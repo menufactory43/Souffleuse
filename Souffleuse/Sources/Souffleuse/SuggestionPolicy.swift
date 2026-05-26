@@ -105,7 +105,10 @@ enum SuggestionPolicy {
     /// D-06 prefix_fit : le ghost s'enchaîne-t-il avec `userTail` ?
     ///
     /// - **Mid-word** (`userTail.last?.isLetter == true`) : 1.0 si `ghost`
-    ///   commence par une lettre (complète le mot courant), 0.0 sinon.
+    ///   commence par une lettre (complète le mot courant) OU par un joiner
+    ///   intra-mot — apostrophe `'`, apostrophe courbe `’`, ou trait d'union
+    ///   `-` (élision/composé : "S'il", "j'ai", "aujourd'hui", "est-ce",
+    ///   "allez-vous"). 0.0 sinon (rejette espace/newline/markdown mid-mot).
     /// - **After-space ou empty tail** : 1.0 si `ghost.first` est letter, digit,
     ///   `'` ou `"` (natural continuation) ; 0.0 si commence par whitespace,
     ///   newline, ou un délimiteur markdown (`#`, `*`, `_`, `~`) — le LLM ne
@@ -115,8 +118,15 @@ enum SuggestionPolicy {
         guard let g = ghost.first else { return 0.0 }
         if let tail = userTail.last {
             if tail.isLetter {
-                // Mid-word : on attend la suite du mot ⇒ ghost doit commencer par lettre.
-                return g.isLetter ? 1.0 : 0.0
+                // Mid-word : on attend la suite du mot. Le ghost est une
+                // continuation valide s'il commence par une lettre OU par un
+                // joiner intra-mot (apostrophe droite/courbe, trait d'union) :
+                // "S"→"'il vous plaît", "allez"→"-vous", "aujourd"→"'hui".
+                // Tout le reste (espace, newline, ponctuation, markdown) reste
+                // rejeté mid-mot.
+                if g.isLetter { return 1.0 }
+                if g == "'" || g == "’" || g == "-" { return 1.0 }
+                return 0.0
             }
             if tail.isWhitespace {
                 // After-space : on attend un mot nouveau ⇒ pas de whitespace/markdown.
