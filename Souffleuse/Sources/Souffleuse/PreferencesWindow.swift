@@ -71,7 +71,7 @@ private struct PreferencesRoot: View {
         TabView {
             GeneralTab(store: store)
                 .tabItem { Label("Général", systemImage: "gearshape") }
-            ModelTab(store: store, onModelChange: onModelChange)
+            ModelTab(store: store)
                 .tabItem { Label("Modèle", systemImage: "cpu") }
             EnrichmentTab(store: store, onCaptureToggle: onCaptureToggle)
                 .tabItem { Label("Enrichissement", systemImage: "doc.text.magnifyingglass") }
@@ -315,36 +315,42 @@ private struct GeneralTab: View {
 
 private struct ModelTab: View {
     @Bindable var store: PreferencesStore
-    let onModelChange: (String) -> Void
 
     var body: some View {
         Form {
             Section {
-                Picker("Modèle actif", selection: $store.modelID) {
-                    ForEach(ModelOption.catalogue) { m in
-                        Text(m.displayName).tag(m.id)
+                Picker("Modèle actif", selection: $store.ggufModelID) {
+                    ForEach(GGUFModelOption.catalogue, id: \.id) { (m: GGUFModelOption) in
+                        VStack(alignment: .leading, spacing: 1) {
+                            HStack(spacing: 6) {
+                                Text(m.displayName)
+                                Text(m.quant)
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text(m.isResolvable ? m.hint : "fichier introuvable")
+                                .font(.caption)
+                                .foregroundStyle(m.isResolvable ? Color.secondary : Color.red)
+                        }
+                        .tag(m.id)
+                        .disabled(!m.isResolvable)
                     }
                 }
                 .pickerStyle(.radioGroup)
-                .onChange(of: store.modelID) { _, new in onModelChange(new) }
             } header: {
-                Text("Modèle").font(.headline)
+                Text("Modèle du ghost (GGUF · llama.cpp)").font(.headline)
             } footer: {
-                let m = store.currentModel
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Disque : \(format(m.approxDiskGB)) GB · RAM : ~\(format(m.approxRamGB)) GB")
-                    Text("Langues : \(m.languages)")
-                    Text("Téléchargé via Hugging Face au premier usage. La vérification d'intégrité signée Ed25519 arrive avec la phase de distribution.")
+                    Text("Ces modèles tournent via llama.cpp. Les anciens modèles MLX ne sont plus utilisés.")
+                    Text("Un seul modèle est actif à la fois. Le 4B est plus précis mais plus lent et consomme plus de RAM ; le 1B est le défaut rapide.")
+                        .foregroundStyle(.secondary)
+                    Text("Les fichiers GGUF doivent déjà être présents localement (partagés avec Cotypist). Aucun téléchargement réseau.")
                         .foregroundStyle(.secondary)
                 }
                 .font(.callout)
             }
         }
         .formStyle(.grouped)
-    }
-
-    private func format(_ v: Double) -> String {
-        String(format: "%.1f", v)
     }
 }
 
