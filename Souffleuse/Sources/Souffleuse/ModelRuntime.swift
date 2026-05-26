@@ -3,6 +3,7 @@ import MLX
 import MLXLLM
 import MLXLMCommon
 import NaturalLanguage
+import SouffleuseLlama
 import SouffleuseLog
 import SouffleusePersonalization
 import SouffleusePrompt
@@ -153,8 +154,43 @@ final class ModelRuntime {
     /// Forme `"load_failed: <localizedDescription>"`.
     private(set) var lastError: String?
 
+    /// llama.cpp engine — now the SOLE generation path (Metal GGUF). The MLX
+    /// container above is kept only for the n-gram tokenizer
+    /// (`rebuildPersonalization`) ; all ghost text comes from `llamaEngine`.
+    let llamaEngine = LlamaEngine()
+
+    /// True once the GGUF is loaded into the llama engine.
+    private(set) var llamaReady = false
+
+    /// True when the runtime can produce ghost text — i.e. the llama engine
+    /// has a GGUF loaded. Replaces the old `container != nil` gate in PVM,
+    /// since the MLX container is now optional (n-gram tokenizer only).
+    var canGenerate: Bool { llamaReady }
+
     init(initialModelId: String) {
         self.modelId = initialModelId
+    }
+
+    /// Resolves the local GGUF path used by the llama engine. Overridable via
+    /// `SOUFFLEUSE_GGUF` for testing other models. Defaults to the Gemma 3 1B
+    /// instruct GGUF already on disk (shared with Cotypist) so we can compare
+    /// at iso-model. No network : the file must already exist locally.
+    static func resolveGGUFPath() -> String {
+        if let override = ProcessInfo.processInfo.environment["SOUFFLEUSE_GGUF"],
+           !override.isEmpty {
+            return (override as NSString).expandingTildeInPath
+        }
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        if let base = appSupport {
+            let local = base
+                .appendingPathComponent("Souffleuse/Models/gemma-3-1b.gguf")
+            if FileManager.default.fileExists(atPath: local.path) {
+                return local.path
+            }
+        }
+        // Fallback : the GGUF already downloaded by Cotypist.
+        return (("~/Library/Application Support/app.cotypist.Cotypist/Models/gemma-3-1b.i1-Q5_K_M.gguf") as NSString)
+            .expandingTildeInPath
     }
 
     // MARK: Lifecycle
@@ -169,28 +205,34 @@ final class ModelRuntime {
     /// L'événement `model_load_failed` reste byte-identique au legacy
     /// (StaticString, count nil) pour preserver la signature audit.sh.
     func loadModel() async {
+        // Primary generation engine : llama.cpp + local GGUF (Metal). This is
+        // the path that produces ghost text now ; MLX is only kept for the
+        // n-gram tokenizer below.
+        let ggufPath = ModelRuntime.resolveGGUFPath()
+        let ok = await llamaEngine.load(modelPath: ggufPath, contextTokens: 4096)
+        llamaReady = ok
+        if !ok {
+            Log.error(.predictor, "model_load_failed")
+            self.lastError = "load_failed: gguf"
+            return
+        }
+
+        // Best-effort MLX container load — used solely by
+        // `rebuildPersonalization` for tokenizing history into the n-gram
+        // model. Personalization defaults to off (strength 0), so a failure
+        // here (e.g. offline first-run) must NOT block the llama ghost path.
         do {
             MLX.GPU.set(cacheLimit: 20 * 1024 * 1024)
-
-            let configuration = ModelConfiguration(
-                id: modelId,
-                defaultPrompt: ""
-            )
-
+            let configuration = ModelConfiguration(id: modelId, defaultPrompt: "")
             let container = try await LLMModelFactory.shared.loadContainer(
                 configuration: configuration
-            ) { _ in
-                // Progress reporting intentionally swallowed in ModelRuntime —
-                // la façade UI (04-07) ré-implémentera le hook progress via
-                // un closure injecté.
-            }
-
+            ) { _ in }
             self.container = container
-            self.lastError = nil
         } catch {
-            Log.error(.predictor, "model_load_failed")
-            self.lastError = "load_failed: \(error.localizedDescription)"
+            // Non-fatal : n-gram personalization stays inert without it.
+            self.container = nil
         }
+        self.lastError = nil
     }
 
     /// Swap vers un nouveau modèle. Idempotent si `id == modelId`.
@@ -213,6 +255,10 @@ final class ModelRuntime {
         container = nil
         modelId = id
         completionCache.invalidateAll()
+        // The llama GGUF path is independent of the MLX modelId in v1 (single
+        // local GGUF). loadModel reloads both ; llama.load is idempotent on an
+        // already-loaded path, so a model swap just refreshes the MLX
+        // tokenizer container.
         await loadModel()
     }
 
@@ -450,6 +496,137 @@ final class ModelRuntime {
     /// `lastError` via the `catch` block. We preserve that semantic : return
     /// `nil` and let the caller surface lastError if desired.
     func generate(
+        request: PredictRequest,
+        cache: CompletionCache,
+        onChunk: @escaping @Sendable @MainActor (String) -> Void
+    ) async -> StreamMetrics? {
+        guard llamaReady else { return nil }
+        return await generateLlama(request: request, onChunk: onChunk)
+    }
+
+    /// Builds a Gemma-3 instruct prompt (FIM-style : pre + afterCursor) and
+    /// streams the completion through `LlamaEngine`, running the existing
+    /// `OutputFilter` pipeline on the cumulative output and pushing filtered
+    /// one-line ghost text to `onChunk`.
+    private func generateLlama(
+        request: PredictRequest,
+        onChunk: @escaping @Sendable @MainActor (String) -> Void
+    ) async -> StreamMetrics? {
+        let userTail = request.userTail
+        let llmTail = request.llmTail
+        let maxTokens = request.maxTokens
+        let maxWords = request.maxWords
+
+        let prompt = ModelRuntime.buildLlamaPrompt(
+            system: request.systemMessage,
+            customInstr: request.customInstr,
+            ctxPrefix: request.ctxPrefix,
+            fieldContext: request.fieldContextSlot,
+            afterCursor: request.afterCursorSlot,
+            beforeCursor: llmTail
+        )
+
+        // Accumulator + last-emitted tracker, isolated behind a class so the
+        // @Sendable onToken closure can mutate it without crossing the actor
+        // boundary back to @MainActor on every token.
+        final class Acc: @unchecked Sendable {
+            var generated = ""
+            var lastEmitted = ""
+        }
+        let acc = Acc()
+
+        let metrics = await llamaEngine.generate(
+            prompt: prompt,
+            maxTokens: maxTokens,
+            sampling: LlamaSampling(temperature: 0, repeatPenalty: 1.1, repeatLastN: 64)
+        ) { piece in
+            if Task.isCancelled { return false }
+            acc.generated += piece
+
+            // ── Filter pipeline (verbatim semantics of the MLX onChunk body) ──
+            let snapshot = OutputFilter.stripPrefixOverlap(acc.generated, prefix: userTail)
+            let stripped = snapshot.drop(while: { $0 == "\n" || $0 == "\r" })
+            var oneLine: String
+            if let nl = stripped.firstIndex(of: "\n") {
+                oneLine = String(stripped[..<nl])
+            } else {
+                oneLine = String(stripped)
+            }
+            oneLine = oneLine.replacingOccurrences(
+                of: "<[/!?]?[A-Za-z][A-Za-z0-9]{0,15}\\s*[^>]{0,32}>",
+                with: "",
+                options: .regularExpression
+            )
+            oneLine = oneLine.replacingOccurrences(of: "**", with: "")
+            oneLine = oneLine.replacingOccurrences(of: "__", with: "")
+            oneLine = oneLine.replacingOccurrences(of: "`", with: "")
+            if oneLine.count > 3 {
+                for terminator in [". ", "? ", "! ", "… "] {
+                    if let r = oneLine.range(of: terminator) {
+                        oneLine = String(oneLine[..<r.upperBound]).trimmingCharacters(in: .whitespaces)
+                        break
+                    }
+                }
+            }
+            if oneLine.count > 12, let r = oneLine.range(of: ", ") {
+                oneLine = String(oneLine[..<r.lowerBound])
+            }
+            let words = oneLine.split(whereSeparator: { $0.isWhitespace })
+            if words.count > maxWords {
+                oneLine = words.prefix(maxWords).joined(separator: " ")
+            }
+
+            if OutputFilter.ghostIsRepeatingPrefix(oneLine, prefix: userTail) {
+                Log.info(.predictor, "ghost_dropped_repeat")
+                let chunkOut = ""
+                Task { @MainActor in onChunk(chunkOut) }
+                return true
+            }
+
+            // Only emit when the filtered one-line ghost actually changed.
+            guard oneLine != acc.lastEmitted else { return true }
+            acc.lastEmitted = oneLine
+            let chunkOut = oneLine
+            Task { @MainActor in onChunk(chunkOut) }
+
+            // Stop once we hit a sentence terminator (the truncation above
+            // already trimmed at it) — no value generating further tokens.
+            return true
+        }
+
+        if Task.isCancelled { return nil }
+        var m = StreamMetrics()
+        m.ttftMillis = metrics.ttftMillis
+        m.tokensPerSecond = metrics.tokensPerSecond
+        return m
+    }
+
+    /// Assembles a Gemma-3 instruct chat prompt. The model turn is primed with
+    /// `beforeCursor` so the model continues the user's text rather than
+    /// answering the instruction. `afterCursor` (post-caret text) is provided
+    /// as FIM context the model must not repeat.
+    static func buildLlamaPrompt(
+        system: String,
+        customInstr: String,
+        ctxPrefix: String,
+        fieldContext: String,
+        afterCursor: String,
+        beforeCursor: String
+    ) -> String {
+        var userBlock = system
+        if !customInstr.isEmpty { userBlock += "\n\nStyle : \(customInstr)" }
+        if !ctxPrefix.isEmpty { userBlock += "\n\nContexte : \(ctxPrefix)" }
+        if !fieldContext.isEmpty { userBlock += "\n\n\(fieldContext)" }
+        userBlock += "\n\nTexte avant le curseur :\n\(beforeCursor)"
+        if !afterCursor.isEmpty {
+            userBlock += "\n\n\(afterCursor)"
+        }
+        return "<start_of_turn>user\n\(userBlock)<end_of_turn>\n<start_of_turn>model\n\(beforeCursor)"
+    }
+
+    /// Verbatim MLX generation body — retained dead for reference; no longer
+    /// called now that `generate` routes through llama.cpp.
+    private func generateMLX(
         request: PredictRequest,
         cache: CompletionCache,
         onChunk: @escaping @Sendable @MainActor (String) -> Void

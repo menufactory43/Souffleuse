@@ -44,6 +44,14 @@ let package = Package(
                     "-lggml-cpu", "-lggml-metal", "-lggml-blas",
                     "-Xlinker", "-rpath", "-Xlinker", "@loader_path/../Frameworks",
                     "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks",
+                    // Absolute rpath to the vendored dylibs so `swift build`
+                    // outputs (CLI probes + the xctest bundle) resolve
+                    // @rpath/libllama.0.dylib without env vars (SIP strips
+                    // DYLD_* from the spawned test helper). The make-app.sh
+                    // bundle uses the @loader_path/@executable_path rpaths
+                    // above to find the copies in Contents/Frameworks.
+                    "-Xlinker", "-rpath", "-Xlinker",
+                    "/Users/gabrielwaltio/cocotypist-llama/Souffleuse/vendor/llama/lib",
                 ]),
             ]
         ),
