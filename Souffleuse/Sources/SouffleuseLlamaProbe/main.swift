@@ -1,5 +1,6 @@
 import Foundation
 import SouffleuseLlama
+import SouffleuseTyping
 
 let modelPath = NSString(string: "~/Library/Application Support/app.cotypist.Cotypist/Models/gemma-3-1b.i1-Q5_K_M.gguf").expandingTildeInPath
 
@@ -25,6 +26,48 @@ func buildPrompt(system: String, afterCursor: String, beforeCursor: String) -> S
 
 final class Sink: @unchecked Sendable { var s = "" }
 
+// ─────────────────────────────────────────────────────────────────────────
+// VOLET 1 — silent prefix correction proof. For each typo'd sentence we run
+// the ghost on the RAW prefix and on the CORRECTED prefix (PrefixCorrector,
+// model-input only) and print both. The corrected one should land more
+// coherently. The in-progress last token is appended verbatim by the
+// corrector, so the displayed/user path is unaffected (userTail untouched).
+print("=== VOLET 1: RAW vs CORRECTED PREFIX GHOST ===")
+let corrector = PrefixCorrector()
+
+func ghost(forBeforeCursor before: String, maxTokens: Int = 16) async -> String {
+    let prompt = buildPromptV1(system: system, beforeCursor: before)
+    let sink = Sink()
+    _ = await engine.generate(prompt: prompt, maxTokens: maxTokens,
+                              sampling: LlamaSampling(temperature: 0, repeatPenalty: 1.1)) { tok in
+        sink.s += tok; return true
+    }
+    return sink.s.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? sink.s
+}
+
+func buildPromptV1(system: String, beforeCursor: String) -> String {
+    "<start_of_turn>user\n\(system)\n\nVoici le texte à continuer :<end_of_turn>\n<start_of_turn>model\n\(beforeCursor)"
+}
+
+struct TypoCase { let label: String; let prefix: String; let lang: String }
+let v1cases = [
+    TypoCase(label: "FR completed typos", prefix: "Je vous écirs pour vous infromer que ", lang: "French"),
+    TypoCase(label: "FR typo + in-progress tail", prefix: "Bonjur Madame, je vous écirs au ", lang: "French"),
+    TypoCase(label: "EN completed typos", prefix: "I am writting to infrom you that ", lang: "English"),
+]
+for c in v1cases {
+    let corrected = corrector.correctedPrefix(c.prefix, detectedLanguage: c.lang)
+    print("[\(c.label)]")
+    print("RAW   prefix : \(c.prefix.debugDescription)")
+    print("CORR  prefix : \(corrected.debugDescription)  (changed=\(corrected != c.prefix))")
+    let gRaw = await ghost(forBeforeCursor: c.prefix)
+    let gCor = await ghost(forBeforeCursor: corrected)
+    print("GHOST(raw)   :\(gRaw)")
+    print("GHOST(corr)  :\(gCor)")
+    print("---")
+}
+
+
 struct Case { let pre: String; let after: String }
 let cases = [
     Case(pre: "Bonjour, je voulais vous écrire pour vous", after: ""),
@@ -45,6 +88,51 @@ for c in cases {
     FileHandle.standardError.write("[ttft=\(metrics.ttftMillis ?? -1)ms]\n".data(using: .utf8)!)
     print("PRE: \(c.pre)")
     print("GHOST:\(oneLine)")
+    print("---")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// VOLET 2 — FIM prompt A/B. Baseline = current `buildLlamaPrompt` shape
+// (afterCursor folded into the instruction, "Voici le texte à continuer :").
+// Candidate = explicit "(contexte, ne pas répéter)" framing. We compare on
+// cases WITH an afterCursor (the only place the framing matters). Decision:
+// keep v1 unless candidate is clearly better AND never echoes a label.
+print("\n=== VOLET 2: FIM PROMPT A/B (afterCursor present) ===")
+
+func promptBaseline(system: String, after: String, before: String) -> String {
+    var u = system
+    if !after.isEmpty { u += "\n\nSuite du texte (à ne pas répéter) : « \(after) »." }
+    u += "\n\nVoici le texte à continuer :"
+    return "<start_of_turn>user\n\(u)<end_of_turn>\n<start_of_turn>model\n\(before)"
+}
+func promptCandidate(system: String, after: String, before: String) -> String {
+    var u = system
+    if !after.isEmpty {
+        u += "\n\nCONTEXTE (déjà présent dans le champ, ne JAMAIS le répéter) : « \(after) »"
+    }
+    u += "\n\nTEXTE À CONTINUER (poursuis exactement à partir d'ici, sans le réécrire) :"
+    return "<start_of_turn>user\n\(u)<end_of_turn>\n<start_of_turn>model\n\(before)"
+}
+func ghostFrom(_ prompt: String) async -> String {
+    let sink = Sink()
+    _ = await engine.generate(prompt: prompt, maxTokens: 16,
+                              sampling: LlamaSampling(temperature: 0, repeatPenalty: 1.1)) { tok in
+        sink.s += tok; return true
+    }
+    return sink.s.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? sink.s
+}
+struct FIMCase { let before: String; let after: String }
+let fimCases = [
+    FIMCase(before: "Je vous remercie pour ", after: "Cordialement, Gabriel"),
+    FIMCase(before: "La réunion aura lieu ", after: "merci de confirmer votre présence."),
+    FIMCase(before: "Je pense que ce projet ", after: "et c'est pourquoi je vous écris."),
+]
+for c in fimCases {
+    let gB = await ghostFrom(promptBaseline(system: system, after: c.after, before: c.before))
+    let gC = await ghostFrom(promptCandidate(system: system, after: c.after, before: c.before))
+    print("BEFORE: \(c.before.debugDescription)  AFTER: \(c.after.debugDescription)")
+    print("  baseline :\(gB)")
+    print("  candidate:\(gC)")
     print("---")
 }
 
