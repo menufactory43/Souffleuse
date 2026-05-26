@@ -35,6 +35,16 @@ private enum PredictDebug {
     }
 }
 
+/// Mutable @MainActor-only flag recording whether the in-flight generation has
+/// ever set a ghost for the current prefix (a valid LLM chunk, or an empty-chunk
+/// fallback to a valid instant ghost). Captured by both the `onChunk` closure
+/// and the completion block — both run on @MainActor, so a plain reference box
+/// is race-free. Drives the stale-ghost clear in `predict(...)`.
+@MainActor
+private final class GhostEmissionTracker {
+    var emitted = false
+}
+
 /// Phase 4 D-03 (plan 04-07) — Final façade form of the predictor view model.
 ///
 /// PVM is now a thin observable surface over `ModelRuntime` (which owns the
@@ -535,6 +545,18 @@ final class PredictorViewModel {
             Log.info(.predictor, "kv_cache_invalidate_on_cancel")
         }
 
+        // Stale-ghost guard : track whether THIS generation ever produced a
+        // ghost the user should see (a valid non-empty LLM chunk, OR an empty
+        // chunk that legitimately fell back to a valid instant ghost). When a
+        // generation drops EVERY token (all guards in `generateLlama` fire and
+        // `acc.lastEmitted` stays "" so `onChunk("")` is never called), this
+        // box stays false. The completion block below then clears any leftover
+        // ghost from a PREVIOUS keystroke — UNLESS the current prefix has a
+        // valid instant ghost (L0 word-completion or strong corpus fast-path),
+        // which must be preserved (anti-churn). `emittedGhost` is mutated only
+        // on @MainActor (the onChunk closure and the completion block).
+        let emitTracker = GhostEmissionTracker()
+
         let task = Task { [weak self] in
             _ = await previousTask?.value
             if Task.isCancelled { return }
@@ -608,6 +630,13 @@ final class PredictorViewModel {
                 guard let self else { return }
                 guard self.planner.isCurrent(myGeneration) else { return }
                 if chunk.isEmpty {
+                    // A drop guard in `generateLlama` reset its previously-
+                    // emitted ghost. Fall back to whichever instant-path ghost
+                    // was computed for the CURRENT prefix (history beats word-
+                    // completion, both beat empty). This IS a deliberate ghost
+                    // state for the current prefix — mark emitted so the
+                    // completion block doesn't treat it as a no-output stale case.
+                    emitTracker.emitted = true
                     Log.info(.predictor, "ghost_dropped_repeat")
                     PredictDebug.log("ghost_dropped_repeat", "fallback_to_instant=\(instantGhost.debugDescription)")
                     self.suggestion = instantGhost
@@ -633,6 +662,7 @@ final class PredictorViewModel {
                          fromHigh ? "ghost_swap_to_llm_from_high" : "ghost_apply_llm",
                          count: update.text.count)
                 PredictDebug.log("chunk_applied", "oneLine=\(update.text.debugDescription) prev_source=\(self.suggestionSource)")
+                emitTracker.emitted = true
                 self.policy.applyGhost(update.text, source: .llm, score: update.score)
                 self.suggestion = update.text
                 self.suggestionSource = .llm
@@ -642,6 +672,36 @@ final class PredictorViewModel {
             await MainActor.run {
                 guard let self else { return }
                 guard self.planner.isCurrent(myGeneration) else { return }
+
+                // Stale-ghost clear : this generation finished without ever
+                // emitting a ghost for the current prefix (every token dropped
+                // by the coherence / degenerate / instruction-echo / repeat
+                // guards, and the all-dropped case never reaches the
+                // `onChunk("")` reset inside generateLlama). Whatever is still
+                // displayed therefore belongs to an OLD keystroke's prefix — it
+                // is stale (the "faique" repro : prefix "…fai", leftover ghost
+                // "que"). Clear it so the user sees nothing rather than a
+                // mismatched ghost.
+                //
+                // Anti-churn : we ONLY clear when the current prefix produced no
+                // valid instant ghost (`instantGhost.isEmpty`). A fresh L0
+                // word-completion or a strong corpus `.history` fast-path for
+                // the CURRENT prefix yields a non-empty `instantGhost`, is still
+                // displayed, and is protected here — an empty LLM stream never
+                // wipes a valid current-prefix ghost. Cache / undo-cache hits
+                // return before generation and never reach this path.
+                if Self.shouldClearStaleGhost(
+                    emittedGhost: emitTracker.emitted,
+                    instantGhost: instantGhost,
+                    displayedSuggestion: self.suggestion
+                ) {
+                    Log.info(.predictor, "ghost_cleared_stale", count: self.suggestion.count)
+                    PredictDebug.log("ghost_cleared_stale", "userTail=\(userTail.debugDescription) cleared=\(self.suggestion.debugDescription)")
+                    self.suggestion = ""
+                    self.suggestionSource = .none
+                    self.policy.reset()
+                }
+
                 if let m = metrics {
                     self.ttftMillis = m.ttftMillis
                     self.tokensPerSecond = m.tokensPerSecond
@@ -737,6 +797,31 @@ final class PredictorViewModel {
             let tokens = context.tokenizer.encode(text: joined)
             await ngramModel.ingest(tokens: tokens)
         }
+    }
+
+    /// Pure decision for the stale-ghost clear (extracted for unit testing).
+    ///
+    /// Returns `true` when the just-finished generation left the displayed
+    /// ghost in a stale state that must be cleared :
+    ///   - `emittedGhost == false` : this generation never set a ghost for the
+    ///     current prefix (every token dropped by the coherence / degenerate /
+    ///     instruction-echo / repeat guards, and the all-dropped case never
+    ///     fired the `onChunk("")` reset inside `generateLlama`).
+    ///   - `instantGhost.isEmpty` : the current prefix's instant cascade (L0
+    ///     word-completion / strong corpus fast-path) produced nothing either,
+    ///     so no valid current-prefix ghost is being shown.
+    ///   - `displayedSuggestion` non-empty : there IS a leftover ghost on screen.
+    ///
+    /// When all three hold, the on-screen ghost belongs to an OLD/diverged
+    /// prefix (the "faique" repro) → clear. Conversely, a non-empty
+    /// `instantGhost` means a valid current-prefix L0/corpus ghost is displayed
+    /// and MUST be preserved (anti-churn) — an empty LLM stream never wipes it.
+    static func shouldClearStaleGhost(
+        emittedGhost: Bool,
+        instantGhost: String,
+        displayedSuggestion: String
+    ) -> Bool {
+        !emittedGhost && instantGhost.isEmpty && !displayedSuggestion.isEmpty
     }
 
     /// Phase 4 — cancel avec discriminator pour la classification grid.
