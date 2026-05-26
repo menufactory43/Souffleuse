@@ -128,3 +128,63 @@ print("PRE: Le rendez-vous est fixé à quatorze heures")
 print("GHOST[strength=0] :\(saOff)")
 print("GHOST[strength=6] :\(saOn)")
 print("---")
+
+// ─────────────────────────────────────────────────────────────────────────
+// KV / PROMPT CACHE REUSE — cold vs warm TTFT proof.
+//
+// Realistic long-ish prompt. We force a COLD cache (reload the model to drop
+// the KV), measure TTFT. Then an incremental prompt = previous + a few typed
+// words runs WARM (long common prefix reused, only the suffix decoded) and we
+// measure TTFT again. The warm incremental TTFT must be dramatically lower.
+print("\n=== KV CACHE REUSE: COLD vs WARM TTFT ===")
+await engine.setCorpus([])  // clear corpus so bias never perturbs the proof
+
+let longBefore = """
+Bonjour Madame, je me permets de vous écrire au sujet du dossier que nous \
+avons évoqué la semaine dernière lors de notre réunion de coordination. Comme \
+convenu lors de nos échanges précédents, je vous transmets ci-joint l'ensemble \
+des éléments complémentaires relatifs au calendrier prévisionnel, au budget \
+détaillé poste par poste, ainsi qu'à la répartition des responsabilités entre \
+les différentes équipes impliquées dans ce projet. J'ai également pris soin de \
+préciser les jalons intermédiaires et les livrables attendus à chaque étape, de \
+manière à ce que chacun dispose d'une vision claire et partagée des objectifs. \
+Je reste naturellement à votre entière disposition pour
+"""
+let coldPrompt = buildPrompt(system: system, afterCursor: "", beforeCursor: longBefore)
+// Incremental: the user typed three more words. Shares the entire long prefix.
+let warmPrompt = buildPrompt(system: system, afterCursor: "", beforeCursor: longBefore + " toute information")
+
+func genOnce(_ prompt: String) async -> (ttft: Int, out: String, cached: Int) {
+    let sink = Sink()
+    let m = await engine.generate(prompt: prompt, maxTokens: 16,
+                                  sampling: LlamaSampling(temperature: 0, repeatPenalty: 1.0)) { tok in
+        sink.s += tok; return true
+    }
+    let cached = await engine.cachedTokenCount
+    let oneLine = sink.s.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? sink.s
+    return (m.ttftMillis ?? -1, oneLine, cached)
+}
+
+// COLD: reload model to guarantee an empty KV.
+_ = await engine.load(modelPath: modelPath, contextTokens: 2048)
+let coldA = await genOnce(coldPrompt)
+print("COLD prompt (\(coldA.cached) tok resident) TTFT = \(coldA.ttft)ms")
+print("  ghost: \(coldA.out)")
+
+// WARM: the incremental prompt reuses the long common prefix from the cold run.
+let warmB = await genOnce(warmPrompt)
+print("WARM incremental (\(warmB.cached) tok resident) TTFT = \(warmB.ttft)ms")
+print("  ghost: \(warmB.out)")
+
+if coldA.ttft > 0 && warmB.ttft >= 0 {
+    let speedup = Double(coldA.ttft) / Double(max(1, warmB.ttft))
+    print(String(format: "SPEEDUP (cold/warm TTFT) = %.1fx", speedup))
+}
+
+// CORRECTNESS: the SAME incremental prompt, run cold on a freshly reloaded
+// model, must yield the same first-line ghost as the warm run above.
+_ = await engine.load(modelPath: modelPath, contextTokens: 2048)
+let warmAsCold = await genOnce(warmPrompt)
+print("EQUIVALENCE warm.ghost == cold(sameprompt).ghost : \(warmB.out == warmAsCold.out)")
+print("  cold-recompute of incremental TTFT = \(warmAsCold.ttft)ms (sanity: ≈ cold magnitude)")
+print("---")
