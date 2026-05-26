@@ -30,6 +30,23 @@ let package = Package(
         .target(
             name: "SouffleuseLog"
         ),
+        .target(
+            name: "CSQLCipher",
+            cSettings: [
+                // SQLCipher encryption-at-rest, backed by Apple CommonCrypto
+                // (no OpenSSL dependency → self-contained, distributable).
+                .define("SQLITE_HAS_CODEC"),
+                .define("SQLCIPHER_CRYPTO_CC"),
+                .define("SQLITE_TEMP_STORE", to: "2"),
+                .define("SQLITE_THREADSAFE", to: "1"),
+                .define("NDEBUG"),
+                .unsafeFlags(["-Wno-ambiguous-macro", "-Wno-unused-function", "-Wno-unused-but-set-variable"]),
+            ],
+            linkerSettings: [
+                .linkedFramework("Security"),
+                .linkedFramework("Foundation"),
+            ]
+        ),
         .systemLibrary(
             name: "CLlama",
             path: "vendor/llama/include"
@@ -76,6 +93,7 @@ let package = Package(
             name: "SouffleusePersonalization",
             dependencies: [
                 "SouffleuseLog",
+                "CSQLCipher",
                 .product(name: "MLXLMCommon", package: "mlx-swift-examples"),
             ]
         ),
