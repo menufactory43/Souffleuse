@@ -725,7 +725,16 @@ final class ModelRuntime {
             maxTokens: maxTokens,
             sampling: LlamaSampling(
                 temperature: 0,
-                repeatPenalty: 1.1,
+                // Relevance profile (validated by the 7-experiment probe sweep):
+                // the base/pt Gemma derails into web markup (<strong>), a "web
+                // number" prior ("Des " → "20 ans"), and emoji fallbacks. Banning
+                // those at the sampler — greedy, deterministic, KV-cache-safe —
+                // moves output from "2017 du Festival" to "de transport sont à la
+                // charge du client" / "erreur de syntaxe" / "fruits, des légumes".
+                // Digits banned ONLY on the first token (the prior is strongest
+                // there) so legitimate numbers later ("à 14 heures") survive. A
+                // slightly higher repetition penalty (1.3) curbs the loops.
+                repeatPenalty: 1.3,
                 repeatLastN: 64,
                 // Gain calibration (Phase 3) : the Preferences slider is
                 // 0.0…2.0 (default 1.0), but the raw logit boost needs to be
@@ -738,7 +747,10 @@ final class ModelRuntime {
                 // matches. Slider Max (2.0) ⇒ 2× base. See
                 // `LlamaSampling.personalizationGainScale`.
                 personalizationStrength: Float(request.personalizationStrength)
-                    * LlamaSampling.personalizationGainScale
+                    * LlamaSampling.personalizationGainScale,
+                banMarkup: true,
+                banDigitsLeading: true,
+                banEmoji: true
             )
         ) { piece in
             if Task.isCancelled { return false }
@@ -761,6 +773,10 @@ final class ModelRuntime {
             oneLine = oneLine.replacingOccurrences(of: "**", with: "")
             oneLine = oneLine.replacingOccurrences(of: "__", with: "")
             oneLine = oneLine.replacingOccurrences(of: "`", with: "")
+            // Strip U+FFFD replacement chars: when the sampler bans a token,
+            // greedy can fall back to a byte-fallback token that decodes mid
+            // UTF-8 sequence and renders as "" — never show it.
+            oneLine = oneLine.replacingOccurrences(of: "\u{FFFD}", with: "")
             if oneLine.count > 3 {
                 // Preserve a single LEADING space: a next-word continuation after
                 // a complete word ("…les frais" → " de port. Mais") must keep its
