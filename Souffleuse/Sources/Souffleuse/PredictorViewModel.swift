@@ -120,6 +120,14 @@ final class PredictorViewModel {
     /// existing behaviour). When > 0 we route generation through a custom
     /// `TokenIterator` that chains the repetition penalty with `NgramLogitBias`.
     var personalizationStrength: Float = 0
+    /// When true, completed-word typos in the prefix are corrected *only in the
+    /// model input* (Volet 1). The user's displayed text and `userTail`
+    /// (anti-repeat / cache key) are never altered. Default on; mirrored from
+    /// `PreferencesStore.prefixCorrectionEnabled` by the AppDelegate.
+    var prefixCorrectionEnabled: Bool = true
+    /// Silent prefix typo corrector (pure wrapper over NSSpellChecker). Only
+    /// rewrites the `llmTail` fed into the llama prompt's `beforeCursor`.
+    private let prefixCorrector = PrefixCorrector()
     /// Historique chiffré on-device. Source de l'apprentissage n-gram (via
     /// `rebuildPersonalization` / `ingestAccepted`). Wiré depuis
     /// `SouffleuseAppDelegate` au démarrage. Quand nil, le n-gram bias reste
@@ -388,6 +396,16 @@ final class PredictorViewModel {
             lastDetectedLanguage = confident
         }
         let detectedLanguage = lastDetectedLanguage
+        // ── Volet 1 : silent prefix correction (model input only) ──────────
+        // Correct completed-word typos in the MODEL's view of the prefix so the
+        // ghost continues from clean text. `userTail` (display / anti-repeat /
+        // cache key) is intentionally NOT touched — only `correctedTail` flows
+        // into the llama prompt's `beforeCursor`. Captured here on @MainActor
+        // (PrefixCorrector is main-actor state); the detached Task receives the
+        // already-corrected value as a plain Sendable string.
+        let correctedTail: String = prefixCorrectionEnabled
+            ? prefixCorrector.correctedPrefix(userTail, detectedLanguage: detectedLanguage)
+            : userTail
         let baseSystemPrompt = ModelRuntime.buildSystemPrompt(detectedLanguage: detectedLanguage)
         var systemParts: [String] = [baseSystemPrompt]
         if !customInstructions.isEmpty {
@@ -502,7 +520,10 @@ final class PredictorViewModel {
             // still drives memoisation, but the LLM only needs the recent
             // context to predict well — anything beyond that dilutes
             // attention on a 1B model and slows TTFT proportionally.
-            let llmTail = String(userTail.suffix(512))
+            // Model input window : last 512 chars of the CORRECTED prefix.
+            // userTail (the raw typed text) still drives memoisation /
+            // anti-repeat below; only the bytes the LLM sees are corrected.
+            let llmTail = String(correctedTail.suffix(512))
             let basePromptText = basePreamble + llmTail
             let snapshot: NgramSnapshot? = personalizationStrength > 0
                 ? await ngramModel.snapshot()

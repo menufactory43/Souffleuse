@@ -257,10 +257,11 @@ private struct GeneralTab: View {
                 Toggle("Masquer les suggestions quand un typo est suspecté", isOn: $store.hideOnTypo)
                     .disabled(!store.typoEnabled)
                 Toggle("Expansion emoji (\u{003A}smile\u{003A} → 😄)", isOn: $store.emojiEnabled)
+                Toggle("Corriger les fautes avant de compléter", isOn: $store.prefixCorrectionEnabled)
             } header: {
                 Text("Aide à la frappe").font(.headline)
             } footer: {
-                Text("Désactivés automatiquement dans Xcode, VS Code, JetBrains, terminaux.")
+                Text("Désactivés automatiquement dans Xcode, VS Code, JetBrains, terminaux. La correction avant complétion ne change que ce que voit le modèle — votre texte reste tel que tapé.")
                     .font(.callout).foregroundStyle(.secondary)
             }
             Section {

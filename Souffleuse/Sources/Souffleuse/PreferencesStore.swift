@@ -130,6 +130,7 @@ final class PreferencesStore {
         static let personalizationOnboardingShown = "personalizationOnboardingShown"
         static let partialAcceptEnabled = "partialAcceptEnabled"
         static let trailingSpaceOnPartial = "trailingSpaceOnPartial"
+        static let prefixCorrectionEnabled = "prefixCorrectionEnabled"
     }
 
     var enabled: Bool {
@@ -176,6 +177,13 @@ final class PreferencesStore {
     var trailingSpaceOnPartial: Bool {
         didSet { UserDefaults.standard.set(trailingSpaceOnPartial, forKey: K.trailingSpaceOnPartial) }
     }
+    /// When true, obvious typos in COMPLETED words are silently corrected in the
+    /// text fed to the model (never in what the user sees), so the ghost
+    /// completes from a clean prefix. The in-progress last word is never
+    /// touched. Default on; off → identity (model receives the raw prefix).
+    var prefixCorrectionEnabled: Bool {
+        didSet { UserDefaults.standard.set(prefixCorrectionEnabled, forKey: K.prefixCorrectionEnabled) }
+    }
 
     let allowlist = AllowlistStore()
     let history = TypingHistoryStore()
@@ -207,6 +215,7 @@ final class PreferencesStore {
         self.personalizationOnboardingShown = (d.object(forKey: K.personalizationOnboardingShown) as? Bool) ?? false
         self.partialAcceptEnabled = (d.object(forKey: K.partialAcceptEnabled) as? Bool) ?? true
         self.trailingSpaceOnPartial = (d.object(forKey: K.trailingSpaceOnPartial) as? Bool) ?? true
+        self.prefixCorrectionEnabled = (d.object(forKey: K.prefixCorrectionEnabled) as? Bool) ?? true
     }
 
     /// Vision language codes derived from the toggles. Always non-empty (falls
