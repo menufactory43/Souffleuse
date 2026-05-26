@@ -645,7 +645,8 @@ final class PredictorViewModel {
                 }
                 // Phase 4 D-07 : Relevance Gate replaces the old anti-churn
                 // rule. `policy.onLLMChunk` applies :
-                //   1. Mid-word block (D-08) — ghost_gate_block_midword
+                //   1. Mid-word ALLOWED (D-08 unblocked) — coherence already
+                //      enforced upstream in generateLlama's coherence guard
                 //   2. passesGate floor (0.25) — ghost_gate_block
                 //   3. Replacement bar (1.15) OR L2-upgrades-L1 delta (0.15)
                 //      — ghost_keep_under_bar

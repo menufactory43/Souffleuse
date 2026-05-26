@@ -415,7 +415,9 @@ final class SuggestionPolicyEngine {
     /// Décision Relevance Gate sur un chunk LLM (D-07). Remplace l'anti-churn
     /// high/low de PVM:874-898 pré-Phase-4.
     ///
-    /// 1. Mid-word : bloqué (D-08 — L0 only).
+    /// 1. Mid-word : AUTORISÉ (D-08 unblocked 2026-05-26). La cohérence du
+    ///    splice mid-word est garantie EN AMONT par le coherence guard de
+    ///    `generateLlama` ; seuls les survivants cohérents arrivent ici.
     /// 2. passesGate floor 0.25 : sinon bloqué.
     /// 3. Si currentGhost non-vide, replacement bar 1.15 OU L2-upgrades-L1 delta 0.15.
     /// 4. Si remplacement dans `parasiteWindow` (0.8s) du `shownAt` courant :
@@ -423,12 +425,24 @@ final class SuggestionPolicyEngine {
     ///
     /// Retourne `GhostUpdate?` — le caller appelle `applyGhost(...)` pour set le state.
     func onLLMChunk(_ chunk: String, userTail: String) -> GhostUpdate? {
-        // Mid-word block (D-08).
-        if let last = userTail.last, last.isLetter {
-            Log.info(.predictor, "ghost_gate_block_midword", count: chunk.count)
-            return nil
-        }
-
+        // D-08 mid-word handling — UNBLOCKED (2026-05-26).
+        //
+        // The blunt mid-word block was removed. Coherent mid-word LLM
+        // continuations (Cotypist parity: "fai"→"s", "problè"→"me") must reach
+        // the screen. Quality is now enforced UPSTREAM in
+        // `ModelRuntime.generateLlama` by the mid-word coherence guard
+        // (`OutputFilter.midWordCandidate` + `TypoDetector.isValidWord`), which
+        // already DROPS incoherent splices ("fai"+"que"="faique") before the
+        // chunk ever reaches here and KEEPS coherent ones. Only the survivors
+        // arrive — so the unconditional block was redundant and was the sole
+        // reason coherent mid-word ghosts never showed.
+        //
+        // The rest of the Relevance Gate (gate floor, replacement bar /
+        // anti-churn, parasite-window classification) stays intact and applies
+        // mid-word too: `prefixFit` already returns 1.0 for a letter-starting
+        // ghost on a mid-word tail (and 0.0 for a non-letter splice), so a
+        // coherent continuation scores sanely and a stray punctuation/markdown
+        // splice is still gated out.
         let score = SuggestionPolicy.score(
             source: .llm,
             ghost: chunk,
