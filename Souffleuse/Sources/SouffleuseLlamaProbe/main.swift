@@ -142,31 +142,97 @@ do {
         print("   [\(s.tag.padding(toLength: 10, withPad: " ", startingAt: 0))] │\(g)   (want≈ \(s.want))")
     }
 
-    // ── EXPERIMENT 8 : does a POLLUTED corpus bias degrade live output? ──
-    // The live app applies the personalization bias (strength≈6) from the SQL
-    // corpus; the probe ran with an EMPTY corpus. If the corpus learned junk
-    // (buggy ghosts accepted during testing: "s de", "meufs", fragments), the
-    // bias pushes toward that junk. We reproduce: ship profile + strength 6,
-    // corpus empty vs polluted, same sentences.
-    let shipSampler = { (strength: Float) in
+    // ════════════════════════════════════════════════════════════════════
+    // EXPERIMENT 10 — NOISE-ROBUST PERSONALIZATION : a partially-polluted base
+    // must STILL SERVE (good signal steers, junk filtered). Ship profile +
+    // strength 6 throughout. We (A) sweep the nucleus margin to find the sweet
+    // spot, (B) run 20 prompts comparing empty vs mixed (clean+junk) corpus,
+    // (C) test whether storing RAW non-accepted inputs helps vs only accepted.
+    // ════════════════════════════════════════════════════════════════════
+    func ship(_ strength: Float, margin: Float = 0) -> LlamaSampling {
         LlamaSampling(temperature: 0, repeatPenalty: 1.3, seed: 0,
                       personalizationStrength: strength,
-                      banMarkup: true, banDigitsLeading: true, banEmoji: true)
+                      banMarkup: true, banDigitsLeading: true, banEmoji: true,
+                      nucleusMargin: margin)
     }
-    let polluted = [
-        "envies de", "meufs qui mangent", "procédblème",
-        "s de manger", "de manger des meufs",
-        "J'ai envie de manger des meufs qui mangent",
+
+    // The user's GOOD phrasings (repeated ⇒ count ≥ 2 so they pass the floor).
+    let userClean = [
+        "J'ai envie de manger des sushis ce soir",
+        "J'ai envie de manger des sushis ce soir",
+        "J'ai envie de manger des sushis ce soir",
+        "Je reviens vers toi dès que possible",
+        "Je reviens vers toi dès que possible",
+        "N'hésite pas à me contacter si besoin",
+        "N'hésite pas à me contacter si besoin",
+        "Je suis disponible cet après-midi",
+        "Je suis disponible cet après-midi",
+        "Merci beaucoup pour votre retour rapide",
+        "Pourrais-tu m'envoyer le document signé",
     ]
-    print("\n╔══ EXPERIMENT 8 : POLLUTED CORPUS BIAS (live hypothesis) ══╗")
-    for s in [sentences[0], sentences[1]] {
+    // Junk accepted during debugging.
+    let junk = [
+        "envies de", "meufs qui mangent", "meufs qui mangent",
+        "procédblème", "s de manger", "s de manger", "de manger des meufs",
+    ]
+    let mixed = userClean + junk
+
+    // ── (A) MARGIN SWEEP : want STEER='sushis' AND JUNK has no 'meufs'. ──
+    print("\n╔══ EXP 10A : NUCLEUS MARGIN SWEEP ══╗")
+    let steerPrompt = "J'ai envie de manger des "
+    for m in [Float(8), 12, 16, 20, 26, 40] {
+        await engine.setCorpus(userClean)
+        let steer = await gen(prompt: steerPrompt, ship(6, margin: m), maxTokens: 8)
+        await engine.setCorpus(mixed)
+        let leak = await gen(prompt: steerPrompt, ship(6, margin: m), maxTokens: 8)
+        print(String(format: "   margin %5.0f │ clean→%@   mixed→%@", m,
+                     steer.debugDescription, leak.debugDescription))
+    }
+
+    // ── (B) 20 PROMPTS : empty(off) vs mixed(on) at margin 16. ──
+    let twenty = [
+        "J'ai envie de manger des ", "Coucou, j'ai faim. On commande des ",
+        "Je vous écris pour vous informer que les frais ", "Bonjour Madame, je me permets de vous ",
+        "Merci beaucoup pour votre ", "Le code ne compile pas, il y a une ",
+        "On se retrouve demain à ", "Je te confirme notre rendez-vous de ",
+        "N'hésite pas à me ", "Je reviens vers toi dès que ",
+        "Pourrais-tu m'envoyer le ", "Désolé pour le retard, j'étais ",
+        "Je pense que ce projet ", "Tu préfères qu'on se voie ",
+        "Bonne nouvelle, le client a ", "Je vais prendre un ",
+        "Est-ce que tu peux ", "Merci d'avoir pris le temps de ",
+        "Je suis ", "On en parle ",
+    ]
+    print("\n╔══ EXP 10B : 20 PROMPTS — empty(off) vs MIXED(on, margin16) ══╗")
+    for (i, p) in twenty.enumerated() {
         await engine.setCorpus([])
-        let clean = await gen(prompt: s.text, shipSampler(0))
-        await engine.setCorpus(polluted)
-        let dirty = await gen(prompt: s.text, shipSampler(6))   // default live strength
-        print("\n▼ [\(s.tag)] want≈ \(s.want)")
-        print("   corpus VIDE     (str 0) │\(clean)")
-        print("   corpus POLLUÉ   (str 6) │\(dirty)")
+        let off = await gen(prompt: p, ship(0), maxTokens: 12)
+        await engine.setCorpus(mixed)
+        let on = await gen(prompt: p, ship(6, margin: 16), maxTokens: 12)
+        let flag = on.lowercased().contains("meuf") || on.contains("procéd") ? "  ⚠️JUNK" : ""
+        print(String(format: "  %2d. %@", i + 1, p.debugDescription))
+        print("       off  │\(off)")
+        print("       mix  │\(on)\(flag)")
+    }
+
+    // ── (C) TOGGLE TEST : do RAW non-accepted inputs help vs only accepted? ──
+    // "accepted" = only the short tails the user Tab-accepted.
+    // "raw"      = the full sentences the user typed (store-without-accepted).
+    print("\n╔══ EXP 10C : STORE RAW INPUTS vs ACCEPTED-ONLY ══╗")
+    let acceptedOnly = ["sushis ce soir", "sushis ce soir", "possible", "contacter si besoin"]
+    let rawInputs = [
+        "J'ai envie de manger des sushis ce soir parce que j'adore le poisson cru",
+        "J'ai envie de manger des sushis ce soir parce que j'adore le poisson cru",
+        "Je reviens vers toi dès que possible, promis, sans faute",
+        "N'hésite pas à me contacter si besoin, je reste joignable",
+    ]
+    for p in ["J'ai envie de manger des ", "Je reviens vers toi dès que ", "N'hésite pas à me "] {
+        await engine.setCorpus(acceptedOnly)
+        let acc = await gen(prompt: p, ship(6, margin: 16), maxTokens: 8)
+        await engine.setCorpus(rawInputs)
+        let raw = await gen(prompt: p, ship(6, margin: 16), maxTokens: 8)
+        print("\n  \(p.debugDescription)")
+        print("    accepté-seul │\(acc)")
+        print("    inputs bruts │\(raw)")
     }
     await engine.setCorpus([])
 
