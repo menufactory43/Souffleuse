@@ -710,6 +710,14 @@ final class ModelRuntime {
             afterCursor: request.afterCursorSlot,
             beforeCursor: llmTail
         )
+        // `buildLlamaPrompt` stripped the caret's trailing space before feeding
+        // the model, so the model emits the next token WITH its own leading
+        // space (" arriver"). When the caret sits AFTER a space, that space is
+        // already typed — drop the ghost's leading space so we render
+        // "on va y arriver.", not "on va y  arriver.". When the caret is NOT
+        // after a space (mid/after-word), keep the leading space (next-word
+        // continuation "frais" → " de port").
+        let caretAfterSpace = llmTail.last == " " || llmTail.last == "\t"
 
         // Accumulator + last-emitted tracker, isolated behind a class so the
         // @Sendable onToken closure can mutate it without crossing the actor
@@ -758,7 +766,12 @@ final class ModelRuntime {
 
             // ── Filter pipeline (verbatim semantics of the MLX onChunk body) ──
             let snapshot = OutputFilter.stripPrefixOverlap(acc.generated, prefix: userTail)
-            let stripped = snapshot.drop(while: { $0 == "\n" || $0 == "\r" })
+            // Caret after a space: the model's leading space is redundant (the
+            // space is already typed) → drop ALL leading whitespace. Otherwise
+            // keep it (next-word continuation marker).
+            let stripped = caretAfterSpace
+                ? snapshot.drop(while: { $0 == "\n" || $0 == "\r" || $0 == " " || $0 == "\t" })
+                : snapshot.drop(while: { $0 == "\n" || $0 == "\r" })
             var oneLine: String
             if let nl = stripped.firstIndex(of: "\n") {
                 oneLine = String(stripped[..<nl])
@@ -895,7 +908,17 @@ final class ModelRuntime {
         var prefix = ""
         if !ctxPrefix.isEmpty { prefix += ctxPrefix + "\n\n" }
         if !fieldContext.isEmpty { prefix += fieldContext + "\n\n" }
-        return prefix + beforeCursor
+        // Strip a TRAILING space/tab from the text the model continues. A
+        // SentencePiece model emits the next token WITH its own leading space
+        // (" arriver"), so a space already present at the end derails greedy —
+        // "on va y " loops/repeats, while "on va y" cleanly yields " arriver.".
+        // (Proven in the probe primer sweep.) The caller (`generateLlama`)
+        // knows the caret sits after a space and drops the ghost's leading
+        // space so rendering stays "on va y arriver." with a single space.
+        // Newlines are NOT trimmed — a caret on a fresh line is intentional.
+        var bc = beforeCursor
+        while let last = bc.last, last == " " || last == "\t" { bc.removeLast() }
+        return prefix + bc
     }
 
     /// Verbatim MLX generation body — retained dead for reference; no longer
