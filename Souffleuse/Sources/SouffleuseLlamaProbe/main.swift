@@ -225,14 +225,24 @@ do {
         "Je reviens vers toi dès que possible, promis, sans faute",
         "N'hésite pas à me contacter si besoin, je reste joignable",
     ]
-    for p in ["J'ai envie de manger des ", "Je reviens vers toi dès que ", "N'hésite pas à me "] {
+    // Direct measurement : suffix-array match LENGTH + top candidate for the
+    // same context, accepted-fragments corpus vs raw-inputs corpus. Longer
+    // match = more context = more confident, sharper personalization. This is
+    // the toggle's real value, independent of the conservative bias gate.
+    let toggleCtx = [
+        "Je reviens vers toi dès que",
+        "N'hésite pas à me",
+        "Je suis disponible cet",
+    ]
+    for ctx in toggleCtx {
+        let ids = await engine.tokenizeForCorpus(ctx)
         await engine.setCorpus(acceptedOnly)
-        let acc = await gen(prompt: p, ship(6, margin: 16), maxTokens: 8)
+        let (ca, la) = await engine.suffixArrayCandidates(after: ids)
         await engine.setCorpus(rawInputs)
-        let raw = await gen(prompt: p, ship(6, margin: 16), maxTokens: 8)
-        print("\n  \(p.debugDescription)")
-        print("    accepté-seul │\(acc)")
-        print("    inputs bruts │\(raw)")
+        let (cr, lr) = await engine.suffixArrayCandidates(after: ids)
+        print("\n  ctx=\(ctx.debugDescription)  (ctxTokens=\(ids.count))")
+        print("    accepté-seul : matchLen=\(la)  candidats=\(ca.count)")
+        print("    inputs bruts : matchLen=\(lr)  candidats=\(cr.count)")
     }
     await engine.setCorpus([])
 

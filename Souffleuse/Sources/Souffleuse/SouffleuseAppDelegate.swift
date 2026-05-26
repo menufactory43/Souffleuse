@@ -87,6 +87,13 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// use `lastEnrichedBundleID` for this because it's also gated by the
     /// enrichment toggle.
     private var lastFocusedBundleID: String? = nil
+    /// Running latest text + bundle of the focused field, for the "store inputs
+    /// without accepted completions" mode. Updated each tick; the previous
+    /// field's final text is recorded on focus change. `lastRecordedRawInput`
+    /// dedups so the same draft isn't appended twice.
+    private var rawInputText: String = ""
+    private var rawInputBundleID: String? = nil
+    private var lastRecordedRawInput: String = ""
     /// Owns the OCR fallback + per-bundle layout calibration cache. Used when
     /// AX hides per-character bounds (Brave/Chrome/Edge web fields).
     private let caretResolver = CaretResolver()
@@ -645,6 +652,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // element, and ensures the FIRST ghost paints on a freshly-resolved
         // caretRect — Cotypist-style "appear discreetly on the first keystroke".
         if lastFocusedBundleID != bundleID {
+            // Focus is leaving the previous field → if "store without accepted"
+            // is on, record what the user wrote there (even with no acceptance).
+            recordRawInputIfAllowed(text: rawInputText, bundleID: rawInputBundleID)
             textAtFocusByBundle[bundleID] = text
             lastFocusedBundleID = bundleID
             // Focus left mid-partial: record what the user did take in the
@@ -662,6 +672,10 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             textAtFocusByBundle[bundleID] = text
         }
         let hasTypedSinceFocus = (textAtFocusByBundle[bundleID] != text)
+        // Track the focused field's running text so a focus change can record
+        // it under the "store without accepted" mode.
+        rawInputText = text
+        rawInputBundleID = bundleID
 
         // Cache fresh AX caretRect WITH a timestamp so we can expire stale
         // anchors. When the host stops emitting bounds (zoom, scroll, reflow
@@ -1230,6 +1244,37 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             await history.append(entry)
             await predictorRef.ingestAccepted(entry)
         }
+    }
+
+    /// Records a field's raw text into the corpus when "store without accepted"
+    /// is on — Cotypist's "Store Inputs Without Accepted Completions". Fires on
+    /// focus change with the PREVIOUS field's final text. Gated exactly like
+    /// acceptance recording (personalization master toggle + blocklists), plus
+    /// the store-without-accepted toggle, a minimum length (a real sentence, not
+    /// a stray word), and a consecutive-duplicate dedup. The `append` call adds
+    /// the shared secret-heuristic + fragment + FIFO gates.
+    private func recordRawInputIfAllowed(text: String, bundleID: String?) {
+        guard store.personalizationEnabled, store.storeWithoutAccepted else { return }
+        guard let bid = bundleID else { return }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 8 else { return }
+        guard trimmed != lastRecordedRawInput else { return }
+        if bundleBlocklist.contains(bid) { return }
+        if personalizationBundleBlocklist.contains(where: { bid == $0 || bid.hasPrefix($0) }) { return }
+        lastRecordedRawInput = trimmed
+        let entry = TypingHistoryEntry(
+            timestamp: Date(),
+            contextBefore: "",
+            accepted: String(trimmed.suffix(200)),
+            bundleID: bid
+        )
+        let history = self.store.history
+        let predictorRef = self.predictor
+        Task { [history, predictorRef, entry] in
+            await history.append(entry)
+            await predictorRef.ingestAccepted(entry)
+        }
+        Log.info(.context, "raw_input_recorded")
     }
 
     /// Clear the on-screen ghost when the user typed a character that DIVERGES

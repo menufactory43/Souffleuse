@@ -129,6 +129,7 @@ final class PreferencesStore {
         static let personalizationEnabled = "personalizationEnabled"
         static let personalizationStrength = "personalizationStrength"
         static let personalizationOnboardingShown = "personalizationOnboardingShown"
+        static let storeWithoutAccepted = "storeWithoutAccepted"
         static let partialAcceptEnabled = "partialAcceptEnabled"
         static let trailingSpaceOnPartial = "trailingSpaceOnPartial"
         static let prefixCorrectionEnabled = "prefixCorrectionEnabled"
@@ -171,6 +172,15 @@ final class PreferencesStore {
     }
     var personalizationOnboardingShown: Bool {
         didSet { UserDefaults.standard.set(personalizationOnboardingShown, forKey: K.personalizationOnboardingShown) }
+    }
+    /// When true, the corpus also records the contents of a text field on focus
+    /// change — even when the user accepted NO completion (Cotypist's "Store
+    /// Inputs Without Accepted Completions"). Builds a richer style/vocabulary
+    /// dataset from everything written, not just acceptances. Gated by
+    /// `personalizationEnabled` + the same blocklist / secret / fragment checks.
+    /// Default false (the more private, accepted-only mode).
+    var storeWithoutAccepted: Bool {
+        didSet { UserDefaults.standard.set(storeWithoutAccepted, forKey: K.storeWithoutAccepted) }
     }
     /// When true, Tab on an LLM suggestion accepts only the next word (with
     /// optional trailing space). The remainder stays in the ghost; Tab again
@@ -221,6 +231,7 @@ final class PreferencesStore {
         self.personalizationEnabled = (d.object(forKey: K.personalizationEnabled) as? Bool) ?? false
         self.personalizationStrength = (d.object(forKey: K.personalizationStrength) as? Double) ?? 1.0
         self.personalizationOnboardingShown = (d.object(forKey: K.personalizationOnboardingShown) as? Bool) ?? false
+        self.storeWithoutAccepted = (d.object(forKey: K.storeWithoutAccepted) as? Bool) ?? false
         self.partialAcceptEnabled = (d.object(forKey: K.partialAcceptEnabled) as? Bool) ?? true
         self.trailingSpaceOnPartial = (d.object(forKey: K.trailingSpaceOnPartial) as? Bool) ?? true
         self.prefixCorrectionEnabled = (d.object(forKey: K.prefixCorrectionEnabled) as? Bool) ?? true
