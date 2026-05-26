@@ -94,6 +94,152 @@ struct LlamaCorpusNgram {
     }
 }
 
+/// Phase 3 — variable-length-context corpus model backed by a **suffix array**
+/// over the concatenated corpus token-id sequence.
+///
+/// Strictly richer than `LlamaCorpusNgram` : instead of a fixed bigram/trigram
+/// backoff it finds, at each decode step, the **longest suffix of the current
+/// context window that also occurs in the corpus**, then returns the observed
+/// next-token distribution for that match plus the matched length. The matched
+/// length lets the caller sharpen the boost (longer context ⇒ stronger,
+/// peakier bias) — replicating Cotypist's suffix-array corpus use.
+///
+/// Layout :
+/// - `tokens` : every corpus entry's token ids concatenated, each entry
+///   terminated by a unique negative sentinel (`-1, -2, …`) so a suffix never
+///   matches across an entry boundary.
+/// - `sa` : suffix-array indices into `tokens`, sorted by the suffix that
+///   starts at each index (sentinels compare as their negative values, so they
+///   never equal a real positive token id).
+///
+/// All lookups are pure reads on immutable storage — the struct is built once
+/// per corpus refresh (off the hot decode path) and only read during decode.
+/// Lives inside the actor, never crosses an isolation boundary.
+struct LlamaCorpusSuffixArray {
+    /// Concatenated corpus tokens with per-entry negative sentinels.
+    private var tokens: [Int32] = []
+    /// Suffix-array : indices into `tokens`, sorted lexicographically by suffix.
+    private var sa: [Int] = []
+
+    /// Longest context suffix (in tokens) we bother matching. Beyond this the
+    /// distribution is already maximally sharp and the extra comparisons cost
+    /// more than they buy. Also bounds the per-step comparison work.
+    static let maxMatchLen = 16
+
+    var isEmpty: Bool { sa.isEmpty }
+
+    /// Rebuilds the suffix array from the per-entry tokenised corpus. Each
+    /// inner array is one accepted-text entry's llama token ids. A unique
+    /// negative sentinel terminates every entry so matches cannot cross
+    /// entries. Full rebuild — cheap for the corpus sizes we carry, and run
+    /// off the hot path by the caller.
+    mutating func build(entries: [[Int32]]) {
+        tokens.removeAll(keepingCapacity: true)
+        sa.removeAll(keepingCapacity: true)
+        var sentinel: Int32 = -1
+        for entry in entries where entry.count >= 2 {
+            tokens.append(contentsOf: entry)
+            tokens.append(sentinel)
+            sentinel -= 1
+        }
+        guard !tokens.isEmpty else { return }
+        sa = Array(0..<tokens.count)
+        let toks = tokens
+        sa.sort { a, b in
+            var i = a, j = b
+            while i < toks.count && j < toks.count {
+                if toks[i] != toks[j] { return toks[i] < toks[j] }
+                i += 1; j += 1
+            }
+            // Shorter suffix (hit end of array first) sorts first.
+            return i >= toks.count
+        }
+    }
+
+    mutating func clear() {
+        tokens.removeAll(keepingCapacity: true)
+        sa.removeAll(keepingCapacity: true)
+    }
+
+    /// Result of a longest-match query : the observed next-token counts for the
+    /// longest matched context suffix, and that match length (in tokens).
+    struct Match {
+        let candidates: [Int32: Int]
+        let matchLength: Int
+    }
+
+    /// Finds the longest suffix of `context` that occurs in the corpus (not at
+    /// an entry boundary) and returns the distribution of tokens observed
+    /// immediately after it. Empty `candidates` when no suffix of length ≥1
+    /// matches. Tries the longest suffix first and backs off one token at a
+    /// time — the first length that yields at least one continuation wins.
+    func longestMatch(after context: ArraySlice<Int32>) -> Match {
+        guard !sa.isEmpty, !context.isEmpty else { return Match(candidates: [:], matchLength: 0) }
+        let ctx = Array(context.suffix(Self.maxMatchLen))
+        // Try progressively shorter suffixes of ctx.
+        for start in 0..<ctx.count {
+            let pattern = Array(ctx[start...])
+            let cands = continuations(matching: pattern)
+            if !cands.isEmpty {
+                return Match(candidates: cands, matchLength: pattern.count)
+            }
+        }
+        return Match(candidates: [:], matchLength: 0)
+    }
+
+    /// Binary-searches the suffix array for the range of suffixes that begin
+    /// with `pattern`, then collects the token that follows each occurrence
+    /// (skipping occurrences where `pattern` is immediately followed by a
+    /// sentinel or the end of `tokens`).
+    private func continuations(matching pattern: [Int32]) -> [Int32: Int] {
+        guard !pattern.isEmpty else { return [:] }
+        let lo = lowerBound(pattern)
+        let hi = upperBound(pattern)
+        guard lo < hi else { return [:] }
+        var out: [Int32: Int] = [:]
+        for k in lo..<hi {
+            let next = sa[k] + pattern.count
+            if next >= tokens.count { continue }
+            let nextTok = tokens[next]
+            if nextTok < 0 { continue }  // sentinel — end of entry, no continuation
+            out[nextTok, default: 0] += 1
+        }
+        return out
+    }
+
+    /// Compares the suffix at `tokens[saIdx...]` against `pattern` lexically.
+    /// Returns negative / 0 / positive like C `memcmp` over the prefix.
+    private func compareSuffix(_ saIdx: Int, _ pattern: [Int32]) -> Int {
+        var i = saIdx
+        var p = 0
+        while p < pattern.count {
+            if i >= tokens.count { return -1 }  // suffix shorter ⇒ sorts before
+            let t = tokens[i]
+            if t != pattern[p] { return t < pattern[p] ? -1 : 1 }
+            i += 1; p += 1
+        }
+        return 0  // pattern is a prefix of this suffix
+    }
+
+    private func lowerBound(_ pattern: [Int32]) -> Int {
+        var lo = 0, hi = sa.count
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if compareSuffix(sa[mid], pattern) < 0 { lo = mid + 1 } else { hi = mid }
+        }
+        return lo
+    }
+
+    private func upperBound(_ pattern: [Int32]) -> Int {
+        var lo = 0, hi = sa.count
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if compareSuffix(sa[mid], pattern) <= 0 { lo = mid + 1 } else { hi = mid }
+        }
+        return lo
+    }
+}
+
 /// On-device llama.cpp inference engine.
 ///
 /// Owns one `llama_model` + `llama_context` for the lifetime of the actor.
@@ -122,6 +268,13 @@ public actor LlamaEngine {
     /// via `setCorpus(_:)`. Empty until a corpus is provided ; when empty the
     /// decode loop never touches the logits (zero overhead).
     private var corpusNgram = LlamaCorpusNgram()
+
+    /// Phase 3 — variable-length-context corpus model over llama token ids.
+    /// Built alongside `corpusNgram` in `setCorpus(_:)`. When non-empty it is
+    /// the PRIMARY source of decode-step candidates (longest-match) ; the fixed
+    /// n-gram remains as a guaranteed-cheap fallback. Empty until a corpus is
+    /// provided ; when empty the decode loop never touches the logits.
+    private var corpusSuffixArray = LlamaCorpusSuffixArray()
 
     /// One-time global backend init, guarded so it runs at most once per
     /// process even across multiple engine instances.
@@ -228,19 +381,45 @@ public actor LlamaEngine {
     /// the corpus is small (≤ a few hundred short entries).
     public func setCorpus(_ entries: [String]) {
         corpusNgram.clear()
+        corpusSuffixArray.clear()
         guard handles != nil else { return }
+        var tokenised: [[Int32]] = []
+        tokenised.reserveCapacity(entries.count)
         for entry in entries {
             let trimmed = entry.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty { continue }
-            corpusNgram.ingest(tokenize(trimmed, addSpecial: false))
+            let ids = tokenize(trimmed, addSpecial: false)
+            corpusNgram.ingest(ids)
+            tokenised.append(ids)
         }
+        // Build the suffix array from the SAME llama token-id sequences. Full
+        // rebuild — cheap for our corpus size and run off the hot decode path
+        // (callers invoke setCorpus from a background Task on accept/startup).
+        corpusSuffixArray.build(entries: tokenised)
         if !corpusNgram.isEmpty {
             Log.info(.predictor, "corpus_ngram_built")
+        }
+        if !corpusSuffixArray.isEmpty {
+            Log.info(.predictor, "corpus_suffix_array_built")
         }
     }
 
     /// True when the corpus n-gram has at least one bigram entry.
     public var hasCorpus: Bool { !corpusNgram.isEmpty }
+
+    /// Exposes the corpus suffix-array longest-match for the given context
+    /// token ids — used by tests/probes to prove variable-length matching.
+    /// Returns `(candidates, matchLength)`.
+    public func suffixArrayCandidates(after context: [Int32]) -> (candidates: [Int32: Int], matchLength: Int) {
+        let m = corpusSuffixArray.longestMatch(after: context[context.startIndex...])
+        return (m.candidates, m.matchLength)
+    }
+
+    /// Tokenizes `text` to llama ids (no BOS) — exposed for probe/test use so
+    /// callers can build context windows in token space.
+    public func tokenizeForCorpus(_ text: String) -> [Int32] {
+        tokenize(text, addSpecial: false)
+    }
 
     // MARK: - Tokenization
 
@@ -378,12 +557,16 @@ public actor LlamaEngine {
         // Personalization bias is active only when explicitly requested AND a
         // corpus n-gram exists. When inactive we keep the fast path completely
         // untouched — no logits fetch, no window maintenance.
-        let biasActive = sampling.personalizationStrength > 0 && !corpusNgram.isEmpty
+        let biasActive = sampling.personalizationStrength > 0
+            && (!corpusSuffixArray.isEmpty || !corpusNgram.isEmpty)
         let strength = sampling.personalizationStrength
+        let useSuffixArray = !corpusSuffixArray.isEmpty
         // Sliding window of recently-decoded token ids (prompt tail + emitted)
-        // used to compute the current n-gram context. Only the last two ids
-        // matter (trigram), so a tiny tail is enough.
-        var recentIds: [Int32] = biasActive ? Array(promptTokens.suffix(2)) : []
+        // used to compute the current corpus-match context. The suffix array
+        // matches up to `maxMatchLen` tokens, so we keep that many ; the fixed
+        // n-gram fallback only ever reads the last two.
+        let windowLen = LlamaCorpusSuffixArray.maxMatchLen
+        var recentIds: [Int32] = biasActive ? Array(promptTokens.suffix(windowLen)) : []
 
         while produced < maxTokens {
             if Task.isCancelled { break }
@@ -393,11 +576,29 @@ public actor LlamaEngine {
             // sampler chain (penalties + greedy/temp) reads the modified
             // distribution.
             if biasActive, let logits = llama_get_logits_ith(h.context, -1) {
-                let candidates = corpusNgram.candidates(after: recentIds[recentIds.startIndex...])
+                // Suffix-array longest match (variable-length context) is the
+                // primary source ; the fixed n-gram is the cheap fallback.
+                // `matchLen` sharpens the boost : a longer matched context is
+                // far more predictive, so we scale the boost up with it. This
+                // makes a 4-token corpus match steer much harder than a bare
+                // bigram, which is the whole point of the suffix array.
+                let candidates: [Int32: Int]
+                let matchLen: Int
+                if useSuffixArray {
+                    let m = corpusSuffixArray.longestMatch(after: recentIds[recentIds.startIndex...])
+                    candidates = m.candidates
+                    matchLen = m.matchLength
+                } else {
+                    candidates = corpusNgram.candidates(after: recentIds.suffix(2))
+                    matchLen = candidates.isEmpty ? 0 : min(2, recentIds.count)
+                }
                 if !candidates.isEmpty {
+                    // Sharpening factor : ≥1, grows with matched context length.
+                    // matchLen 1 → 1.0, 2 → ~1.7, 4 → ~3.0, capped at maxMatchLen.
+                    let sharpen = 1.0 + 0.5 * Float(max(0, matchLen - 1))
                     let nVocab = llama_vocab_n_tokens(h.vocab)
                     for (id, count) in candidates where id >= 0 && id < nVocab {
-                        logits[Int(id)] += strength * logf(1 + Float(count))
+                        logits[Int(id)] += strength * sharpen * logf(1 + Float(count))
                     }
                 }
             }
@@ -408,7 +609,9 @@ public actor LlamaEngine {
 
             if biasActive {
                 recentIds.append(tokenId)
-                if recentIds.count > 2 { recentIds.removeFirst(recentIds.count - 2) }
+                if recentIds.count > windowLen {
+                    recentIds.removeFirst(recentIds.count - windowLen)
+                }
             }
 
             if firstTokenAt == nil { firstTokenAt = Date() }
