@@ -1,0 +1,6 @@
+module CLlama {
+    header "llama.h"
+    header "ggml.h"
+    link "llama"
+    export *
+}

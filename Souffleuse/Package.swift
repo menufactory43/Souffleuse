@@ -21,6 +21,7 @@ let package = Package(
         .library(name: "SouffleuseTyping", targets: ["SouffleuseTyping"]),
         .library(name: "SouffleusePersonalization", targets: ["SouffleusePersonalization"]),
         .library(name: "SouffleusePrompt", targets: ["SouffleusePrompt"]),
+        .library(name: "SouffleuseLlama", targets: ["SouffleuseLlama"]),
     ],
     dependencies: [
         .package(url: "https://github.com/ml-explore/mlx-swift-examples", from: "2.0.0"),
@@ -28,6 +29,23 @@ let package = Package(
     targets: [
         .target(
             name: "SouffleuseLog"
+        ),
+        .systemLibrary(
+            name: "CLlama",
+            path: "vendor/llama/include"
+        ),
+        .target(
+            name: "SouffleuseLlama",
+            dependencies: ["CLlama", "SouffleuseLog"],
+            linkerSettings: [
+                .unsafeFlags([
+                    "-L", "vendor/llama/lib",
+                    "-lllama", "-lggml", "-lggml-base",
+                    "-lggml-cpu", "-lggml-metal", "-lggml-blas",
+                    "-Xlinker", "-rpath", "-Xlinker", "@loader_path/../Frameworks",
+                    "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks",
+                ]),
+            ]
         ),
         .target(
             name: "SouffleuseTyping"
@@ -79,6 +97,7 @@ let package = Package(
                 "SouffleuseTyping",
                 "SouffleusePersonalization",
                 "SouffleusePrompt",
+                "SouffleuseLlama",
                 .product(name: "MLXLLM", package: "mlx-swift-examples"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-examples"),
             ]
