@@ -112,6 +112,58 @@ public final class TypoDetector: @unchecked Sendable {
         checker.ignoreWord(word, inSpellDocumentWithTag: 0)
     }
 
+    /// True when `word` is a valid word in at least one of the checked
+    /// languages. Used by the mid-word coherence guard in the ghost pipeline:
+    /// the candidate "partialWord + ghostHead" is only KEPT when it forms a
+    /// real word, so an incoherent splice ("procéd" + "blème" → "procédblème")
+    /// is rejected while a legitimate completion ("problè" + "me" → "problème")
+    /// passes.
+    ///
+    /// A word counts as valid as soon as ONE language accepts it — the opposite
+    /// rule of `bestGuess`/`currentWordLooksSuspect` (which require ALL to
+    /// flag). Here we want to be permissive: any dictionary recognising the
+    /// candidate means the splice is coherent and must not be dropped.
+    ///
+    /// `language` (when provided) is tried first as a hint; we always also
+    /// fall back to FR + EN so single-language installs don't reject the other
+    /// tongue. We refuse to log the actual word — only event names flow to Log.
+    public func isValidWord(_ word: String, language: String? = nil) -> Bool {
+        let trimmed = word.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return true }
+        var languages = ["fr", "en"]
+        if let hint = Self.spellLanguageCode(for: language), !languages.contains(hint) {
+            languages.insert(hint, at: 0)
+        }
+        let nsword = trimmed as NSString
+        for language in languages {
+            let range = checker.checkSpelling(
+                of: trimmed, startingAt: 0, language: language, wrap: false,
+                inSpellDocumentWithTag: 0, wordCount: nil
+            )
+            // Not flagged (or flagged on a sub-range only) → valid in this lang.
+            if range.location == NSNotFound || range.length != nsword.length {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Maps an English language name (as produced by `detectLanguage`) to the
+    /// ISO code NSSpellChecker expects. Nil when unknown.
+    static func spellLanguageCode(for language: String?) -> String? {
+        guard let language else { return nil }
+        switch language.lowercased() {
+        case "french": return "fr"
+        case "english": return "en"
+        case "spanish": return "es"
+        case "german": return "de"
+        case "italian": return "it"
+        case "portuguese": return "pt"
+        case "dutch": return "nl"
+        default: return nil
+        }
+    }
+
     /// Returns true if the word the caret is INSIDE (mid-word case) looks
     /// misspelled. Used by the "hide completions on suspected typo" path so
     /// the LLM ghost doesn't extend a misspelled word with more wrong text.

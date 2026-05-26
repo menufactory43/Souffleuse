@@ -7,6 +7,7 @@ import SouffleuseLlama
 import SouffleuseLog
 import SouffleusePersonalization
 import SouffleusePrompt
+import SouffleuseTyping
 
 // MARK: - Value types (Phase 4 / 04-05 — extracted alongside PVM, no callers yet)
 
@@ -158,6 +159,13 @@ final class ModelRuntime {
     /// container above is kept only for the n-gram tokenizer
     /// (`rebuildPersonalization`) ; all ghost text comes from `llamaEngine`.
     let llamaEngine = LlamaEngine()
+
+    /// NSSpellChecker wrapper, reused for the mid-word coherence guard
+    /// (`OutputFilter.midWordCandidate` + `isValidWord`). Process-wide and
+    /// thread-safe behind its own `@unchecked Sendable` declaration, so it can
+    /// be captured by the `@Sendable` onToken closure without crossing back to
+    /// the actor on every token.
+    private let spellChecker = TypoDetector()
 
     /// True once the GGUF is loaded into the llama engine.
     private(set) var llamaReady = false
@@ -478,6 +486,71 @@ final class ModelRuntime {
             if t.allSatisfy({ !$0.isLetter }) { return true }
             return false
         }
+
+        /// A character is a "word character" for coherence purposes when it can
+        /// participate in a single word — letters, digits, and the intra-word
+        /// joiners apostrophe / curly-apostrophe / hyphen. Mirrors
+        /// `stripTrailingPartialWord`'s notion so the two stay consistent.
+        nonisolated static func isWordChar(_ c: Character) -> Bool {
+            c.isLetter || c.isNumber || c == "'" || c == "’" || c == "-"
+        }
+
+        /// Returns the in-progress partial word at the END of `userTail`: the
+        /// trailing run of word-characters. Empty when the caret sits right
+        /// after a space / punctuation (i.e. NOT mid-word).
+        ///
+        /// This is exactly the slice `stripTrailingPartialWord` removes — we
+        /// expose it directly so the coherence guard can reuse the same rule.
+        nonisolated static func trailingPartialWord(_ userTail: String) -> String {
+            String(userTail.dropFirst(stripTrailingPartialWord(userTail).count))
+        }
+
+        /// Leading run of word-characters of `ghost` (the part that would splice
+        /// onto a mid-word partial). Empty when the ghost starts with a space /
+        /// punctuation — meaning it does NOT continue the same word.
+        nonisolated static func leadingWordRun(_ ghost: String) -> String {
+            var out = ""
+            for c in ghost {
+                if isWordChar(c) { out.append(c) } else { break }
+            }
+            return out
+        }
+
+        /// Builds the candidate word formed by splicing the mid-word ghost onto
+        /// the in-progress partial word, OR nil when there is nothing to check
+        /// (caret not mid-word, or ghost doesn't continue the same word).
+        ///
+        /// `nil` ⇒ guard does not apply (leave the ghost alone). A non-nil
+        /// value ⇒ the caller must spell-validate it; an invalid candidate
+        /// means the splice is incoherent and the ghost must be dropped.
+        nonisolated static func midWordCandidate(userTail: String, ghost: String) -> String? {
+            let partial = trailingPartialWord(userTail)
+            guard !partial.isEmpty else { return nil }       // caret after space/punct → not mid-word
+            guard let first = ghost.first, isWordChar(first) else { return nil }  // ghost doesn't continue the word
+            return partial + leadingWordRun(ghost)
+        }
+
+        /// Instruction-text fragments the instruct 1B sometimes echoes verbatim
+        /// in degenerate cases (it restates the prompt framing instead of
+        /// continuing the user). A ghost containing any of these is meta-text,
+        /// never a real completion → drop it. Cheap substring check, lowered.
+        nonisolated static let instructionEchoMarkers: [String] = [
+            "voici le texte à continuer",
+            "voici le texte a continuer",
+            "texte à continuer",
+            "suite du texte",
+            "you are an inline autocomplete",
+            "continue the user",
+        ]
+
+        /// True when the ghost echoes the prompt instruction text instead of
+        /// continuing the user. Substring match, case- and accent-insensitive
+        /// enough for the markers above (we lowercase only; the markers cover
+        /// both accented and unaccented spellings).
+        nonisolated static func echoesInstruction(_ ghost: String) -> Bool {
+            let g = ghost.lowercased()
+            return instructionEchoMarkers.contains { g.contains($0) }
+        }
     }
 
     // MARK: - System prompt + language detection
@@ -681,6 +754,39 @@ final class ModelRuntime {
             // list-like context. Better to show nothing than a "1" ghost. Keep
             // generating — a later token may yield a real continuation.
             if OutputFilter.isDegenerateGhost(oneLine) {
+                if !acc.lastEmitted.isEmpty {
+                    acc.lastEmitted = ""
+                    Task { @MainActor in onChunk("") }
+                }
+                return true
+            }
+
+            // Instruction-echo safety net : in degenerate cases the instruct 1B
+            // restates the prompt framing ("Voici le texte à continuer :", …)
+            // instead of continuing the user. The first-line + sentence
+            // truncation above already cut most of it, but a leaked echo is
+            // meta-text, never a real completion → drop and keep generating.
+            if OutputFilter.echoesInstruction(oneLine) {
+                Log.info(.predictor, "ghost_dropped_instruction_echo")
+                if !acc.lastEmitted.isEmpty {
+                    acc.lastEmitted = ""
+                    Task { @MainActor in onChunk("") }
+                }
+                return true
+            }
+
+            // Mid-word coherence guard. When the caret sits mid-word (userTail
+            // ends in a partial word) and the ghost continues that same word
+            // (starts with a word-char), the spliced candidate "partial+head"
+            // must be a real word. Otherwise the model produced an incoherent
+            // continuation — e.g. "…procéd" + "blème" → "procédblème" (a
+            // non-word, amplified by the corpus bias). Drop those; keep
+            // coherent ones ("problè" + "me…" → "problème"). Only runs when
+            // mid-word AND the ghost continues the word — one word per emit,
+            // cheap on the hot path.
+            if let candidate = OutputFilter.midWordCandidate(userTail: userTail, ghost: oneLine),
+               !self.spellChecker.isValidWord(candidate, language: request.detectedLanguage) {
+                Log.info(.predictor, "ghost_dropped_midword_incoherent")
                 if !acc.lastEmitted.isEmpty {
                     acc.lastEmitted = ""
                     Task { @MainActor in onChunk("") }
