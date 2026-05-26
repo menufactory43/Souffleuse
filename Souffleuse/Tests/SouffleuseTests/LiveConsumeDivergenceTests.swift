@@ -60,4 +60,44 @@ struct LiveConsumeDivergenceTests {
     func divergesWhenTypedExceedsGhost() {
         #expect(SouffleuseAppDelegate.isLiveConsumeMatch(ghost: "el", typedSince: "elle") == false)
     }
+
+    // MARK: - Stale mid-word completion guard (the "envies de" bug)
+
+    /// The exact repro: ghost "es de manger" was generated at "J'ai envi"
+    /// (mid-word). It completes the word ("envies") AND continues (" de
+    /// manger"). It is a stale word-completion guess — must NOT be live-consumed
+    /// (re-predict on the fuller word instead).
+    @Test("mid-word completion that continues past the word → stale")
+    func staleWhenCompletionContinuesPastWord() {
+        #expect(SouffleuseAppDelegate.isStaleMidWordCompletion(basePrefix: "J'ai envi", ghost: "es de manger") == true)
+    }
+
+    /// A PURE word completion with nothing after it ("Bonj" → "our") just
+    /// finishes the obvious word — safe to live-consume, NOT stale.
+    @Test("pure word completion (nothing after) → not stale")
+    func notStaleForPureWordCompletion() {
+        #expect(SouffleuseAppDelegate.isStaleMidWordCompletion(basePrefix: "Bonj", ghost: "our") == false)
+    }
+
+    /// A space/punctuation-led next-word ghost ("J'ai envie" → " de manger")
+    /// does NOT continue the current word (its first char isn't a word char) —
+    /// NOT stale, consume freely.
+    @Test("next-word (space-led) ghost → not stale")
+    func notStaleForNextWordGhost() {
+        #expect(SouffleuseAppDelegate.isStaleMidWordCompletion(basePrefix: "J'ai envie", ghost: " de manger") == false)
+    }
+
+    /// When the caret was NOT mid-word (basePrefix ends in a space), the ghost
+    /// can't be a mid-word completion regardless of its shape — NOT stale.
+    @Test("caret after a space → not stale")
+    func notStaleWhenBasePrefixEndsWithSpace() {
+        #expect(SouffleuseAppDelegate.isStaleMidWordCompletion(basePrefix: "J'ai ", ghost: "envie de manger") == false)
+    }
+
+    /// Empty inputs are degenerate — never stale (defensive).
+    @Test("empty inputs → not stale")
+    func notStaleForEmptyInputs() {
+        #expect(SouffleuseAppDelegate.isStaleMidWordCompletion(basePrefix: "", ghost: "abc") == false)
+        #expect(SouffleuseAppDelegate.isStaleMidWordCompletion(basePrefix: "abc", ghost: "") == false)
+    }
 }

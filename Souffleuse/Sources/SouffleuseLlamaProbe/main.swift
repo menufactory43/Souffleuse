@@ -27,6 +27,37 @@ func buildPrompt(system: String, afterCursor: String, beforeCursor: String) -> S
 final class Sink: @unchecked Sendable { var s = "" }
 
 // ─────────────────────────────────────────────────────────────────────────
+// VOLET 0 — RAW CONTINUATION repro (mirrors the LIVE app prompt shape:
+// buildLlamaPrompt = ctxPrefix + fieldContext + beforeCursor, no chat template,
+// base/pt model). Prints the UNFILTERED model output so we see what the model
+// truly produces at the caret for the reported screenshots.
+print("=== VOLET 0: RAW CONTINUATION (live prompt shape) ===")
+func rawGhost(before: String, ctxPrefix: String = "", maxTokens: Int = 16) async -> String {
+    var prompt = ""
+    if !ctxPrefix.isEmpty { prompt += ctxPrefix + "\n\n" }
+    prompt += before
+    let sink = Sink()
+    _ = await engine.generate(prompt: prompt, maxTokens: maxTokens,
+                              sampling: LlamaSampling(temperature: 0, repeatPenalty: 1.1, repeatLastN: 64)) { tok in
+        sink.s += tok; return true
+    }
+    return sink.s
+}
+let v0cases: [(String, String)] = [
+    ("J'ai faim, on mange quoi ? J'ai envie", ""),
+    ("J'ai faim, on mangue quoi ? J'ai envie", ""),
+    ("J'ai envie", ""),
+    ("Merci beaucoup pour votre", ""),
+    ("Je vous écris pour vous informer que les frais", ""),
+]
+for (before, ctx) in v0cases {
+    let raw = await rawGhost(before: before, ctxPrefix: ctx)
+    print("BEFORE: \(before.debugDescription)")
+    print("RAW   : \(raw.debugDescription)")
+    print("---")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // VOLET 1 — silent prefix correction proof. For each typo'd sentence we run
 // the ghost on the RAW prefix and on the CORRECTED prefix (PrefixCorrector,
 // model-input only) and print both. The corrected one should land more
