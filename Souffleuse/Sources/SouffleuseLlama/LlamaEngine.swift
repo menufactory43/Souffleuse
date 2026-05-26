@@ -40,16 +40,59 @@ public struct LlamaSampling: Sendable {
     /// behaviour easy to reason about and avoids overfitting.
     public static let personalizationGainScale: Float = 6.0
 
+    /// Nucleus / tail trimming knobs (experiment levers). All default to
+    /// "disabled" so the shipped greedy profile is byte-identical. They only
+    /// affect output when `temperature > 0` (greedy ignores the distribution
+    /// shape). `topK`/`topP`/`minP == 0` ⇒ that stage is not added to the chain.
+    public var topK: Int32
+    public var topP: Float
+    public var minP: Float
+
+    /// When true, tokens whose decoded piece contains web-markup characters
+    /// (`<` `>` `` ` `` `*` `#`) are forced to `-inf` before sampling — the base
+    /// (pt) Gemma was trained on scraped HTML/markdown and emits `<strong>…`,
+    /// fenced code, etc. Banning the markup tokens at the source stops the
+    /// derailment that the post-hoc regex only papered over. Built once per
+    /// model load (vocab scan), then free per step.
+    public var banMarkup: Bool
+
+    /// Experiment lever : force tokens whose piece contains an ASCII digit to
+    /// `-inf`. The base (pt) model has a strong "web text" prior and loves to
+    /// continue a short casual fragment with a number ("Des 20 ans…", "2019.").
+    /// Banning digits tests whether suppressing that prior pushes it back to
+    /// prose. NOT necessarily a shipping default (some completions legitimately
+    /// want numbers) — a measurement knob.
+    public var banDigits: Bool
+
+    /// Experiment lever : ban digit tokens ONLY for the FIRST generated token.
+    /// The "web number" prior is strongest right at the start of a completion
+    /// ("Des " → "20 ans"), but later digits are often legitimate ("à 14
+    /// heures"). Banning leading-only kills the prior without losing valid
+    /// numbers mid-completion. Ignored when `banDigits` (full ban) is set.
+    public var banDigitsLeading: Bool
+
     public init(temperature: Float = 0,
                 repeatPenalty: Float = 1.1,
                 repeatLastN: Int32 = 64,
                 seed: UInt32 = 0,
-                personalizationStrength: Float = 0) {
+                personalizationStrength: Float = 0,
+                topK: Int32 = 0,
+                topP: Float = 0,
+                minP: Float = 0,
+                banMarkup: Bool = false,
+                banDigits: Bool = false,
+                banDigitsLeading: Bool = false) {
         self.temperature = temperature
         self.repeatPenalty = repeatPenalty
         self.repeatLastN = repeatLastN
         self.seed = seed
         self.personalizationStrength = personalizationStrength
+        self.topK = topK
+        self.topP = topP
+        self.minP = minP
+        self.banMarkup = banMarkup
+        self.banDigits = banDigits
+        self.banDigitsLeading = banDigitsLeading
     }
 }
 
@@ -302,6 +345,16 @@ public actor LlamaEngine {
     /// provided ; when empty the decode loop never touches the logits.
     private var corpusSuffixArray = LlamaCorpusSuffixArray()
 
+    /// Cached list of vocab token ids whose decoded piece contains web-markup
+    /// characters (`< > ` `` ` `` ` * #`). Built lazily on first `banMarkup`
+    /// generation by scanning the vocab once, then reused. Reset to `nil` on
+    /// every `load` (a new model has a different vocab). `nil` = not yet built.
+    private var markupBannedTokens: [Int32]?
+
+    /// Cached list of vocab token ids whose decoded piece contains an ASCII
+    /// digit. Built lazily on first `banDigits` generation. Reset on `load`.
+    private var digitBannedTokens: [Int32]?
+
     /// One-time global backend init, guarded so it runs at most once per
     /// process even across multiple engine instances.
     private static let backendOnce: Void = {
@@ -385,6 +438,9 @@ public actor LlamaEngine {
         loadedPath = path
         // Fresh context ⇒ KV is empty. Invalidate any stale cached sequence.
         kvTokens = []
+        // New vocab ⇒ rebuild the ban sets on next demand.
+        markupBannedTokens = nil
+        digitBannedTokens = nil
         Log.info(.predictor, "llama_loaded")
         return true
     }
@@ -503,6 +559,50 @@ public actor LlamaEngine {
         return Array(tokens.prefix(Int(n)))
     }
 
+    /// Builds (once) and returns the list of vocab token ids whose decoded
+    /// piece contains a web-markup character. Scans the full vocab — O(nVocab)
+    /// `token_to_piece` calls — but only on the first `banMarkup` generation
+    /// after a load; the result is cached on the actor.
+    private func markupBanList() -> [Int32] {
+        if let cached = markupBannedTokens { return cached }
+        guard let h = handles else { return [] }
+        let markup: Set<Character> = ["<", ">", "`", "*", "#", "~"]
+        let nVocab = llama_vocab_n_tokens(h.vocab)
+        var ids: [Int32] = []
+        ids.reserveCapacity(2048)
+        var id: Int32 = 0
+        while id < nVocab {
+            let p = piece(id)
+            if p.contains(where: { markup.contains($0) }) {
+                ids.append(id)
+            }
+            id += 1
+        }
+        markupBannedTokens = ids
+        Log.info(.predictor, "markup_ban_built", count: ids.count)
+        return ids
+    }
+
+    /// Builds (once) and returns the list of vocab token ids whose decoded
+    /// piece contains an ASCII digit. Same one-shot vocab scan as the markup set.
+    private func digitBanList() -> [Int32] {
+        if let cached = digitBannedTokens { return cached }
+        guard let h = handles else { return [] }
+        let nVocab = llama_vocab_n_tokens(h.vocab)
+        var ids: [Int32] = []
+        ids.reserveCapacity(4096)
+        var id: Int32 = 0
+        while id < nVocab {
+            if piece(id).contains(where: { $0.isASCII && $0.isNumber }) {
+                ids.append(id)
+            }
+            id += 1
+        }
+        digitBannedTokens = ids
+        Log.info(.predictor, "digit_ban_built", count: ids.count)
+        return ids
+    }
+
     /// Converts a single token id into its UTF-8 piece.
     private func piece(_ token: Int32) -> String {
         guard let h = handles else { return "" }
@@ -615,6 +715,17 @@ public actor LlamaEngine {
         if sampling.temperature <= 0 {
             llama_sampler_chain_add(sampler, llama_sampler_init_greedy())
         } else {
+            // Tail trimming BEFORE temperature so we sample from a clean nucleus.
+            // Disabled stages (== 0) are simply not added.
+            if sampling.topK > 0 {
+                llama_sampler_chain_add(sampler, llama_sampler_init_top_k(sampling.topK))
+            }
+            if sampling.topP > 0 {
+                llama_sampler_chain_add(sampler, llama_sampler_init_top_p(sampling.topP, 1))
+            }
+            if sampling.minP > 0 {
+                llama_sampler_chain_add(sampler, llama_sampler_init_min_p(sampling.minP, 1))
+            }
             llama_sampler_chain_add(sampler, llama_sampler_init_temp(sampling.temperature))
             llama_sampler_chain_add(sampler, llama_sampler_init_dist(sampling.seed))
         }
@@ -651,6 +762,13 @@ public actor LlamaEngine {
         let biasActive = sampling.personalizationStrength > 0
             && (!corpusSuffixArray.isEmpty || !corpusNgram.isEmpty)
         let strength = sampling.personalizationStrength
+        // Markup / digit ban : precompute the lists once. Markup + full digit
+        // ban apply every step ; leading-only digit ban applies on produced==0.
+        let alwaysBan: [Int32] = (sampling.banMarkup ? markupBanList() : [])
+            + (sampling.banDigits ? digitBanList() : [])
+        let leadingBan: [Int32] = (sampling.banDigitsLeading && !sampling.banDigits)
+            ? digitBanList() : []
+        let banActive = !alwaysBan.isEmpty || !leadingBan.isEmpty
         let useSuffixArray = !corpusSuffixArray.isEmpty
         // Sliding window of recently-decoded token ids (prompt tail + emitted)
         // used to compute the current corpus-match context. The suffix array
@@ -666,7 +784,16 @@ public actor LlamaEngine {
             // to each candidate next-token's logit BEFORE sampling, so the
             // sampler chain (penalties + greedy/temp) reads the modified
             // distribution.
-            if biasActive, let logits = llama_get_logits_ith(h.context, -1) {
+            if (biasActive || banActive), let logits = llama_get_logits_ith(h.context, -1) {
+                // Markup ban : force web-markup tokens to -inf so they can never
+                // be sampled (kills `<strong>`, fenced code, etc. at the source).
+                if banActive {
+                    for id in alwaysBan { logits[Int(id)] = -Float.infinity }
+                    if produced == 0 {
+                        for id in leadingBan { logits[Int(id)] = -Float.infinity }
+                    }
+                }
+              if biasActive {
                 // Suffix-array longest match (variable-length context) is the
                 // primary source ; the fixed n-gram is the cheap fallback.
                 // `matchLen` sharpens the boost : a longer matched context is
@@ -692,7 +819,8 @@ public actor LlamaEngine {
                         logits[Int(id)] += strength * sharpen * logf(1 + Float(count))
                     }
                 }
-            }
+              }  // if biasActive
+            }  // if (biasActive || banActive)
 
             let tokenId = llama_sampler_sample(sampler, h.context, -1)
             if llama_vocab_is_eog(h.vocab, tokenId) { break }

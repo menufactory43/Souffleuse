@@ -13,6 +13,139 @@ guard ok else {
 }
 FileHandle.standardError.write("LOADED\n".data(using: .utf8)!)
 
+// ═════════════════════════════════════════════════════════════════════════
+// EXPERIMENTS — sampling × markup-ban × prompt-shape sweep.
+//
+// GOAL : ghosts whose words are coherent with what was typed before. We hold
+// the prompt shape = LIVE raw continuation (ctxPrefix + beforeCursor) and sweep
+// sampling/anti-junk levers, then a second pass sweeps PROMPT SHAPE. Greedy
+// baseline (config A) = exactly what ships today. Everything is compared on the
+// same context-coherence sentences. Deterministic (fixed seed for temp>0).
+// ═════════════════════════════════════════════════════════════════════════
+do {
+    final class S: @unchecked Sendable { var s = "" }
+
+    func gen(prompt: String, _ smp: LlamaSampling, maxTokens: Int = 18) async -> String {
+        let sink = S()
+        _ = await engine.generate(prompt: prompt, maxTokens: maxTokens, sampling: smp) { t in
+            sink.s += t; return true
+        }
+        // First line only + collapse for readability (mirrors app one-line cut).
+        let oneLine = sink.s.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? sink.s
+        return oneLine
+    }
+
+    // Context-coherence probes : the NEXT word(s) should fit the prior text.
+    let sentences: [(tag: String, text: String, want: String)] = [
+        ("food-list",  "J'ai faim, j'ai envie de manger des ",                 "fruits/légumes/viande"),
+        ("food-mid",   "Coucou, j'ai faim J'ai envie de manger. Des ",         "un aliment (merguez…)"),
+        ("formal-fee", "Je vous écris pour vous informer que les frais ",      "de port/dossier"),
+        ("email-open", "Bonjour Madame, je me permets de vous ",               "contacter/écrire"),
+        ("tech-bug",   "Le code ne compile pas, il y a une ",                  "erreur"),
+        ("thanks",     "Merci beaucoup pour votre ",                           "réponse/message/aide"),
+        ("casual-q",   "Tu préfères quoi comme fraises toi ? Ou d'",           "autres (fruits ?)"),
+    ]
+
+    // Sampling configs. A = shipped greedy baseline (control).
+    let configs: [(name: String, smp: LlamaSampling)] = [
+        ("A greedy baseline       ", LlamaSampling(temperature: 0,   repeatPenalty: 1.1)),
+        ("B greedy +banMarkup      ", LlamaSampling(temperature: 0,   repeatPenalty: 1.1, banMarkup: true)),
+        ("C greedy rep1.3 +ban     ", LlamaSampling(temperature: 0,   repeatPenalty: 1.3, banMarkup: true)),
+        ("D greedy rep1.5 +ban     ", LlamaSampling(temperature: 0,   repeatPenalty: 1.5, banMarkup: true)),
+        ("E t0.3 minP.05 rep1.2 ban", LlamaSampling(temperature: 0.3, repeatPenalty: 1.2, seed: 42, minP: 0.05, banMarkup: true)),
+        ("F t0.5 minP.1 k40 r1.2 ban", LlamaSampling(temperature: 0.5, repeatPenalty: 1.2, seed: 42, topK: 40, minP: 0.1, banMarkup: true)),
+        ("G t0.2 minP.1 rep1.3 ban ", LlamaSampling(temperature: 0.2, repeatPenalty: 1.3, seed: 42, minP: 0.1, banMarkup: true)),
+    ]
+
+    await engine.setCorpus([])  // isolate from personalization for the sweep
+
+    print("\n╔══ EXPERIMENT 1 : SAMPLING × MARKUP-BAN (raw continuation) ══╗")
+    for s in sentences {
+        print("\n▼ [\(s.tag)] \(s.text.debugDescription)   want≈ \(s.want)")
+        for c in configs {
+            let g = await gen(prompt: s.text, c.smp)
+            print("   \(c.name) │\(g)")
+        }
+    }
+
+    // ── EXPERIMENT 2 : PROMPT SHAPE (fixed sampling = best-junk profile C). ──
+    // Same user text, different leading context, to see if our live
+    // ctxPrefix/fieldContext annotations help or pollute the continuation.
+    let smpFixed = LlamaSampling(temperature: 0, repeatPenalty: 1.3, banMarkup: true)
+    func shaped(_ kind: String, user: String) -> String {
+        switch kind {
+        case "bare":     return user
+        case "field":    return "Champ : zone de texte.\n\n" + user           // current fieldContext style
+        case "context":  return "Contexte : conversation amicale sur la nourriture.\n\n" + user
+        case "prime":    return "Voici une conversation naturelle en français.\n" + user  // clean prose primer
+        default:         return user
+        }
+    }
+    let shapeUser = "Coucou, j'ai faim J'ai envie de manger. Des "
+    print("\n╔══ EXPERIMENT 2 : PROMPT SHAPE (sampling fixed = C) ══╗")
+    print("user = \(shapeUser.debugDescription)")
+    for kind in ["bare", "field", "context", "prime"] {
+        let g = await gen(prompt: shaped(kind, user: shapeUser), smpFixed)
+        print("   \(kind.padding(toLength: 8, withPad: " ", startingAt: 0)) │\(g)")
+    }
+
+    // ── EXPERIMENT 3 : markup-ban sanity — show the ban list size + a case
+    // that previously emitted <strong>. ──
+    print("\n╔══ EXPERIMENT 3 : MARKUP-BAN EFFECT (same prompt, ban off→on) ══╗")
+    let htmlCase = "J'aime les fraises, j'ai envie de "
+    let off = await gen(prompt: htmlCase, LlamaSampling(temperature: 0, repeatPenalty: 1.1))
+    let on  = await gen(prompt: htmlCase, LlamaSampling(temperature: 0, repeatPenalty: 1.1, banMarkup: true))
+    print("   ban OFF │\(off)")
+    print("   ban ON  │\(on)")
+
+    // ── EXPERIMENT 4 : kill the NUMBER prior (banDigits) + context primer. ──
+    // The "20 ans / 2019" web prior is the dominant enemy once markup is gone.
+    print("\n╔══ EXPERIMENT 4 : BAN DIGITS + CONTEXT PRIMER ══╗")
+    let exp4 = sentences
+    let noNum = LlamaSampling(temperature: 0, repeatPenalty: 1.3, banMarkup: true, banDigits: true)
+    let noNumWarm = LlamaSampling(temperature: 0.4, repeatPenalty: 1.3, seed: 42, minP: 0.08, banMarkup: true, banDigits: true)
+    for s in exp4 {
+        print("\n▼ [\(s.tag)] want≈ \(s.want)")
+        let g1 = await gen(prompt: s.text, noNum)
+        let g2 = await gen(prompt: s.text, noNumWarm)
+        print("   greedy +ban +noDigit │\(g1)")
+        print("   t0.4 minP +ban +noDig │\(g2)")
+    }
+
+    // ── EXPERIMENT 5 : mid-word constraint (the real "merguez" case). ──
+    print("\n╔══ EXPERIMENT 5 : MID-WORD 'Des me' (merguez case) ══╗")
+    for (label, smp) in [
+        ("greedy baseline      ", LlamaSampling(temperature: 0, repeatPenalty: 1.1)),
+        ("greedy +ban +noDigit ", noNum),
+        ("t0.4 minP +ban +noDig", noNumWarm),
+    ] {
+        let g = await gen(prompt: "Coucou, j'ai faim J'ai envie de manger. Des me", smp, maxTokens: 8)
+        print("   \(label) │\(g)")
+    }
+
+    // ── EXPERIMENT 6 : best combo + context primer on the food cases. ──
+    print("\n╔══ EXPERIMENT 6 : CONTEXT PRIMER × best anti-junk ══╗")
+    let primerFood = "Conversation amicale à propos de nourriture.\n"
+    for s in [exp4[0], exp4[1]] {
+        let plain = await gen(prompt: s.text, noNum)
+        let primed = await gen(prompt: primerFood + s.text, noNum)
+        print("\n▼ [\(s.tag)]")
+        print("   sans amorce │\(plain)")
+        print("   avec amorce │\(primed)")
+    }
+
+    // ── EXPERIMENT 7 : leading-digit-only ban (shipping-safe candidate). ──
+    print("\n╔══ EXPERIMENT 7 : LEADING-DIGIT-ONLY BAN (ship candidate) ══╗")
+    let shipCand = LlamaSampling(temperature: 0, repeatPenalty: 1.3, banMarkup: true, banDigitsLeading: true)
+    for s in sentences {
+        let g = await gen(prompt: s.text, shipCand)
+        print("   [\(s.tag.padding(toLength: 10, withPad: " ", startingAt: 0))] │\(g)   (want≈ \(s.want))")
+    }
+
+    print("\n═══ END EXPERIMENTS ═══")
+    exit(0)
+}
+
 // Mirror the in-app system prompt + prompt-building shape so the probe
 // reflects what PredictorViewModel actually feeds the engine.
 let system = "Tu es un moteur d'autocomplétion inline. Continue le texte de l'utilisateur exactement là où il s'arrête, dans la MÊME langue. Réponds UNIQUEMENT par la suite (quelques mots, une courte phrase au plus), sans répéter le texte, sans salutations, sans guillemets, sans formatage."
@@ -44,6 +177,9 @@ func rawGhost(before: String, ctxPrefix: String = "", maxTokens: Int = 16) async
     return sink.s
 }
 let v0cases: [(String, String)] = [
+    ("Coucou, j'ai faim J'ai envie de manger. Des me", ""),
+    ("Coucou, j'ai faim J'ai envie de manger. Des ", ""),
+    ("J'ai faim, j'ai envie de manger des ", ""),
     ("J'aime les fraises, j'ai envie de", ""),
     ("J'aime les fraises, j'ai envie de ", ""),
     ("J'ai faim, on mange quoi ? J'ai envie", ""),
