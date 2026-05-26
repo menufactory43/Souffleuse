@@ -102,8 +102,10 @@ func leadingWordRun(_ s: String) -> String {
 /// Returns (ghostShown, dropped). dropped=true ⇒ incoherent mid-word splice.
 func applyMidWordGuard(userTail: String, rawGhost: String, language: String) -> (shown: String, dropped: Bool) {
     let partial = trailingPartialWord(userTail)
-    guard !partial.isEmpty, let first = rawGhost.first, isWordChar(first) else {
-        return (rawGhost, false)  // not mid-word / ghost starts a new word → keep
+    guard !partial.isEmpty,
+          !partial.contains(where: { $0 == "-" || $0 == "'" || $0 == "’" }),  // hyphen/apostrophe compound → skip
+          let first = rawGhost.first, isWordChar(first) else {
+        return (rawGhost, false)  // not mid-word / compound / ghost starts a new word → keep
     }
     let candidate = partial + leadingWordRun(rawGhost)
     if spell.isValidWord(candidate, language: language) {
@@ -116,6 +118,8 @@ struct MidWordCase { let label: String; let prefix: String; let lang: String }
 let midWordCases = [
     MidWordCase(label: "BUG repro (mid-word, incoherent)", prefix: "Coucou, petit test de procéd", lang: "French"),
     MidWordCase(label: "Coherent mid-word (problè→me)", prefix: "Il y a un gros problè", lang: "French"),
+    MidWordCase(label: "Hyphen compound (allez-→vous)", prefix: "Bonjour, comment allez-", lang: "French"),
+    MidWordCase(label: "Elision (j'→ai)", prefix: "Je pense que j'", lang: "French"),
 ]
 for c in midWordCases {
     let raw = await ghost(forBeforeCursor: c.prefix)
