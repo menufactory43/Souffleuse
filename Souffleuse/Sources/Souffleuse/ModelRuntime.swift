@@ -842,10 +842,21 @@ final class ModelRuntime {
         return m
     }
 
-    /// Assembles a Gemma-3 instruct chat prompt. The model turn is primed with
-    /// `beforeCursor` so the model continues the user's text rather than
-    /// answering the instruction. `afterCursor` (post-caret text) is provided
-    /// as FIM context the model must not repeat.
+    /// Assembles the prompt for **raw text continuation**.
+    ///
+    /// The shipped GGUF is the **base / pretrained** Gemma 3 (`finetune = pt`),
+    /// NOT the instruct model — same file Cotypist uses. A base model has never
+    /// seen the `<start_of_turn>` chat template or instruction framing; wrapping
+    /// it in one produces generic/off-topic words and English drift. So we feed
+    /// it the way a base model expects: plain text it simply continues, ending
+    /// in `beforeCursor`. Cotypist does the same (its `basePromptPrefix` + raw
+    /// text). Any contextual prose (app/field context) is prepended as a light
+    /// prefix; `beforeCursor` is always last so the continuation extends it.
+    ///
+    /// `system` / `customInstr` / `afterCursor` are intentionally NOT injected
+    /// as instructions — a base model can't follow them and they only pollute
+    /// the continuation. Language steering is unnecessary: the base model
+    /// continues in whatever language the input text is already in.
     static func buildLlamaPrompt(
         system: String,
         customInstr: String,
@@ -854,19 +865,10 @@ final class ModelRuntime {
         afterCursor: String,
         beforeCursor: String
     ) -> String {
-        var userBlock = system
-        if !customInstr.isEmpty { userBlock += "\n\nStyle : \(customInstr)" }
-        if !ctxPrefix.isEmpty { userBlock += "\n\nContexte : \(ctxPrefix)" }
-        if !fieldContext.isEmpty { userBlock += "\n\n\(fieldContext)" }
-        // After-cursor text is folded INTO the instruction (not appended as a
-        // labelled trailing block) so the model never echoes a label like
-        // "Texte après le curseur :" into the ghost. We then prime the model
-        // turn with the raw beforeCursor text so it continues seamlessly.
-        if !afterCursor.isEmpty {
-            userBlock += "\n\n\(afterCursor)"
-        }
-        userBlock += "\n\nVoici le texte à continuer :"
-        return "<start_of_turn>user\n\(userBlock)<end_of_turn>\n<start_of_turn>model\n\(beforeCursor)"
+        var prefix = ""
+        if !ctxPrefix.isEmpty { prefix += ctxPrefix + "\n\n" }
+        if !fieldContext.isEmpty { prefix += fieldContext + "\n\n" }
+        return prefix + beforeCursor
     }
 
     /// Verbatim MLX generation body — retained dead for reference; no longer
