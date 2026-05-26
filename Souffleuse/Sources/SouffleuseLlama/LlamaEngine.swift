@@ -525,6 +525,13 @@ public actor LlamaEngine {
         tokenize(text, addSpecial: false).count
     }
 
+    /// Counts tokens for `text` WITH the BOS/special prefix — i.e. exactly how
+    /// `generate` tokenises a prompt. Test/probe seam for asserting KV
+    /// bookkeeping against the resident sequence length.
+    public func countTokensWithBOS(_ text: String) -> Int {
+        tokenize(text, addSpecial: true).count
+    }
+
     // MARK: - Generation
 
     /// Streams a completion for `prompt`. Calls `onToken` for each decoded
