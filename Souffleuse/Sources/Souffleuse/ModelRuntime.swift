@@ -162,33 +162,37 @@ final class ModelRuntime {
     /// True once the GGUF is loaded into the llama engine.
     private(set) var llamaReady = false
 
+    /// Currently-selected GGUF model id (from `GGUFModelOption.catalogue`).
+    /// Drives `resolveGGUFPath()` — the file the llama engine loads. Defaults
+    /// to the fast 1B Q5 entry ; updated by `swapGGUF(to:)`.
+    private(set) var ggufModelID: String = GGUFModelOption.defaultID
+
     /// True when the runtime can produce ghost text — i.e. the llama engine
     /// has a GGUF loaded. Replaces the old `container != nil` gate in PVM,
     /// since the MLX container is now optional (n-gram tokenizer only).
     var canGenerate: Bool { llamaReady }
 
-    init(initialModelId: String) {
+    init(initialModelId: String, ggufModelID: String = GGUFModelOption.defaultID) {
         self.modelId = initialModelId
+        self.ggufModelID = ggufModelID
     }
 
-    /// Resolves the local GGUF path used by the llama engine. Overridable via
-    /// `SOUFFLEUSE_GGUF` for testing other models. Defaults to the Gemma 3 1B
-    /// instruct GGUF already on disk (shared with Cotypist) so we can compare
-    /// at iso-model. No network : the file must already exist locally.
-    static func resolveGGUFPath() -> String {
-        if let override = ProcessInfo.processInfo.environment["SOUFFLEUSE_GGUF"],
-           !override.isEmpty {
-            return (override as NSString).expandingTildeInPath
+    /// Resolves the local GGUF path used by the llama engine, derived from the
+    /// currently-selected `ggufModelID`. Overridable globally via
+    /// `SOUFFLEUSE_GGUF` (debug). Falls back to the default 1B Q5 entry when the
+    /// selected entry's file can't be found. No network : the file must already
+    /// exist locally.
+    func resolveGGUFPath() -> String {
+        let option = GGUFModelOption.option(forID: ggufModelID)
+        if let path = option.resolvePath() {
+            return path
         }
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-        if let base = appSupport {
-            let local = base
-                .appendingPathComponent("Souffleuse/Models/gemma-3-1b.gguf")
-            if FileManager.default.fileExists(atPath: local.path) {
-                return local.path
-            }
+        // Selected entry unresolved → fall back to the default 1B entry so the
+        // ghost still works ; the UI flags the missing file separately.
+        if let fallback = GGUFModelOption.option(forID: GGUFModelOption.defaultID).resolvePath() {
+            return fallback
         }
-        // Fallback : the GGUF already downloaded by Cotypist.
+        // Last-resort literal (mirrors the historical hardcoded path).
         return (("~/Library/Application Support/app.cotypist.Cotypist/Models/gemma-3-1b.i1-Q5_K_M.gguf") as NSString)
             .expandingTildeInPath
     }
@@ -208,7 +212,7 @@ final class ModelRuntime {
         // Primary generation engine : llama.cpp + local GGUF (Metal). This is
         // the path that produces ghost text now ; MLX is only kept for the
         // n-gram tokenizer below.
-        let ggufPath = ModelRuntime.resolveGGUFPath()
+        let ggufPath = resolveGGUFPath()
         let ok = await llamaEngine.load(modelPath: ggufPath, contextTokens: 4096)
         llamaReady = ok
         if !ok {
@@ -260,6 +264,38 @@ final class ModelRuntime {
         // already-loaded path, so a model swap just refreshes the MLX
         // tokenizer container.
         await loadModel()
+    }
+
+    /// Swaps the active **GGUF** model (the real ghost engine). Reloads ONLY
+    /// the llama engine on the newly-resolved path — the MLX container is NOT
+    /// touched (it is decoupled from the user's choice now). `LlamaEngine.load`
+    /// tears down the prior model and resets KV state (kvTokens=[]). Idempotent
+    /// when `id == ggufModelID`.
+    ///
+    /// Returns true when the new GGUF loaded successfully. The caller is
+    /// responsible for re-feeding the personalization corpus afterwards
+    /// (token-id n-gram + suffix array must be rebuilt for the reloaded engine).
+    /// Sets the GGUF selection before the first `loadModel()`. No reload — the
+    /// next `loadModel()` will resolve and load this entry's path.
+    func configureInitialGGUF(_ id: String) {
+        guard !llamaReady else { return }
+        ggufModelID = id
+    }
+
+    @discardableResult
+    func swapGGUF(to id: String) async -> Bool {
+        guard id != ggufModelID else { return llamaReady }
+        ggufModelID = id
+        let ggufPath = resolveGGUFPath()
+        let ok = await llamaEngine.load(modelPath: ggufPath, contextTokens: 4096)
+        llamaReady = ok
+        if !ok {
+            Log.error(.predictor, "model_load_failed")
+            self.lastError = "load_failed: gguf"
+        } else {
+            self.lastError = nil
+        }
+        return ok
     }
 
     /// Feeds the personalization corpus (accepted-text strings) into the

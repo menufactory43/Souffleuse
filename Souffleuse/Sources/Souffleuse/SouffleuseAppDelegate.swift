@@ -193,6 +193,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // `predict()` pour retrouver des entrées similaires au userTail.
         // Gated par `personalizationStrength > 0` côté predictor.
         predictor.history = store.history
+        // Load the persisted GGUF selection on launch (the real ghost engine).
+        predictor.configureInitialGGUF(store.ggufModelID)
         Task { [weak self] in
             await self?.predictor.loadModel()
             // Rebuild the n-gram model from history once the tokenizer is ready.
@@ -290,6 +292,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         storeObservationTask?.cancel()
         let snapshot = (
             modelID: store.modelID,
+            ggufModelID: store.ggufModelID,
             captureEnabled: store.captureEnabled,
             ocrLangs: store.ocrLanguages,
             enrichment: store.enrichmentEnabled,
@@ -298,6 +301,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         )
         withObservationTracking {
             _ = store.modelID
+            _ = store.ggufModelID
             _ = store.captureEnabled
             _ = store.ocrLangFR
             _ = store.ocrLangEN
@@ -318,9 +322,12 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func handlePreferenceChange(previous: (modelID: String, captureEnabled: Bool, ocrLangs: [String], enrichment: Bool, enabled: Bool, completionLength: CompletionLength)) {
+    private func handlePreferenceChange(previous: (modelID: String, ggufModelID: String, captureEnabled: Bool, ocrLangs: [String], enrichment: Bool, enabled: Bool, completionLength: CompletionLength)) {
         if store.modelID != previous.modelID {
             Task { await predictor.swapModel(to: store.modelID) }
+        }
+        if store.ggufModelID != previous.ggufModelID {
+            Task { await predictor.swapGGUF(to: store.ggufModelID) }
         }
         if store.completionLength != previous.completionLength {
             predictor.maxTokens = store.completionLength.maxTokens
