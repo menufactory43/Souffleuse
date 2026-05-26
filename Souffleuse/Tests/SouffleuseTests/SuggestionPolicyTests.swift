@@ -58,6 +58,25 @@ struct SuggestionPolicyTests {
         #expect(r?.text == "rné")
     }
 
+    /// Row 3 quater : mid-word + LLM chunk démarrant par un JOINER (apostrophe /
+    /// trait d'union) → AUTORISÉ. Regression : "…corrigé. S" + "'il vous plaît"
+    /// (S'il) était gaté (prefixFit=0). Maintenant prefixFit=1.0 mid-word pour un
+    /// joiner, donc le ghost passe. Cotypist montre cette complétion.
+    @Test func midWordJoinerLLMChunkPasses() {
+        let p = Self.engine()
+        let r = p.onLLMChunk("'il vous plaît", userTail: "…corrigé. S")
+        #expect(r != nil)
+        #expect(r?.source == .llm)
+        #expect(r?.text == "'il vous plaît")
+    }
+
+    @Test func midWordHyphenLLMChunkPasses() {
+        let p = Self.engine()
+        let r = p.onLLMChunk("-vous", userTail: "…comment allez")
+        #expect(r != nil)
+        #expect(r?.text == "-vous")
+    }
+
     /// Row 3 bis : mid-word, mais le chunk démarre par un non-letter (whitespace
     /// / markdown) → prefixFit = 0.0 → score = 0.0 → gate floor le rejette.
     /// La sanity du scoring mid-word reste donc : seuls les vrais continuations
