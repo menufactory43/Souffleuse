@@ -1,0 +1,172 @@
+{
+  "version": 2,
+  "scenarios": [
+    {
+      "id": "slack-empty-channel",
+      "label": "Slack: empty message in channel #equipe-produit",
+      "bundleID": "com.tinyspeck.slackmacgap",
+      "windowTitle": "Slack — #equipe-produit",
+      "contextPrefix": "App Slack, window \"#equipe-produit\". On screen: Marie: « On a une demande urgente de Carrefour pour la migration ». Paul: « Je peux prendre, j'ai du temps cet aprem ».",
+      "userTail": "",
+      "notes": "Cold start — champ vide, contexte de canal visible. Sans contexte: ghost générique \"Coucou !\". Avec contexte: devrait proposer une réponse liée à la demande Carrefour."
+    },
+    {
+      "id": "slack-reply-mid",
+      "label": "Slack: réponse en cours après salutation",
+      "bundleID": "com.tinyspeck.slackmacgap",
+      "windowTitle": "Slack — DM Paul",
+      "contextPrefix": "App Slack, window \"DM Paul\". On screen: Paul: « Tu peux me filer un coup de main sur le bug paiement ? ».",
+      "userTail": "Hello Paul, je ",
+      "notes": "Réponse engagée mais incomplète. Doit continuer naturellement (\"regarde ça tout de suite\" plutôt que \"vais bien merci\").",
+      "expectedCategory": "acceptable",
+      "expectedGhostPrefix": "regarde"
+    },
+    {
+      "id": "mail-new-subject",
+      "label": "Mail: champ sujet vide, nouveau message",
+      "bundleID": "com.apple.mail",
+      "windowTitle": "Nouveau message — Mail",
+      "contextPrefix": "App Mail, window \"Nouveau message\". On screen: À: client@example.com. Cc: equipe@cocotypist.io. Sujet: .",
+      "userTail": "",
+      "notes": "Sujet vide. Avec contexte → propose un sujet en lien avec le destinataire."
+    },
+    {
+      "id": "mail-reply-body",
+      "label": "Mail: corps de réponse, salutation seulement",
+      "bundleID": "com.apple.mail",
+      "windowTitle": "Re: Devis Q3 — Mail",
+      "contextPrefix": "App Mail, window \"Re: Devis Q3\". On screen: Bonjour, suite à notre échange du 15 mai, je vous joins le devis révisé. N'hésitez pas si vous avez des questions. Cordialement, Sophie.",
+      "userTail": "Bonjour Sophie,\n\nMerci pour ",
+      "notes": "Devrait enchaîner naturellement (\"l'envoi du devis\" / \"votre retour\").",
+      "expectedCategory": "acceptable",
+      "expectedGhostPrefix": "votre"
+    },
+    {
+      "id": "vscode-comment-fn",
+      "label": "VSCode: commentaire au-dessus d'une fonction Swift",
+      "bundleID": "com.microsoft.VSCode",
+      "windowTitle": "PredictorViewModel.swift — Souffleuse",
+      "contextPrefix": "App Visual Studio Code, window \"PredictorViewModel.swift — Souffleuse\". On screen: func capToWords(_ text: String, max: Int) -> String { ... } func detectLanguage(in text: String) -> String? { ... }.",
+      "userTail": "/// ",
+      "notes": "Doc comment au-dessus d'une fonction. Avec contexte → devrait proposer un summary lié au code visible (truncation, language detection)."
+    },
+    {
+      "id": "vscode-impl-line",
+      "label": "VSCode: implémentation, milieu de fonction",
+      "bundleID": "com.microsoft.VSCode",
+      "windowTitle": "PromptBuilder.swift — Souffleuse",
+      "contextPrefix": "App Visual Studio Code, window \"PromptBuilder.swift\". On screen: public struct PromptBuilder { public let counter: TokenCounting; public func build(...) -> BuiltPrompt { ... }.",
+      "userTail": "        let total = ",
+      "notes": "Au milieu d'une expression. Devrait compléter avec un nom de variable plausible."
+    },
+    {
+      "id": "notes-blank",
+      "label": "Notes: nouvelle note vide",
+      "bundleID": "com.apple.Notes",
+      "windowTitle": "Nouvelle note — Notes",
+      "contextPrefix": "App Notes, window \"Nouvelle note\". On screen: Notes précédentes: « Liste courses du 12 mai », « Idées projet souffleuse »",
+      "userTail": "",
+      "notes": "Champ vide, contexte de notes adjacentes. Sans contexte → fortune cookie. Avec → peut-être un titre cohérent."
+    },
+    {
+      "id": "intercom-cs-reply",
+      "label": "Intercom: réponse customer support, milieu de phrase",
+      "bundleID": "com.intercom.intercom-inbox",
+      "windowTitle": "Intercom — Conversation #4821",
+      "contextPrefix": "App Intercom, window \"Conversation #4821\". On screen: Client: « Mon paiement par carte n'a pas fonctionné hier soir vers 22h, j'ai eu un message d'erreur ‹ 3D Secure failed ›. Pouvez-vous m'aider ? ».",
+      "userTail": "Bonjour, je suis désolé pour ce souci de paiement. Je ",
+      "notes": "Réponse CS engagée. Devrait continuer en direction \"vais vérifier votre transaction\" plutôt que générique.",
+      "expectedCategory": "acceptable",
+      "expectedGhostPrefix": "vais"
+    },
+    {
+      "id": "browser-form-name",
+      "label": "Brave: champ Nom dans un formulaire",
+      "bundleID": "com.brave.Browser",
+      "windowTitle": "Inscription — Cocotypist",
+      "contextPrefix": "App Brave, window \"Inscription — Cocotypist\". On screen: Inscription. Nom: ___. Prénom: ___. Email: ___. Mot de passe: ___.",
+      "userTail": "",
+      "notes": "Champ formulaire vide. Difficile sans field metadata (Phase 2). Doit AU MINIMUM ne pas proposer de phrase."
+    },
+    {
+      "id": "discord-reply",
+      "label": "Discord: réply dans un fil",
+      "bundleID": "com.hnc.Discord",
+      "windowTitle": "Discord — #dev-souffleuse",
+      "contextPrefix": "App Discord, window \"#dev-souffleuse\". On screen: alice: « le bench TTFT remonte 95ms avec le builder activé, c'est attendu ? ». bob: « oui c'est la 1ère mesure post-refactor ».",
+      "userTail": "yep on devrait pouvoir ",
+      "notes": "Conversation technique en français mêlé d'anglais. Doit continuer dans le même registre.",
+      "expectedCategory": "acceptable",
+      "expectedGhostPrefix": "le"
+    },
+    {
+      "id": "mid-edit-rewrite",
+      "label": "Notes: édition au milieu d'un texte existant",
+      "bundleID": "com.apple.Notes",
+      "windowTitle": "Compte-rendu réunion — Notes",
+      "contextPrefix": "App Notes, window \"Compte-rendu réunion\".",
+      "userTail": "L'équipe a discuté du planning Q3 et a décidé de prioriser ",
+      "notes": "Curseur au milieu d'une phrase déjà engagée. Contexte = juste app+window, signal vient surtout du userTail. Test du baseline beforeCursor budget.",
+      "expectedCategory": "acceptable",
+      "expectedGhostPrefix": "les"
+    },
+    {
+      "id": "long-tail-truncation",
+      "label": "Mail: corps très long approchant la budget cap",
+      "bundleID": "com.apple.mail",
+      "windowTitle": "Re: Spec v2 — Mail",
+      "contextPrefix": "App Mail, window \"Re: Spec v2\". On screen: Spec v2 du PromptBuilder. Points discutés: 1. allocation par slot 2. eviction policy 3. tests snapshot.",
+      "userTail": "Bonjour Alex,\n\nMerci pour ta proposition de spec sur le PromptBuilder. J'ai bien noté les trois points que tu soulèves : l'allocation par slot avec budgets fixes, la policy d'éviction qui préfère couper sur frontière de phrase puis de mot, et les tests snapshot indépendants de MLX. Sur le point 1, je suis aligné — c'est cohérent avec ce que Cotypist fait en interne, et ça correspond à ce qu'on a discuté en standup la semaine dernière avec Marie et Paul. Sur le point 3, les snapshots déterministes via WordCountTokenCounter sont la bonne approche : on évite la dépendance MLX dans la CI, et on garde une assertion exacte sur les frontières de slots. Sur le point 2, j'aimerais juste qu'on s'assure qu'on ne ",
+      "notes": "Test du head-truncation: userTail ~750 chars, budget beforeCursor=200 tokens (~600 chars). Le builder doit cut head sur frontière phrase, jamais mid-mot. Doit continuer le raisonnement engagé (\"coupe pas mid-word\" ou similaire). [Rule 1 - Bug] Étendu vs RESEARCH §7 seed (426 chars) pour réellement dépasser le budget beforeCursor et exercer head-truncation."
+    },
+    {
+      "id": "13-mid-field-mail-subject",
+      "label": "Mid-field caret in mail subject with placeholder + textAfterCaret",
+      "bundleID": "com.apple.mail",
+      "windowTitle": "Nouveau message",
+      "contextPrefix": "Application : Mail. Fenêtre : Nouveau message.",
+      "userTail": "Suite à notre échange,",
+      "notes": "Placeholder 'Objet' + textAfterCaret continuing the sentence.",
+      "customInstructions": null,
+      "role": "AXTextField",
+      "subrole": null,
+      "placeholder": "Objet",
+      "help": null,
+      "textAfterCaret": " je vous propose un déjeuner la semaine prochaine.",
+      "expectedCategory": "acceptable",
+      "expectedGhostPrefix": "déjeuner"
+    },
+    {
+      "id": "14-search-field-empty-with-help",
+      "label": "Empty search field with help text + role",
+      "bundleID": "com.tinyspeck.slackmacgap",
+      "windowTitle": "Slack — équipe Cocotypist",
+      "contextPrefix": "Application : Slack. Fenêtre : équipe Cocotypist.",
+      "userTail": "",
+      "notes": "fieldContext slot must fire on role + placeholder + help; afterCursor skipped (D-14c).",
+      "customInstructions": null,
+      "role": "AXTextField",
+      "subrole": "AXSearchField",
+      "placeholder": "Rechercher dans la conversation",
+      "help": "Entrez un terme pour filtrer les messages",
+      "textAfterCaret": null,
+      "expectedCategory": "useless",
+      "expectedGhostPrefix": null
+    },
+    {
+      "id": "15-mid-code-comment-textarea",
+      "label": "Mid-code TextArea with following code + role",
+      "bundleID": "com.microsoft.VSCode",
+      "windowTitle": "main.swift — cocotypist",
+      "contextPrefix": "Application : Visual Studio Code. Fenêtre : main.swift.",
+      "userTail": "// TODO: ",
+      "notes": "afterCursor slot in code context.",
+      "customInstructions": null,
+      "role": "AXTextArea",
+      "subrole": null,
+      "placeholder": null,
+      "help": null,
+      "textAfterCaret": "\n\nfunc parsePrefix(_ raw: String) -> [Token] {\n    let tokens = raw.split(separator: \" \")"
+    }
+  ]
+}

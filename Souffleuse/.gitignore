@@ -1,0 +1,17 @@
+.DS_Store
+/.build
+/Packages
+xcuserdata/
+DerivedData/
+.swiftpm/configuration/registries.json
+.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+.netrc
+
+# xcodebuild output (large, regenerable)
+build/
+
+# Code coverage artifacts
+*.profraw
+
+# J3.D — DMG / notarisation artifacts (not committed)
+dist/
