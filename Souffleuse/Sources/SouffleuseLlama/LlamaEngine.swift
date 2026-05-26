@@ -279,6 +279,17 @@ public actor LlamaEngine {
     private var handles: Handles?
     private var loadedPath: String?
 
+    /// The EXACT token sequence currently resident in KV sequence 0. It is the
+    /// last prompt that was decoded plus every token decoded during generation
+    /// (each appended to KV via `llama_decode`). Maintained incrementally so a
+    /// mid-stream cancellation still leaves it consistent with the real KV
+    /// contents — the next `generate()` computes the longest common prefix
+    /// against it and only re-decodes the diverging suffix.
+    ///
+    /// Invalidated (`[]`) on model load/unload. NOT touched by `setCorpus`
+    /// (corpus only affects the logit bias, never the KV).
+    private var kvTokens: [Int32] = []
+
     /// Corpus n-gram over llama token ids, rebuilt from accepted-text strings
     /// via `setCorpus(_:)`. Empty until a corpus is provided ; when empty the
     /// decode loop never touches the logits (zero overhead).
@@ -305,6 +316,12 @@ public actor LlamaEngine {
 
     /// True once a model is loaded and ready to generate.
     public var isReady: Bool { handles != nil }
+
+    /// Number of tokens currently resident in KV sequence 0 (test/probe seam
+    /// to assert cache bookkeeping). Equals the last decoded prompt length plus
+    /// the count of tokens decoded during the last (possibly cancelled)
+    /// generation. `0` when the cache is cold/invalidated.
+    public var cachedTokenCount: Int { kvTokens.count }
 
     /// The path of the currently-loaded GGUF, or nil.
     public var modelPath: String? { loadedPath }
@@ -366,6 +383,8 @@ public actor LlamaEngine {
             nCtx: Int32(llama_n_ctx(context))
         )
         loadedPath = path
+        // Fresh context ⇒ KV is empty. Invalidate any stale cached sequence.
+        kvTokens = []
         Log.info(.predictor, "llama_loaded")
         return true
     }
@@ -378,6 +397,8 @@ public actor LlamaEngine {
         }
         handles = nil
         loadedPath = nil
+        // The context (and its KV) is gone — any cached sequence is invalid.
+        kvTokens = []
     }
 
     deinit {
@@ -510,8 +531,13 @@ public actor LlamaEngine {
     /// piece ; if `onToken` returns `false`, generation stops cleanly.
     /// Stops on EOG, on `maxTokens`, or on cooperative `Task` cancellation.
     ///
-    /// The KV cache is cleared at the start of every call (stateless per
-    /// generation) — the caller handles its own memoisation upstream.
+    /// KV/prompt cache reuse : across consecutive calls the engine keeps the
+    /// KV cache for the longest common prefix between the new prompt and the
+    /// previously-resident sequence (`kvTokens`), and only decodes the new
+    /// suffix. Greedy output for a given FINAL prompt is identical whether the
+    /// cache was cold or warm. See `kvTokens`. Falls back to a full reset +
+    /// recompute (logging `kv_full_recompute`) when the prompt is head-truncated
+    /// to fit the window (position-0 caching would be invalid).
     @discardableResult
     public func generate(
         prompt: String,
@@ -521,18 +547,50 @@ public actor LlamaEngine {
     ) -> LlamaMetrics {
         guard let h = handles else { return LlamaMetrics() }
 
-        // Reset the KV cache for sequence 0 — stateless per generation.
-        if let mem = llama_get_memory(h.context) {
-            llama_memory_seq_rm(mem, 0, -1, -1)
-        }
-
         var promptTokens = tokenize(prompt, addSpecial: true)
         if promptTokens.isEmpty { return LlamaMetrics() }
-        // Guard against overflowing the context window.
+        // Guard against overflowing the context window. If we have to
+        // head-truncate, the absolute positions of the remaining tokens shift,
+        // so a position-0-anchored KV reuse would be incorrect. Detect this and
+        // force a full recompute (invalidate the cached sequence).
         let maxPrompt = Int(h.nCtx) - maxTokens - 4
+        var headTruncated = false
         if maxPrompt > 0, promptTokens.count > maxPrompt {
             promptTokens = Array(promptTokens.suffix(maxPrompt))
+            headTruncated = true
         }
+
+        // ── KV / prompt cache reuse ──────────────────────────────────────────
+        // Compute the longest common prefix between the new prompt and the
+        // sequence currently resident in KV seq 0, drop the diverging tail from
+        // KV, and decode only the new suffix. On head-truncation we cannot
+        // safely reuse (positions shifted) → full reset + recompute.
+        let mem = llama_get_memory(h.context)
+        var lcp = 0
+        if headTruncated || kvTokens.isEmpty {
+            // Full recompute path.
+            if let mem { llama_memory_seq_rm(mem, 0, -1, -1) }
+            if headTruncated { Log.info(.predictor, "kv_full_recompute") }
+            kvTokens = []
+            lcp = 0
+        } else {
+            let bound = min(promptTokens.count, kvTokens.count)
+            while lcp < bound && promptTokens[lcp] == kvTokens[lcp] { lcp += 1 }
+            // Drop everything in KV from position `lcp` onward, keeping [0, lcp).
+            if let mem { llama_memory_seq_rm(mem, 0, Int32(lcp), -1) }
+        }
+
+        // The slice we still need to decode. When the entire new prompt is
+        // already cached (`lcp == promptTokens.count`) the logits at the final
+        // position are NOT fresh in the sampler's view, so we trim one token
+        // back and re-decode it — guaranteeing at least one decode this pass and
+        // valid logits at the last position before sampling.
+        if lcp == promptTokens.count && lcp > 0 {
+            lcp -= 1
+            if let mem { llama_memory_seq_rm(mem, 0, Int32(lcp), -1) }
+        }
+        // KV now holds exactly promptTokens[0..<lcp]. We will decode the rest.
+        kvTokens = Array(promptTokens[0..<lcp])
 
         // Build the sampler chain : penalties → temp/greedy.
         let chainParams = llama_sampler_chain_default_params()
@@ -559,13 +617,24 @@ public actor LlamaEngine {
         var firstTokenAt: Date?
         var produced = 0
 
-        // Decode the prompt in one batch.
-        var workTokens = promptTokens
+        // Decode only the new suffix (promptTokens[lcp...]) in one batch.
+        // `llama_batch_get_one` assigns positions starting from the current KV
+        // length (= lcp), so the suffix lands at the right absolute positions.
+        // There is always ≥1 token to decode here (the lcp==count case trimmed
+        // one back above), so the final-position logits are always fresh.
+        var workTokens = Array(promptTokens[lcp...])
         let promptOK = workTokens.withUnsafeMutableBufferPointer { ptr -> Bool in
             let batch = llama_batch_get_one(ptr.baseAddress, Int32(ptr.count))
             return llama_decode(h.context, batch) == 0
         }
-        if !promptOK { return metrics }
+        if !promptOK {
+            // Decode failed; KV state is now indeterminate for the suffix.
+            // Invalidate the cache so the next call does a clean recompute.
+            kvTokens = []
+            return metrics
+        }
+        // The suffix is now resident in KV. Reflect that in kvTokens.
+        kvTokens = promptTokens
 
         var nPast = Int32(promptTokens.count)
 
@@ -641,7 +710,15 @@ public actor LlamaEngine {
                 let batch = llama_batch_get_one(ptr.baseAddress, 1)
                 return llama_decode(h.context, batch) == 0
             }
-            if !ok { break }
+            if !ok {
+                // Decode failed: this token never entered KV. kvTokens already
+                // reflects the resident sequence, so leave it as-is and stop.
+                break
+            }
+            // The token is now resident in KV — record it immediately so that a
+            // cancellation on the NEXT iteration leaves kvTokens consistent with
+            // the actual KV contents.
+            kvTokens.append(tokenId)
             nPast += 1
         }
 
