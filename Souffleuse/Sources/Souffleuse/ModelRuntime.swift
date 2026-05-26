@@ -550,7 +550,18 @@ final class ModelRuntime {
                 temperature: 0,
                 repeatPenalty: 1.1,
                 repeatLastN: 64,
+                // Gain calibration (Phase 3) : the Preferences slider is
+                // 0.0…2.0 (default 1.0), but the raw logit boost needs to be
+                // an order of magnitude larger to actually steer (Phase 1
+                // probe required strength≈8 on a bare bigram). We map the
+                // preference through a fixed internal multiplier so that the
+                // DEFAULT preference (1.0) lands near the proven-steering
+                // base gain, while the suffix-array `matchLength` sharpening
+                // (applied inside the engine) does the rest for longer
+                // matches. Slider Max (2.0) ⇒ 2× base. See
+                // `LlamaSampling.personalizationGainScale`.
                 personalizationStrength: Float(request.personalizationStrength)
+                    * LlamaSampling.personalizationGainScale
             )
         ) { piece in
             if Task.isCancelled { return false }
