@@ -44,11 +44,44 @@ struct SuggestionPolicyTests {
         }
     }
 
-    /// Row 3 : mid-word + LLM chunk → bloqué.
-    @Test func midWordLLMChunkIsBlocked() {
+    /// Row 3 : mid-word + LLM chunk → AUTORISÉ (D-08 unblocked 2026-05-26).
+    ///
+    /// Le blocage mid-word inconditionnel a été retiré. La cohérence du splice
+    /// est garantie EN AMONT (generateLlama coherence guard) ; onLLMChunk laisse
+    /// passer un chunk mid-word cohérent qui démarre par une lettre (prefixFit
+    /// 1.0) et passe le gate floor. Cotypist-parité : "Bonjou"→"rné" doit montrer.
+    @Test func midWordCoherentLLMChunkPasses() {
         let p = Self.engine()
         let r = p.onLLMChunk("rné", userTail: "Bonjou")  // letter-ending tail
+        #expect(r != nil)
+        #expect(r?.source == .llm)
+        #expect(r?.text == "rné")
+    }
+
+    /// Row 3 bis : mid-word, mais le chunk démarre par un non-letter (whitespace
+    /// / markdown) → prefixFit = 0.0 → score = 0.0 → gate floor le rejette.
+    /// La sanity du scoring mid-word reste donc : seuls les vrais continuations
+    /// de mot passent.
+    @Test func midWordChunkStartingNonLetterStillGated() {
+        let p = Self.engine()
+        let r = p.onLLMChunk(" autre mot", userTail: "Bonjou")  // leading space
         #expect(r == nil)
+    }
+
+    /// Row 3 ter : anti-churn applies mid-word too. A mid-word LLM ghost is set,
+    /// then a too-close mid-word chunk arrives — replacement bar (1.15) rejects
+    /// it. Proves the relevance pipeline (not the removed blunt block) is what
+    /// governs mid-word now.
+    @Test func midWordReplacementBarRespected() {
+        let p = Self.engine()
+        // First mid-word ghost: "rné" on "Bonjou". score = 0.60 × 1.0 × lengthFit.
+        let first = p.onLLMChunk("rné", userTail: "Bonjou")
+        #expect(first != nil)
+        if let first { p.applyGhost(first.text, source: .llm, score: first.score) }
+        // A second mid-word chunk with the SAME score cannot beat the bar.
+        let second = p.onLLMChunk("rné", userTail: "Bonjou")
+        #expect(second == nil)  // ghost_keep_under_bar
+        #expect(p.currentGhost == "rné")
     }
 
     /// Row 4 : after-space + L1 hit qualifié → GhostUpdate .history.
