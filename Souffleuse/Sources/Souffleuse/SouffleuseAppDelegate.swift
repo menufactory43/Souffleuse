@@ -810,7 +810,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             // a ghost starting with "bonjour" (and vice versa). The user's
             // typed casing wins in the rendered text (AX writes verbatim);
             // only the matching logic ignores case.
-            if Self.isLiveConsumeMatch(ghost: predictor.suggestion, typedSince: typedSince) {
+            if Self.isLiveConsumeMatch(ghost: predictor.suggestion, typedSince: typedSince)
+                && !Self.isStaleMidWordCompletion(basePrefix: basePrefix, ghost: predictor.suggestion) {
                 // User is consuming the ghost letter-by-letter — set up
                 // partial state so the existing block below renders the
                 // remainder and skips re-prediction.
@@ -820,11 +821,14 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 partialRemainder = String(predictor.suggestion.dropFirst(typedSince.count))
                 predictor.cancel()
             } else {
-                // Divergence: the typed char(s) do NOT match the start of the
-                // ghost. Hide the stale ghost NOW, then fall through. The
-                // predict gate at the bottom fires a fresh prediction because
-                // `lastPredictedPrefix` is reset to nil here (and was stale
-                // anyway). Without this clear, the old ghost stayed rendered.
+                // Either the typed char(s) do NOT match the start of the ghost
+                // (true divergence — the "applielle" bug), OR the ghost was a
+                // stale mid-word completion guess that the user is now typing
+                // past (the "envies de" bug). Both cases: hide the stale ghost
+                // NOW, then fall through. The predict gate at the bottom fires a
+                // fresh prediction because `lastPredictedPrefix` is reset to nil
+                // here (and was stale anyway). Without this clear, the old ghost
+                // stayed rendered.
                 clearStaleGhostOnDivergence()
             }
         }
@@ -1253,5 +1257,35 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// never triggers a spurious divergence clear.
     static func isLiveConsumeMatch(ghost: String, typedSince: String) -> Bool {
         ghost.lowercased().hasPrefix(typedSince.lowercased())
+    }
+
+    /// True when `ghost` was generated while the caret sat MID-WORD (its
+    /// `basePrefix` ends in a word character) AND the ghost completes that very
+    /// word and then keeps going (its leading word-run is followed by more
+    /// text). Such a ghost committed to a GUESSED word completion the model can
+    /// no longer revise: "J'ai envi" → ghost "es de manger" splices to
+    /// "envies de manger". Once the user reveals the next letter the guess can
+    /// be wrong ("J'ai envie de manger") — yet plain live-consume would happily
+    /// shave the matching head ("e") and keep showing the stale tail ("s de"),
+    /// rendering "envies de". So when this holds the caller must NOT promote the
+    /// ghost via live-consume; it re-predicts on the now-longer word instead
+    /// (the base model, fed "J'ai envie", returns " de manger").
+    ///
+    /// A *pure* word completion with nothing after it ("Bonj" → "our") is NOT
+    /// stale — it merely finishes the obvious word — so live-consume keeps it
+    /// and the ghost stays instant. The space/punctuation-led next-word ghost
+    /// ("J'ai envie" → " de manger") is likewise unaffected: its first char is
+    /// not a word char.
+    static func isStaleMidWordCompletion(basePrefix: String, ghost: String) -> Bool {
+        guard let lastTyped = basePrefix.last,
+              ModelRuntime.OutputFilter.isWordChar(lastTyped),
+              let firstGhost = ghost.first,
+              ModelRuntime.OutputFilter.isWordChar(firstGhost) else {
+            return false
+        }
+        // The ghost finishes the in-progress word (leading word-run) AND
+        // continues past it. A word-run that IS the whole ghost ("our") just
+        // completes the word and is safe to consume.
+        return ModelRuntime.OutputFilter.leadingWordRun(ghost).count < ghost.count
     }
 }
