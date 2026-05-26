@@ -22,14 +22,75 @@ public struct LlamaSampling: Sendable {
     public var repeatPenalty: Float
     public var repeatLastN: Int32
     public var seed: UInt32
+    /// Personalization gain applied to the corpus n-gram logit bias. `0`
+    /// disables the bias entirely (zero per-step overhead — the fast path is
+    /// byte-identical to a build without personalization). Values > 0 scale
+    /// the boost `log(1 + count)` added to each corpus-predicted next token.
+    public var personalizationStrength: Float
     public init(temperature: Float = 0,
                 repeatPenalty: Float = 1.1,
                 repeatLastN: Int32 = 64,
-                seed: UInt32 = 0) {
+                seed: UInt32 = 0,
+                personalizationStrength: Float = 0) {
         self.temperature = temperature
         self.repeatPenalty = repeatPenalty
         self.repeatLastN = repeatLastN
         self.seed = seed
+        self.personalizationStrength = personalizationStrength
+    }
+}
+
+/// In-memory bigram + trigram model over **llama token ids**, built from the
+/// user's accepted-text corpus. Independent of the MLX-tokenizer `NgramModel`
+/// in `SouffleusePersonalization` (which tokenises into words, not llama
+/// tokens). Lives inside the actor — never crosses an isolation boundary, so
+/// its mutable dictionaries are safe without synchronisation.
+///
+/// Lookup keys are packed integers to avoid hashing arrays per decode step :
+/// - bigram key  : `a`                          → counts of `next`
+/// - trigram key : `(a << 32) | b`              → counts of `next`
+struct LlamaCorpusNgram {
+    /// `prevToken → (nextToken → count)`.
+    private var bigram: [Int32: [Int32: Int]] = [:]
+    /// `(prev2 << 32 | prev1) → (nextToken → count)`.
+    private var trigram: [Int64: [Int32: Int]] = [:]
+
+    var isEmpty: Bool { bigram.isEmpty }
+
+    /// Accumulates bigram/trigram counts from one tokenised corpus entry.
+    mutating func ingest(_ tokens: [Int32]) {
+        guard tokens.count >= 2 else { return }
+        for i in 1..<tokens.count {
+            let prev = tokens[i - 1]
+            let next = tokens[i]
+            bigram[prev, default: [:]][next, default: 0] += 1
+            if i >= 2 {
+                let key = (Int64(tokens[i - 2]) << 32) | Int64(UInt32(bitPattern: prev))
+                trigram[key, default: [:]][next, default: 0] += 1
+            }
+        }
+    }
+
+    /// Removes all accumulated counts.
+    mutating func clear() {
+        bigram.removeAll(keepingCapacity: true)
+        trigram.removeAll(keepingCapacity: true)
+    }
+
+    /// Returns candidate next tokens for the context `recentIds`, trying the
+    /// trigram (last two ids) first and backing off to the bigram (last id).
+    /// Empty when no match — caller skips the bias for that step.
+    func candidates(after recentIds: ArraySlice<Int32>) -> [Int32: Int] {
+        if recentIds.count >= 2 {
+            let a = recentIds[recentIds.index(recentIds.endIndex, offsetBy: -2)]
+            let b = recentIds[recentIds.index(recentIds.endIndex, offsetBy: -1)]
+            let key = (Int64(a) << 32) | Int64(UInt32(bitPattern: b))
+            if let tri = trigram[key], !tri.isEmpty { return tri }
+        }
+        if let last = recentIds.last, let bi = bigram[last] {
+            return bi
+        }
+        return [:]
     }
 }
 
@@ -56,6 +117,11 @@ public actor LlamaEngine {
 
     private var handles: Handles?
     private var loadedPath: String?
+
+    /// Corpus n-gram over llama token ids, rebuilt from accepted-text strings
+    /// via `setCorpus(_:)`. Empty until a corpus is provided ; when empty the
+    /// decode loop never touches the logits (zero overhead).
+    private var corpusNgram = LlamaCorpusNgram()
 
     /// One-time global backend init, guarded so it runs at most once per
     /// process even across multiple engine instances.
@@ -152,6 +218,29 @@ public actor LlamaEngine {
             llama_model_free(h.model)
         }
     }
+
+    // MARK: - Personalization corpus
+
+    /// Rebuilds the corpus n-gram from `entries` (accepted-text strings, or
+    /// `contextBefore + " " + accepted`). Each entry is tokenised with the
+    /// loaded vocabulary (no BOS) and folded into bigram/trigram counts.
+    /// No-op (clears) when the engine is not loaded. Cheap full rebuild —
+    /// the corpus is small (≤ a few hundred short entries).
+    public func setCorpus(_ entries: [String]) {
+        corpusNgram.clear()
+        guard handles != nil else { return }
+        for entry in entries {
+            let trimmed = entry.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { continue }
+            corpusNgram.ingest(tokenize(trimmed, addSpecial: false))
+        }
+        if !corpusNgram.isEmpty {
+            Log.info(.predictor, "corpus_ngram_built")
+        }
+    }
+
+    /// True when the corpus n-gram has at least one bigram entry.
+    public var hasCorpus: Bool { !corpusNgram.isEmpty }
 
     // MARK: - Tokenization
 
@@ -286,11 +375,41 @@ public actor LlamaEngine {
 
         var nPast = Int32(promptTokens.count)
 
+        // Personalization bias is active only when explicitly requested AND a
+        // corpus n-gram exists. When inactive we keep the fast path completely
+        // untouched — no logits fetch, no window maintenance.
+        let biasActive = sampling.personalizationStrength > 0 && !corpusNgram.isEmpty
+        let strength = sampling.personalizationStrength
+        // Sliding window of recently-decoded token ids (prompt tail + emitted)
+        // used to compute the current n-gram context. Only the last two ids
+        // matter (trigram), so a tiny tail is enough.
+        var recentIds: [Int32] = biasActive ? Array(promptTokens.suffix(2)) : []
+
         while produced < maxTokens {
             if Task.isCancelled { break }
+
+            // Context-dependent corpus boost : add `strength * log(1+count)`
+            // to each candidate next-token's logit BEFORE sampling, so the
+            // sampler chain (penalties + greedy/temp) reads the modified
+            // distribution.
+            if biasActive, let logits = llama_get_logits_ith(h.context, -1) {
+                let candidates = corpusNgram.candidates(after: recentIds[recentIds.startIndex...])
+                if !candidates.isEmpty {
+                    let nVocab = llama_vocab_n_tokens(h.vocab)
+                    for (id, count) in candidates where id >= 0 && id < nVocab {
+                        logits[Int(id)] += strength * logf(1 + Float(count))
+                    }
+                }
+            }
+
             let tokenId = llama_sampler_sample(sampler, h.context, -1)
             if llama_vocab_is_eog(h.vocab, tokenId) { break }
             llama_sampler_accept(sampler, tokenId)
+
+            if biasActive {
+                recentIds.append(tokenId)
+                if recentIds.count > 2 { recentIds.removeFirst(recentIds.count - 2) }
+            }
 
             if firstTokenAt == nil { firstTokenAt = Date() }
             produced += 1

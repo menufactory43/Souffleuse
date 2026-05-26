@@ -611,6 +611,15 @@ final class PredictorViewModel {
         // linear scan in SuggestionPolicy's exact-substring helper hits
         // freshest first (matches ingestAccepted's insert-at-0 ordering).
         self.historySnapshot = Array(entries.reversed())
+
+        // Phase 1 personalization : rebuild the llama-token-id corpus n-gram
+        // inside the engine. This is the path that biases the llama.cpp
+        // decoder (the MLX-tokenizer n-gram below is now decoupled from the
+        // active llama generation). Strings are the accepted text, prefixed by
+        // their context when present — same join shape as the MLX n-gram.
+        let corpus = entries.map { Self.corpusString(for: $0) }
+        await runtime.setCorpus(corpus)
+
         guard let container = runtime.container else { return }
         let tokenizerTag = modelId
         await container.perform { context in
@@ -629,6 +638,16 @@ final class PredictorViewModel {
         }
     }
 
+    /// Builds the corpus training string for one accepted entry — the accepted
+    /// text, prefixed by its preceding context when present. Shared by both the
+    /// full rebuild and the incremental accept path so the llama-token-id
+    /// n-gram sees the same shape as the MLX-tokenizer n-gram.
+    static func corpusString(for entry: TypingHistoryEntry) -> String {
+        entry.contextBefore.isEmpty
+            ? entry.accepted
+            : entry.contextBefore + " " + entry.accepted
+    }
+
     /// Streams a single newly-accepted entry into the n-gram model.
     func ingestAccepted(_ entry: TypingHistoryEntry) async {
         // Layer 1 snapshot append — keep most-recent-first ordering so the
@@ -638,6 +657,14 @@ final class PredictorViewModel {
         if self.historySnapshot.count > 200 {
             self.historySnapshot.removeLast(self.historySnapshot.count - 200)
         }
+
+        // Refresh the llama corpus n-gram so the just-accepted continuation is
+        // immediately available to bias the decoder. The corpus is small, so a
+        // full rebuild from the (capped) snapshot is cheap and avoids tracking
+        // incremental n-gram deltas inside the engine.
+        let corpus = self.historySnapshot.map { Self.corpusString(for: $0) }
+        await runtime.setCorpus(corpus)
+
         guard let container = runtime.container else { return }
         await container.perform { context in
             let joined: String

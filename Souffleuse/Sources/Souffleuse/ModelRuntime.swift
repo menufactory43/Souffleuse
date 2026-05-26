@@ -262,6 +262,14 @@ final class ModelRuntime {
         await loadModel()
     }
 
+    /// Feeds the personalization corpus (accepted-text strings) into the
+    /// llama engine, which rebuilds its llama-token-id n-gram. Called at
+    /// startup once the GGUF is loaded and after each acceptance / clear.
+    /// Cheap full rebuild — the corpus is small (ring buffer ≤ 200 entries).
+    func setCorpus(_ entries: [String]) async {
+        await llamaEngine.setCorpus(entries)
+    }
+
     /// Cancellation hook. No-op : `GenerationPlanner` owns Task cancellation,
     /// container teardown happens in `swap(to:)` when modelId changes. Cette
     /// méthode existe pour symétrie d'API (la façade 04-07 voudra peut-être
@@ -538,7 +546,12 @@ final class ModelRuntime {
         let metrics = await llamaEngine.generate(
             prompt: prompt,
             maxTokens: maxTokens,
-            sampling: LlamaSampling(temperature: 0, repeatPenalty: 1.1, repeatLastN: 64)
+            sampling: LlamaSampling(
+                temperature: 0,
+                repeatPenalty: 1.1,
+                repeatLastN: 64,
+                personalizationStrength: Float(request.personalizationStrength)
+            )
         ) { piece in
             if Task.isCancelled { return false }
             acc.generated += piece
