@@ -12,18 +12,38 @@ guard ok else {
 }
 FileHandle.standardError.write("LOADED\n".data(using: .utf8)!)
 
-let pre = "Bonjour, je voulais vous écrire pour vous"
-let after = ""
-let instr = "Tu es un moteur d'autocomplétion. Continue le texte EXACTEMENT là où il s'arrête, dans la même langue. Réponds UNIQUEMENT par la suite du texte (quelques mots), sans répéter ce qui précède, sans guillemets, sans explication."
-let prompt = "<start_of_turn>user\n\(instr)\n\nTexte avant le curseur :\n\(pre)" + (after.isEmpty ? "" : "\n\nTexte après le curseur :\n\(after)") + "<end_of_turn>\n<start_of_turn>model\n\(pre)"
+// Mirror the in-app system prompt + prompt-building shape so the probe
+// reflects what PredictorViewModel actually feeds the engine.
+let system = "Tu es un moteur d'autocomplétion inline. Continue le texte de l'utilisateur exactement là où il s'arrête, dans la MÊME langue. Réponds UNIQUEMENT par la suite (quelques mots, une courte phrase au plus), sans répéter le texte, sans salutations, sans guillemets, sans formatage."
+
+func buildPrompt(system: String, afterCursor: String, beforeCursor: String) -> String {
+    var userBlock = system
+    if !afterCursor.isEmpty { userBlock += "\n\n\(afterCursor)" }
+    userBlock += "\n\nVoici le texte à continuer :"
+    return "<start_of_turn>user\n\(userBlock)<end_of_turn>\n<start_of_turn>model\n\(beforeCursor)"
+}
 
 final class Sink: @unchecked Sendable { var s = "" }
-let sink = Sink()
-let metrics = await engine.generate(prompt: prompt, maxTokens: 24) { tok in
-    sink.s += tok
-    return true
+
+struct Case { let pre: String; let after: String }
+let cases = [
+    Case(pre: "Bonjour, je voulais vous écrire pour vous", after: ""),
+    Case(pre: "Merci beaucoup pour votre", after: ""),
+    Case(pre: "Je suis désolé pour le retard, je", after: "Cordialement,"),
+    Case(pre: "The quick brown fox jumps over the", after: ""),
+]
+
+for c in cases {
+    let prompt = buildPrompt(system: system, afterCursor: c.after.isEmpty ? "" : "Suite du texte (à ne pas répéter) : « \(c.after) ».", beforeCursor: c.pre)
+    let sink = Sink()
+    let metrics = await engine.generate(prompt: prompt, maxTokens: 16) { tok in
+        sink.s += tok
+        return true
+    }
+    // First line only (mirrors OutputFilter one-line truncation).
+    let oneLine = sink.s.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? sink.s
+    FileHandle.standardError.write("[ttft=\(metrics.ttftMillis ?? -1)ms]\n".data(using: .utf8)!)
+    print("PRE: \(c.pre)")
+    print("GHOST:\(oneLine)")
+    print("---")
 }
-let out = sink.s
-FileHandle.standardError.write("TTFT=\(metrics.ttftMillis ?? -1)ms tps=\(metrics.tokensPerSecond ?? -1)\n".data(using: .utf8)!)
-print("PROMPT_PRE: \(pre)")
-print("COMPLETION: \(out)")

@@ -617,10 +617,14 @@ final class ModelRuntime {
         if !customInstr.isEmpty { userBlock += "\n\nStyle : \(customInstr)" }
         if !ctxPrefix.isEmpty { userBlock += "\n\nContexte : \(ctxPrefix)" }
         if !fieldContext.isEmpty { userBlock += "\n\n\(fieldContext)" }
-        userBlock += "\n\nTexte avant le curseur :\n\(beforeCursor)"
+        // After-cursor text is folded INTO the instruction (not appended as a
+        // labelled trailing block) so the model never echoes a label like
+        // "Texte après le curseur :" into the ghost. We then prime the model
+        // turn with the raw beforeCursor text so it continues seamlessly.
         if !afterCursor.isEmpty {
             userBlock += "\n\n\(afterCursor)"
         }
+        userBlock += "\n\nVoici le texte à continuer :"
         return "<start_of_turn>user\n\(userBlock)<end_of_turn>\n<start_of_turn>model\n\(beforeCursor)"
     }
 
