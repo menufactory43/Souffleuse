@@ -60,6 +60,10 @@ public actor LlamaEngine {
     /// One-time global backend init, guarded so it runs at most once per
     /// process even across multiple engine instances.
     private static let backendOnce: Void = {
+        // Silence llama.cpp/ggml's own stdout/stderr logging. We route nothing
+        // through it ; our structured Log is the only sanctioned sink.
+        llama_log_set({ _, _, _ in }, nil)
+        ggml_log_set({ _, _, _ in }, nil)
         llama_backend_init()
     }()
 
