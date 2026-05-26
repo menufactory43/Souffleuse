@@ -160,10 +160,18 @@ struct ModelRuntimeOutputFilterTests {
         #expect(r == "Bonjour.")
     }
 
-    @Test func capToWordsCutsOnCommaWhenLong() {
-        // length > 12 + ", " présent → coupe AVANT la virgule
+    @Test func capToWordsKeepsCommaForNaturalGhost() {
+        // Cotypist parity : punctuation is KEPT — the comma no longer truncates.
+        // No sentence terminator, 6 words ≤ cap 20 → unchanged, comma preserved.
         let r = Filter.capToWords("Bonjour cher ami, comment ça va", max: 20)
-        #expect(r == "Bonjour cher ami")
+        #expect(r == "Bonjour cher ami, comment ça va")
+    }
+
+    @Test func capToWordsKeepsCommaThenCapsByWordCount() {
+        // Comma kept, but the word cap still bounds length: "de manger, je
+        // crois bien que oui" capped to 4 words → "de manger, je crois".
+        let r = Filter.capToWords("de manger, je crois bien que oui", max: 4)
+        #expect(r == "de manger, je crois")
     }
 
     @Test func capToWordsPreservesLeadingSpaceAcrossTerminatorCut() {

@@ -447,9 +447,11 @@ final class ModelRuntime {
                     }
                 }
             }
-            if s.count > 12, let r = s.range(of: ", ") {
-                s = String(s[..<r.lowerBound])
-            }
+            // Punctuation is KEPT inside the ghost (Cotypist parity: the user
+            // wants natural, complete ghosts — "de manger, je crois", "vie de
+            // manger.", "rguez ?"). We deliberately do NOT cut at the first
+            // comma anymore; the sentence-terminator cut above and the word cap
+            // below bound the length to one natural clause/sentence.
             let words = s.split(whereSeparator: { $0.isWhitespace })
             if words.count > max {
                 s = words.prefix(max).joined(separator: " ")
@@ -774,9 +776,8 @@ final class ModelRuntime {
                     }
                 }
             }
-            if oneLine.count > 12, let r = oneLine.range(of: ", ") {
-                oneLine = String(oneLine[..<r.lowerBound])
-            }
+            // Punctuation KEPT (Cotypist parity) — no comma truncation. The
+            // sentence-terminator cut above + word cap below bound the length.
             let words = oneLine.split(whereSeparator: { $0.isWhitespace })
             if words.count > maxWords {
                 oneLine = words.prefix(maxWords).joined(separator: " ")
