@@ -188,6 +188,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         predictor.personalizationStrength = store.personalizationEnabled
             ? Float(store.personalizationStrength)
             : 0
+        predictor.prefixCorrectionEnabled = store.prefixCorrectionEnabled
         // Few-shot dynamique : le predictor lit ce store à chaque appel à
         // `predict()` pour retrouver des entrées similaires au userTail.
         // Gated par `personalizationStrength > 0` côté predictor.
@@ -306,6 +307,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             _ = store.completionLength
             _ = store.personalizationEnabled
             _ = store.personalizationStrength
+            _ = store.prefixCorrectionEnabled
         } onChange: { [weak self] in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
@@ -331,6 +333,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             : 0
         if predictor.personalizationStrength != effectiveStrength {
             predictor.personalizationStrength = effectiveStrength
+        }
+        if predictor.prefixCorrectionEnabled != store.prefixCorrectionEnabled {
+            predictor.prefixCorrectionEnabled = store.prefixCorrectionEnabled
         }
         if store.captureEnabled != previous.captureEnabled {
             applyCaptureToggle(store.captureEnabled, requestPermissionIfNeeded: true)
