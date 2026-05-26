@@ -68,6 +68,69 @@ for c in v1cases {
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────
+// VOLET 1.bis — MID-WORD COHERENCE GUARD repro. Feeds a mid-word prefix
+// through the SAME prompt + first-line/filter shape the app uses, then applies
+// the mid-word coherence guard (partialWord + ghostHead must be a real word,
+// validated by NSSpellChecker via TypoDetector — the same helper wired into
+// ModelRuntime.generateLlama). Proves "…procéd" is now suppressed (incoherent
+// splice "procédblème") while "…problè" still yields "me…" ("problème").
+//
+// The guard logic below MIRRORS ModelRuntime.OutputFilter.{trailingPartialWord,
+// leadingWordRun,midWordCandidate} + TypoDetector.isValidWord. The probe can't
+// link the Souffleuse executable target, so the pure helpers are inlined here;
+// the SPELL validation uses the real shared TypoDetector.
+print("\n=== VOLET 1.bis: MID-WORD COHERENCE GUARD ===")
+let spell = TypoDetector()
+
+func isWordChar(_ c: Character) -> Bool {
+    c.isLetter || c.isNumber || c == "'" || c == "’" || c == "-"
+}
+func trailingPartialWord(_ s: String) -> String {
+    var end = s.endIndex
+    while end > s.startIndex {
+        let prev = s.index(before: end)
+        if isWordChar(s[prev]) { end = prev } else { break }
+    }
+    return String(s[end...])
+}
+func leadingWordRun(_ s: String) -> String {
+    var out = ""
+    for c in s { if isWordChar(c) { out.append(c) } else { break } }
+    return out
+}
+/// Returns (ghostShown, dropped). dropped=true ⇒ incoherent mid-word splice.
+func applyMidWordGuard(userTail: String, rawGhost: String, language: String) -> (shown: String, dropped: Bool) {
+    let partial = trailingPartialWord(userTail)
+    guard !partial.isEmpty, let first = rawGhost.first, isWordChar(first) else {
+        return (rawGhost, false)  // not mid-word / ghost starts a new word → keep
+    }
+    let candidate = partial + leadingWordRun(rawGhost)
+    if spell.isValidWord(candidate, language: language) {
+        return (rawGhost, false)  // coherent → keep
+    }
+    return ("", true)            // incoherent splice → suppress
+}
+
+struct MidWordCase { let label: String; let prefix: String; let lang: String }
+let midWordCases = [
+    MidWordCase(label: "BUG repro (mid-word, incoherent)", prefix: "Coucou, petit test de procéd", lang: "French"),
+    MidWordCase(label: "Coherent mid-word (problè→me)", prefix: "Il y a un gros problè", lang: "French"),
+]
+for c in midWordCases {
+    let raw = await ghost(forBeforeCursor: c.prefix)
+    let partial = trailingPartialWord(c.prefix)
+    let candidate = partial + leadingWordRun(raw)
+    let (shown, dropped) = applyMidWordGuard(userTail: c.prefix, rawGhost: raw, language: c.lang)
+    print("[\(c.label)]")
+    print("PREFIX        : \(c.prefix.debugDescription)")
+    print("partialWord   : \(partial.debugDescription)")
+    print("RAW ghost     : \(raw.debugDescription)")
+    print("candidateWord : \(candidate.debugDescription)  valid=\(spell.isValidWord(candidate, language: c.lang))")
+    print("GHOST shown   : \(shown.debugDescription)  dropped=\(dropped)")
+    print("---")
+}
+
 struct Case { let pre: String; let after: String }
 let cases = [
     Case(pre: "Bonjour, je voulais vous écrire pour vous", after: ""),
