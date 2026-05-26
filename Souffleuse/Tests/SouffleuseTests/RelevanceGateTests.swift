@@ -108,6 +108,36 @@ struct RelevanceGateTests {
         #expect(v == 0.0)
     }
 
+    @Test func prefixFitMidWordApostropheElisionReturnsOne() {
+        // Regression: model completes "…corrigé. S" with "'il vous plaît" (S'il).
+        // The apostrophe is an intra-word joiner → valid mid-word continuation.
+        let v = SuggestionPolicy.prefixFit(ghost: "'il vous plaît", userTail: "…corrigé. S")
+        #expect(v == 1.0)
+    }
+
+    @Test func prefixFitMidWordHyphenCompoundReturnsOne() {
+        // "allez" + "-vous" → hyphen joiner → valid mid-word continuation.
+        let v = SuggestionPolicy.prefixFit(ghost: "-vous", userTail: "…allez")
+        #expect(v == 1.0)
+    }
+
+    @Test func prefixFitMidWordCurlyApostropheReturnsOne() {
+        let v = SuggestionPolicy.prefixFit(ghost: "’hui", userTail: "aujourd")
+        #expect(v == 1.0)
+    }
+
+    @Test func prefixFitMidWordBareSpaceStillReturnsZero() {
+        // Joiner acceptance must NOT loosen the bare-space rejection: a leading
+        // space mid-word is still 0.0.
+        let v = SuggestionPolicy.prefixFit(ghost: " mot", userTail: "…Au")
+        #expect(v == 0.0)
+    }
+
+    @Test func prefixFitMidWordNewlineStillReturnsZero() {
+        let v = SuggestionPolicy.prefixFit(ghost: "\nmot", userTail: "…Au")
+        #expect(v == 0.0)
+    }
+
     @Test func prefixFitAfterSpaceLetterReturnsOne() {
         let v = SuggestionPolicy.prefixFit(ghost: "monde", userTail: "Bonjour ")
         #expect(v == 1.0)

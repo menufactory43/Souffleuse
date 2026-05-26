@@ -70,6 +70,25 @@ struct MidWordCoherenceTests {
         #expect(ModelRuntime.OutputFilter.midWordCandidate(userTail: "C'est aujourd'", ghost: "hui") == nil)
     }
 
+    @Test func midWordCandidateNilWhenGhostStartsWithJoiner() {
+        // Regression: partial "S" has NO joiner, but the ghost STARTS with an
+        // apostrophe/hyphen — it begins a new sub-word after an elision/compound
+        // boundary ("S"+"'il vous plaît" = "S'il"). The guard must SKIP (nil):
+        // spell-checking "S'il" across the boundary would wrongly drop the
+        // ghost. prefixFit now accepts these; the coherence guard stands aside.
+        #expect(ModelRuntime.OutputFilter.midWordCandidate(userTail: "…corrigé. S", ghost: "'il vous plaît, continuez") == nil)
+        #expect(ModelRuntime.OutputFilter.midWordCandidate(userTail: "…allez", ghost: "-vous") == nil)
+        #expect(ModelRuntime.OutputFilter.midWordCandidate(userTail: "aujourd", ghost: "’hui") == nil)
+    }
+
+    @Test func midWordCandidateStopsAtJoinerInGhost() {
+        // When the ghost is a same-word continuation (letter-led) that LATER
+        // contains a joiner, the validated candidate uses only the leading
+        // plain (letters/digits) run — it must NOT cross into the joiner.
+        // "problè" + "me-clé" → candidate "problème", not "problème-clé".
+        #expect(ModelRuntime.OutputFilter.midWordCandidate(userTail: "Il y a un gros problè", ghost: "me-clé du sujet") == "problème")
+    }
+
     // MARK: - End-to-end drop decision (candidate + spell validation)
 
     /// Helper mirroring the generateLlama guard : drop when mid-word AND the
