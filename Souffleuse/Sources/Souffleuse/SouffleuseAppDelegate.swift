@@ -810,7 +810,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             // a ghost starting with "bonjour" (and vice versa). The user's
             // typed casing wins in the rendered text (AX writes verbatim);
             // only the matching logic ignores case.
-            if predictor.suggestion.lowercased().hasPrefix(typedSince.lowercased()) {
+            if Self.isLiveConsumeMatch(ghost: predictor.suggestion, typedSince: typedSince) {
                 // User is consuming the ghost letter-by-letter — set up
                 // partial state so the existing block below renders the
                 // remainder and skips re-prediction.
@@ -819,10 +819,14 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 partialAcceptedAtBundleID = bundleID
                 partialRemainder = String(predictor.suggestion.dropFirst(typedSince.count))
                 predictor.cancel()
+            } else {
+                // Divergence: the typed char(s) do NOT match the start of the
+                // ghost. Hide the stale ghost NOW, then fall through. The
+                // predict gate at the bottom fires a fresh prediction because
+                // `lastPredictedPrefix` is reset to nil here (and was stale
+                // anyway). Without this clear, the old ghost stayed rendered.
+                clearStaleGhostOnDivergence()
             }
-            // Divergence: fall through. `lastPredictedPrefix` is stale
-            // (≠ prefix) so the predict gate at the bottom will fire a
-            // fresh prediction on the new prefix.
         }
 
         // Partial-accept guard: while we still owe the user a remainder, the
@@ -861,7 +865,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 let typedSince = String(prefix.dropFirst(expected.count))
                 // Case-insensitive match: a typo correction or auto-capitalize
                 // shouldn't break the consume chain mid-suggestion.
-                if partialRemainder.lowercased().hasPrefix(typedSince.lowercased()) {
+                if Self.isLiveConsumeMatch(ghost: partialRemainder, typedSince: typedSince) {
                     // Continue consuming — match keeps going regardless of
                     // whether the typed char is a space, punctuation, or
                     // letter. Only divergence breaks the consume.
@@ -886,20 +890,25 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                     }
                 } else {
                     // Divergence — record what was consumed, reset, fall
-                    // through to the predict gate below.
+                    // through to the predict gate below. Hide the stale ghost
+                    // (the remainder rendered last tick) so it can't linger if
+                    // the re-prediction is gated/empty.
                     recordPartialAcceptanceToHistoryIfAllowed()
                     partialRemainder = ""
                     partialAcceptedSoFar = ""
                     partialAcceptedAtPrefix = ""
                     partialAcceptedAtBundleID = nil
+                    clearStaleGhostOnDivergence()
                 }
             } else {
                 // Divergence (user deleted, moved caret, etc.) — record + reset.
+                // Hide the stale remainder ghost; re-prediction repaints later.
                 recordPartialAcceptanceToHistoryIfAllowed()
                 partialRemainder = ""
                 partialAcceptedSoFar = ""
                 partialAcceptedAtPrefix = ""
                 partialAcceptedAtBundleID = nil
+                clearStaleGhostOnDivergence()
             }
         }
 
@@ -1217,5 +1226,32 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             await history.append(entry)
             await predictorRef.ingestAccepted(entry)
         }
+    }
+
+    /// Clear the on-screen ghost when the user typed a character that DIVERGES
+    /// from the currently displayed suggestion. Without this, the old ghost
+    /// stays rendered while the (debounced, async) re-prediction runs — and if
+    /// that re-prediction is gated or empty, the stale ghost lingers forever
+    /// (e.g. "applielle"). Callers MUST NOT `return` after this: control falls
+    /// through to the predict gate so a fresh prediction fires on the new
+    /// prefix. `predictor.cancel()` also empties `predictor.suggestion`, so the
+    /// final tick guard won't re-show the stale text.
+    private func clearStaleGhostOnDivergence() {
+        predictor.cancel()
+        overlay.hide()
+        interceptor.setActive(false)
+        lastPredictedPrefix = nil
+    }
+
+    /// Pure decision: do the characters the user just typed (`typedSince`)
+    /// CONSUME the start of the displayed ghost (`ghost`), or DIVERGE from it?
+    ///
+    /// Returns `true` when `typedSince` is a case-insensitive prefix of `ghost`
+    /// (smooth live-consume — keep shrinking the ghost). Returns `false` on
+    /// divergence — the caller must hide the stale ghost and re-predict. Empty
+    /// `typedSince` is treated as a (degenerate) consume so an unchanged prefix
+    /// never triggers a spurious divergence clear.
+    static func isLiveConsumeMatch(ghost: String, typedSince: String) -> Bool {
+        ghost.lowercased().hasPrefix(typedSince.lowercased())
     }
 }
