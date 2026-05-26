@@ -118,6 +118,7 @@ final class PreferencesStore {
         static let enrichmentEnabled = "enrichmentEnabled"
         static let captureEnabled = "captureEnabled"
         static let modelID = "modelID"
+        static let ggufModelID = "ggufModelID"
         static let ocrLangFR = "ocrLangFR"
         static let ocrLangEN = "ocrLangEN"
         static let ocrLangES = "ocrLangES"
@@ -144,6 +145,12 @@ final class PreferencesStore {
     }
     var modelID: String {
         didSet { UserDefaults.standard.set(modelID, forKey: K.modelID) }
+    }
+    /// Selected **GGUF (llama.cpp)** model id — the model that actually drives
+    /// the ghost. Persists across restarts. Default = the fast 1B Q5 entry.
+    /// (The MLX `modelID` above is legacy and no longer user-driven.)
+    var ggufModelID: String {
+        didSet { UserDefaults.standard.set(ggufModelID, forKey: K.ggufModelID) }
     }
     var ocrLangFR: Bool { didSet { UserDefaults.standard.set(ocrLangFR, forKey: K.ocrLangFR) } }
     var ocrLangEN: Bool { didSet { UserDefaults.standard.set(ocrLangEN, forKey: K.ocrLangEN) } }
@@ -203,6 +210,7 @@ final class PreferencesStore {
         // anti-repeat post-process catches the worst of the IT failures
         // for the "test only" variants.
         self.modelID = (d.string(forKey: K.modelID)) ?? ModelOption.catalogue[0].id
+        self.ggufModelID = (d.string(forKey: K.ggufModelID)) ?? GGUFModelOption.defaultID
         self.ocrLangFR = (d.object(forKey: K.ocrLangFR) as? Bool) ?? true
         self.ocrLangEN = (d.object(forKey: K.ocrLangEN) as? Bool) ?? true
         self.ocrLangES = (d.object(forKey: K.ocrLangES) as? Bool) ?? false
@@ -230,5 +238,10 @@ final class PreferencesStore {
 
     var currentModel: ModelOption {
         ModelOption.catalogue.first(where: { $0.id == modelID }) ?? ModelOption.catalogue[0]
+    }
+
+    /// The currently-selected GGUF entry (the real ghost engine model).
+    var currentGGUFModel: GGUFModelOption {
+        GGUFModelOption.option(forID: ggufModelID)
     }
 }
