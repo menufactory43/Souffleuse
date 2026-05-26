@@ -286,7 +286,7 @@ final class PredictorViewModel {
         // LLM gate : need at least 3 chars of trimmed userTail AND a
         // loaded runtime container.
         guard userTail.trimmingCharacters(in: .whitespaces).count >= 3,
-              runtime.container != nil else {
+              runtime.canGenerate else {
             return
         }
 
