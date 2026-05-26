@@ -159,10 +159,50 @@ final class PredictorViewModel {
     /// ~16KB peak, well within budget for a linear scan in <1ms.
     private(set) var historySnapshot: [TypingHistoryEntry] = []
 
-    init() {
+    /// Active GGUF model id (the real ghost engine). Mirrored from
+    /// `PreferencesStore.ggufModelID` at startup ; changed via `swapGGUF(to:)`.
+    private var ggufModelID: String = GGUFModelOption.defaultID
+
+    init(ggufModelID: String = GGUFModelOption.defaultID) {
         let initialModelId = "mlx-community/gemma-3-1b-pt-4bit"
         self.modelId = initialModelId
-        self.runtime = ModelRuntime(initialModelId: initialModelId)
+        self.ggufModelID = ggufModelID
+        self.runtime = ModelRuntime(initialModelId: initialModelId, ggufModelID: ggufModelID)
+    }
+
+    /// Swaps the active **GGUF (llama.cpp)** model — the model that actually
+    /// produces the ghost. Cancels any in-flight generation, reloads the llama
+    /// engine on the new GGUF (which resets KV state), then re-feeds the
+    /// personalization corpus so the token-id n-gram + suffix array are rebuilt
+    /// for the reloaded engine. Surfaces `loadState = .loading` during the load
+    /// (the 4B model is ~2.5 GB, noticeably slower than the 1B). No-op when the
+    /// id already matches. Does NOT touch the legacy MLX container.
+    /// Sets the GGUF selection BEFORE the initial `loadModel()` so the engine
+    /// loads the persisted model from disk on launch (no reload). Must be called
+    /// before `loadModel()`. A no-op once a model is loaded — use `swapGGUF`.
+    func configureInitialGGUF(_ id: String) {
+        ggufModelID = id
+        runtime.configureInitialGGUF(id)
+    }
+
+    func swapGGUF(to id: String) async {
+        guard id != ggufModelID else { return }
+        cancel(reason: .modelSwap)
+        ggufModelID = id
+        loadState = .loading(progress: 0)
+        cache.invalidateAll()
+        let ok = await runtime.swapGGUF(to: id)
+        if !ok {
+            let err = runtime.lastError ?? "load_failed: gguf"
+            loadState = .failed(err)
+            lastError = err
+            return
+        }
+        // Re-feed the corpus : the reloaded engine has fresh (empty) n-gram /
+        // suffix-array state, so rebuild it from the current history snapshot.
+        let corpus = historySnapshot.map { Self.corpusString(for: $0) }
+        await runtime.setCorpus(corpus)
+        loadState = .ready
     }
 
     /// Swap the active model. Cancels in-flight generation, drops the container,
