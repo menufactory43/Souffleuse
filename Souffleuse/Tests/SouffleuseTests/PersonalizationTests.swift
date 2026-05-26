@@ -5,11 +5,16 @@ import Testing
 
 // MARK: - Helpers
 
-private func tempStoreURL(_ tag: String = UUID().uuidString) -> URL {
+private func tempStoreDir(_ tag: String = UUID().uuidString) -> URL {
     let dir = FileManager.default.temporaryDirectory
         .appendingPathComponent("souffleuse-tests-\(tag)", isDirectory: true)
+    try? FileManager.default.removeItem(at: dir)
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    return dir.appendingPathComponent("history.aes")
+    return dir
+}
+
+private func tempStoreURL(_ tag: String = UUID().uuidString) -> URL {
+    tempStoreDir(tag).appendingPathComponent("history.db")
 }
 
 private func makeStore(_ tag: String = UUID().uuidString) -> (TypingHistoryStore, URL, SymmetricKey) {
@@ -68,17 +73,22 @@ private func makeEntry(_ accepted: String, _ ctx: String = "ctx") -> TypingHisto
     await reloaded.clear()
 }
 
-@Test func historyRingBufferRotatesAtMax() async throws {
+@Test func historyFifoPurgeAtCap() async throws {
+    // Validate FIFO purge against a small temporary cap rather than inserting
+    // 50k rows. Uses the test-only purge seam.
     let (store, _, _) = makeStore("ring")
-    for i in 0..<(TypingHistoryStore.maxEntries + 50) {
+    let cap = 100
+    let overshoot = 50
+    for i in 0..<(cap + overshoot) {
         await store.append(makeEntry("phrase numéro \(i)"))
     }
+    await store.purgeToCapForTesting(cap)
     let count = await store.count()
-    #expect(count == TypingHistoryStore.maxEntries)
+    #expect(count == cap)
     let entries = await store.allEntries()
-    // First 50 should have been dropped (FIFO).
-    #expect(entries.first?.accepted == "phrase numéro 50")
-    #expect(entries.last?.accepted == "phrase numéro \(TypingHistoryStore.maxEntries + 49)")
+    // First `overshoot` should have been dropped (FIFO by id).
+    #expect(entries.first?.accepted == "phrase numéro \(overshoot)")
+    #expect(entries.last?.accepted == "phrase numéro \(cap + overshoot - 1)")
     await store.clear()
 }
 
@@ -104,6 +114,66 @@ private func makeEntry(_ accepted: String, _ ctx: String = "ctx") -> TypingHisto
     await store.append(makeEntry("after recovery"))
     let entries = await store.allEntries()
     #expect(entries.map(\.accepted) == ["after recovery"])
+    await store.clear()
+}
+
+@Test func historyEncryptedAtRestNoSQLiteMagic() async throws {
+    let (store, url, _) = makeStore("magic")
+    await store.append(makeEntry("Bonjour le monde"))
+    // Force a flush/close so all pages hit disk.
+    let n = await store.count()
+    #expect(n == 1)
+
+    let raw = try Data(contentsOf: url)
+    #expect(raw.count >= 16)
+    // A plaintext SQLite db begins with the 16-byte magic "SQLite format 3\0".
+    let magic = Array("SQLite format 3\u{0}".utf8)
+    let header = Array(raw.prefix(16))
+    #expect(header != magic)        // encrypted: header is NOT the magic
+    let asString = String(data: raw, encoding: .utf8) ?? ""
+    #expect(!asString.contains("Bonjour"))  // payload not plaintext
+    await store.clear()
+}
+
+@Test func historyMigratesFromLegacyAESBlob() async throws {
+    let dir = tempStoreDir("migrate")
+    let dbURL = dir.appendingPathComponent("history.db")
+    let aesURL = dir.appendingPathComponent("history.aes")
+    let key = SymmetricKey(size: .bits256)
+
+    // Seed a legacy AES-GCM JSON blob exactly as the old store wrote it.
+    let legacy = [
+        TypingHistoryEntry(timestamp: Date(), contextBefore: "ctx1", accepted: "ancien un", bundleID: "com.a"),
+        TypingHistoryEntry(timestamp: Date(), contextBefore: "ctx2", accepted: "ancien deux", bundleID: nil),
+    ]
+    let plaintext = try JSONEncoder().encode(legacy)
+    let sealed = try AES.GCM.seal(plaintext, using: key)
+    try sealed.combined!.write(to: aesURL)
+
+    // New store opens the .db, sees the sibling .aes, migrates with same key.
+    let store = TypingHistoryStore(fileURL: dbURL, testKey: key)
+    let entries = await store.allEntries()
+    #expect(entries.map(\.accepted) == ["ancien un", "ancien deux"])
+
+    // Legacy blob renamed (not deleted), so it is no longer at the source path.
+    #expect(!FileManager.default.fileExists(atPath: aesURL.path))
+    #expect(FileManager.default.fileExists(atPath: aesURL.appendingPathExtension("migrated").path))
+
+    // Idempotent: a second store sees no source file, count unchanged.
+    let store2 = TypingHistoryStore(fileURL: dbURL, testKey: key)
+    let count2 = await store2.count()
+    #expect(count2 == 2)
+    await store2.clear()
+}
+
+@Test func historyPrefixLookup() async throws {
+    let (store, _, _) = makeStore("prefix")
+    await store.append(TypingHistoryEntry(timestamp: Date(), contextBefore: "Bonjour ", accepted: "Gabriel", bundleID: nil))
+    await store.append(TypingHistoryEntry(timestamp: Date(), contextBefore: "Bonjour ", accepted: "tout le monde", bundleID: nil))
+    await store.append(TypingHistoryEntry(timestamp: Date(), contextBefore: "Au revoir ", accepted: "et merci", bundleID: nil))
+    let matches = await store.entriesMatchingContext("bonjour")
+    #expect(matches.count == 2)
+    #expect(Set(matches.map(\.accepted)) == ["Gabriel", "tout le monde"])
     await store.clear()
 }
 

@@ -57,10 +57,13 @@ else
   green "OK (no log file yet)"
 fi
 
-echo "=== 5. history.aes never read outside Personalization + HistoryViewer ==="
-hits=$(grep -rn --include="*.swift" 'history\.aes\|history\.aes' "${SHIPPING_DIRS[@]}" 2>/dev/null \
+echo "=== 5. corpus (history.db / legacy history.aes) never read outside Personalization + HistoryViewer ==="
+# Phase 2: the encrypted SQLite corpus (history.db) is the corpus source.
+# history.aes only survives as the legacy migration source inside the store.
+# Both must stay confined to TypingHistoryStore.swift + HistoryViewerWindow.swift.
+hits=$(grep -rn --include="*.swift" -E 'history\.(db|aes)' "${SHIPPING_DIRS[@]}" 2>/dev/null \
   | grep -v 'TypingHistoryStore\.swift\|HistoryViewerWindow\.swift' || true)
-if [ -n "$hits" ]; then red "FAIL: history.aes referenced outside allowed paths"; echo "$hits"; fail=1
+if [ -n "$hits" ]; then red "FAIL: corpus file referenced outside allowed paths"; echo "$hits"; fail=1
 else green "OK"; fi
 
 echo "=== 6. No raw acceptance text logged (interpolated user fields) ==="
