@@ -25,6 +25,22 @@ FileHandle.standardError.write("LOADED\n".data(using: .utf8)!)
 do {
     final class S: @unchecked Sendable { var s = "" }
 
+    func genG(prompt: String, _ smp: LlamaSampling, maxTokens: Int = 10) async -> String {
+        let sink = S()
+        _ = await engine.generate(prompt: prompt, maxTokens: maxTokens, sampling: smp) { t in sink.s += t; return true }
+        return sink.s.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? sink.s
+    }
+    // GRAMMAR PROBE : mid-word completion vs word-boundary. "on va y arriv" →
+    // does the model wrongly pick "ait" (arrivait) when the grammar wants "er"
+    // (arriver)? And at the boundary "on va y " does it know "arriver"?
+    print("\n╔══ GRAMMAR : mid-word vs boundary (arriver/arrivait) ══╗")
+    let gShip = LlamaSampling(temperature: 0, repeatPenalty: 1.3, banMarkup: true, banDigitsLeading: true, banEmoji: true)
+    let ctxG = "J'ai envie de continuer à tester pour aller plus loin, on va y "
+    await engine.setCorpus([])
+    print("   boundary 'on va y '      →\(await genG(prompt: ctxG, gShip))")
+    print("   mid-word 'on va y arriv' →\(await genG(prompt: ctxG + "arriv", gShip))")
+    print("   mid-word 'arriv' (short) →\(await genG(prompt: "on va y arriv", gShip))")
+
     func gen(prompt: String, _ smp: LlamaSampling, maxTokens: Int = 18) async -> String {
         let sink = S()
         _ = await engine.generate(prompt: prompt, maxTokens: maxTokens, sampling: smp) { t in
