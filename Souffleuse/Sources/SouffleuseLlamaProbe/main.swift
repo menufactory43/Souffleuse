@@ -33,13 +33,41 @@ do {
     // GRAMMAR PROBE : mid-word completion vs word-boundary. "on va y arriv" →
     // does the model wrongly pick "ait" (arrivait) when the grammar wants "er"
     // (arriver)? And at the boundary "on va y " does it know "arriver"?
-    print("\n╔══ GRAMMAR : mid-word vs boundary (arriver/arrivait) ══╗")
+    print("\n╔══ GRAMMAR : context-length sweep (arriver vs arrivait/loop) ══╗")
     let gShip = LlamaSampling(temperature: 0, repeatPenalty: 1.3, banMarkup: true, banDigitsLeading: true, banEmoji: true)
-    let ctxG = "J'ai envie de continuer à tester pour aller plus loin, on va y "
     await engine.setCorpus([])
-    print("   boundary 'on va y '      →\(await genG(prompt: ctxG, gShip))")
-    print("   mid-word 'on va y arriv' →\(await genG(prompt: ctxG + "arriv", gShip))")
-    print("   mid-word 'arriv' (short) →\(await genG(prompt: "on va y arriv", gShip))")
+    let full = "J'ai envie de continuer à tester pour aller plus loin, on va y "
+    let variants: [(String, String)] = [
+        ("FULL ctx + 'arriv'",   full + "arriv"),
+        ("FULL ctx boundary",    full),
+        ("1 phrase + 'arriv'",   "on va y arriv"),
+        ("clause + 'arriv'",     "pour aller plus loin, on va y arriv"),
+        ("clause boundary",      "pour aller plus loin, on va y "),
+        ("idiom only boundary",  "on va y "),
+    ]
+    for (label, p) in variants {
+        print("   \(label.padding(toLength: 22, withPad: " ", startingAt: 0)) →\(await genG(prompt: p, gShip, maxTokens: 6).debugDescription)")
+    }
+    // PRIMER sweep : does a leading frame put the base model into "clean
+    // conversational completion" register (→ "arriver") instead of "web
+    // document continuation" (→ loop / "arrivait") ? Test on the boundary
+    // ("on va y ", want "arriver") AND mid-word ("on va y arriv", want "er").
+    print("\n   -- PRIMER sweep (boundary / mid-word) --")
+    let primers: [(String, String)] = [
+        ("none",            ""),
+        ("no-trailing-sp",  ""),  // special-cased below
+        ("Message:",        "Message :\n"),
+        ("guillemet",       "« "),
+        ("conv-1shot",      "— Tu penses qu'on va réussir ?\n— Oui, on va y arriver, j'en suis sûr.\n\n"),
+        ("clean-prose",     "Voici un message écrit dans un français correct et naturel.\n\n"),
+    ]
+    for (label, pre) in primers {
+        let boundaryText = label == "no-trailing-sp" ? (pre + full.trimmingCharacters(in: .whitespaces)) : (pre + full)
+        let midText = pre + full + "arriv"
+        let b = await genG(prompt: boundaryText, gShip, maxTokens: 6)
+        let m = await genG(prompt: midText, gShip, maxTokens: 5)
+        print("   \(label.padding(toLength: 16, withPad: " ", startingAt: 0)) bound→\(b.debugDescription)  mid→\(m.debugDescription)")
+    }
 
     func gen(prompt: String, _ smp: LlamaSampling, maxTokens: Int = 18) async -> String {
         let sink = S()
