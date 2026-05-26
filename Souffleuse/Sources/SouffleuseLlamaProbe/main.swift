@@ -44,6 +44,8 @@ func rawGhost(before: String, ctxPrefix: String = "", maxTokens: Int = 16) async
     return sink.s
 }
 let v0cases: [(String, String)] = [
+    ("J'aime les fraises, j'ai envie de", ""),
+    ("J'aime les fraises, j'ai envie de ", ""),
     ("J'ai faim, on mange quoi ? J'ai envie", ""),
     ("J'ai faim, on mangue quoi ? J'ai envie", ""),
     ("J'ai envie", ""),

@@ -656,6 +656,20 @@ final class PredictorViewModel {
                     PredictDebug.log("chunk_gated", "oneLine=\(chunk.debugDescription) current=\(self.suggestion.debugDescription) source=\(self.suggestionSource)")
                     return
                 }
+                // Stub guard : a fresh NEXT-WORD ghost (caret at a word
+                // boundary — userTail ends in space/punct/empty) that is just a
+                // single character ("m") is noise. The user can't read intent
+                // from one letter, and it's almost always a streaming stub whose
+                // continuation got gated out (base-model junk like repeated
+                // "fraises"/`<strong>` tags, or an over-eager corpus bias that
+                // flips only the first token). Skip it and wait for ≥2 chars —
+                // nothing beats a lone "m". Mid-word completions (caret inside a
+                // word, finishing it: "Bonjou" → "r") are exempt: there the last
+                // userTail char is a letter, so this never fires.
+                if Self.isNextWordStub(userTail: userTail, ghost: update.text) {
+                    PredictDebug.log("chunk_stub_skip", "text=\(update.text.debugDescription) userTail=\(userTail.debugDescription)")
+                    return
+                }
                 let fromHigh = (self.suggestionSource == .history
                              || self.suggestionSource == .cache
                              || self.suggestionSource == .undoCache)
@@ -823,6 +837,31 @@ final class PredictorViewModel {
         displayedSuggestion: String
     ) -> Bool {
         !emittedGhost && instantGhost.isEmpty && !displayedSuggestion.isEmpty
+    }
+
+    /// A fresh NEXT-WORD ghost reduced to a single character ("m" after "envie
+    /// de ") is noise — one letter conveys no intent and is almost always a
+    /// streaming stub whose continuation got gated out (base-model junk, or a
+    /// corpus bias that flips only the first token). Skip it and wait for ≥2
+    /// chars; nothing beats a lone letter.
+    ///
+    /// Fires ONLY when the caret sits at a word boundary — `userTail` is empty
+    /// or ends in a non-alphanumeric char (space/punctuation). A MID-WORD
+    /// completion that finishes the current word ("Bonjou" → "r") ends in a
+    /// letter, so this never suppresses it. The ghost's leading space (next-word
+    /// continuation marker) is ignored when measuring length.
+    static func isNextWordStub(userTail: String, ghost: String) -> Bool {
+        // The ghost begins a NEW word when EITHER the caret sits at a word
+        // boundary (userTail empty / ends in space or punctuation) OR the ghost
+        // itself starts with a space (a next-word continuation after a complete
+        // word: "envie" → " manger"). A mid-word completion ("Bonjou" → "r")
+        // satisfies neither and is exempt.
+        let caretAtWordBoundary = userTail.last.map {
+            !($0.isLetter || $0.isNumber)
+        } ?? true
+        let ghostStartsNewWord = caretAtWordBoundary || ghost.first == " "
+        guard ghostStartsNewWord else { return false }
+        return ghost.drop(while: { $0 == " " }).count < 2
     }
 
     /// Phase 4 — cancel avec discriminator pour la classification grid.
