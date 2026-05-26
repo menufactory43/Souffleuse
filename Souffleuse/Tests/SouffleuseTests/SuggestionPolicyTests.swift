@@ -77,13 +77,26 @@ struct SuggestionPolicyTests {
         #expect(r?.text == "-vous")
     }
 
-    /// Row 3 bis : mid-word, mais le chunk démarre par un non-letter (whitespace
-    /// / markdown) → prefixFit = 0.0 → score = 0.0 → gate floor le rejette.
-    /// La sanity du scoring mid-word reste donc : seuls les vrais continuations
-    /// de mot passent.
-    @Test func midWordChunkStartingNonLetterStillGated() {
+    /// Row 3 quinquies — THE BUG FIX : caret right after a COMPLETE word ending
+    /// in a letter (no trailing space). The base model continues with a SPACE-led
+    /// next word ("…les frais" → " de port"). Previously gated (prefixFit=0 →
+    /// score=0); now prefixFit=1.0 because "frais" is a complete word, so the
+    /// ghost reaches the screen WITH its leading space preserved.
+    @Test func midWordNextWordAfterCompleteWordPassesEndToEnd() {
         let p = Self.engine()
-        let r = p.onLLMChunk(" autre mot", userTail: "Bonjou")  // leading space
+        let r = p.onLLMChunk(" de port", userTail: "J'aime aussi les frais")
+        #expect(r != nil)
+        #expect(r?.source == .llm)
+        #expect(r?.text == " de port")  // leading space kept → renders "frais de port"
+    }
+
+    /// Row 3 bis : mid-word, chunk space-led APRÈS un mot INCOMPLET ("Bonjou"
+    /// n'est pas un mot valide) → prefixFit = 0.0 → gate floor le rejette. Le
+    /// next-word continuation n'est autorisé qu'après un mot COMPLET (cf.
+    /// RelevanceGateTests.prefixFitMidWordSpaceAfterCompleteWord*).
+    @Test func midWordChunkStartingNonLetterAfterIncompleteWordStillGated() {
+        let p = Self.engine()
+        let r = p.onLLMChunk(" autre mot", userTail: "Bonjou")  // leading space, partial incomplete
         #expect(r == nil)
     }
 

@@ -126,15 +126,57 @@ struct RelevanceGateTests {
         #expect(v == 1.0)
     }
 
-    @Test func prefixFitMidWordBareSpaceStillReturnsZero() {
-        // Joiner acceptance must NOT loosen the bare-space rejection: a leading
-        // space mid-word is still 0.0.
-        let v = SuggestionPolicy.prefixFit(ghost: " mot", userTail: "…Au")
+    @Test func prefixFitMidWordBareSpaceAfterIncompleteWordReturnsZero() {
+        // Re-expressed (was prefixFitMidWordBareSpaceStillReturnsZero): a leading
+        // space mid-word after an INCOMPLETE / non-word partial ("Bonj") is 0.0 —
+        // the model must not abandon a half-typed word. Inject false to pin the
+        // "partial is NOT complete" branch deterministically (no spell checker).
+        let v = SuggestionPolicy.prefixFit(
+            ghost: " mot", userTail: "…Bonj", partialWordIsComplete: { _ in false }
+        )
         #expect(v == 0.0)
     }
 
+    @Test func prefixFitMidWordSpaceAfterCompleteWordReturnsOne() {
+        // New behaviour: after a COMPLETE word the base model continues with a
+        // SPACE-led next word ("…les frais" → " de port"). That is a legitimate
+        // next-word completion ⇒ 1.0 when the partial word is valid.
+        let v = SuggestionPolicy.prefixFit(
+            ghost: " de port", userTail: "…les frais", partialWordIsComplete: { _ in true }
+        )
+        #expect(v == 1.0)
+    }
+
+    @Test func prefixFitMidWordPunctuationAfterCompleteWordReturnsOne() {
+        // "…le chocolat" → ", mais il ne peut pas…" — comma-led next-word
+        // continuation after a complete word ⇒ 1.0.
+        let v = SuggestionPolicy.prefixFit(
+            ghost: ", mais", userTail: "…le chocolat", partialWordIsComplete: { _ in true }
+        )
+        #expect(v == 1.0)
+    }
+
+    @Test func prefixFitMidWordSpaceAfterCompleteWordDefaultValidatorReturnsOne() {
+        // End-to-end through the DEFAULT spell-checker validator: "frais" is a
+        // real French word, so the space-led continuation is accepted.
+        let v = SuggestionPolicy.prefixFit(ghost: " de port", userTail: "J'aime aussi les frais")
+        #expect(v == 1.0)
+    }
+
     @Test func prefixFitMidWordNewlineStillReturnsZero() {
-        let v = SuggestionPolicy.prefixFit(ghost: "\nmot", userTail: "…Au")
+        // Newline mid-word is rejected even after a complete word (must not break
+        // the line). The validator never even gets consulted.
+        let v = SuggestionPolicy.prefixFit(
+            ghost: "\nmot", userTail: "…chocolat", partialWordIsComplete: { _ in true }
+        )
+        #expect(v == 0.0)
+    }
+
+    @Test func prefixFitMidWordMarkdownStillReturnsZero() {
+        // Markdown token mid-word rejected even after a complete word.
+        let v = SuggestionPolicy.prefixFit(
+            ghost: "* liste", userTail: "…chocolat", partialWordIsComplete: { _ in true }
+        )
         #expect(v == 0.0)
     }
 
