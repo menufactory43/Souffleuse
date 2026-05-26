@@ -166,6 +166,7 @@ let package = Package(
                 "SouffleuseTyping",
                 "SouffleusePersonalization",
                 "SouffleusePrompt",
+                "SouffleuseLlama",
             ]
         ),
     ],

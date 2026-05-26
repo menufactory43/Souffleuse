@@ -128,7 +128,7 @@ struct LlamaCorpusNgram {
 /// All lookups are pure reads on immutable storage — the struct is built once
 /// per corpus refresh (off the hot decode path) and only read during decode.
 /// Lives inside the actor, never crosses an isolation boundary.
-struct LlamaCorpusSuffixArray {
+public struct LlamaCorpusSuffixArray {
     /// Concatenated corpus tokens with per-entry negative sentinels.
     private var tokens: [Int32] = []
     /// Suffix-array : indices into `tokens`, sorted lexicographically by suffix.
@@ -137,16 +137,18 @@ struct LlamaCorpusSuffixArray {
     /// Longest context suffix (in tokens) we bother matching. Beyond this the
     /// distribution is already maximally sharp and the extra comparisons cost
     /// more than they buy. Also bounds the per-step comparison work.
-    static let maxMatchLen = 16
+    public static let maxMatchLen = 16
 
-    var isEmpty: Bool { sa.isEmpty }
+    public init() {}
+
+    public var isEmpty: Bool { sa.isEmpty }
 
     /// Rebuilds the suffix array from the per-entry tokenised corpus. Each
     /// inner array is one accepted-text entry's llama token ids. A unique
     /// negative sentinel terminates every entry so matches cannot cross
     /// entries. Full rebuild — cheap for the corpus sizes we carry, and run
     /// off the hot path by the caller.
-    mutating func build(entries: [[Int32]]) {
+    public mutating func build(entries: [[Int32]]) {
         tokens.removeAll(keepingCapacity: true)
         sa.removeAll(keepingCapacity: true)
         var sentinel: Int32 = -1
@@ -169,16 +171,16 @@ struct LlamaCorpusSuffixArray {
         }
     }
 
-    mutating func clear() {
+    public mutating func clear() {
         tokens.removeAll(keepingCapacity: true)
         sa.removeAll(keepingCapacity: true)
     }
 
     /// Result of a longest-match query : the observed next-token counts for the
     /// longest matched context suffix, and that match length (in tokens).
-    struct Match {
-        let candidates: [Int32: Int]
-        let matchLength: Int
+    public struct Match {
+        public let candidates: [Int32: Int]
+        public let matchLength: Int
     }
 
     /// Finds the longest suffix of `context` that occurs in the corpus (not at
@@ -186,7 +188,7 @@ struct LlamaCorpusSuffixArray {
     /// immediately after it. Empty `candidates` when no suffix of length ≥1
     /// matches. Tries the longest suffix first and backs off one token at a
     /// time — the first length that yields at least one continuation wins.
-    func longestMatch(after context: ArraySlice<Int32>) -> Match {
+    public func longestMatch(after context: ArraySlice<Int32>) -> Match {
         guard !sa.isEmpty, !context.isEmpty else { return Match(candidates: [:], matchLength: 0) }
         let ctx = Array(context.suffix(Self.maxMatchLen))
         // Try progressively shorter suffixes of ctx.
