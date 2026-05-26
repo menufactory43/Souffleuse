@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key>
+  <string>Souffleuse</string>
+  <key>CFBundleDisplayName</key>
+  <string>Souffleuse</string>
+  <key>CFBundleIdentifier</key>
+  <string>app.cocotypist.Souffleuse</string>
+  <key>CFBundleVersion</key>
+  <string>0.2.0</string>
+  <key>CFBundleShortVersionString</key>
+  <string>0.2.0</string>
+  <key>CFBundleExecutable</key>
+  <string>Souffleuse</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleSignature</key>
+  <string>????</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>14.0</string>
+  <key>LSUIElement</key>
+  <true/>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>NSAccessibilityUsageDescription</key>
+  <string>Souffleuse lit le contenu du champ texte focalisé pour générer des suggestions et y écrit la suggestion acceptée quand vous appuyez sur Tab.</string>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>Souffleuse a besoin d'envoyer des événements pour injecter du texte dans l'application active.</string>
+  <key>NSScreenCaptureUsageDescription</key>
+  <string>Souffleuse peut capturer la fenêtre active pour extraire du texte visible (OCR local) afin d'améliorer les suggestions. Cette source est désactivée par défaut et tout traitement reste local — rien n'est enregistré ni envoyé sur le réseau.</string>
+</dict>
+</plist>

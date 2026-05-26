@@ -1,0 +1,33 @@
+# Swift Package Manager
+.build/
+Package.resolved
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+
+# Xcode build outputs
+build/
+.swiftpm/
+
+# Logs
+*.log
+
+# Coverage / profiling artifacts
+*.profraw
+*.profdata
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Local secrets
+.env
+.env.local
