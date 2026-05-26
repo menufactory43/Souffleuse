@@ -516,13 +516,29 @@ final class ModelRuntime {
             return out
         }
 
+        /// Leading run of LETTERS/DIGITS ONLY of `ghost` — stops at the first
+        /// apostrophe, hyphen, space or punctuation. Unlike `leadingWordRun`
+        /// this does NOT cross an intra-word joiner, so the spliced candidate is
+        /// always a single plain word that NSSpellChecker can validate (we must
+        /// not spell-check "S'il" or "aujourd'hui" across the elision boundary).
+        nonisolated static func leadingPlainRun(_ ghost: String) -> String {
+            var out = ""
+            for c in ghost {
+                if c.isLetter || c.isNumber { out.append(c) } else { break }
+            }
+            return out
+        }
+
         /// Builds the candidate word formed by splicing the mid-word ghost onto
         /// the in-progress partial word, OR nil when there is nothing to check
         /// (caret not mid-word, or ghost doesn't continue the same word).
         ///
-        /// `nil` ⇒ guard does not apply (leave the ghost alone). A non-nil
-        /// value ⇒ the caller must spell-validate it; an invalid candidate
-        /// means the splice is incoherent and the ghost must be dropped.
+        /// `nil` ⇒ guard does not apply (leave the ghost alone). Returned nil
+        /// when: caret not mid-word, partial already contains a joiner, OR the
+        /// ghost starts with a joiner (apostrophe/hyphen = new sub-word after an
+        /// elision/compound boundary, "S"+"'il" → skip). A non-nil value ⇒ the
+        /// caller must spell-validate it; an invalid candidate means the splice
+        /// is incoherent and the ghost must be dropped.
         nonisolated static func midWordCandidate(userTail: String, ghost: String) -> String? {
             let partial = trailingPartialWord(userTail)
             guard !partial.isEmpty else { return nil }       // caret after space/punct → not mid-word
@@ -532,8 +548,16 @@ final class ModelRuntime {
             // and NSSpellChecker would wrongly reject a perfectly good ghost.
             // The guard targets only plain alphabetic mid-word typos ("procéd").
             guard !partial.contains(where: { $0 == "-" || $0 == "'" || $0 == "’" }) else { return nil }
-            guard let first = ghost.first, isWordChar(first) else { return nil }  // ghost doesn't continue the word
-            return partial + leadingWordRun(ghost)
+            // Only validate when the ghost is a SAME-WORD continuation, i.e. it
+            // starts with a letter or digit. If it starts with a joiner
+            // (apostrophe / hyphen) the ghost begins a NEW sub-word after an
+            // elision/compound boundary ("S"+"'il vous…", "aujourd"+"'hui") —
+            // spell-checking "S'il" across that boundary would wrongly drop a
+            // perfectly good ghost. Skip the guard; prefixFit already allows it.
+            guard let first = ghost.first, first.isLetter || first.isNumber else { return nil }
+            // Candidate uses the leading plain (letters/digits) run only, so the
+            // validated word stops at any joiner the ghost might contain later.
+            return partial + leadingPlainRun(ghost)
         }
 
         /// Instruction-text fragments the instruct 1B sometimes echoes verbatim
