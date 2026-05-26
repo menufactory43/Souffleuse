@@ -102,19 +102,53 @@ enum SuggestionPolicy {
         )
     }
 
+    /// `TypoDetector` partagé (process-wide) servant à valider le mot partiel
+    /// en cours quand on doit décider si une continuation next-word (espace/
+    /// ponctuation après une lettre) est légitime. `NSSpellChecker` est
+    /// thread-safe pour la lecture et `TypoDetector` est `@unchecked Sendable`.
+    /// On l'instancie une fois pour éviter de reconstruire le checker à chaque
+    /// scoring (le scoring tourne sur le `@MainActor` onChunk / routeInstant).
+    private static let sharedTypoDetector = TypoDetector()
+
+    /// Le mot partiel en fin de `userTail` est-il un mot COMPLET/valide ?
+    /// Réutilise `ModelRuntime.OutputFilter.trailingPartialWord` (même notion
+    /// que le coherence guard mid-word) puis `TypoDetector.isValidWord`.
+    /// Permissif FR+EN. Vide ⇒ pas mid-word ⇒ false (caller ne l'appelle pas).
+    nonisolated static func defaultPartialWordIsComplete(_ userTail: String) -> Bool {
+        let partial = ModelRuntime.OutputFilter.trailingPartialWord(userTail)
+        guard !partial.isEmpty else { return false }
+        return sharedTypoDetector.isValidWord(partial, language: nil)
+    }
+
     /// D-06 prefix_fit : le ghost s'enchaîne-t-il avec `userTail` ?
     ///
-    /// - **Mid-word** (`userTail.last?.isLetter == true`) : 1.0 si `ghost`
-    ///   commence par une lettre (complète le mot courant) OU par un joiner
-    ///   intra-mot — apostrophe `'`, apostrophe courbe `’`, ou trait d'union
-    ///   `-` (élision/composé : "S'il", "j'ai", "aujourd'hui", "est-ce",
-    ///   "allez-vous"). 0.0 sinon (rejette espace/newline/markdown mid-mot).
+    /// - **Mid-word** (`userTail.last?.isLetter == true`) :
+    ///   - 1.0 si `ghost` commence par une lettre (complète le mot courant) OU
+    ///     par un joiner intra-mot — apostrophe `'`, apostrophe courbe `’`, ou
+    ///     trait d'union `-` (élision/composé : "S'il", "j'ai", "aujourd'hui",
+    ///     "est-ce", "allez-vous").
+    ///   - 1.0 si `ghost` commence par une espace (non-newline) ou une
+    ///     ponctuation (`,` `.` `!` `?` `;` `:`) — c'est une continuation
+    ///     NEXT-WORD légitime — MAIS seulement si le mot partiel en cours
+    ///     ("frais", "chocolat") est lui-même un mot COMPLET/valide
+    ///     (`partialWordIsComplete`). Sinon ("Bonj") on refuse : le modèle ne
+    ///     doit pas abandonner un mot à moitié tapé. Le caractère réel de
+    ///     continuation (après l'espace de tête) doit rester naturel — newline
+    ///     et markdown (`#`, `*`, `_`, `~`) restent rejetés.
+    ///   - 0.0 sinon.
     /// - **After-space ou empty tail** : 1.0 si `ghost.first` est letter, digit,
     ///   `'` ou `"` (natural continuation) ; 0.0 si commence par whitespace,
     ///   newline, ou un délimiteur markdown (`#`, `*`, `_`, `~`) — le LLM ne
     ///   doit pas insérer de syntaxe.
     /// - Tout autre cas (userTail termine sur ponctuation non-whitespace) : 0.0.
-    nonisolated static func prefixFit(ghost: String, userTail: String) -> Float {
+    ///
+    /// `partialWordIsComplete` est injecté pour garder la fonction testable sans
+    /// `NSSpellChecker` ; par défaut il délègue à `defaultPartialWordIsComplete`.
+    nonisolated static func prefixFit(
+        ghost: String,
+        userTail: String,
+        partialWordIsComplete: ((String) -> Bool)? = nil
+    ) -> Float {
         guard let g = ghost.first else { return 0.0 }
         if let tail = userTail.last {
             if tail.isLetter {
@@ -122,10 +156,17 @@ enum SuggestionPolicy {
                 // continuation valide s'il commence par une lettre OU par un
                 // joiner intra-mot (apostrophe droite/courbe, trait d'union) :
                 // "S"→"'il vous plaît", "allez"→"-vous", "aujourd"→"'hui".
-                // Tout le reste (espace, newline, ponctuation, markdown) reste
-                // rejeté mid-mot.
                 if g.isLetter { return 1.0 }
                 if g == "'" || g == "’" || g == "-" { return 1.0 }
+                // Espace/ponctuation mid-word ⇒ NEXT-WORD continuation. Légitime
+                // UNIQUEMENT si le mot partiel courant est déjà un mot complet
+                // ("frais"→" de port", "chocolat"→", mais"). On rejette si le mot
+                // est incomplet ("Bonj"→" mot") pour ne pas abandonner un mot
+                // à moitié tapé. Newline & markdown toujours rejetés.
+                if Self.isNextWordContinuationStart(g) {
+                    let validator = partialWordIsComplete ?? Self.defaultPartialWordIsComplete
+                    return validator(userTail) ? 1.0 : 0.0
+                }
                 return 0.0
             }
             if tail.isWhitespace {
@@ -161,6 +202,26 @@ enum SuggestionPolicy {
         if c == "#" || c == "*" || c == "_" || c == "~" { return false }
         if c.isLetter || c.isNumber { return true }
         if c == "'" || c == "\"" { return true }
+        return false
+    }
+
+    /// Démarrage valide d'une continuation NEXT-WORD après un mot COMPLET tapé
+    /// (le user vient de finir un mot, sans espace de fin encore). Le modèle base
+    /// continue typiquement par " mot suivant" (espace de tête) ou par une
+    /// ponctuation (", mais…", ". Mais…"). On accepte :
+    /// - une espace ORDINAIRE de tête (tab/space, PAS un newline) — un nouveau
+    ///   mot va suivre ; un éventuel markdown derrière reste improbable et sera
+    ///   de toute façon coupé en aval ;
+    /// - une ponctuation de clause courante (`,` `.` `!` `?` `;` `:`).
+    /// On refuse explicitement : newline (le ghost ne doit pas casser la ligne)
+    /// et les tokens markdown (`#`, `*`, `_`, `~`).
+    private static func isNextWordContinuationStart(_ c: Character) -> Bool {
+        if c.isNewline { return false }
+        if c == "#" || c == "*" || c == "_" || c == "~" { return false }
+        if c.isWhitespace { return true }
+        if c == "," || c == "." || c == "!" || c == "?" || c == ";" || c == ":" {
+            return true
+        }
         return false
     }
 
