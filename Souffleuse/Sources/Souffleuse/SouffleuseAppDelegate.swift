@@ -131,10 +131,11 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// 2026-05-25: lowered from 150ms to 30ms. With the Instant Ghost Path
     /// cascade (Layer 0 WordCompleter, Layer 1 history match, both sub-ms),
     /// 150ms debounce was the dominant chunk of perceived ghost latency.
-    /// 30ms is still enough to absorb burst keystrokes within the 80ms
-    /// poll-tick window. LLM Task cancellations on rapid retypes are
-    /// inexpensive thanks to the KV cache extend path (phase 03).
-    private static let predictDebounceNanos: UInt64 = 30 * 1_000_000
+    /// 2026-05-26: 30ms → 15ms. Warm KV TTFT is ~24ms and cancellations are
+    /// cheap, so a tighter debounce makes the ghost appear noticeably sooner
+    /// without flooding the engine — burst keystrokes still cancel the prior
+    /// in-flight Task before its first token.
+    private static let predictDebounceNanos: UInt64 = 15 * 1_000_000
 
     private let enricher = ContextEnricher()
     private let typoDetector = TypoDetector()
@@ -229,12 +230,13 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
         observePreferences()
 
-        // 80 ms tick → live-consume + overlay refresh feel near-instant
-        // under typing speeds up to ~12 chars/sec. The previous 200 ms timer
-        // left up to 200 ms of perceived lag between a keystroke and the
-        // ghost adjusting, which is the dominant chunk of the "slow ghost"
-        // feel. The AX snapshot cost at 80 ms is still negligible (<1 ms).
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self] _ in
+        // 50 ms tick → live-consume + overlay refresh feel near-instant.
+        // Lowered from 80 ms (2026-05-26): at 80 ms a keystroke could wait up
+        // to 80 ms before the tick even noticed the new text, the dominant
+        // remaining chunk of the "slow ghost" feel. 50 ms (20 Hz) halves that
+        // worst-case detection lag; the AX snapshot cost stays negligible
+        // (<1 ms), so the only cost is a few more idle snapshots per second.
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
 
