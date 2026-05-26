@@ -142,6 +142,34 @@ do {
         print("   [\(s.tag.padding(toLength: 10, withPad: " ", startingAt: 0))] │\(g)   (want≈ \(s.want))")
     }
 
+    // ── EXPERIMENT 8 : does a POLLUTED corpus bias degrade live output? ──
+    // The live app applies the personalization bias (strength≈6) from the SQL
+    // corpus; the probe ran with an EMPTY corpus. If the corpus learned junk
+    // (buggy ghosts accepted during testing: "s de", "meufs", fragments), the
+    // bias pushes toward that junk. We reproduce: ship profile + strength 6,
+    // corpus empty vs polluted, same sentences.
+    let shipSampler = { (strength: Float) in
+        LlamaSampling(temperature: 0, repeatPenalty: 1.3, seed: 0,
+                      personalizationStrength: strength,
+                      banMarkup: true, banDigitsLeading: true, banEmoji: true)
+    }
+    let polluted = [
+        "envies de", "meufs qui mangent", "procédblème",
+        "s de manger", "de manger des meufs",
+        "J'ai envie de manger des meufs qui mangent",
+    ]
+    print("\n╔══ EXPERIMENT 8 : POLLUTED CORPUS BIAS (live hypothesis) ══╗")
+    for s in [sentences[0], sentences[1]] {
+        await engine.setCorpus([])
+        let clean = await gen(prompt: s.text, shipSampler(0))
+        await engine.setCorpus(polluted)
+        let dirty = await gen(prompt: s.text, shipSampler(6))   // default live strength
+        print("\n▼ [\(s.tag)] want≈ \(s.want)")
+        print("   corpus VIDE     (str 0) │\(clean)")
+        print("   corpus POLLUÉ   (str 6) │\(dirty)")
+    }
+    await engine.setCorpus([])
+
     print("\n═══ END EXPERIMENTS ═══")
     exit(0)
 }

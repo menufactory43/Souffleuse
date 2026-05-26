@@ -71,6 +71,12 @@ public struct LlamaSampling: Sendable {
     /// numbers mid-completion. Ignored when `banDigits` (full ban) is set.
     public var banDigitsLeading: Bool
 
+    /// Force tokens whose piece contains an emoji / pictograph to `-inf`. Once
+    /// markup + digits are banned the base model sometimes falls back to emoji
+    /// ("Merci pour votre" → "⭐️"); a ghost is text, never an emoji, so we ban
+    /// them at the source.
+    public var banEmoji: Bool
+
     public init(temperature: Float = 0,
                 repeatPenalty: Float = 1.1,
                 repeatLastN: Int32 = 64,
@@ -81,7 +87,8 @@ public struct LlamaSampling: Sendable {
                 minP: Float = 0,
                 banMarkup: Bool = false,
                 banDigits: Bool = false,
-                banDigitsLeading: Bool = false) {
+                banDigitsLeading: Bool = false,
+                banEmoji: Bool = false) {
         self.temperature = temperature
         self.repeatPenalty = repeatPenalty
         self.repeatLastN = repeatLastN
@@ -93,6 +100,7 @@ public struct LlamaSampling: Sendable {
         self.banMarkup = banMarkup
         self.banDigits = banDigits
         self.banDigitsLeading = banDigitsLeading
+        self.banEmoji = banEmoji
     }
 }
 
@@ -355,6 +363,11 @@ public actor LlamaEngine {
     /// digit. Built lazily on first `banDigits` generation. Reset on `load`.
     private var digitBannedTokens: [Int32]?
 
+    /// Cached list of vocab token ids whose decoded piece contains an emoji /
+    /// pictograph scalar. Built lazily on first `banEmoji` generation. Reset on
+    /// `load`.
+    private var emojiBannedTokens: [Int32]?
+
     /// One-time global backend init, guarded so it runs at most once per
     /// process even across multiple engine instances.
     private static let backendOnce: Void = {
@@ -441,6 +454,7 @@ public actor LlamaEngine {
         // New vocab ⇒ rebuild the ban sets on next demand.
         markupBannedTokens = nil
         digitBannedTokens = nil
+        emojiBannedTokens = nil
         Log.info(.predictor, "llama_loaded")
         return true
     }
@@ -600,6 +614,31 @@ public actor LlamaEngine {
         }
         digitBannedTokens = ids
         Log.info(.predictor, "digit_ban_built", count: ids.count)
+        return ids
+    }
+
+    /// Builds (once) and returns vocab token ids whose decoded piece contains an
+    /// emoji / pictograph scalar. Uses Unicode scalar properties (emoji
+    /// presentation, or scalar ≥ U+1F000) so ASCII like `#`/`*` is NOT caught
+    /// here (those are the markup set's job).
+    private func emojiBanList() -> [Int32] {
+        if let cached = emojiBannedTokens { return cached }
+        guard let h = handles else { return [] }
+        func isEmoji(_ c: Character) -> Bool {
+            c.unicodeScalars.contains { s in
+                s.properties.isEmojiPresentation || s.value >= 0x1F000
+                    || (0x2190...0x2BFF).contains(s.value)   // arrows, symbols, dingbats
+            }
+        }
+        let nVocab = llama_vocab_n_tokens(h.vocab)
+        var ids: [Int32] = []
+        var id: Int32 = 0
+        while id < nVocab {
+            if piece(id).contains(where: isEmoji) { ids.append(id) }
+            id += 1
+        }
+        emojiBannedTokens = ids
+        Log.info(.predictor, "emoji_ban_built", count: ids.count)
         return ids
     }
 
@@ -766,6 +805,7 @@ public actor LlamaEngine {
         // ban apply every step ; leading-only digit ban applies on produced==0.
         let alwaysBan: [Int32] = (sampling.banMarkup ? markupBanList() : [])
             + (sampling.banDigits ? digitBanList() : [])
+            + (sampling.banEmoji ? emojiBanList() : [])
         let leadingBan: [Int32] = (sampling.banDigitsLeading && !sampling.banDigits)
             ? digitBanList() : []
         let banActive = !alwaysBan.isEmpty || !leadingBan.isEmpty
