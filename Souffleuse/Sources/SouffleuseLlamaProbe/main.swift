@@ -47,3 +47,39 @@ for c in cases {
     print("GHOST:\(oneLine)")
     print("---")
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Phase 1 personalization proof : feed a tiny fake corpus containing a
+// distinctive continuation, then show that strength>0 steers the completion
+// toward the corpus continuation while strength==0 does not.
+print("\n=== PERSONALIZATION CORPUS BIAS PROOF ===")
+
+let corpus = [
+    "Cordialement, Gabriel Waltio",
+    "Cordialement, Gabriel Waltio",
+    "Cordialement, Gabriel Waltio",
+    "Bien cordialement, Gabriel Waltio fondateur de Cocotypist",
+]
+await engine.setCorpus(corpus)
+let hasCorpus = await engine.hasCorpus
+print("corpus loaded: \(hasCorpus)")
+
+let proofPrompt = buildPrompt(system: system, afterCursor: "", beforeCursor: "Cordialement,")
+
+func run(strength: Float) async -> String {
+    let sink = Sink()
+    _ = await engine.generate(
+        prompt: proofPrompt,
+        maxTokens: 16,
+        sampling: LlamaSampling(temperature: 0, repeatPenalty: 1.1, repeatLastN: 64,
+                                personalizationStrength: strength)
+    ) { tok in sink.s += tok; return true }
+    return sink.s.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? sink.s
+}
+
+let off = await run(strength: 0)
+let on = await run(strength: 8.0)
+print("PRE: Cordialement,")
+print("GHOST[strength=0]   :\(off)")
+print("GHOST[strength=8.0] :\(on)")
+print("---")
