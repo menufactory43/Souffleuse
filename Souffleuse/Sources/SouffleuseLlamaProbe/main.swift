@@ -83,3 +83,48 @@ print("PRE: Cordialement,")
 print("GHOST[strength=0]   :\(off)")
 print("GHOST[strength=8.0] :\(on)")
 print("---")
+
+// ─────────────────────────────────────────────────────────────────────────
+// Phase 3 (a) — suffix array variable-length-context match drives a
+// >2-token continuation MORE sharply than a bare bigram. We feed a corpus
+// with a distinctive multi-token phrase, then show the longest-match lookup
+// returns a sharp continuation for a >2-token context window.
+print("\n=== PHASE 3 (a): SUFFIX ARRAY LONGEST-MATCH PROOF ===")
+
+let saCorpus = [
+    "Le rendez-vous est fixé à quatorze heures précises mardi prochain",
+    "Le rendez-vous est fixé à quatorze heures précises mardi prochain",
+    "merci de confirmer votre présence au rendez-vous est fixé ailleurs",
+]
+await engine.setCorpus(saCorpus)
+
+// Build a >2-token context window IN TOKEN SPACE and query the suffix array.
+let ctxText = "Le rendez-vous est fixé à quatorze heures"
+let ctxIds = await engine.tokenizeForCorpus(ctxText)
+let (cands, matchLen) = await engine.suffixArrayCandidates(after: ctxIds)
+print("context tokens: \(ctxIds.count)  matchLength=\(matchLen)")
+let topCand = cands.max(by: { $0.value < $1.value })
+if let top = topCand {
+    let piece = await engine.tokenizeForCorpus("précises").first
+    print("top corpus continuation id=\(top.key) count=\(top.value)  (expect to lead toward 'précises' id≈\(piece.map(String.init) ?? "?"))")
+}
+print("candidates=\(cands.count)  (variable-length match used \(matchLen) tokens of context — bigram would use 1)")
+
+// Now drive the actual decoder: a multi-token primed context should
+// continue the corpus phrase sharply under the suffix-array bias.
+let saPrompt = buildPrompt(system: system, afterCursor: "", beforeCursor: "Le rendez-vous est fixé à quatorze heures")
+func runSA(strength: Float) async -> String {
+    let sink = Sink()
+    _ = await engine.generate(
+        prompt: saPrompt, maxTokens: 12,
+        sampling: LlamaSampling(temperature: 0, repeatPenalty: 1.1, repeatLastN: 64,
+                                personalizationStrength: strength)
+    ) { tok in sink.s += tok; return true }
+    return sink.s.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? sink.s
+}
+let saOff = await runSA(strength: 0)
+let saOn = await runSA(strength: 6.0)  // default-preference effective base gain
+print("PRE: Le rendez-vous est fixé à quatorze heures")
+print("GHOST[strength=0] :\(saOff)")
+print("GHOST[strength=6] :\(saOn)")
+print("---")

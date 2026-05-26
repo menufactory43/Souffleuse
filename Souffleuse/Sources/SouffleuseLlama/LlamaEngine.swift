@@ -27,6 +27,19 @@ public struct LlamaSampling: Sendable {
     /// byte-identical to a build without personalization). Values > 0 scale
     /// the boost `log(1 + count)` added to each corpus-predicted next token.
     public var personalizationStrength: Float
+
+    /// Internal gain calibration (Phase 3). The user-facing Preferences slider
+    /// is `0.0…2.0` (default `1.0`), but the additive logit boost needs to be
+    /// roughly an order of magnitude larger to actually steer greedy decoding
+    /// (Phase 1 probe needed an effective strength ≈ 8 on a bare bigram). The
+    /// caller multiplies the slider value by this constant before constructing
+    /// `LlamaSampling`, so the DEFAULT preference (1.0) maps to an effective
+    /// base gain of `6.0` — noticeable but not overpowering — and the
+    /// suffix-array `matchLength` sharpening inside the decode loop boosts
+    /// longer (more predictive) matches further. A pure multiplier keeps the
+    /// behaviour easy to reason about and avoids overfitting.
+    public static let personalizationGainScale: Float = 6.0
+
     public init(temperature: Float = 0,
                 repeatPenalty: Float = 1.1,
                 repeatLastN: Int32 = 64,
