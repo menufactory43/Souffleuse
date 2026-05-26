@@ -27,6 +27,23 @@ extension SuggestionPolicy {
         static let afterSpaceL1Bar: Float = 0.6
         static let l2UpgradeDelta: Float = 0.15
 
+        // MARK: - Phase 3 (b) — Cotypist "short" fast-path (strong corpus match)
+        ///
+        /// Minimum matched-context length (in characters) for a corpus
+        /// continuation to be shown DIRECTLY as the ghost with zero LLM
+        /// inference. Below this we treat the match as too weak and let the
+        /// L1/L2 cascade decide. ~16 chars ≈ several words — long enough that
+        /// the user has clearly re-entered a known context.
+        static let strongCorpusMatchMinChars: Int = 16
+
+        /// Source prior for a STRONG corpus fast-path match. Higher than the
+        /// regular `.history` prior (0.75) so that a confident instant ghost is
+        /// NOT clobbered by a divergent LLM stream — `onLLMChunk`'s replacement
+        /// bar (1.15) requires the LLM to beat `≈0.92 × 1.15 ≈ 1.06`, which an
+        /// in-[0,1] score can never reach. The LLM may therefore only EXTEND
+        /// (never replace) a strong corpus ghost, honouring the anti-churn rule.
+        static let strongCorpusSourcePrior: Float = 0.92
+
         // MARK: - D-08 Cache / undo-cache floors (tightening 2026-05-26)
         ///
         /// `cacheFloor` gates `cache.lookup(...)` hits. Before this tightening,

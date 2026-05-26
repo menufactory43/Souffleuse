@@ -184,6 +184,57 @@ enum SuggestionPolicy {
         return nil
     }
 
+    /// Phase 3 (b) — Cotypist "short" fast-path : a STRONG corpus match.
+    ///
+    /// Upgrades the linear exact-substring scan (`historyExactSubstringMatch`)
+    /// into a confidence-bearing match. Returns the saved continuation AND the
+    /// length of the matched context (in characters) when the user's recent
+    /// tail matches a corpus entry by at least `strongCorpusMatchMinChars`
+    /// characters — long enough that we trust it as a direct ghost without any
+    /// LLM inference. Picks the match with the LONGEST overlap (most specific),
+    /// freshness breaking ties (snapshot is newest-first).
+    ///
+    /// Nil when no entry overlaps by the threshold. Unlike
+    /// `historyExactSubstringMatch` this does NOT bail on whitespace-terminated
+    /// tails — an after-space context is exactly where Cotypist's instant
+    /// completion fires. The match must still be word-aligned (the overlap ends
+    /// at the user's caret, and the continuation is the entry's remainder).
+    nonisolated static func strongCorpusMatch(
+        userTail: String,
+        snapshot: [TypingHistoryEntry]
+    ) -> (continuation: String, matchedChars: Int)? {
+        let minChars = Tuning.strongCorpusMatchMinChars
+        // Look back over a generous window; the longest suffix of userTail that
+        // is also a substring of some entry (ending the entry's recorded text
+        // BEFORE its tail) wins.
+        let lookbackFull = String(userTail.suffix(120))
+        guard lookbackFull.count >= minChars else { return nil }
+
+        var best: (continuation: String, matchedChars: Int)?
+        for entry in snapshot {
+            let full = entry.contextBefore.isEmpty
+                ? entry.accepted
+                : entry.contextBefore + " " + entry.accepted
+            // Find the longest suffix of the user tail that occurs in `full`
+            // and leaves a non-empty continuation after it.
+            var len = min(lookbackFull.count, full.count)
+            while len >= minChars {
+                let needle = String(lookbackFull.suffix(len))
+                if let r = full.range(of: needle) {
+                    let after = String(full[r.upperBound...])
+                    if !after.isEmpty {
+                        if best == nil || len > best!.matchedChars {
+                            best = (after, len)
+                        }
+                        break  // longest for THIS entry found
+                    }
+                }
+                len -= 1
+            }
+        }
+        return best
+    }
+
     /// Truncates `text` to at most `max` whole words, respecting natural
     /// break points (sentence terminators, soft comma break, word cap).
     /// Migration verbatim depuis PVM:411-429 (pre-Phase-4).
@@ -309,6 +360,30 @@ final class SuggestionPolicyEngine {
             guard score.passesGate else { return nil }
             Log.info(.predictor, "ghost_word_complete", count: completion.count)
             return GhostUpdate(text: completion, source: .wordComplete, score: score)
+        }
+
+        // Phase 3 (b) — Cotypist "short" fast-path : a STRONG corpus match
+        // wins over the cascade and is shown DIRECTLY (zero LLM inference).
+        // Checked for BOTH after-space and punctuation tails — wherever the
+        // user has re-entered a long known context. The high source prior
+        // (strongCorpusSourcePrior) means a later LLM stream can only EXTEND
+        // this ghost, never clobber it (replacement bar unreachable from [0,1]).
+        if let strong = SuggestionPolicy.strongCorpusMatch(
+            userTail: userTail,
+            snapshot: historySnapshot
+        ) {
+            let capped = SuggestionPolicy.capToWords(strong.continuation, max: maxWords)
+            if !capped.isEmpty {
+                let score = Score(
+                    sourcePrior: SuggestionPolicy.Tuning.strongCorpusSourcePrior,
+                    prefixFit: SuggestionPolicy.prefixFit(ghost: capped, userTail: userTail),
+                    lengthFit: SuggestionPolicy.lengthFit(ghost: capped)
+                )
+                if score.passesGate {
+                    Log.info(.predictor, "ghost_corpus_fastpath", count: strong.matchedChars)
+                    return GhostUpdate(text: capped, source: .history, score: score)
+                }
+            }
         }
 
         // Cas after-space ou tail vide — L1 first.
