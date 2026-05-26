@@ -312,9 +312,14 @@ enum SuggestionPolicy {
     nonisolated static func capToWords(_ text: String, max: Int) -> String {
         var s = text
         if s.count > 3 {
+            // Preserve a single leading space so a next-word continuation keeps
+            // its separator ("…frais" → " de port" renders "frais de port").
+            let hadLeadingSpace = s.first == " "
             for terminator in [". ", "? ", "! ", "… "] {
                 if let r = s.range(of: terminator) {
-                    s = String(s[..<r.upperBound]).trimmingCharacters(in: .whitespaces)
+                    var cut = String(s[..<r.upperBound]).trimmingCharacters(in: .whitespaces)
+                    if hadLeadingSpace { cut = " " + cut }
+                    s = cut
                     break
                 }
             }

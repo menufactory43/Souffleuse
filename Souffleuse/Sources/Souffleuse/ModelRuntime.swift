@@ -437,9 +437,12 @@ final class ModelRuntime {
         nonisolated static func capToWords(_ text: String, max: Int) -> String {
             var s = text
             if s.count > 3 {
+                let hadLeadingSpace = s.first == " "
                 for terminator in [". ", "? ", "! ", "… "] {
                     if let r = s.range(of: terminator) {
-                        s = String(s[..<r.upperBound]).trimmingCharacters(in: .whitespaces)
+                        var cut = String(s[..<r.upperBound]).trimmingCharacters(in: .whitespaces)
+                        if hadLeadingSpace { cut = " " + cut }
+                        s = cut
                         break
                     }
                 }
@@ -757,9 +760,16 @@ final class ModelRuntime {
             oneLine = oneLine.replacingOccurrences(of: "__", with: "")
             oneLine = oneLine.replacingOccurrences(of: "`", with: "")
             if oneLine.count > 3 {
+                // Preserve a single LEADING space: a next-word continuation after
+                // a complete word ("…les frais" → " de port. Mais") must keep its
+                // leading space so the ghost renders "frais de port." (not
+                // "fraisde port."). trimmingCharacters would otherwise eat it.
+                let hadLeadingSpace = oneLine.first == " "
                 for terminator in [". ", "? ", "! ", "… "] {
                     if let r = oneLine.range(of: terminator) {
-                        oneLine = String(oneLine[..<r.upperBound]).trimmingCharacters(in: .whitespaces)
+                        var cut = String(oneLine[..<r.upperBound]).trimmingCharacters(in: .whitespaces)
+                        if hadLeadingSpace { cut = " " + cut }
+                        oneLine = cut
                         break
                     }
                 }
@@ -1190,9 +1200,15 @@ final class ModelRuntime {
                         oneLine = oneLine.replacingOccurrences(of: "__", with: "")
                         oneLine = oneLine.replacingOccurrences(of: "`", with: "")
                         if oneLine.count > 3 {
+                            // Preserve a single LEADING space (next-word
+                            // continuation after a complete word: "…les frais" →
+                            // " de port. Mais" must render "frais de port.").
+                            let hadLeadingSpace = oneLine.first == " "
                             for terminator in [". ", "? ", "! ", "… "] {
                                 if let r = oneLine.range(of: terminator) {
-                                    oneLine = String(oneLine[..<r.upperBound]).trimmingCharacters(in: .whitespaces)
+                                    var cut = String(oneLine[..<r.upperBound]).trimmingCharacters(in: .whitespaces)
+                                    if hadLeadingSpace { cut = " " + cut }
+                                    oneLine = cut
                                     break
                                 }
                             }

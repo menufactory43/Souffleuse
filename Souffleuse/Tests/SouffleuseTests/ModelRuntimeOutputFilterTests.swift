@@ -166,6 +166,14 @@ struct ModelRuntimeOutputFilterTests {
         #expect(r == "Bonjour cher ami")
     }
 
+    @Test func capToWordsPreservesLeadingSpaceAcrossTerminatorCut() {
+        // Next-word continuation after a complete word keeps its leading space:
+        // " de port. Mais" → " de port." (NOT "de port."), so the ghost renders
+        // "frais de port." not "fraisde port.".
+        let r = Filter.capToWords(" de port. Mais il", max: 20)
+        #expect(r == " de port.")
+    }
+
     @Test func capToWordsShortStringIgnoresTerminator() {
         // length <= 3 → la branche terminator est skipée.
         // "a. b" length=4 > 3 → terminator-branch s'applique : coupe après "a."
