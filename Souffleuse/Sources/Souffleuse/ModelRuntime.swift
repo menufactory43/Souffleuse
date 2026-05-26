@@ -445,6 +445,39 @@ final class ModelRuntime {
             }
             return s
         }
+
+        /// True when the filtered ghost is a *bare* enumerator / number /
+        /// list-marker with no real word behind it — e.g. "1", "1.", "12)",
+        /// "1er", "100%", "1/2", "-", "•", or pure punctuation.
+        ///
+        /// Why: in thin or list-like contexts ("Voici les étapes :\n", "- ",
+        /// after a period) the instruct 1B starts a numbered list — "1. …" —
+        /// and the sentence-terminator truncation chops it to "1." (and the
+        /// streaming path even emits the lone "1" first token). Showing a
+        /// bare ordinal as a ghost is noise, so we drop it. Crucially this
+        /// only fires when nothing useful follows: "1er janvier" / "1/2 tasse
+        /// de farine" carry a word and are NOT degenerate (good completions).
+        nonisolated static func isDegenerateGhost(_ s: String) -> Bool {
+            let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            if t.isEmpty { return true }
+            // Any letter present ⇒ there is a real word ⇒ not degenerate.
+            if t.contains(where: { $0.isLetter }) {
+                // …except a lone ordinal like "1er" / "2nd" / "3ème" / "4e".
+                if t.range(of: "^\\d{1,4}(er|ère|ere|e|ème|eme|nd|nde|th|st|rd)$",
+                           options: [.regularExpression, .caseInsensitive]) != nil {
+                    return true
+                }
+                return false
+            }
+            // No letters: lone number (opt. trailing .)°%), fraction, bullet,
+            // or pure punctuation/symbols are all degenerate.
+            if t.range(of: "^\\d{1,4}\\s*[.)°%]?$", options: .regularExpression) != nil { return true }
+            if t.range(of: "^\\d{1,4}/\\d{1,4}$", options: .regularExpression) != nil { return true }
+            if t.range(of: "^[-*•·–—]$", options: .regularExpression) != nil { return true }
+            // Only punctuation / symbols / digits, no letters at all.
+            if t.allSatisfy({ !$0.isLetter }) { return true }
+            return false
+        }
     }
 
     // MARK: - System prompt + language detection
@@ -640,6 +673,18 @@ final class ModelRuntime {
                 Log.info(.predictor, "ghost_dropped_repeat")
                 let chunkOut = ""
                 Task { @MainActor in onChunk(chunkOut) }
+                return true
+            }
+
+            // Drop bare enumerators / lone numbers ("1", "1.", "1er") that the
+            // instruct model emits when it starts a numbered list in a thin or
+            // list-like context. Better to show nothing than a "1" ghost. Keep
+            // generating — a later token may yield a real continuation.
+            if OutputFilter.isDegenerateGhost(oneLine) {
+                if !acc.lastEmitted.isEmpty {
+                    acc.lastEmitted = ""
+                    Task { @MainActor in onChunk("") }
+                }
                 return true
             }
 
