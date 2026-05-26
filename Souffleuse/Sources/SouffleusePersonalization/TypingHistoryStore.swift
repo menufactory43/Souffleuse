@@ -127,6 +127,11 @@ public actor TypingHistoryStore {
             sqlite3_close(handle)
             return false
         }
+        // WAL + NORMAL sync: durable enough for an append-on-Tab corpus while
+        // keeping per-insert latency low (the hot path runs off the UI thread,
+        // but a large migration / bulk insert must not stall for seconds).
+        sqlite3_exec(handle, "PRAGMA journal_mode=WAL;", nil, nil, nil)
+        sqlite3_exec(handle, "PRAGMA synchronous=NORMAL;", nil, nil, nil)
         self.db = handle
         return true
     }
@@ -223,6 +228,21 @@ public actor TypingHistoryStore {
         if sqlite3_step(stmt) != SQLITE_DONE {
             Log.warn(.context, "history_insert_failed")
         }
+    }
+
+    /// Test seam: force a FIFO purge down to `cap` without inserting 50k rows.
+    internal func purgeToCapForTesting(_ cap: Int) {
+        load()
+        guard let db else { return }
+        let n = rowCount()
+        guard n > cap else { return }
+        let toDrop = n - cap
+        let sql = "DELETE FROM entries WHERE id IN (SELECT id FROM entries ORDER BY id ASC LIMIT ?);"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int(stmt, 1, Int32(toDrop))
+        _ = sqlite3_step(stmt)
     }
 
     private func purgeIfNeeded() {
