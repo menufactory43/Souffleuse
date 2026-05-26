@@ -207,8 +207,35 @@ public actor TypingHistoryStore {
             Log.info(.context, "history_skipped_secretlike")
             return
         }
+        // Structural junk gate : reject the live-consume residue that polluted
+        // the corpus during debugging ("s de", "t es" — a lone leading letter
+        // then a space). Deliberately NOT a dictionary check: that would reject
+        // the user's own uncommon vocabulary (proper nouns, jargon), which is
+        // exactly what personalization must learn. Only obvious fragments go.
+        if Self.looksLikeFragment(entry.accepted) {
+            Log.info(.context, "history_skipped_fragment")
+            return
+        }
         insert(entry)
         purgeIfNeeded()
+    }
+
+    /// True when `accepted` looks like a live-consume FRAGMENT rather than real
+    /// accepted text: it starts with a lone letter immediately followed by a
+    /// space ("s de manger" — the dangling "s" of a mis-consumed "envies"). Pure
+    /// structural check, no dictionary, so legitimate uncommon words are kept.
+    static func looksLikeFragment(_ accepted: String) -> Bool {
+        let t = accepted.trimmingCharacters(in: .whitespacesAndNewlines)
+        let chars = Array(t)
+        guard chars.count >= 2 else { return false }
+        // "s de…" : single letter then a space. But keep genuine one-letter
+        // French words (a, à, y, ô, o) — only a NON-standalone leading letter
+        // (consonant residue: s, t, l, d, n, j, m, c…) signals a bad consume.
+        if chars[0].isLetter, chars[1] == " " {
+            let standalone: Set<Character> = ["a", "à", "y", "ô", "o", "A", "À", "Y", "Ô", "O"]
+            return !standalone.contains(chars[0])
+        }
+        return false
     }
 
     private func insert(_ entry: TypingHistoryEntry) {

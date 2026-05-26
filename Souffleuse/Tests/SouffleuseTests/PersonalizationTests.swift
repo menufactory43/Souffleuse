@@ -185,3 +185,29 @@ private func makeEntry(_ accepted: String, _ ctx: String = "ctx") -> TypingHisto
     #expect(entries.map(\.accepted) == ["oui"])
     await store.clear()
 }
+
+// MARK: - Fragment gate (corpus pollution prevention)
+
+@Suite("TypingHistoryStore fragment gate")
+struct FragmentGateTests {
+    @Test("lone consonant + space = fragment (rejected)")
+    func rejectsConsonantFragment() {
+        #expect(TypingHistoryStore.looksLikeFragment("s de manger"))
+        #expect(TypingHistoryStore.looksLikeFragment("t es là"))
+        #expect(TypingHistoryStore.looksLikeFragment("l a dit"))
+    }
+
+    @Test("genuine one-letter French words kept")
+    func keepsStandaloneWords() {
+        #expect(!TypingHistoryStore.looksLikeFragment("à demain"))
+        #expect(!TypingHistoryStore.looksLikeFragment("y aller"))
+        #expect(!TypingHistoryStore.looksLikeFragment("a fait beau"))
+    }
+
+    @Test("normal text and uncommon vocabulary kept")
+    func keepsNormalAndVocab() {
+        #expect(!TypingHistoryStore.looksLikeFragment("de manger des sushis"))
+        #expect(!TypingHistoryStore.looksLikeFragment("Cocotypist arrive bientôt"))
+        #expect(!TypingHistoryStore.looksLikeFragment("merguez"))
+    }
+}

@@ -77,6 +77,12 @@ public struct LlamaSampling: Sendable {
     /// them at the source.
     public var banEmoji: Bool
 
+    /// Nucleus gate width for the noise-robust corpus bias: a corpus candidate
+    /// is boosted only if its model logit is within this many units of the top
+    /// logit. Larger = more permissive (legit personalization steers harder,
+    /// but a polluted corpus leaks more). `0` falls back to the engine default.
+    public var nucleusMargin: Float
+
     public init(temperature: Float = 0,
                 repeatPenalty: Float = 1.1,
                 repeatLastN: Int32 = 64,
@@ -88,7 +94,8 @@ public struct LlamaSampling: Sendable {
                 banMarkup: Bool = false,
                 banDigits: Bool = false,
                 banDigitsLeading: Bool = false,
-                banEmoji: Bool = false) {
+                banEmoji: Bool = false,
+                nucleusMargin: Float = 0) {
         self.temperature = temperature
         self.repeatPenalty = repeatPenalty
         self.repeatLastN = repeatLastN
@@ -101,6 +108,7 @@ public struct LlamaSampling: Sendable {
         self.banDigits = banDigits
         self.banDigitsLeading = banDigitsLeading
         self.banEmoji = banEmoji
+        self.nucleusMargin = nucleusMargin
     }
 }
 
@@ -367,6 +375,17 @@ public actor LlamaEngine {
     /// pictograph scalar. Built lazily on first `banEmoji` generation. Reset on
     /// `load`.
     private var emojiBannedTokens: [Int32]?
+
+    /// Noise-robustness tuning for the corpus logit bias (see the decode loop).
+    /// `nucleusMargin` : a corpus candidate is only boosted if its logit is
+    /// within this many units of the top logit (already plausible to the model).
+    /// `minBiasCount` : ignore corpus candidates seen fewer times (one-offs are
+    /// noise). `maxBiasBoost` : cap the additive boost so a high count can't
+    /// blow a token past the nucleus gate. Calibrated against the probe's
+    /// polluted-vs-clean corpus A/B (Experiment 8/9).
+    static let nucleusMargin: Float = 8.0
+    static let minBiasCount: Int = 2
+    static let maxBiasBoost: Float = 6.0
 
     /// One-time global backend init, guarded so it runs at most once per
     /// process even across multiple engine instances.
@@ -850,13 +869,38 @@ public actor LlamaEngine {
                     candidates = corpusNgram.candidates(after: recentIds.suffix(2))
                     matchLen = candidates.isEmpty ? 0 : min(2, recentIds.count)
                 }
-                if !candidates.isEmpty {
-                    // Sharpening factor : ≥1, grows with matched context length.
-                    // matchLen 1 → 1.0, 2 → ~1.7, 4 → ~3.0, capped at maxMatchLen.
-                    let sharpen = 1.0 + 0.5 * Float(max(0, matchLen - 1))
+                // ── Noise-robust corpus bias ─────────────────────────────────
+                // A polluted corpus (junk ghosts accepted during debugging)
+                // must NOT be able to drag the output toward words the model
+                // would never produce. Three guards make the bias degrade
+                // gracefully when the corpus is low-quality:
+                //   1. matchLen ≥ 2 — only steer on a real multi-token context
+                //      match, never a single-token coincidence.
+                //   2. count ≥ minCount — a one-off accepted entry (count 1) is
+                //      noise, not a pattern; it never biases.
+                //   3. NUCLEUS GATE — only boost a corpus candidate whose model
+                //      logit is already within `nucleusMargin` of the top logit,
+                //      i.e. a token the model ALREADY finds plausible. This is
+                //      the key guard: the corpus can re-rank plausible
+                //      candidates but can never inject an implausible junk token
+                //      ("…de la viande" ↛ "meufs"). Additionally the per-token
+                //      boost is capped so a huge count can't blow past the gate.
+                if !candidates.isEmpty && matchLen >= 2 {
                     let nVocab = llama_vocab_n_tokens(h.vocab)
-                    for (id, count) in candidates where id >= 0 && id < nVocab {
-                        logits[Int(id)] += strength * sharpen * logf(1 + Float(count))
+                    // Top logit (plausibility reference). One scan per biased
+                    // step; only runs when a ≥2-token corpus match exists.
+                    var topLogit = -Float.greatestFiniteMagnitude
+                    for i in 0..<Int(nVocab) where logits[i] > topLogit { topLogit = logits[i] }
+                    let margin = sampling.nucleusMargin > 0 ? sampling.nucleusMargin : Self.nucleusMargin
+                    let floor = topLogit - margin
+                    let sharpen = 1.0 + 0.5 * Float(max(0, matchLen - 1))
+                    for (id, count) in candidates
+                        where id >= 0 && id < nVocab && count >= Self.minBiasCount {
+                        let i = Int(id)
+                        guard logits[i] >= floor else { continue }   // implausible → skip
+                        let boost = min(Self.maxBiasBoost,
+                                        strength * sharpen * logf(Float(count)))
+                        logits[i] += boost
                     }
                 }
               }  // if biasActive
