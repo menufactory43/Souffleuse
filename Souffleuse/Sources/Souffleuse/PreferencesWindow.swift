@@ -112,6 +112,10 @@ private struct PersonalizationTab: View {
                     }
                 Text("Stocké chiffré localement (AES-GCM, clé Keychain). Jamais envoyé sur internet.")
                     .font(.callout).foregroundStyle(.secondary)
+                Toggle("Enregistrer aussi sans complétion acceptée", isOn: $store.storeWithoutAccepted)
+                    .disabled(!store.personalizationEnabled)
+                Text("Enregistre le contenu des champs même quand vous n'acceptez aucune suggestion — un dataset plus riche de votre style. À éviter si vous manipulez des informations sensibles.")
+                    .font(.callout).foregroundStyle(.secondary)
             } header: {
                 Text("Collecte").font(.headline)
             }
