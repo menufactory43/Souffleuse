@@ -100,6 +100,13 @@ final class PredictorViewModel {
     internal let cache = CompletionCache()
 
     private var modelId: String
+    /// Last language `detectLanguage` resolved *with confidence* (English name,
+    /// e.g. "French"). Short or low-confidence prefixes make `detectLanguage`
+    /// return nil mid-typing — exactly the autocomplete case — which would drop
+    /// the language-steering header and let the 1B model drift to English. We
+    /// keep the last confident detection and reuse it when the current prefix is
+    /// undetectable; a *new* confident detection always wins and overwrites it.
+    private var lastDetectedLanguage: String?
     /// Driven by Preferences > Général > "Longueur des suggestions".
     /// Combined with sentence-end truncation in onChunk for snappy output.
     var maxTokens: Int = 10
@@ -374,7 +381,13 @@ final class PredictorViewModel {
         // the prefix's language and prepend an explicit "you must reply in
         // {language}" header. Counters the English-drift bias on
         // multilingual models.
-        let detectedLanguage = ModelRuntime.detectLanguage(in: userTail)
+        // Sticky language: a confident detection updates the remembered value;
+        // an undetectable (short / low-confidence) prefix falls back to it so
+        // the steering header survives mid-typing instead of vanishing.
+        if let confident = ModelRuntime.detectLanguage(in: userTail) {
+            lastDetectedLanguage = confident
+        }
+        let detectedLanguage = lastDetectedLanguage
         let baseSystemPrompt = ModelRuntime.buildSystemPrompt(detectedLanguage: detectedLanguage)
         var systemParts: [String] = [baseSystemPrompt]
         if !customInstructions.isEmpty {
