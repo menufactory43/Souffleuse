@@ -59,6 +59,17 @@ struct MidWordCoherenceTests {
         #expect(ModelRuntime.OutputFilter.midWordCandidate(userTail: "Il y a un gros problè", ghost: " avec le modèle") == nil)
     }
 
+    @Test func midWordCandidateNilForHyphenAndApostropheCompounds() {
+        // French inversion / elision / compounds: the joiner starts a NEW word,
+        // so the splice is never a single dictionary word — the guard must NOT
+        // apply (otherwise it wrongly suppresses "allez-vous", "j'ai", etc.).
+        #expect(ModelRuntime.OutputFilter.midWordCandidate(userTail: "Bonjour, comment allez-", ghost: "vous") == nil)
+        #expect(ModelRuntime.OutputFilter.midWordCandidate(userTail: "Je pense que j'", ghost: "ai raison") == nil)
+        #expect(ModelRuntime.OutputFilter.midWordCandidate(userTail: "Dis-moi, est-", ghost: "ce que tu viens") == nil)
+        #expect(ModelRuntime.OutputFilter.midWordCandidate(userTail: "On se voit au rendez-", ghost: "vous") == nil)
+        #expect(ModelRuntime.OutputFilter.midWordCandidate(userTail: "C'est aujourd'", ghost: "hui") == nil)
+    }
+
     // MARK: - End-to-end drop decision (candidate + spell validation)
 
     /// Helper mirroring the generateLlama guard : drop when mid-word AND the

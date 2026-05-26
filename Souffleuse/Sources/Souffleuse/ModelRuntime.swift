@@ -526,6 +526,12 @@ final class ModelRuntime {
         nonisolated static func midWordCandidate(userTail: String, ghost: String) -> String? {
             let partial = trailingPartialWord(userTail)
             guard !partial.isEmpty else { return nil }       // caret after space/punct → not mid-word
+            // Skip hyphen/apostrophe compounds & elisions — the joiner starts a
+            // NEW word ("allez-vous", "j'ai", "est-ce", "aujourd'hui",
+            // "rendez-vous"), so the splice is never a single dictionary word
+            // and NSSpellChecker would wrongly reject a perfectly good ghost.
+            // The guard targets only plain alphabetic mid-word typos ("procéd").
+            guard !partial.contains(where: { $0 == "-" || $0 == "'" || $0 == "’" }) else { return nil }
             guard let first = ghost.first, isWordChar(first) else { return nil }  // ghost doesn't continue the word
             return partial + leadingWordRun(ghost)
         }
