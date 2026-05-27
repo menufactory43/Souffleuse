@@ -2,6 +2,7 @@ import Foundation
 import MLXLLM
 import MLXLMCommon
 import SouffleuseAX
+import SouffleuseCore
 import SouffleuseLog
 import SouffleusePersonalization
 import SouffleusePrompt
@@ -687,7 +688,8 @@ final class PredictorViewModel {
                 // nothing beats a lone "m". Mid-word completions (caret inside a
                 // word, finishing it: "Bonjou" → "r") are exempt: there the last
                 // userTail char is a letter, so this never fires.
-                if Self.isNextWordStub(userTail: userTail, ghost: update.text) {
+                if Self.isNextWordStub(userTail: userTail, ghost: update.text)
+                    || Self.isMidWordStub(userTail: userTail, ghost: update.text) {
                     PredictDebug.log("chunk_stub_skip", "text=\(update.text.debugDescription) userTail=\(userTail.debugDescription)")
                     return
                 }
@@ -885,6 +887,27 @@ final class PredictorViewModel {
         let ghostStartsNewWord = caretAtWordBoundary || ghost.first == " "
         guard ghostStartsNewWord else { return false }
         return ghost.drop(while: { $0 == " " }).count < 2
+    }
+
+    /// A MID-WORD ghost reduced to a single character ("opé" → "r", "dp" → "n")
+    /// is noise: it's the LLM's first streamed token shown before the rest
+    /// arrives, or a confused short output on a word the base model doesn't
+    /// recognise (typos, abbreviations). One letter spliced mid-word is
+    /// unreadable as intent and flickers. Fires when the caret sits INSIDE a word
+    /// (`userTail` ends in a letter/number) AND the ghost is a single,
+    /// non-space-led char — i.e. it continues the current word but says almost
+    /// nothing yet.
+    ///
+    /// Complement of `isNextWordStub` (which covers the word-boundary case). The
+    /// accepted cost: a genuine 1-letter completion ("Bonjou" → "r") is withheld
+    /// until the stream produces ≥2 chars — a lone mid-word letter is always
+    /// visual noise, never a useful ghost, so the trade is worth it.
+    static func isMidWordStub(userTail: String, ghost: String) -> Bool {
+        let caretMidWord = userTail.last.map { $0.isLetter || $0.isNumber } ?? false
+        guard caretMidWord else { return false }
+        // Next-word ghosts (leading space) are isNextWordStub's job.
+        guard ghost.first != " " else { return false }
+        return ghost.count < 2
     }
 
     /// Phase 4 — cancel avec discriminator pour la classification grid.

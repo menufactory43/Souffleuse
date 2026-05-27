@@ -3,6 +3,7 @@ import Foundation
 import Observation
 import SouffleuseAX
 import SouffleuseContext
+import SouffleuseCore
 import SouffleuseInput
 import SouffleuseLog
 import SouffleuseOverlay
@@ -1042,6 +1043,21 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             overlay.hide()
             interceptor.setActive(false)
             return
+        }
+
+        // Ground-truth render trace (dev only, same env var as PredictDebug):
+        // logs the EXACT ghost painted at the caret, distinct from what the LLM
+        // merely generated. Lets us see what the user actually saw vs what the
+        // gates suppressed.
+        if ProcessInfo.processInfo.environment["SOUFFLEUSE_PREDICT_LOG"]?.isEmpty == false {
+            let tail = String(prefix.suffix(40))
+            let line = "[\(ISO8601DateFormatter().string(from: Date()))] overlay_shown userTail=\(tail.debugDescription) ghost=\(suggestion.debugDescription)\n"
+            if let data = line.data(using: .utf8) {
+                let path = "/tmp/souffleuse-predict.log"
+                if let h = FileHandle(forWritingAtPath: path) {
+                    h.seekToEndOfFile(); try? h.write(contentsOf: data); try? h.close()
+                } else { FileManager.default.createFile(atPath: path, contents: data) }
+            }
         }
 
         overlay.show(text: suggestion, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFontForOverlay)

@@ -1,21 +1,6 @@
 import Foundation
+import SouffleuseCore
 import SouffleuseLog
-
-// MARK: - GenerationToken
-
-/// Opaque generation identity. Bumped on every predict and cancel. The post-stream
-/// commit captures the token at request creation and drops chunks if the token
-/// is no longer current (Pitfall 1 in RESEARCH §"Common Pitfalls").
-///
-/// Value-type sur `UInt64` — Sendable de fait, Equatable structurel. Le PVM
-/// avant Phase-4 utilisait directement un `UInt64` capturé dans les closures
-/// onChunk ; les comparaisons `self.generation == myGeneration` étaient
-/// faites par valeur. Token unifie ce contrat : `isCurrent(_:)` remplace la
-/// comparaison directe pour que la propriété `currentGeneration` reste
-/// `private(set)` chez le Planner.
-struct GenerationToken: Sendable, Equatable {
-    let value: UInt64
-}
 
 // MARK: - GenerationPlanner
 

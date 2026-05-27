@@ -1,4 +1,5 @@
 import Testing
+import SouffleuseCore
 @testable import Souffleuse
 
 /// Guards the lone-"1" ghost fix : `OutputFilter.isDegenerateGhost` must drop

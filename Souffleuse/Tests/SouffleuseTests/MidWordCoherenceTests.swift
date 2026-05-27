@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import SouffleuseCore
 @testable import Souffleuse
 import SouffleuseTyping
 

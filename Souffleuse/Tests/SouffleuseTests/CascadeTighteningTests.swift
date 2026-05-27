@@ -2,6 +2,7 @@ import Testing
 import Foundation
 import SouffleusePersonalization
 import SouffleuseTyping
+import SouffleuseCore
 @testable import Souffleuse
 
 /// Tightening pass 2026-05-26 (post 04-07 empirical validation).

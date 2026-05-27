@@ -8,6 +8,7 @@ SHIPPING_DIRS=(
   "Sources/Souffleuse"
   "Sources/SouffleuseAX"
   "Sources/SouffleuseContext"
+  "Sources/SouffleuseCore"
   "Sources/SouffleuseInput"
   "Sources/SouffleuseLog"
   "Sources/SouffleuseOverlay"

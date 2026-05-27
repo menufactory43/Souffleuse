@@ -11,10 +11,10 @@ extension SuggestionPolicy {
     ///
     /// Visibilité `internal` (pas `private`) : les tests accèdent via
     /// `@testable import Souffleuse`.
-    enum Tuning {
+    public enum Tuning {
         // MARK: - D-07 Gate floor + replacement bar
-        static let gateFloor: Float = 0.25
-        static let replacementBar: Float = 1.15
+        public static let gateFloor: Float = 0.25
+        public static let replacementBar: Float = 1.15
 
         // MARK: - D-08 Routing thresholds
         ///
@@ -24,8 +24,8 @@ extension SuggestionPolicy {
         /// injection). A 0.4 bar lets too many low-relevance history fragments
         /// through. Local completions or LLM generations should win unless
         /// history is highly confident.
-        static let afterSpaceL1Bar: Float = 0.6
-        static let l2UpgradeDelta: Float = 0.15
+        public static let afterSpaceL1Bar: Float = 0.6
+        public static let l2UpgradeDelta: Float = 0.15
 
         // MARK: - Phase 3 (b) — Cotypist "short" fast-path (strong corpus match)
         ///
@@ -34,7 +34,7 @@ extension SuggestionPolicy {
         /// inference. Below this we treat the match as too weak and let the
         /// L1/L2 cascade decide. ~16 chars ≈ several words — long enough that
         /// the user has clearly re-entered a known context.
-        static let strongCorpusMatchMinChars: Int = 16
+        public static let strongCorpusMatchMinChars: Int = 16
 
         /// Mid-word variant of the threshold above. When the caret sits INSIDE a
         /// word, the in-progress fragment plus its preceding context recalls a
@@ -46,7 +46,15 @@ extension SuggestionPolicy {
         /// recalls anything), and the continuation must START with a letter (it
         /// genuinely completes the current word rather than jumping to a new
         /// one). 8 ≈ one short word of leading context + the fragment.
-        static let midWordCorpusMatchMinChars: Int = 8
+        public static let midWordCorpusMatchMinChars: Int = 8
+
+        /// Minimum length of the (complete) current partial word for a mid-word
+        /// LLM continuation to be allowed (Option A refined, 2026-05-27). Below
+        /// this, a "complete" word is most likely a short fragment the
+        /// NSSpellChecker false-accepts ("es", "pr", "pu", "v") that would let
+        /// the model guess the wrong word or drift to another language. ≥4 keeps
+        /// real finished words ("frais", "corrigé", "vendredi", "contrôle").
+        public static let midWordLLMMinCompleteWordChars: Int = 4
 
         /// Source prior for a STRONG corpus fast-path match. Higher than the
         /// regular `.history` prior (0.75) so that a confident instant ghost is
@@ -54,7 +62,7 @@ extension SuggestionPolicy {
         /// bar (1.15) requires the LLM to beat `≈0.92 × 1.15 ≈ 1.06`, which an
         /// in-[0,1] score can never reach. The LLM may therefore only EXTEND
         /// (never replace) a strong corpus ghost, honouring the anti-churn rule.
-        static let strongCorpusSourcePrior: Float = 0.92
+        public static let strongCorpusSourcePrior: Float = 0.92
 
         // MARK: - D-08 Cache / undo-cache floors (tightening 2026-05-26)
         ///
@@ -64,21 +72,21 @@ extension SuggestionPolicy {
         /// after the user typed an unrelated prefix. Now cache hits must score
         /// above `cacheFloor` (re-using `SuggestionPolicy.score(...)` with
         /// `source: .cache`) to be shown.
-        static let cacheFloor: Float = 0.55
+        public static let cacheFloor: Float = 0.55
 
         /// `undoCacheFloor` gates `cache.longestExtendingKey(...)` hits (undo
         /// as ghost — "user just backspaced, propose to restore"). Slightly
         /// more permissive than `cacheFloor` because the semantic signal is
         /// strong (the suffix was literally typed before backspacing).
-        static let undoCacheFloor: Float = 0.45
+        public static let undoCacheFloor: Float = 0.45
 
         // MARK: - D-09 Classification windows (assumptions A2-A4 in RESEARCH)
-        static let parasiteWindow: TimeInterval = 0.8
-        static let uselessMinVisibleMs: Int = 200
-        static let badMaxDivergeMs: Int = 500
+        public static let parasiteWindow: TimeInterval = 0.8
+        public static let uselessMinVisibleMs: Int = 200
+        public static let badMaxDivergeMs: Int = 500
 
         // MARK: - D-06 Source priors
-        static let sourcePrior: [SuggestionSource: Float] = [
+        public static let sourcePrior: [SuggestionSource: Float] = [
             .wordComplete: 0.55,
             .history:      0.75,
             .llm:          0.60,
@@ -88,7 +96,7 @@ extension SuggestionPolicy {
         ]
 
         // MARK: - D-06 Bell curve length_fit (index = word count, clamp to last for >=10)
-        static let lengthFitByWordCount: [Float] = [
+        public static let lengthFitByWordCount: [Float] = [
             0.0,  // 0 mots — défensif
             0.6,  // 1 mot
             1.0,  // 2

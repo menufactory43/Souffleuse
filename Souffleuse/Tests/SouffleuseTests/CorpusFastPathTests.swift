@@ -2,6 +2,7 @@ import Testing
 import Foundation
 import SouffleusePersonalization
 import SouffleuseTyping
+import SouffleuseCore
 @testable import Souffleuse
 
 /// Phase 3 (b) — Cotypist "short" fast-path: a strong corpus match yields the

@@ -122,11 +122,14 @@ public final class OverlayWindow {
     /// Estimate a usable font size when AX doesn't expose the host font.
     /// AX caret rects are typically the line height; line-height ≈ font-size
     /// × 1.2 for the system text rendering stack, so dividing inverts that.
-    /// Clamped to the readable range so we never produce a 4pt or 200pt ghost
-    /// from a degenerate rect.
+    /// We divide by 1.1 (not the strict 1.2) on purpose: web/Electron line
+    /// boxes run tighter than the system stack, and the user prefers a ghost a
+    /// hair LARGER than the host text rather than slightly smaller. Clamped to
+    /// the readable range so we never produce a 4pt or 200pt ghost from a
+    /// degenerate rect.
     static func estimatedFont(forCaretRectHeight height: CGFloat) -> NSFont? {
         guard height > 1 else { return nil }
-        let estimated = height / 1.2
+        let estimated = height / 1.1
         let clamped = max(12, min(64, estimated))
         return .systemFont(ofSize: clamped)
     }

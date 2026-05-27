@@ -13,7 +13,9 @@ let package = Package(
         .executable(name: "SouffleuseEnrichmentBench", targets: ["SouffleuseEnrichmentBench"]),
         .executable(name: "SouffleuseAXProbe", targets: ["SouffleuseAXProbe"]),
         .executable(name: "SouffleuseContextProbe", targets: ["SouffleuseContextProbe"]),
+        .executable(name: "SouffleuseReplay", targets: ["SouffleuseReplay"]),
         .library(name: "SouffleuseAX", targets: ["SouffleuseAX"]),
+        .library(name: "SouffleuseCore", targets: ["SouffleuseCore"]),
         .library(name: "SouffleuseOverlay", targets: ["SouffleuseOverlay"]),
         .library(name: "SouffleuseInput", targets: ["SouffleuseInput"]),
         .library(name: "SouffleuseContext", targets: ["SouffleuseContext"]),
@@ -76,6 +78,14 @@ let package = Package(
             name: "SouffleuseTyping"
         ),
         .target(
+            name: "SouffleuseCore",
+            dependencies: [
+                "SouffleuseLog",
+                "SouffleuseTyping",
+                "SouffleusePersonalization",
+            ]
+        ),
+        .target(
             name: "SouffleuseAX"
         ),
         .target(
@@ -117,10 +127,21 @@ let package = Package(
             dependencies: ["SouffleuseAX", "SouffleuseContext"]
         ),
         .executableTarget(
+            name: "SouffleuseReplay",
+            dependencies: [
+                "SouffleuseCore",
+                "SouffleuseLlama",
+                "SouffleusePersonalization",
+                "SouffleuseTyping",
+                "SouffleuseLog",
+            ]
+        ),
+        .executableTarget(
             name: "Souffleuse",
             dependencies: [
                 "SouffleuseAX",
                 "SouffleuseContext",
+                "SouffleuseCore",
                 "SouffleuseInput",
                 "SouffleuseLog",
                 "SouffleuseOverlay",
@@ -161,6 +182,7 @@ let package = Package(
                 "Souffleuse",
                 "SouffleuseAX",
                 "SouffleuseContext",
+                "SouffleuseCore",
                 "SouffleuseLog",
                 "SouffleuseOverlay",
                 "SouffleuseTyping",

@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import SouffleuseCore
 @testable import Souffleuse
 
 /// Phase 4 / 04-05 — pure-function lock-in pour `ModelRuntime.OutputFilter`.

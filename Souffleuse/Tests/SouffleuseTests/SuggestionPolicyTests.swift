@@ -2,6 +2,7 @@ import Testing
 import Foundation
 import SouffleusePersonalization
 import SouffleuseTyping
+import SouffleuseCore
 @testable import Souffleuse
 
 /// Phase 4 — Cascade routing (D-08) + Relevance Gate replacement bar (D-07)
@@ -46,50 +47,49 @@ struct SuggestionPolicyTests {
         #expect(result?.text == "ée à toi aussi")
     }
 
-    /// Row 3 : mid-word + LLM chunk → AUTORISÉ (D-08 unblocked 2026-05-26).
-    ///
-    /// Le blocage mid-word inconditionnel a été retiré. La cohérence du splice
-    /// est garantie EN AMONT (generateLlama coherence guard) ; onLLMChunk laisse
-    /// passer un chunk mid-word cohérent qui démarre par une lettre (prefixFit
-    /// 1.0) et passe le gate floor. Cotypist-parité : "Bonjou"→"rné" doit montrer.
-    @Test func midWordCoherentLLMChunkPasses() {
+    /// Row 3 — mid-word + LLM, partial word INCOMPLETE → BLOQUÉ (Option A
+    /// refined, 2026-05-27). "Bonjou" is not a complete word, so the model is
+    /// guessing how to finish it ("rné") → block. (The replay harness proved
+    /// free mid-word LLM on incomplete fragments produces the wrong word:
+    /// "pr"→prunelle, "C'es"→junk.) The word-completer / history fast-path in
+    /// `routeInstant` serves the incomplete-fragment case instead.
+    @Test func midWordIncompleteWordLLMChunkBlocked() {
         let p = Self.engine()
-        let r = p.onLLMChunk("rné", userTail: "Bonjou")  // letter-ending tail
-        #expect(r != nil)
-        #expect(r?.source == .llm)
-        #expect(r?.text == "rné")
+        let r = p.onLLMChunk("rné", userTail: "Bonjou")  // "Bonjou" incomplete
+        #expect(r == nil)
     }
 
-    /// Row 3 quater : mid-word + LLM chunk démarrant par un JOINER (apostrophe /
-    /// trait d'union) → AUTORISÉ. Regression : "…corrigé. S" + "'il vous plaît"
-    /// (S'il) était gaté (prefixFit=0). Maintenant prefixFit=1.0 mid-word pour un
-    /// joiner, donc le ghost passe. Cotypist montre cette complétion.
-    @Test func midWordJoinerLLMChunkPasses() {
+    /// Row 3 quater — a SINGLE-letter elision start ("S" of "S'il") is below the
+    /// ≥4-char complete-word floor, so it is treated as a short fragment and the
+    /// LLM is blocked (the floor kills false-positive "complete" fragments like
+    /// "es"/"pr"/"v" and thin-prefix language drift). Conservative on purpose.
+    @Test func midWordShortElisionStartLLMChunkBlocked() {
         let p = Self.engine()
         let r = p.onLLMChunk("'il vous plaît", userTail: "…corrigé. S")
-        #expect(r != nil)
-        #expect(r?.source == .llm)
-        #expect(r?.text == "'il vous plaît")
+        #expect(r == nil)
     }
 
-    @Test func midWordHyphenLLMChunkPasses() {
+    /// Partial word COMPLETE ("allez") → hyphen continuation ("allez-vous")
+    /// allowed.
+    @Test func midWordCompleteWordHyphenLLMChunkPasses() {
         let p = Self.engine()
         let r = p.onLLMChunk("-vous", userTail: "…comment allez")
         #expect(r != nil)
         #expect(r?.text == "-vous")
     }
 
-    /// Row 3 quinquies — THE BUG FIX : caret right after a COMPLETE word ending
-    /// in a letter (no trailing space). The base model continues with a SPACE-led
-    /// next word ("…les frais" → " de port"). Previously gated (prefixFit=0 →
-    /// score=0); now prefixFit=1.0 because "frais" is a complete word, so the
-    /// ghost reaches the screen WITH its leading space preserved.
-    @Test func midWordNextWordAfterCompleteWordPassesEndToEnd() {
+    /// Row 3 quinquies — caret right after a COMPLETE word ("frais", no trailing
+    /// space). The replay harness showed the LLM does a reliable NEXT-WORD
+    /// continuation here ("corrigé"→" dans la prochaine version", "vendredi"→
+    /// " prochain"). The refined rule ALLOWS it (the blunt all-mid-word block
+    /// killed exactly these good, long ghosts). Leading space preserved →
+    /// renders "frais de port".
+    @Test func midWordNextWordAfterCompleteWordPasses() {
         let p = Self.engine()
         let r = p.onLLMChunk(" de port", userTail: "J'aime aussi les frais")
         #expect(r != nil)
         #expect(r?.source == .llm)
-        #expect(r?.text == " de port")  // leading space kept → renders "frais de port"
+        #expect(r?.text == " de port")
     }
 
     /// Row 3 bis : mid-word, chunk space-led APRÈS un mot INCOMPLET ("Bonjou"
@@ -102,20 +102,17 @@ struct SuggestionPolicyTests {
         #expect(r == nil)
     }
 
-    /// Row 3 ter : anti-churn applies mid-word too. A mid-word LLM ghost is set,
-    /// then a too-close mid-word chunk arrives — replacement bar (1.15) rejects
-    /// it. Proves the relevance pipeline (not the removed blunt block) is what
-    /// governs mid-word now.
-    @Test func midWordReplacementBarRespected() {
+    /// Row 3 ter : sous l'Option A, AUCUN ghost LLM n'est posé en milieu de mot,
+    /// donc aucun churn mid-mot possible — chaque chunk mid-mot est rejeté
+    /// d'emblée (avant même le gate floor / replacement bar). L'anti-churn au
+    /// bord de mot reste couvert par les tests Row 5 (l2Upgrades…).
+    @Test func midWordLLMChunkAlwaysBlockedNoGhostSet() {
         let p = Self.engine()
-        // First mid-word ghost: "rné" on "Bonjou". score = 0.60 × 1.0 × lengthFit.
         let first = p.onLLMChunk("rné", userTail: "Bonjou")
-        #expect(first != nil)
-        if let first { p.applyGhost(first.text, source: .llm, score: first.score) }
-        // A second mid-word chunk with the SAME score cannot beat the bar.
+        #expect(first == nil)
         let second = p.onLLMChunk("rné", userTail: "Bonjou")
-        #expect(second == nil)  // ghost_keep_under_bar
-        #expect(p.currentGhost == "rné")
+        #expect(second == nil)
+        #expect(p.currentGhost == "")  // jamais posé
     }
 
     /// Row 4 : after-space + L1 hit qualifié → GhostUpdate .history.

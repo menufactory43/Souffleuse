@@ -3,6 +3,7 @@ import MLX
 import MLXLLM
 import MLXLMCommon
 import NaturalLanguage
+import SouffleuseCore
 import SouffleuseLlama
 import SouffleuseLog
 import SouffleusePersonalization
@@ -45,81 +46,9 @@ struct StreamMetrics: Sendable {
     var tokensPerSecond: Double?
 }
 
-/// Predict request — value-type capture of all inputs flowing from PVM into
-/// the LLM pipeline. Sera consommé par `ModelRuntime.generate(...)` en
-/// 04-06. **Non utilisé encore en 04-05** : déclaré pour figer le shape
-/// avant la migration container.perform.
-///
-/// Champs (alignés sur `PredictorViewModel.predict(prefix:contextPrefix:customInstructions:axSnapshot:)`
-/// plus les internes calculés au début de cette méthode) :
-/// - `prefix` : texte utilisateur brut (avant suffix-2048 trim).
-/// - `contextPrefix` : prose contextuelle injectée avant `prefix` dans
-///   le user-message.
-/// - `customInstructions` : instructions user-defined.
-/// - `axSnapshotPlaceholder/help/role/subrole/textAfterCaret` : AX context
-///   slots utilisés par PromptBuilder.
-/// - `personalizationStrength` : 0..1 — pondère le n-gram logit bias.
-/// - `maxTokens` / `maxWords` : caps sur la génération.
-/// - `detectedLanguage` : output de `ModelRuntime.detectLanguage(in:)`,
-///   string anglais ("French", "English", …). Aligné sur le retour réel
-///   de `PVM.detectLanguage`.
-/// - `token` : `GenerationToken` (cf. `GenerationPlanner.swift`) — permet
-///   au callback `onChunk` de drop les chunks d'une génération obsolète.
-struct PredictRequest: Sendable {
-    let prefix: String
-    let contextPrefix: String
-    let customInstructions: String
-    let axSnapshotPlaceholder: String?
-    let axSnapshotHelp: String?
-    let axSnapshotRole: String?
-    let axSnapshotSubrole: String?
-    let axTextAfterCaret: String?
-    let personalizationStrength: Double
-    let maxTokens: Int
-    let maxWords: Int
-    let detectedLanguage: String?
-    let token: GenerationToken
-
-    // ── 04-06 additions : precomputed inputs that PVM legacy assembles
-    // BEFORE entering `container.perform`. We carry them across the
-    // Sendable boundary as pure values so ModelRuntime.generate (which
-    // runs inside the off-actor closure) never has to touch `self` /
-    // any actor. The caller (PVM.predict_new) precomputes these from
-    // its actor-isolated state (ngramModel, history, modelId, …).
-
-    /// Trimmed user text actually fed to the LLM (suffix 2048 cap).
-    /// Identical to the legacy `userTail`.
-    let userTail: String
-    /// Cap-512 suffix of `userTail` — the textual content actually
-    /// included in the user-message of the chat template.
-    let llmTail: String
-    /// True if the active model id contains `-it` or `instruct`.
-    let isInstructModel: Bool
-    /// Full legacy system message (base + customInstructions + contextPrefix).
-    let systemMessage: String
-    /// Base framing only, used by the new PromptBuilder path.
-    let baseSystem: String
-    /// Trimmed custom instructions slot body.
-    let customInstr: String
-    /// Trimmed context prefix slot body.
-    let ctxPrefix: String
-    /// Field context slot body assembled from AX snapshot (FR prose).
-    let fieldContextSlot: String
-    /// After-cursor slot body assembled from AX snapshot (FR prose).
-    let afterCursorSlot: String
-    /// Soft preamble fed into base/PT prompt (customInstr + ctxPrefix
-    /// joined by blank lines, with trailing "\n\n" if non-empty).
-    let basePreamble: String
-    /// Few-shot examples block (similarity-ranked, prebuilt by caller
-    /// via `await TypingHistoryStore.similarEntries(...)`).
-    let examplesBlock: String
-    /// Full assembled prompt text for the base/PT path
-    /// (`basePreamble + examplesBlock + llmTail`).
-    let basePromptText: String
-    /// N-gram snapshot — `nil` when personalization is disabled or
-    /// caller has no model. Precomputed off-actor by caller.
-    let ngramSnapshot: NgramSnapshot?
-}
+// `PredictRequest` — extracted VERBATIM to `SouffleuseCore.PredictRequest`
+// (Phase 5). Re-exported here is unnecessary: ModelRuntime imports
+// SouffleuseCore, so `PredictRequest` resolves unqualified at every call-site.
 
 // MARK: - ModelRuntime
 
@@ -322,330 +251,28 @@ final class ModelRuntime {
         // No-op by design. Voir doc-comment.
     }
 
-    // MARK: - OutputFilter (pure-function namespace)
+    // MARK: - OutputFilter / prompt helpers (extracted to SouffleuseCore)
 
-    /// Pure-function helpers qui filtrent / normalisent le ghost text avant
-    /// affichage. **Copies verbatim depuis PVM** (cf. PVM:247-375). La dédup
-    /// PVM-side viendra en 04-07 ; en 04-05 les deux copies co-existent
-    /// pour ne pas perturber le pipeline ghost actif.
-    ///
-    /// Toutes les fonctions sont `nonisolated static` → appelables depuis
-    /// n'importe quel actor sans `await`, facilement testables.
-    enum OutputFilter {
+    /// `OutputFilter` was moved VERBATIM to `SouffleuseCore.OutputFilter`
+    /// (Phase 5). This typealias keeps every `ModelRuntime.OutputFilter.*`
+    /// call-site (PVM, AppDelegate, tests) compiling unchanged.
+    typealias OutputFilter = SouffleuseCore.OutputFilter
 
-        /// Finds the largest suffix of `prefix` that is also a leading
-        /// substring of `ghost`, and strips it. Recovers the actually-new
-        /// chunk when the PT model decides to re-emit what the user just
-        /// typed before continuing.
-        ///
-        /// **Verbatim** PVM:247-259 (`stripPrefixOverlap(_:prefix:)`).
-        /// Note : signature ré-arrangée en (prefix:ghost:) côté docstring
-        /// mais l'argument-label PVM est `(_:prefix:)` — on RESPECTE la
-        /// shape PVM exacte pour rester testable contre la sémantique
-        /// existante.
-        nonisolated static func stripPrefixOverlap(_ snapshot: String, prefix: String) -> String {
-            let maxLen = min(prefix.count, snapshot.count)
-            if maxLen == 0 { return snapshot }
-            var len = maxLen
-            while len >= 2 {
-                let suffix = prefix.suffix(len)
-                if snapshot.hasPrefix(suffix) {
-                    return String(snapshot.dropFirst(len))
-                }
-                len -= 1
-            }
-            return snapshot
-        }
+    /// Mid-word confidence gate threshold — forwarding shim to
+    /// `LlamaPromptBuilder.midWordMinFirstTokenProb` (extracted Phase 5).
+    static var midWordMinFirstTokenProb: Float { LlamaPromptBuilder.midWordMinFirstTokenProb }
 
-        /// Returns true when the START of the ghost matches the END of the
-        /// prefix — i.e. the model is restating what the user just typed
-        /// before (maybe) continuing.
-        ///
-        /// **Verbatim** PVM:285-297 (`ghostIsRepeatingPrefix(_:prefix:)`).
-        nonisolated static func ghostIsRepeatingPrefix(_ ghost: String, prefix: String) -> Bool {
-            let g = normalizeForRepeatCheck(String(ghost.prefix(60)))
-            guard g.count >= 5 else { return false }
-            let trimmed = stripTrailingPartialWord(prefix)
-            let p = normalizeForRepeatCheck(String(trimmed.suffix(120)))
-            var k = min(g.count, 60)
-            while k >= 5 {
-                let candidate = String(g.prefix(k))
-                if p.hasSuffix(candidate) { return true }
-                k -= 1
-            }
-            return false
-        }
+    /// Forwarding shim — see `LlamaPromptBuilder.autocompleteSystemPrompt`.
+    static var autocompleteSystemPrompt: String { LlamaPromptBuilder.autocompleteSystemPrompt }
 
-        /// True once `s` contains at least one word→separator transition.
-        ///
-        /// **Verbatim** PVM:303-313.
-        nonisolated static func hasCompletedFirstWord(_ s: String) -> Bool {
-            var sawWord = false
-            for c in s {
-                if c.isLetter || c.isNumber || c == "'" || c == "’" || c == "-" {
-                    sawWord = true
-                } else if sawWord {
-                    return true
-                }
-            }
-            return false
-        }
-
-        /// Drops the trailing word characters from `s`.
-        ///
-        /// **Verbatim** PVM:318-330.
-        nonisolated static func stripTrailingPartialWord(_ s: String) -> String {
-            var end = s.endIndex
-            while end > s.startIndex {
-                let prev = s.index(before: end)
-                let c = s[prev]
-                if c.isLetter || c.isNumber || c == "'" || c == "’" || c == "-" {
-                    end = prev
-                } else {
-                    break
-                }
-            }
-            return String(s[..<end])
-        }
-
-        /// Lowercases, keeps only letters/digits/space, collapses runs of
-        /// non-word chars to a single space.
-        ///
-        /// **Verbatim** PVM:336-350.
-        nonisolated static func normalizeForRepeatCheck(_ s: String) -> String {
-            let lowered = s.lowercased()
-            var out = ""
-            var lastWasSpace = false
-            for ch in lowered {
-                if ch.isLetter || ch.isNumber {
-                    out.append(ch)
-                    lastWasSpace = false
-                } else if !lastWasSpace {
-                    out.append(" ")
-                    lastWasSpace = true
-                }
-            }
-            return out.trimmingCharacters(in: .whitespaces)
-        }
-
-        /// Truncates `text` to at most `max` whole words, respecting the
-        /// same natural break points as the LLM-stream truncation
-        /// (sentence terminators, then a soft comma break, then word cap).
-        ///
-        /// **Verbatim** PVM:357-375. Signature exacte : label externe `max`.
-        nonisolated static func capToWords(_ text: String, max: Int) -> String {
-            var s = text
-            if s.count > 3 {
-                let hadLeadingSpace = s.first == " "
-                for terminator in [". ", "? ", "! ", "… "] {
-                    if let r = s.range(of: terminator) {
-                        var cut = String(s[..<r.upperBound]).trimmingCharacters(in: .whitespaces)
-                        if hadLeadingSpace { cut = " " + cut }
-                        s = cut
-                        break
-                    }
-                }
-            }
-            // Punctuation is KEPT inside the ghost (Cotypist parity: the user
-            // wants natural, complete ghosts — "de manger, je crois", "vie de
-            // manger.", "rguez ?"). We deliberately do NOT cut at the first
-            // comma anymore; the sentence-terminator cut above and the word cap
-            // below bound the length to one natural clause/sentence.
-            let words = s.split(whereSeparator: { $0.isWhitespace })
-            if words.count > max {
-                s = words.prefix(max).joined(separator: " ")
-            }
-            return s
-        }
-
-        /// True when the filtered ghost is a *bare* enumerator / number /
-        /// list-marker with no real word behind it — e.g. "1", "1.", "12)",
-        /// "1er", "100%", "1/2", "-", "•", or pure punctuation.
-        ///
-        /// Why: in thin or list-like contexts ("Voici les étapes :\n", "- ",
-        /// after a period) the instruct 1B starts a numbered list — "1. …" —
-        /// and the sentence-terminator truncation chops it to "1." (and the
-        /// streaming path even emits the lone "1" first token). Showing a
-        /// bare ordinal as a ghost is noise, so we drop it. Crucially this
-        /// only fires when nothing useful follows: "1er janvier" / "1/2 tasse
-        /// de farine" carry a word and are NOT degenerate (good completions).
-        nonisolated static func isDegenerateGhost(_ s: String) -> Bool {
-            let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
-            if t.isEmpty { return true }
-            // Any letter present ⇒ there is a real word ⇒ not degenerate.
-            if t.contains(where: { $0.isLetter }) {
-                // …except a lone ordinal like "1er" / "2nd" / "3ème" / "4e".
-                if t.range(of: "^\\d{1,4}(er|ère|ere|e|ème|eme|nd|nde|th|st|rd)$",
-                           options: [.regularExpression, .caseInsensitive]) != nil {
-                    return true
-                }
-                return false
-            }
-            // No letters: lone number (opt. trailing .)°%), fraction, bullet,
-            // or pure punctuation/symbols are all degenerate.
-            if t.range(of: "^\\d{1,4}\\s*[.)°%]?$", options: .regularExpression) != nil { return true }
-            if t.range(of: "^\\d{1,4}/\\d{1,4}$", options: .regularExpression) != nil { return true }
-            if t.range(of: "^[-*•·–—]$", options: .regularExpression) != nil { return true }
-            // Only punctuation / symbols / digits, no letters at all.
-            if t.allSatisfy({ !$0.isLetter }) { return true }
-            return false
-        }
-
-        /// A character is a "word character" for coherence purposes when it can
-        /// participate in a single word — letters, digits, and the intra-word
-        /// joiners apostrophe / curly-apostrophe / hyphen. Mirrors
-        /// `stripTrailingPartialWord`'s notion so the two stay consistent.
-        nonisolated static func isWordChar(_ c: Character) -> Bool {
-            c.isLetter || c.isNumber || c == "'" || c == "’" || c == "-"
-        }
-
-        /// Returns the in-progress partial word at the END of `userTail`: the
-        /// trailing run of word-characters. Empty when the caret sits right
-        /// after a space / punctuation (i.e. NOT mid-word).
-        ///
-        /// This is exactly the slice `stripTrailingPartialWord` removes — we
-        /// expose it directly so the coherence guard can reuse the same rule.
-        nonisolated static func trailingPartialWord(_ userTail: String) -> String {
-            String(userTail.dropFirst(stripTrailingPartialWord(userTail).count))
-        }
-
-        /// Leading run of word-characters of `ghost` (the part that would splice
-        /// onto a mid-word partial). Empty when the ghost starts with a space /
-        /// punctuation — meaning it does NOT continue the same word.
-        nonisolated static func leadingWordRun(_ ghost: String) -> String {
-            var out = ""
-            for c in ghost {
-                if isWordChar(c) { out.append(c) } else { break }
-            }
-            return out
-        }
-
-        /// Leading run of LETTERS/DIGITS ONLY of `ghost` — stops at the first
-        /// apostrophe, hyphen, space or punctuation. Unlike `leadingWordRun`
-        /// this does NOT cross an intra-word joiner, so the spliced candidate is
-        /// always a single plain word that NSSpellChecker can validate (we must
-        /// not spell-check "S'il" or "aujourd'hui" across the elision boundary).
-        nonisolated static func leadingPlainRun(_ ghost: String) -> String {
-            var out = ""
-            for c in ghost {
-                if c.isLetter || c.isNumber { out.append(c) } else { break }
-            }
-            return out
-        }
-
-        /// Builds the candidate word formed by splicing the mid-word ghost onto
-        /// the in-progress partial word, OR nil when there is nothing to check
-        /// (caret not mid-word, or ghost doesn't continue the same word).
-        ///
-        /// `nil` ⇒ guard does not apply (leave the ghost alone). Returned nil
-        /// when: caret not mid-word, partial already contains a joiner, OR the
-        /// ghost starts with a joiner (apostrophe/hyphen = new sub-word after an
-        /// elision/compound boundary, "S"+"'il" → skip). A non-nil value ⇒ the
-        /// caller must spell-validate it; an invalid candidate means the splice
-        /// is incoherent and the ghost must be dropped.
-        nonisolated static func midWordCandidate(userTail: String, ghost: String) -> String? {
-            let partial = trailingPartialWord(userTail)
-            guard !partial.isEmpty else { return nil }       // caret after space/punct → not mid-word
-            // Skip hyphen/apostrophe compounds & elisions — the joiner starts a
-            // NEW word ("allez-vous", "j'ai", "est-ce", "aujourd'hui",
-            // "rendez-vous"), so the splice is never a single dictionary word
-            // and NSSpellChecker would wrongly reject a perfectly good ghost.
-            // The guard targets only plain alphabetic mid-word typos ("procéd").
-            guard !partial.contains(where: { $0 == "-" || $0 == "'" || $0 == "’" }) else { return nil }
-            // Only validate when the ghost is a SAME-WORD continuation, i.e. it
-            // starts with a letter or digit. If it starts with a joiner
-            // (apostrophe / hyphen) the ghost begins a NEW sub-word after an
-            // elision/compound boundary ("S"+"'il vous…", "aujourd"+"'hui") —
-            // spell-checking "S'il" across that boundary would wrongly drop a
-            // perfectly good ghost. Skip the guard; prefixFit already allows it.
-            guard let first = ghost.first, first.isLetter || first.isNumber else { return nil }
-            // Candidate uses the leading plain (letters/digits) run only, so the
-            // validated word stops at any joiner the ghost might contain later.
-            return partial + leadingPlainRun(ghost)
-        }
-
-        /// Instruction-text fragments the instruct 1B sometimes echoes verbatim
-        /// in degenerate cases (it restates the prompt framing instead of
-        /// continuing the user). A ghost containing any of these is meta-text,
-        /// never a real completion → drop it. Cheap substring check, lowered.
-        nonisolated static let instructionEchoMarkers: [String] = [
-            "voici le texte à continuer",
-            "voici le texte a continuer",
-            "texte à continuer",
-            "suite du texte",
-            "you are an inline autocomplete",
-            "continue the user",
-        ]
-
-        /// True when the ghost echoes the prompt instruction text instead of
-        /// continuing the user. Substring match, case- and accent-insensitive
-        /// enough for the markers above (we lowercase only; the markers cover
-        /// both accented and unaccented spellings).
-        nonisolated static func echoesInstruction(_ ghost: String) -> Bool {
-            let g = ghost.lowercased()
-            return instructionEchoMarkers.contains { g.contains($0) }
-        }
-    }
-
-    // MARK: - System prompt + language detection
-
-    /// Default autocomplete framing used in the system message of chat-template
-    /// models.
-    ///
-    /// **Verbatim** PVM:218-220 (`autocompleteSystemPrompt`).
-    static let autocompleteSystemPrompt = """
-    You are an inline autocomplete inside the user's text field. Continue the user's text exactly where it stops, in the SAME language and style as the user. Output ONLY the continuation — never repeat the user's text, never add greetings, explanations, or quotes. Keep it short: a few words, one short sentence at most. If the text ends mid-word, complete that word first. If it ends after a space, predict the next words. Output plain text only: NEVER use Markdown, HTML, XML, bold, italics, code fences, or any formatting tags like <b>, **, _, ``. Just the raw characters the user would have typed themselves.
-    """
-
-    /// Builds a system prompt with an explicit language-steering header
-    /// when we confidently detected the prefix's language.
-    ///
-    /// **Verbatim** PVM:228-235. Signature: `detectedLanguage: String?`
-    /// (pas `NLLanguage?`) — aligné sur le retour réel de `detectLanguage`.
+    /// Forwarding shim — see `LlamaPromptBuilder.buildSystemPrompt`.
     static func buildSystemPrompt(detectedLanguage: String?) -> String {
-        guard let lang = detectedLanguage else { return autocompleteSystemPrompt }
-        return """
-        The user is currently writing in \(lang). You MUST output the continuation in \(lang) only — never switch languages, never translate, never output English when the user is writing in \(lang).
-
-        \(autocompleteSystemPrompt)
-        """
+        LlamaPromptBuilder.buildSystemPrompt(detectedLanguage: detectedLanguage)
     }
 
-    /// Detects the dominant language of the last ~512 chars of the prefix.
-    /// Returns the language as an English name ("French", "Spanish", …).
-    ///
-    /// **Verbatim** PVM:383-414. Le switch sur `NLLanguage` est conservé
-    /// tel quel ; retour `String?` parce que la chaîne anglaise est ce que
-    /// `buildSystemPrompt` consomme directement.
+    /// Forwarding shim — see `LlamaPromptBuilder.detectLanguage`.
     static func detectLanguage(in text: String) -> String? {
-        let tail = String(text.suffix(512))
-        let trimmed = tail.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.count >= 8 else { return nil }
-
-        let recognizer = NLLanguageRecognizer()
-        recognizer.processString(trimmed)
-        guard let lang = recognizer.dominantLanguage else { return nil }
-        let hypotheses = recognizer.languageHypotheses(withMaximum: 1)
-        if let confidence = hypotheses[lang], confidence < 0.5 { return nil }
-
-        switch lang {
-        case .french: return "French"
-        case .english: return "English"
-        case .spanish: return "Spanish"
-        case .german: return "German"
-        case .italian: return "Italian"
-        case .portuguese: return "Portuguese"
-        case .dutch: return "Dutch"
-        case .polish: return "Polish"
-        case .russian: return "Russian"
-        case .japanese: return "Japanese"
-        case .korean: return "Korean"
-        case .simplifiedChinese, .traditionalChinese: return "Chinese"
-        case .arabic: return "Arabic"
-        case .turkish: return "Turkish"
-        default:
-            return Locale(identifier: "en").localizedString(forLanguageCode: lang.rawValue)
-        }
+        LlamaPromptBuilder.detectLanguage(in: text)
     }
 
     // MARK: - generate (04-06 — verbatim port of PVM container.perform body)
@@ -718,6 +345,18 @@ final class ModelRuntime {
         // continuation "frais" → " de port").
         let caretAfterSpace = llmTail.last == " " || llmTail.last == "\t"
 
+        // Confidence gate (Cotypist `minBranchProbability` parity). Mid-word —
+        // the caret sits inside a word (last typed char is a letter/number) —
+        // is exactly where the LLM guesses the WRONG word ("co"→colette,
+        // "c"→aca, "Po"→issons): the live overlay_shown log showed 80% of ghosts
+        // are mid-word and that is where the incoherence concentrates. We demand
+        // a high first-token probability there so the model only completes a
+        // word it is confident about, and stays silent (empty ghost) otherwise.
+        // At a word boundary several continuations are all legitimate, so we
+        // leave the gate off (0) — the LLM is reliable there.
+        let caretMidWord = userTail.last.map { $0.isLetter || $0.isNumber } ?? false
+        let minFirstTokenProb: Float = caretMidWord ? Self.midWordMinFirstTokenProb : 0
+
         // Accumulator + last-emitted tracker, isolated behind a class so the
         // @Sendable onToken closure can mutate it without crossing the actor
         // boundary back to @MainActor on every token.
@@ -757,117 +396,58 @@ final class ModelRuntime {
                     * LlamaSampling.personalizationGainScale,
                 banMarkup: true,
                 banDigitsLeading: true,
-                banEmoji: true
+                banEmoji: true,
+                minFirstTokenProb: minFirstTokenProb
             )
         ) { piece in
             if Task.isCancelled { return false }
             acc.generated += piece
 
-            // ── Filter pipeline (verbatim semantics of the MLX onChunk body) ──
-            let snapshot = OutputFilter.stripPrefixOverlap(acc.generated, prefix: userTail)
-            // Caret after a space: the model's leading space is redundant (the
-            // space is already typed) → drop ALL leading whitespace. Otherwise
-            // keep it (next-word continuation marker).
-            let stripped = caretAfterSpace
-                ? snapshot.drop(while: { $0 == "\n" || $0 == "\r" || $0 == " " || $0 == "\t" })
-                : snapshot.drop(while: { $0 == "\n" || $0 == "\r" })
-            var oneLine: String
-            if let nl = stripped.firstIndex(of: "\n") {
-                oneLine = String(stripped[..<nl])
-            } else {
-                oneLine = String(stripped)
-            }
-            oneLine = oneLine.replacingOccurrences(
-                of: "<[/!?]?[A-Za-z][A-Za-z0-9]{0,15}\\s*[^>]{0,32}>",
-                with: "",
-                options: .regularExpression
+            // ── Filter pipeline (extracted VERBATIM to ChunkFilter, Phase 5) ──
+            // `ChunkFilter.filterChunk` reproduces the full snapshot→oneLine
+            // computation (stripPrefixOverlap, leading-whitespace drop gated on
+            // caretAfterSpace, first-line, markup/`**`/`__`/backtick/U+FFFD
+            // strip, sentence-terminator truncation preserving a single leading
+            // space, word cap). The verdict maps the three drop/emit branches.
+            // The `acc.lastEmitted` "emit only when changed" rule and the
+            // `acc.lastEmitted=""` resets + `onChunk(...)` / `Log.*` side
+            // effects stay HERE so the observable sequence is identical.
+            //
+            // NOTE — mid-word coherence guard REMOVED (2026-05-27). The probe
+            // proved fresh greedy mid-word output is coherent; the spell-check
+            // only produced false positives. `OutputFilter.midWordCandidate` is
+            // retained (pure helper + tests) but no longer gates emission.
+            let (verdict, dropReason) = ChunkFilter.filterChunk(
+                accumulated: acc.generated,
+                userTail: userTail,
+                caretAfterSpace: caretAfterSpace,
+                maxWords: maxWords
             )
-            oneLine = oneLine.replacingOccurrences(of: "**", with: "")
-            oneLine = oneLine.replacingOccurrences(of: "__", with: "")
-            oneLine = oneLine.replacingOccurrences(of: "`", with: "")
-            // Strip U+FFFD replacement chars: when the sampler bans a token,
-            // greedy can fall back to a byte-fallback token that decodes mid
-            // UTF-8 sequence and renders as "" — never show it.
-            oneLine = oneLine.replacingOccurrences(of: "\u{FFFD}", with: "")
-            if oneLine.count > 3 {
-                // Preserve a single LEADING space: a next-word continuation after
-                // a complete word ("…les frais" → " de port. Mais") must keep its
-                // leading space so the ghost renders "frais de port." (not
-                // "fraisde port."). trimmingCharacters would otherwise eat it.
-                let hadLeadingSpace = oneLine.first == " "
-                for terminator in [". ", "? ", "! ", "… "] {
-                    if let r = oneLine.range(of: terminator) {
-                        var cut = String(oneLine[..<r.upperBound]).trimmingCharacters(in: .whitespaces)
-                        if hadLeadingSpace { cut = " " + cut }
-                        oneLine = cut
-                        break
-                    }
-                }
-            }
-            // Punctuation KEPT (Cotypist parity) — no comma truncation. The
-            // sentence-terminator cut above + word cap below bound the length.
-            let words = oneLine.split(whereSeparator: { $0.isWhitespace })
-            if words.count > maxWords {
-                oneLine = words.prefix(maxWords).joined(separator: " ")
-            }
-
-            if OutputFilter.ghostIsRepeatingPrefix(oneLine, prefix: userTail) {
+            switch verdict {
+            case .reset:
                 Log.info(.predictor, "ghost_dropped_repeat")
                 let chunkOut = ""
                 Task { @MainActor in onChunk(chunkOut) }
                 return true
-            }
-
-            // Drop bare enumerators / lone numbers ("1", "1.", "1er") that the
-            // instruct model emits when it starts a numbered list in a thin or
-            // list-like context. Better to show nothing than a "1" ghost. Keep
-            // generating — a later token may yield a real continuation.
-            if OutputFilter.isDegenerateGhost(oneLine) {
+            case .dropKeepGenerating:
+                if dropReason == .instructionEcho {
+                    Log.info(.predictor, "ghost_dropped_instruction_echo")
+                }
                 if !acc.lastEmitted.isEmpty {
                     acc.lastEmitted = ""
                     Task { @MainActor in onChunk("") }
                 }
                 return true
-            }
-
-            // Instruction-echo safety net : in degenerate cases the instruct 1B
-            // restates the prompt framing ("Voici le texte à continuer :", …)
-            // instead of continuing the user. The first-line + sentence
-            // truncation above already cut most of it, but a leaked echo is
-            // meta-text, never a real completion → drop and keep generating.
-            if OutputFilter.echoesInstruction(oneLine) {
-                Log.info(.predictor, "ghost_dropped_instruction_echo")
-                if !acc.lastEmitted.isEmpty {
-                    acc.lastEmitted = ""
-                    Task { @MainActor in onChunk("") }
-                }
+            case .emit(let oneLine):
+                // Only emit when the filtered one-line ghost actually changed.
+                guard oneLine != acc.lastEmitted else { return true }
+                acc.lastEmitted = oneLine
+                let chunkOut = oneLine
+                Task { @MainActor in onChunk(chunkOut) }
+                // Stop once we hit a sentence terminator (the truncation above
+                // already trimmed at it) — no value generating further tokens.
                 return true
             }
-
-            // NOTE — mid-word coherence guard REMOVED (2026-05-27).
-            // It used to drop a mid-word splice whose "partial+head" wasn't a
-            // dictionary word (to kill "…procéd"+"blème" → "procédblème"). But
-            // the probe proved that bug came from STALE-ghost splicing, not the
-            // model: FRESH greedy output is coherent across the board ("procéd"
-            // → "procédural", "gamif" → "gamifier", "dévelo" → "développer").
-            // The spell-check only produced FALSE POSITIVES — NSSpellChecker
-            // rejects valid neologisms/technical terms ("gamifier", "procédural"),
-            // so the guard dropped the GRAMMATICALLY CORRECT completion and let a
-            // stale dictionary word ("gamification") linger. The real incoherent-
-            // splice cause is now prevented upstream (isStaleMidWordCompletion +
-            // trailing-space fix + cleared corpus), so we trust the model's fresh
-            // mid-word continuation. `OutputFilter.midWordCandidate` is retained
-            // (pure helper + tests) but no longer gates emission.
-
-            // Only emit when the filtered one-line ghost actually changed.
-            guard oneLine != acc.lastEmitted else { return true }
-            acc.lastEmitted = oneLine
-            let chunkOut = oneLine
-            Task { @MainActor in onChunk(chunkOut) }
-
-            // Stop once we hit a sentence terminator (the truncation above
-            // already trimmed at it) — no value generating further tokens.
-            return true
         }
 
         if Task.isCancelled { return nil }
@@ -903,8 +483,11 @@ final class ModelRuntime {
     /// writing:" label dragged "Cocotypist" into a delivery sentence — avoided).
     /// This mirrors Cotypist, which injects the same kind of labelled block
     /// (`PromptTemplates` / "My writing:") rather than a chat-template system
-    /// message. The block is prepended FIRST (most global), before the
-    /// screen/field context, so the user's text still ends the prompt.
+    /// message.
+    ///
+    /// **Phase 5** : forwarding shim to `LlamaPromptBuilder.buildLlamaPrompt`
+    /// (extracted to SouffleuseCore). Kept so `ModelRuntime.buildLlamaPrompt`
+    /// call-sites (generateLlama, BuildLlamaPromptTests) compile unchanged.
     static func buildLlamaPrompt(
         system: String,
         customInstr: String,
@@ -913,22 +496,14 @@ final class ModelRuntime {
         afterCursor: String,
         beforeCursor: String
     ) -> String {
-        var prefix = ""
-        let trimmedInstr = customInstr.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedInstr.isEmpty { prefix += "Contexte : " + trimmedInstr + "\n\n" }
-        if !ctxPrefix.isEmpty { prefix += ctxPrefix + "\n\n" }
-        if !fieldContext.isEmpty { prefix += fieldContext + "\n\n" }
-        // Strip a TRAILING space/tab from the text the model continues. A
-        // SentencePiece model emits the next token WITH its own leading space
-        // (" arriver"), so a space already present at the end derails greedy —
-        // "on va y " loops/repeats, while "on va y" cleanly yields " arriver.".
-        // (Proven in the probe primer sweep.) The caller (`generateLlama`)
-        // knows the caret sits after a space and drops the ghost's leading
-        // space so rendering stays "on va y arriver." with a single space.
-        // Newlines are NOT trimmed — a caret on a fresh line is intentional.
-        var bc = beforeCursor
-        while let last = bc.last, last == " " || last == "\t" { bc.removeLast() }
-        return prefix + bc
+        LlamaPromptBuilder.buildLlamaPrompt(
+            system: system,
+            customInstr: customInstr,
+            ctxPrefix: ctxPrefix,
+            fieldContext: fieldContext,
+            afterCursor: afterCursor,
+            beforeCursor: beforeCursor
+        )
     }
 
     /// Verbatim MLX generation body — retained dead for reference; no longer
