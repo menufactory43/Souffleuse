@@ -1,4 +1,5 @@
 import Testing
+import SouffleuseCore
 @testable import Souffleuse
 
 /// Guards the trailing-space strip in `buildLlamaPrompt` — the fix for the

@@ -30,10 +30,11 @@ struct NextWordStubTests {
         #expect(PredictorViewModel.isNextWordStub(userTail: "J'ai envie", ghost: " de") == false)
     }
 
-    @Test("mid-word single letter (caret inside a word) → not a stub")
-    func midWordSingleLetterExempt() {
-        // "Bonjou" + "r" → finishes the word; the userTail ends in a letter so
-        // the boundary guard does not fire — keep the completion.
+    @Test("mid-word single letter is not a NEXT-WORD stub (isMidWordStub's job)")
+    func midWordSingleLetterNotNextWord() {
+        // The boundary guard never fires mid-word; the mid-word single-char case
+        // is handled by isMidWordStub (tested below). At the call site the two
+        // are OR-ed.
         #expect(PredictorViewModel.isNextWordStub(userTail: "Bonjou", ghost: "r") == false)
     }
 
@@ -45,5 +46,36 @@ struct NextWordStubTests {
     @Test("after punctuation (no space) → boundary, lone letter is a stub")
     func afterPunctuation() {
         #expect(PredictorViewModel.isNextWordStub(userTail: "Bonjour,", ghost: "m") == true)
+    }
+
+    // MARK: - Mid-word single-char stub (the "opé"→"r" / "dp"→"n" bug)
+
+    @Test("lone char continuing a word → mid-word stub")
+    func midWordLoneCharIsStub() {
+        // "…d'opé" + "r" and "C'est un dp" + "n" — a single mid-word char is the
+        // first streamed token / confused output, unreadable as intent.
+        #expect(PredictorViewModel.isMidWordStub(userTail: "Pouvez-vous m'indiquer quels types d'opé", ghost: "r") == true)
+        #expect(PredictorViewModel.isMidWordStub(userTail: "C'est un dp", ghost: "n") == true)
+        #expect(PredictorViewModel.isMidWordStub(userTail: "Bonjou", ghost: "r") == true)
+    }
+
+    @Test("two or more mid-word chars → not a stub")
+    func midWordTwoCharsKept() {
+        #expect(PredictorViewModel.isMidWordStub(userTail: "d'opé", ghost: "rations") == false)
+        #expect(PredictorViewModel.isMidWordStub(userTail: "Bonjou", ghost: "rs") == false)
+    }
+
+    @Test("word-boundary lone char is NOT a mid-word stub (isNextWordStub's job)")
+    func boundaryNotMidWord() {
+        #expect(PredictorViewModel.isMidWordStub(userTail: "J'ai envie de ", ghost: "m") == false)
+        #expect(PredictorViewModel.isMidWordStub(userTail: "Bonjour,", ghost: "m") == false)
+        #expect(PredictorViewModel.isMidWordStub(userTail: "", ghost: "m") == false)
+    }
+
+    @Test("next-word (leading-space) lone char is NOT a mid-word stub")
+    func leadingSpaceNotMidWord() {
+        // Even with a letter-ending userTail, a leading-space ghost is a
+        // next-word continuation → isNextWordStub's domain, not this one.
+        #expect(PredictorViewModel.isMidWordStub(userTail: "J'ai envie", ghost: " m") == false)
     }
 }

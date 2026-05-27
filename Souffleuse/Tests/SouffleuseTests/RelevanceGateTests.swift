@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import SouffleuseCore
 @testable import Souffleuse
 
 /// Phase 4 plan 04-01 — pure-function tests on the Ghost Relevance Gate

@@ -9,9 +9,17 @@ import SouffleuseLog
 public struct LlamaMetrics: Sendable {
     public var ttftMillis: Int?
     public var tokensPerSecond: Double?
-    public init(ttftMillis: Int? = nil, tokensPerSecond: Double? = nil) {
+    /// Softmax probability the model assigned to the FIRST sampled token, on
+    /// the (ban/bias-adjusted) distribution actually used for sampling. This is
+    /// the model's confidence in how it starts the completion — low when it is
+    /// guessing which word you mean mid-word ("co" → colette? comment?). nil
+    /// when no token was produced. Used by the confidence gate (Cotypist
+    /// `minBranchProbability` parity) and read by the probe to calibrate it.
+    public var firstTokenProb: Double?
+    public init(ttftMillis: Int? = nil, tokensPerSecond: Double? = nil, firstTokenProb: Double? = nil) {
         self.ttftMillis = ttftMillis
         self.tokensPerSecond = tokensPerSecond
+        self.firstTokenProb = firstTokenProb
     }
 }
 
@@ -83,6 +91,15 @@ public struct LlamaSampling: Sendable {
     /// but a polluted corpus leaks more). `0` falls back to the engine default.
     public var nucleusMargin: Float
 
+    /// Confidence gate (Cotypist `minBranchProbability` parity). When > 0, the
+    /// decode is ABORTED with zero tokens if the FIRST sampled token's softmax
+    /// probability is below this threshold — i.e. the model is guessing rather
+    /// than confident. The caller raises it mid-word (where a low first-token
+    /// prob means "wrong word": "co" → colette/comment/commande split) and
+    /// leaves it 0 at a word boundary (where several continuations are all
+    /// legitimate). `0` disables the gate (zero overhead — no softmax scan).
+    public var minFirstTokenProb: Float
+
     public init(temperature: Float = 0,
                 repeatPenalty: Float = 1.1,
                 repeatLastN: Int32 = 64,
@@ -95,7 +112,8 @@ public struct LlamaSampling: Sendable {
                 banDigits: Bool = false,
                 banDigitsLeading: Bool = false,
                 banEmoji: Bool = false,
-                nucleusMargin: Float = 0) {
+                nucleusMargin: Float = 0,
+                minFirstTokenProb: Float = 0) {
         self.temperature = temperature
         self.repeatPenalty = repeatPenalty
         self.repeatLastN = repeatLastN
@@ -109,6 +127,7 @@ public struct LlamaSampling: Sendable {
         self.banDigitsLeading = banDigitsLeading
         self.banEmoji = banEmoji
         self.nucleusMargin = nucleusMargin
+        self.minFirstTokenProb = minFirstTokenProb
     }
 }
 
@@ -908,6 +927,30 @@ public actor LlamaEngine {
 
             let tokenId = llama_sampler_sample(sampler, h.context, -1)
             if llama_vocab_is_eog(h.vocab, tokenId) { break }
+
+            // Confidence gate (Cotypist `minBranchProbability` parity). On the
+            // FIRST token only, compute the softmax probability the model gave
+            // the token it actually chose. The logits at position -1 are still
+            // the ones the sampler just read (we haven't decoded the new token
+            // yet), so this is exact — including any ban (-inf) / corpus bias
+            // already applied in place above. A low value means the model is
+            // guessing (mid-word word-identity ambiguity, or a language flip);
+            // we abort with zero tokens so no ghost is shown.
+            if produced == 0, sampling.minFirstTokenProb > 0,
+               let logits = llama_get_logits_ith(h.context, -1) {
+                let nVocab = Int(llama_vocab_n_tokens(h.vocab))
+                var maxLogit = -Float.greatestFiniteMagnitude
+                for i in 0..<nVocab where logits[i] > maxLogit { maxLogit = logits[i] }
+                var sumExp: Double = 0
+                for i in 0..<nVocab {
+                    let l = logits[i]
+                    if l > -Float.greatestFiniteMagnitude { sumExp += Double(expf(l - maxLogit)) }
+                }
+                let prob = sumExp > 0 ? Double(expf(logits[Int(tokenId)] - maxLogit)) / sumExp : 0
+                metrics.firstTokenProb = prob
+                if prob < Double(sampling.minFirstTokenProb) { break }
+            }
+
             llama_sampler_accept(sampler, tokenId)
 
             if biasActive {

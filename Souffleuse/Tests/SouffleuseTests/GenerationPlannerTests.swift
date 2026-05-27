@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import SouffleuseCore
 @testable import Souffleuse
 
 /// Plan 04-03 — verrouille les invariants de `GenerationPlanner` :

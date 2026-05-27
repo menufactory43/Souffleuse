@@ -2,6 +2,7 @@ import Testing
 import Foundation
 import SouffleusePersonalization
 import SouffleuseTyping
+import SouffleuseCore
 @testable import Souffleuse
 
 @Suite("Instant Ghost Path — history exact-substring match")

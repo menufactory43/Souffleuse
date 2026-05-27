@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import SouffleuseCore
 @testable import Souffleuse
 
 /// Phase 4 — Classification grid lifecycle invariants (D-09, D-10, Pitfall 5).

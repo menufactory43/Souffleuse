@@ -33,11 +33,12 @@ import Testing
 
 @MainActor
 @Test func overlayEstimatedFontInvertsLineHeightRatio() {
-    // Standard system text: line-height ≈ font-size × 1.2.
-    // A 18pt line height should give us roughly 15pt.
+    // We divide the line height by 1.1 (not the strict 1.2) so the ghost
+    // renders a hair larger than the host text in tight web/Electron line
+    // boxes. A 18pt line height should give us roughly 16.4pt.
     let f = OverlayWindow.estimatedFont(forCaretRectHeight: 18)
     #expect(f != nil)
-    #expect(abs((f?.pointSize ?? 0) - 15) < 0.5)
+    #expect(abs((f?.pointSize ?? 0) - 16.36) < 0.5)
 }
 
 @MainActor

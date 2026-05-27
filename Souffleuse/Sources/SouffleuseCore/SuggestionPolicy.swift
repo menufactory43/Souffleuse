@@ -37,7 +37,7 @@ import SouffleuseTyping
 ///
 /// Le nom est canonique cross-module. Migration verbatim depuis
 /// `PredictorViewModel.SuggestionSource` (PVM L101-108 pre-Phase-4).
-enum SuggestionSource: Sendable {
+public enum SuggestionSource: Sendable {
     case none           // suggestion is "" or stale
     case wordComplete   // Layer 0 — NSSpellChecker
     case history        // Layer 1 — TypingHistoryStore match
@@ -57,27 +57,33 @@ enum SuggestionSource: Sendable {
 ///
 /// Le triplet est conservé pour pouvoir logger les composants séparément
 /// (audit-safe : juste des `count: Int` scaled).
-struct Score: Sendable, Equatable, CustomStringConvertible {
-    let sourcePrior: Float
-    let prefixFit: Float
-    let lengthFit: Float
+public struct Score: Sendable, Equatable, CustomStringConvertible {
+    public let sourcePrior: Float
+    public let prefixFit: Float
+    public let lengthFit: Float
+
+    public init(sourcePrior: Float, prefixFit: Float, lengthFit: Float) {
+        self.sourcePrior = sourcePrior
+        self.prefixFit = prefixFit
+        self.lengthFit = lengthFit
+    }
 
     /// Produit des trois facteurs. Toujours dans [0,1] tant que les facteurs y sont.
-    var value: Float { sourcePrior * prefixFit * lengthFit }
+    public var value: Float { sourcePrior * prefixFit * lengthFit }
 
     /// D-07 hard floor : sous ce seuil le ghost est rejeté sans affichage.
-    var passesGate: Bool { value >= SuggestionPolicy.Tuning.gateFloor }
+    public var passesGate: Bool { value >= SuggestionPolicy.Tuning.gateFloor }
 
     /// D-07 replacement bar : un nouveau ghost doit battre le score courant
     /// d'un facteur `Tuning.replacementBar` pour le supplanter. Évite le
     /// churn (régression de la session 2026-05-25, commits 2b6b6be..7316a8c).
     /// L'égalité stricte est volontairement insuffisante : `a.beats(a) == false`
     /// quand `value == 0` ; sinon `value >= value * 1.15` est false.
-    func beats(_ other: Score) -> Bool {
+    public func beats(_ other: Score) -> Bool {
         value >= other.value * SuggestionPolicy.Tuning.replacementBar
     }
 
-    var description: String {
+    public var description: String {
         "Score(src=\(sourcePrior) pref=\(prefixFit) len=\(lengthFit) → \(value))"
     }
 }
@@ -87,14 +93,14 @@ struct Score: Sendable, Equatable, CustomStringConvertible {
 /// Namespace pour les pure-function helpers du Ghost Relevance Gate.
 /// Tous les seuils consommés ici vivent dans `SuggestionPolicy+Tuning.swift`
 /// (Pitfall 6 — aucun littéral autorisé ailleurs).
-enum SuggestionPolicy {
+public enum SuggestionPolicy {
 
     /// Calcule le `Score` complet pour un ghost candidat (D-06).
     ///
     /// Pure function : `(source, ghost, userTail) → Score`. Aucun effet de bord.
     /// Le caller (PVM ou le futur `SuggestionPolicyEngine`) compose `passesGate`
     /// et `beats(_:)` au-dessus pour décider d'afficher/replacer.
-    static func score(source: SuggestionSource, ghost: String, userTail: String) -> Score {
+    public static func score(source: SuggestionSource, ghost: String, userTail: String) -> Score {
         Score(
             sourcePrior: Tuning.sourcePrior[source] ?? 0.0,
             prefixFit: Self.prefixFit(ghost: ghost, userTail: userTail),
@@ -110,12 +116,51 @@ enum SuggestionPolicy {
     /// scoring (le scoring tourne sur le `@MainActor` onChunk / routeInstant).
     private static let sharedTypoDetector = TypoDetector()
 
+    /// Reconstructs the continuous text of a history entry from its stored
+    /// `contextBefore` + `accepted`.
+    ///
+    /// `accepted` is recorded TRIMMED, so the word/next-word boundary is lost.
+    /// The old code unconditionally inserted a space (`contextBefore + " " +
+    /// accepted`), which corrupted MID-WORD accepts: "…vend" + "redi" →
+    /// "vend redi" (should be "vendredi"), "liquida" + "tion" → "liquida tion".
+    /// We restore the boundary by inserting a space ONLY when it is actually
+    /// needed: if the trailing word of `contextBefore` glued to the leading word
+    /// of `accepted` forms a real dictionary word (vendredi, liquidation), it
+    /// was a mid-word completion → no space; otherwise it was a next-word
+    /// completion ("…le" + "montant" → "le montant") → space. Whitespace/
+    /// punctuation boundaries are passed through unchanged.
+    public nonisolated static func joinHistory(_ contextBefore: String, _ accepted: String) -> String {
+        guard !contextBefore.isEmpty else { return accepted }
+        guard let cb = contextBefore.last, let af = accepted.first else {
+            return contextBefore + accepted
+        }
+        // Boundary already carries a separator → concat verbatim.
+        if cb.isWhitespace || af.isWhitespace { return contextBefore + accepted }
+        // An uppercase start is a new word / proper noun, never a mid-word
+        // continuation ("Bonjour" + "Madame", not "BonjourMadame") → space.
+        if af.isUppercase { return contextBefore + " " + accepted }
+        // Letter/number on both sides: ambiguous (mid-word vs next-word). Decide
+        // with the dictionary on the merged boundary word.
+        if (cb.isLetter || cb.isNumber) && (af.isLetter || af.isNumber) {
+            let lastWord = OutputFilter.trailingPartialWord(contextBefore)
+            let headWord = OutputFilter.leadingWordRun(accepted)
+            let merged = lastWord + headWord
+            if !merged.isEmpty, sharedTypoDetector.isValidWord(merged, language: nil) {
+                return contextBefore + accepted          // mid-word → glue
+            }
+            return contextBefore + " " + accepted        // next-word → space
+        }
+        // Punctuation boundary (".", "?", …) before a new word → space reads
+        // naturally ("corrigé." + "Bonjour" → "corrigé. Bonjour").
+        return contextBefore + " " + accepted
+    }
+
     /// Le mot partiel en fin de `userTail` est-il un mot COMPLET/valide ?
     /// Réutilise `ModelRuntime.OutputFilter.trailingPartialWord` (même notion
     /// que le coherence guard mid-word) puis `TypoDetector.isValidWord`.
     /// Permissif FR+EN. Vide ⇒ pas mid-word ⇒ false (caller ne l'appelle pas).
-    nonisolated static func defaultPartialWordIsComplete(_ userTail: String) -> Bool {
-        let partial = ModelRuntime.OutputFilter.trailingPartialWord(userTail)
+    public nonisolated static func defaultPartialWordIsComplete(_ userTail: String) -> Bool {
+        let partial = OutputFilter.trailingPartialWord(userTail)
         guard !partial.isEmpty else { return false }
         return sharedTypoDetector.isValidWord(partial, language: nil)
     }
@@ -144,7 +189,7 @@ enum SuggestionPolicy {
     ///
     /// `partialWordIsComplete` est injecté pour garder la fonction testable sans
     /// `NSSpellChecker` ; par défaut il délègue à `defaultPartialWordIsComplete`.
-    nonisolated static func prefixFit(
+    public nonisolated static func prefixFit(
         ghost: String,
         userTail: String,
         partialWordIsComplete: ((String) -> Bool)? = nil
@@ -183,7 +228,7 @@ enum SuggestionPolicy {
 
     /// D-06 length_fit : bell curve sur le nombre de mots du ghost.
     /// Table `Tuning.lengthFitByWordCount` ; clamp à la dernière entrée pour ≥10.
-    nonisolated static func lengthFit(ghost: String) -> Float {
+    public nonisolated static func lengthFit(ghost: String) -> Float {
         let wordCount = ghost.split(whereSeparator: { $0.isWhitespace }).count
         let table = Tuning.lengthFitByWordCount
         guard !table.isEmpty else { return 0.0 }
@@ -233,7 +278,7 @@ enum SuggestionPolicy {
     /// Returns the saved continuation when the user's recent tail matches
     /// an entry's body. Nil when the lookback is too short (<6 chars) or
     /// ends on whitespace (next-word predicate too wide for exact-match).
-    nonisolated static func historyExactSubstringMatch(
+    public nonisolated static func historyExactSubstringMatch(
         userTail: String,
         snapshot: [TypingHistoryEntry]
     ) -> String? {
@@ -241,9 +286,7 @@ enum SuggestionPolicy {
         guard lookback.count >= 6 else { return nil }
         if lookback.last?.isWhitespace == true { return nil }
         for entry in snapshot {
-            let full = entry.contextBefore.isEmpty
-                ? entry.accepted
-                : entry.contextBefore + " " + entry.accepted
+            let full = joinHistory(entry.contextBefore, entry.accepted)
             if let r = full.range(of: lookback) {
                 let after = full[r.upperBound...]
                 let trimmed = String(after)
@@ -270,7 +313,7 @@ enum SuggestionPolicy {
     /// tails — an after-space context is exactly where Cotypist's instant
     /// completion fires. The match must still be word-aligned (the overlap ends
     /// at the user's caret, and the continuation is the entry's remainder).
-    nonisolated static func strongCorpusMatch(
+    public nonisolated static func strongCorpusMatch(
         userTail: String,
         snapshot: [TypingHistoryEntry],
         minChars: Int = Tuning.strongCorpusMatchMinChars
@@ -283,9 +326,7 @@ enum SuggestionPolicy {
 
         var best: (continuation: String, matchedChars: Int)?
         for entry in snapshot {
-            let full = entry.contextBefore.isEmpty
-                ? entry.accepted
-                : entry.contextBefore + " " + entry.accepted
+            let full = joinHistory(entry.contextBefore, entry.accepted)
             // Find the longest suffix of the user tail that occurs in `full`
             // and leaves a non-empty continuation after it.
             var len = min(lookbackFull.count, full.count)
@@ -309,7 +350,7 @@ enum SuggestionPolicy {
     /// Truncates `text` to at most `max` whole words, respecting natural
     /// break points (sentence terminators, soft comma break, word cap).
     /// Migration verbatim depuis PVM:411-429 (pre-Phase-4).
-    nonisolated static func capToWords(_ text: String, max: Int) -> String {
+    public nonisolated static func capToWords(_ text: String, max: Int) -> String {
         var s = text
         if s.count > 3 {
             // Preserve a single leading space so a next-word continuation keeps
@@ -339,16 +380,22 @@ enum SuggestionPolicy {
 
 /// Résultat d'une décision de routing — soit un nouveau ghost à afficher,
 /// soit nil (aucun changement). Sendable + Equatable pour test seam.
-struct GhostUpdate: Sendable, Equatable {
-    let text: String
-    let source: SuggestionSource
-    let score: Score
+public struct GhostUpdate: Sendable, Equatable {
+    public let text: String
+    public let source: SuggestionSource
+    public let score: Score
+
+    public init(text: String, source: SuggestionSource, score: Score) {
+        self.text = text
+        self.source = source
+        self.score = score
+    }
 }
 
 /// Cause de fin de vie d'un ghost. Le call-site `endLifecycle(reason:)` mappe
 /// chaque cas vers AU PLUS UN event `ghost_classified_*` (D-09/D-10).
 /// Pitfall 5 RESEARCH §728-736 : 1 ghost lifecycle = 1 classification event.
-enum LifecycleEndReason: Sendable {
+public enum LifecycleEndReason: Sendable {
     case acceptedFull
     case acceptedPartial(chunks: Int)
     case dismissedByEsc
@@ -377,20 +424,20 @@ enum LifecycleEndReason: Sendable {
 /// State strictement local : `currentGhost`, `currentSource`, `currentScore`, `shownAt`,
 /// `lastReplacedSource`, `maxWords`. Aucun lien direct vers AppKit / MLX / AX.
 @MainActor
-final class SuggestionPolicyEngine {
-    private(set) var currentGhost: String = ""
-    private(set) var currentSource: SuggestionSource = .none
-    private(set) var currentScore: Score = Score(sourcePrior: 0, prefixFit: 0, lengthFit: 0)
-    private(set) var shownAt: Date? = nil
-    private(set) var lastReplacedSource: SuggestionSource = .none
+public final class SuggestionPolicyEngine {
+    public private(set) var currentGhost: String = ""
+    public private(set) var currentSource: SuggestionSource = .none
+    public private(set) var currentScore: Score = Score(sourcePrior: 0, prefixFit: 0, lengthFit: 0)
+    public private(set) var shownAt: Date? = nil
+    public private(set) var lastReplacedSource: SuggestionSource = .none
     private var maxWords: Int
 
-    init(maxWords: Int) {
+    public init(maxWords: Int) {
         self.maxWords = maxWords
     }
 
     /// Sync le cap de longueur depuis PreferencesStore.
-    func updateMaxWords(_ n: Int) {
+    public func updateMaxWords(_ n: Int) {
         self.maxWords = n
     }
 
@@ -398,7 +445,7 @@ final class SuggestionPolicyEngine {
     /// reflète plus la réalité. Demote vers `.llm` au début de predict afin que
     /// la cascade puisse re-confirmer ou accepter une mise à jour légitime.
     /// Migration verbatim depuis PVM:512-517 (pre-Phase-4).
-    func beginPredict() {
+    public func beginPredict() {
         switch currentSource {
         case .history, .cache, .undoCache:
             currentSource = .llm
@@ -417,7 +464,7 @@ final class SuggestionPolicyEngine {
     ///
     /// Aucun side-effect sur le state interne — caller doit appeler `applyGhost`
     /// pour effectivement set le ghost.
-    func routeInstant(
+    public func routeInstant(
         userTail: String,
         historySnapshot: [TypingHistoryEntry],
         wordCompleter: WordCompleter
@@ -526,25 +573,48 @@ final class SuggestionPolicyEngine {
     ///    émission directe de `ghost_classified_parasite` (D-09/D-10).
     ///
     /// Retourne `GhostUpdate?` — le caller appelle `applyGhost(...)` pour set le state.
-    func onLLMChunk(_ chunk: String, userTail: String) -> GhostUpdate? {
-        // D-08 mid-word handling — UNBLOCKED (2026-05-26).
+    public func onLLMChunk(_ chunk: String, userTail: String) -> GhostUpdate? {
+        // D-08 mid-word handling — Option A REFINED (2026-05-27).
         //
-        // The blunt mid-word block was removed. Coherent mid-word LLM
-        // continuations (Cotypist parity: "fai"→"s", "problè"→"me") must reach
-        // the screen. Quality is now enforced UPSTREAM in
-        // `ModelRuntime.generateLlama` by the mid-word coherence guard
-        // (`OutputFilter.midWordCandidate` + `TypoDetector.isValidWord`), which
-        // already DROPS incoherent splices ("fai"+"que"="faique") before the
-        // chunk ever reaches here and KEEPS coherent ones. Only the survivors
-        // arrive — so the unconditional block was redundant and was the sole
-        // reason coherent mid-word ghosts never showed.
+        // History: the 2026-05-26 unblock let ALL free-LLM mid-word output
+        // through; the live `overlay_shown` log showed the 1B routinely
+        // completes a DIFFERENT word than intended ("co"→"lette", "c"→"aca",
+        // "informations pe"→"peinardes"). A first-token confidence gate did NOT
+        // discriminate (the model is often confidently wrong). The first fix
+        // blocked ALL mid-word LLM — but the replay harness proved that was too
+        // blunt: it also killed the GOOD case where the partial word is already
+        // a COMPLETE word ("corrigé"→" dans la prochaine version", "vendredi"→
+        // " prochain", "contrôle"→" de la température…", "exactement"→" ce que
+        // je pensais"). Those are exactly the long, coherent ghosts we want.
         //
-        // The rest of the Relevance Gate (gate floor, replacement bar /
-        // anti-churn, parasite-window classification) stays intact and applies
-        // mid-word too: `prefixFit` already returns 1.0 for a letter-starting
-        // ghost on a mid-word tail (and 0.0 for a non-letter splice), so a
-        // coherent continuation scores sanely and a stray punctuation/markdown
-        // splice is still gated out.
+        // Refined rule: mid-word, block the LLM ONLY when the current partial
+        // word is INCOMPLETE (a fragment the model must guess: "pr", "C'es",
+        // "prha"). When it is already a complete dictionary word, the caret is
+        // effectively at a word boundary → the LLM does a reliable NEXT-WORD
+        // continuation → allow it (prefixFit already returns 1.0 for a
+        // space-led ghost after a complete word).
+        if let last = userTail.last, last.isLetter || last.isNumber {
+            // Allow the LLM mid-word ONLY when the partial word is both a
+            // complete dictionary word AND long enough to be unambiguous. The
+            // replay harness showed short "complete" fragments are false
+            // positives — NSSpellChecker accepts "es", "pr", "pu", "v" — and
+            // letting them through reintroduces wrong-word guesses ("ma pr"→
+            // "prunelle") and foreign-language drift on thin prefixes ("Si v"→
+            // Spanish, "C'e"→Italian). A ≥N-char complete word ("frais",
+            // "corrigé", "vendredi", "contrôle", "exactement") is a real word
+            // boundary where the LLM's next-word continuation is reliable.
+            let partial = OutputFilter.trailingPartialWord(userTail)
+            let allow = partial.count >= SuggestionPolicy.Tuning.midWordLLMMinCompleteWordChars
+                && SuggestionPolicy.defaultPartialWordIsComplete(userTail)
+            if !allow {
+                Log.info(.predictor, "ghost_midword_llm_block", count: chunk.count)
+                return nil
+            }
+        }
+
+        // Word-boundary path (after space/punctuation). The Relevance Gate
+        // below (gate floor, replacement bar / anti-churn, parasite-window
+        // classification) applies as before.
         let score = SuggestionPolicy.score(
             source: .llm,
             ghost: chunk,
@@ -583,7 +653,7 @@ final class SuggestionPolicyEngine {
     }
 
     /// Set le ghost courant atomiquement. Track `lastReplacedSource` pour debug.
-    func applyGhost(_ text: String, source: SuggestionSource, score: Score) {
+    public func applyGhost(_ text: String, source: SuggestionSource, score: Score) {
         lastReplacedSource = currentSource
         currentGhost = text
         currentSource = source
@@ -594,7 +664,7 @@ final class SuggestionPolicyEngine {
     /// SINGLE CALL-SITE pour les 5 events `ghost_classified_*` (D-09/D-10).
     /// Pitfall 5 : 1 lifecycle = 1 event. Reset state après émission ; second
     /// call no-op via guard `!currentGhost.isEmpty`.
-    func endLifecycle(reason: LifecycleEndReason) {
+    public func endLifecycle(reason: LifecycleEndReason) {
         guard !currentGhost.isEmpty, let shown = shownAt else { return }
         let visibleMs = Int(Date().timeIntervalSince(shown) * 1000)
         switch reason {
@@ -624,7 +694,7 @@ final class SuggestionPolicyEngine {
 
     /// Réinit complet. Appelé depuis `PredictorViewModel.cancel(...)` après
     /// `endLifecycle(...)`.
-    func reset() {
+    public func reset() {
         currentGhost = ""
         currentSource = .none
         currentScore = Score(sourcePrior: 0, prefixFit: 0, lengthFit: 0)
