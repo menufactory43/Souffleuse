@@ -59,19 +59,23 @@ import Testing
 
 @MainActor
 @Test func midTextSuppressionRule() {
-    // Rule: suppress whenever ANY non-whitespace text remains after the caret.
+    // Rule: suppress when non-whitespace remains on the CURRENT line after the
+    // caret (scan stops at the first newline).
     // Caret inside "hello" (next char 'l', more follows) → suppress.
     #expect(SouffleuseAppDelegate.shouldSuppressForCaretContext(text: "hello", caretIndex: 2))
     // Caret at position 0, whole word follows → suppress.
     #expect(SouffleuseAppDelegate.shouldSuppressForCaretContext(text: "hello", caretIndex: 0))
     // Caret clicked between two words (lands before the inter-word space),
-    // "world" still follows → suppress (the real "edit mid-text" case).
+    // "world" still follows on the same line → suppress (the "edit mid-text" case).
     #expect(SouffleuseAppDelegate.shouldSuppressForCaretContext(text: "hello world", caretIndex: 5))
-    // Caret before a newline with another line after → suppress.
-    #expect(SouffleuseAppDelegate.shouldSuppressForCaretContext(text: "line one\nline two", caretIndex: 8))
+    // Caret at END of first line, "line two" is BELOW (after newline) →
+    // do NOT suppress (appending at end of a line, signature beneath is fine).
+    #expect(!SouffleuseAppDelegate.shouldSuppressForCaretContext(text: "line one\nline two", caretIndex: 8))
+    // Caret mid-first-line ("one" still follows before the newline) → suppress.
+    #expect(SouffleuseAppDelegate.shouldSuppressForCaretContext(text: "line one\nline two", caretIndex: 5))
     // Caret at end of text (nothing after) → do NOT suppress.
     #expect(!SouffleuseAppDelegate.shouldSuppressForCaretContext(text: "hello", caretIndex: 5))
-    // Caret before ONLY trailing whitespace (append at very end) → do NOT suppress.
+    // Caret before ONLY trailing whitespace on the line → do NOT suppress.
     #expect(!SouffleuseAppDelegate.shouldSuppressForCaretContext(text: "hello   ", caretIndex: 5))
     // Caret before a trailing newline only → do NOT suppress.
     #expect(!SouffleuseAppDelegate.shouldSuppressForCaretContext(text: "hello\n", caretIndex: 5))
