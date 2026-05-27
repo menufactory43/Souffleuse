@@ -165,7 +165,6 @@ final class ModelRuntime {
     /// thread-safe behind its own `@unchecked Sendable` declaration, so it can
     /// be captured by the `@Sendable` onToken closure without crossing back to
     /// the actor on every token.
-    private let spellChecker = TypoDetector()
 
     /// True once the GGUF is loaded into the llama engine.
     private(set) var llamaReady = false
@@ -845,24 +844,20 @@ final class ModelRuntime {
                 return true
             }
 
-            // Mid-word coherence guard. When the caret sits mid-word (userTail
-            // ends in a partial word) and the ghost continues that same word
-            // (starts with a word-char), the spliced candidate "partial+head"
-            // must be a real word. Otherwise the model produced an incoherent
-            // continuation — e.g. "…procéd" + "blème" → "procédblème" (a
-            // non-word, amplified by the corpus bias). Drop those; keep
-            // coherent ones ("problè" + "me…" → "problème"). Only runs when
-            // mid-word AND the ghost continues the word — one word per emit,
-            // cheap on the hot path.
-            if let candidate = OutputFilter.midWordCandidate(userTail: userTail, ghost: oneLine),
-               !self.spellChecker.isValidWord(candidate, language: request.detectedLanguage) {
-                Log.info(.predictor, "ghost_dropped_midword_incoherent")
-                if !acc.lastEmitted.isEmpty {
-                    acc.lastEmitted = ""
-                    Task { @MainActor in onChunk("") }
-                }
-                return true
-            }
+            // NOTE — mid-word coherence guard REMOVED (2026-05-27).
+            // It used to drop a mid-word splice whose "partial+head" wasn't a
+            // dictionary word (to kill "…procéd"+"blème" → "procédblème"). But
+            // the probe proved that bug came from STALE-ghost splicing, not the
+            // model: FRESH greedy output is coherent across the board ("procéd"
+            // → "procédural", "gamif" → "gamifier", "dévelo" → "développer").
+            // The spell-check only produced FALSE POSITIVES — NSSpellChecker
+            // rejects valid neologisms/technical terms ("gamifier", "procédural"),
+            // so the guard dropped the GRAMMATICALLY CORRECT completion and let a
+            // stale dictionary word ("gamification") linger. The real incoherent-
+            // splice cause is now prevented upstream (isStaleMidWordCompletion +
+            // trailing-space fix + cleared corpus), so we trust the model's fresh
+            // mid-word continuation. `OutputFilter.midWordCandidate` is retained
+            // (pure helper + tests) but no longer gates emission.
 
             // Only emit when the filtered one-line ghost actually changed.
             guard oneLine != acc.lastEmitted else { return true }

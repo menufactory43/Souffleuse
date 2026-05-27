@@ -33,6 +33,79 @@ do {
     // GRAMMAR PROBE : mid-word completion vs word-boundary. "on va y arriv" →
     // does the model wrongly pick "ait" (arrivait) when the grammar wants "er"
     // (arriver)? And at the boundary "on va y " does it know "arriver"?
+    // Coherence-guard spell-check : does NSSpellChecker reject the neologism
+    // "gamifier" (which would DROP the correct "ier" completion) while accepting
+    // "gamification"? If so, the guard is the live culprit.
+    let sc = TypoDetector()
+    print("\n╔══ SPELL-CHECK (coherence guard) ══╗")
+    for w in ["gamifier", "gamification", "développer", "arriver", "ménagères"] {
+        print("   isValidWord(\(w), FR) = \(sc.isValidWord(w, language: "French"))  | nil = \(sc.isValidWord(w, language: nil))")
+    }
+
+    // Is the spell-check coherence guard still needed? Test FRESH greedy on the
+    // partials that historically spliced into non-words. If fresh output is
+    // coherent (procéd→ure, not procéd→blème), the guard only causes false
+    // positives now (dropping valid neologisms) and can be relaxed.
+    print("\n╔══ FRESH MID-WORD COHERENCE (guard still needed?) ══╗")
+    let gmFresh = LlamaSampling(temperature: 0, repeatPenalty: 1.3, banMarkup: true, banDigitsLeading: true, banEmoji: true)
+    await engine.setCorpus([])
+    for (lbl, p) in [
+        ("procéd", "Coucou, petit test de procéd"),
+        ("problè", "Il y a un gros problè"),
+        ("gamif",  "l'idée est de gamif"),
+        ("dévelo", "Je vais continuer à dévelo"),
+        ("anniv",  "Joyeux anniv"),
+        ("rdv",    "On a rendez-vous demain, n'oublie pas le rend"),
+    ] {
+        let g = await genG(prompt: p, gmFresh, maxTokens: 4)
+        print("   '\(lbl)' →\(g.debugDescription)")
+    }
+
+    print("\n╔══ MID-WORD : boundary-predict hypothesis (gamif→ier) ══╗")
+    let gm = LlamaSampling(temperature: 0, repeatPenalty: 1.3, banMarkup: true, banDigitsLeading: true, banEmoji: true)
+    await engine.setCorpus([])
+    let gamifCtx = "Coucou, j'ai besoin d'aides pour mon application de gestion des tâches ménagères. l'idée est de"
+    let midWordCases2: [(String, String)] = [
+        ("mid full  'est de gamif'", gamifCtx + " gamif"),
+        ("BOUNDARY full 'est de'",   gamifCtx),
+        ("mid short 'est de gamif'", "l'idée est de gamif"),
+        ("BOUNDARY short 'est de'",  "l'idée est de"),
+        ("mid 'continuer à dévelo'", "Je vais continuer à dévelo"),
+        ("BOUNDARY 'continuer à'",   "Je vais continuer à"),
+        ("mid 'je veux mang'",       "Ce soir je veux mang"),
+        ("BOUNDARY 'je veux'",       "Ce soir je veux"),
+    ]
+    for (label, p) in midWordCases2 {
+        print("   \(label.padding(toLength: 26, withPad: " ", startingAt: 0)) →\(await genG(prompt: p, gm, maxTokens: 6).debugDescription)")
+    }
+    // Does the LIVE prefix shape (fieldContext / ctxPrefix prepended) break it?
+    print("   -- live prompt-shape effect on 'gamif' --")
+    let bare = "l'idée est de gamif"
+    let shapes: [(String, String)] = [
+        ("bare",       bare),
+        ("fieldCtx",   "Champ : zone de texte.\n\n" + bare),
+        ("fieldCtx2",  "Champ : zone de saisie de texte.\nPlaceholder : « Écrivez un message ».\n\n" + bare),
+        ("ctxPrefix",  "Brave — Gmail\n\n" + bare),
+        ("both",       "Brave — Gmail\n\nChamp : zone de texte.\n\n" + bare),
+    ]
+    for (label, p) in shapes {
+        print("   \(label.padding(toLength: 12, withPad: " ", startingAt: 0)) →\(await genG(prompt: p, gm, maxTokens: 5).debugDescription)")
+    }
+    // HYPOTHESIS : a corpus containing "application" boosts the "ication"
+    // token (from "appl-ication"), flipping "gamif"→"ier" to "gamif"→"ication".
+    print("   -- corpus-bias effect on 'gamif' (str 6) --")
+    let gmBias = LlamaSampling(temperature: 0, repeatPenalty: 1.3, personalizationStrength: 6,
+                               banMarkup: true, banDigitsLeading: true, banEmoji: true)
+    await engine.setCorpus([])
+    print("   corpus VIDE        →\(await genG(prompt: bare, gmBias, maxTokens: 5).debugDescription)")
+    await engine.setCorpus([
+        "mon application de gestion des tâches ménagères",
+        "mon application de gestion des tâches ménagères",
+        "l'application de gestion",
+    ])
+    print("   corpus 'applic...' →\(await genG(prompt: bare, gmBias, maxTokens: 5).debugDescription)")
+    await engine.setCorpus([])
+
     print("\n╔══ GRAMMAR : context-length sweep (arriver vs arrivait/loop) ══╗")
     let gShip = LlamaSampling(temperature: 0, repeatPenalty: 1.3, banMarkup: true, banDigitsLeading: true, banEmoji: true)
     await engine.setCorpus([])
