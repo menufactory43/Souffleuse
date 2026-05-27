@@ -44,6 +44,18 @@ private let bundleBlocklist: Set<String> = [
     "com.apple.keychainaccess",
 ]
 
+/// Derives the `midWordContinuation` flag from the stored contextBefore and
+/// accepted values at acceptance time. True when the accept glues onto a word
+/// in progress (both boundary characters are word-chars as defined by
+/// `OutputFilter.isWordChar`), false otherwise.
+///
+/// Free function (not on AppDelegate) so it is callable from both the
+/// @MainActor context and the CGEventTap handler (non-isolated context).
+private func deriveMidWordContinuation(contextBefore: String, accepted: String) -> Bool {
+    guard let cb = contextBefore.last, let af = accepted.first else { return false }
+    return OutputFilter.isWordChar(cb) && OutputFilter.isWordChar(af)
+}
+
 @MainActor
 final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
@@ -1213,11 +1225,16 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 return true
             }
             if recordPersonalization {
+                let storedContext = SecretHeuristic.contextTail(prefix: prePrefix)
                 let entry = TypingHistoryEntry(
                     timestamp: Date(),
-                    contextBefore: SecretHeuristic.contextTail(prefix: prePrefix),
+                    contextBefore: storedContext,
                     accepted: suggestion,
-                    bundleID: bundleID
+                    bundleID: bundleID,
+                    midWordContinuation: deriveMidWordContinuation(
+                        contextBefore: storedContext,
+                        accepted: suggestion
+                    )
                 )
                 let history = MainActor.assumeIsolated { self.store.history }
                 let predictorRef = MainActor.assumeIsolated { self.predictor }
@@ -1294,11 +1311,16 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         guard store.personalizationEnabled, let bid = partialAcceptedAtBundleID else { return }
         if bundleBlocklist.contains(bid) { return }
         if personalizationBundleBlocklist.contains(where: { bid == $0 || bid.hasPrefix($0) }) { return }
+        let storedContext = SecretHeuristic.contextTail(prefix: partialAcceptedAtPrefix)
         let entry = TypingHistoryEntry(
             timestamp: Date(),
-            contextBefore: SecretHeuristic.contextTail(prefix: partialAcceptedAtPrefix),
+            contextBefore: storedContext,
             accepted: partialAcceptedSoFar,
-            bundleID: bid
+            bundleID: bid,
+            midWordContinuation: deriveMidWordContinuation(
+                contextBefore: storedContext,
+                accepted: partialAcceptedSoFar
+            )
         )
         let history = self.store.history
         let predictorRef = self.predictor
