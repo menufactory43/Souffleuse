@@ -272,9 +272,9 @@ enum SuggestionPolicy {
     /// at the user's caret, and the continuation is the entry's remainder).
     nonisolated static func strongCorpusMatch(
         userTail: String,
-        snapshot: [TypingHistoryEntry]
+        snapshot: [TypingHistoryEntry],
+        minChars: Int = Tuning.strongCorpusMatchMinChars
     ) -> (continuation: String, matchedChars: Int)? {
-        let minChars = Tuning.strongCorpusMatchMinChars
         // Look back over a generous window; the longest suffix of userTail that
         // is also a substring of some entry (ending the entry's recorded text
         // BEFORE its tail) wins.
@@ -422,8 +422,34 @@ final class SuggestionPolicyEngine {
         historySnapshot: [TypingHistoryEntry],
         wordCompleter: WordCompleter
     ) -> GhostUpdate? {
-        // Cas mid-word — L0 exclusif.
+        // Cas mid-word — historique d'abord (parité Cotypist), puis L0 système.
         if let last = userTail.last, last.isLetter {
+            // Rappel de phrase mid-mot : le fragment de mot en cours + son
+            // contexte précédent prolongent une phrase déjà tapée → on propose
+            // la phrase ENTIÈRE, court-circuitant le LLM. C'est exactement ce
+            // que fait Cotypist ("Bonjour, co" → "mment allez-vous ?") : il
+            // n'embarque aucune liste de phrases, il rappelle l'historique. On
+            // exige que la continuation commence par une LETTRE — elle complète
+            // le mot en cours, pas un saut de mot accidentel — et le seuil
+            // mid-word garantit qu'un fragment nu sans contexte ne recale rien.
+            if let strong = SuggestionPolicy.strongCorpusMatch(
+                userTail: userTail,
+                snapshot: historySnapshot,
+                minChars: SuggestionPolicy.Tuning.midWordCorpusMatchMinChars
+            ), strong.continuation.first?.isLetter == true {
+                let capped = SuggestionPolicy.capToWords(strong.continuation, max: maxWords)
+                if !capped.isEmpty {
+                    let score = Score(
+                        sourcePrior: SuggestionPolicy.Tuning.strongCorpusSourcePrior,
+                        prefixFit: SuggestionPolicy.prefixFit(ghost: capped, userTail: userTail),
+                        lengthFit: SuggestionPolicy.lengthFit(ghost: capped)
+                    )
+                    if score.passesGate {
+                        Log.info(.predictor, "ghost_corpus_fastpath", count: strong.matchedChars)
+                        return GhostUpdate(text: capped, source: .history, score: score)
+                    }
+                }
+            }
             guard let completion = wordCompleter.completion(for: userTail),
                   completion.count >= 3 else {
                 return nil

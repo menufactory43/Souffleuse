@@ -825,6 +825,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         if partialRemainder.isEmpty,
            !predictor.suggestion.isEmpty,
            let basePrefix = lastPredictedPrefix,
+           predictor.predictedForPrefix == basePrefix,
            prefix.count > basePrefix.count,
            prefix.hasPrefix(basePrefix) {
             let typedSince = String(prefix.dropFirst(basePrefix.count))
@@ -1028,7 +1029,16 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let suggestion = predictor.suggestion
-        guard !suggestion.isEmpty, let rect = rectForGhost else {
+        // Freshness gate: only paint a suggestion that was generated for THIS
+        // exact prefix. `predictor.suggestion` can outlive the prefix it was made
+        // for — kept alive through a gating path while a fresh stream is pending
+        // — and without this check it gets painted at the new caret (the
+        // "Bonjour" repro: a start-of-message ghost re-shown at "…autre chose
+        // pou"). The pending re-prediction repaints once it lands.
+        guard Self.shouldRenderSuggestion(suggestion: suggestion,
+                                          predictedForPrefix: predictor.predictedForPrefix,
+                                          currentPrefix: prefix),
+              let rect = rectForGhost else {
             overlay.hide()
             interceptor.setActive(false)
             return
@@ -1310,6 +1320,23 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// never triggers a spurious divergence clear.
     static func isLiveConsumeMatch(ghost: String, typedSince: String) -> Bool {
         ghost.lowercased().hasPrefix(typedSince.lowercased())
+    }
+
+    /// Pure render-gate decision: may the overlay paint `suggestion` right now?
+    ///
+    /// True only when there IS a suggestion AND it was generated for the LIVE
+    /// `currentPrefix` (`predictedForPrefix == currentPrefix`). `suggestion` is
+    /// a bare string with no built-in notion of which prefix produced it, and it
+    /// can survive in `PredictorViewModel.suggestion` past the keystroke it was
+    /// made for (a gating path kept it while a fresh stream is still pending).
+    /// Painting such a leftover at the new caret is the "Bonjour" repro — a
+    /// start-of-message ghost re-shown far downstream at "…autre chose pou".
+    /// Gating on the stamped prefix makes a stale paint impossible regardless of
+    /// which path let the suggestion linger.
+    static func shouldRenderSuggestion(suggestion: String,
+                                       predictedForPrefix: String,
+                                       currentPrefix: String) -> Bool {
+        !suggestion.isEmpty && predictedForPrefix == currentPrefix
     }
 
     /// True when `ghost` was generated while the caret sat MID-WORD (its

@@ -70,6 +70,15 @@ final class PredictorViewModel {
 
     var loadState: LoadState = .idle
     var suggestion: String = ""
+    /// The exact `prefix` (text before the caret) that the current `suggestion`
+    /// was generated for. The render boundary MUST refuse to paint `suggestion`
+    /// unless this equals the live prefix — otherwise a ghost produced for an
+    /// earlier keystroke (kept alive in `suggestion` through one of the many
+    /// gating paths while a fresh stream is pending) gets painted at the new
+    /// caret. That is the "Bonjour" repro: a stale start-of-message ghost shown
+    /// far downstream at "…autre chose pou". Empty until the first suggestion is
+    /// produced; reset on `cancel()` and on the stale-clear path.
+    private(set) var predictedForPrefix: String = ""
     var ttftMillis: Int?
     var tokensPerSecond: Double?
     var lastError: String?
@@ -282,6 +291,11 @@ final class PredictorViewModel {
         axSnapshot: AXSnapshot? = nil
     ) {
         let userTail = String(prefix.suffix(2048))
+        // The exact prefix this invocation produces a suggestion for. Stamped
+        // onto `predictedForPrefix` at every site that assigns `suggestion`, so
+        // the render boundary can prove freshness. Matches the AppDelegate's
+        // `prefix` (text before caret) verbatim — same value flows in here.
+        let forPrefix = prefix
         // Context-aware invalidation: predictCache is keyed on userTail
         // only, so a hit returns the same suggestion regardless of which
         // app/field the user is currently in. fieldContext + afterCursor
@@ -346,6 +360,10 @@ final class PredictorViewModel {
                 Log.info(.predictor, "ghost_keep_stable", count: suggestion.count)
                 PredictDebug.log("ghost_keep_stable", "current=\(suggestion.debugDescription) candidate=\(instantGhost.debugDescription)")
             }
+            // Either we applied the instant ghost, or we kept the existing one
+            // because the fresh L0 candidate didn't extend it — in both cases a
+            // valid ghost for THIS prefix is on screen, so it is fresh.
+            predictedForPrefix = forPrefix
         }
 
         // LLM gate : need at least 3 chars of trimmed userTail AND a
@@ -373,6 +391,7 @@ final class PredictorViewModel {
                 let score = SuggestionPolicy.score(source: .cache, ghost: capped, userTail: userTail)
                 if score.value >= SuggestionPolicy.Tuning.cacheFloor {
                     suggestion = capped
+                    predictedForPrefix = forPrefix
                     suggestionSource = .cache
                     planner.cancel()
                     Log.info(.predictor, "cache_hit", count: Int(score.value * 100))
@@ -411,6 +430,7 @@ final class PredictorViewModel {
                 if score.value >= SuggestionPolicy.Tuning.undoCacheFloor {
                     planner.cancel()
                     suggestion = capped
+                    predictedForPrefix = forPrefix
                     suggestionSource = .undoCache
                     Log.info(.predictor, "cache_undo_hit", count: Int(score.value * 100))
                     PredictDebug.log("cache_undo_hit", "key=\(key.debugDescription) delta=\(delta.debugDescription) cached=\(cached.debugDescription) shown=\(suggestion.debugDescription) score=\(score.value)")
@@ -640,6 +660,7 @@ final class PredictorViewModel {
                     Log.info(.predictor, "ghost_dropped_repeat")
                     PredictDebug.log("ghost_dropped_repeat", "fallback_to_instant=\(instantGhost.debugDescription)")
                     self.suggestion = instantGhost
+                    self.predictedForPrefix = forPrefix
                     self.suggestionSource = instantSource
                     return
                 }
@@ -680,6 +701,7 @@ final class PredictorViewModel {
                 emitTracker.emitted = true
                 self.policy.applyGhost(update.text, source: .llm, score: update.score)
                 self.suggestion = update.text
+                self.predictedForPrefix = forPrefix
                 self.suggestionSource = .llm
             }
 
@@ -713,6 +735,7 @@ final class PredictorViewModel {
                     Log.info(.predictor, "ghost_cleared_stale", count: self.suggestion.count)
                     PredictDebug.log("ghost_cleared_stale", "userTail=\(userTail.debugDescription) cleared=\(self.suggestion.debugDescription)")
                     self.suggestion = ""
+                    self.predictedForPrefix = ""
                     self.suggestionSource = .none
                     self.policy.reset()
                 }
@@ -876,6 +899,7 @@ final class PredictorViewModel {
         // updates par closure isCurrent(token) check).
         planner.cancel()
         suggestion = ""
+        predictedForPrefix = ""
         suggestionSource = .none
         policy.reset()
         // IMPORTANT: cache is preserved. `cancel()` is called from many paths
