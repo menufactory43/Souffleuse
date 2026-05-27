@@ -3,17 +3,17 @@ import Foundation
 @testable import Souffleuse
 import SouffleuseTyping
 
-/// Guards the mid-word coherence fix : when the caret sits mid-word and the
-/// ghost continues the SAME word, the spliced candidate must be a real word —
-/// otherwise the model produced an incoherent continuation
-/// ("…procéd" + "blème" → "procédblème") and the ghost is dropped. Coherent
-/// splices ("problè" + "me…" → "problème") and non-mid-word ghosts (caret
-/// after a space) are kept.
+/// Exercises `OutputFilter.midWordCandidate` (pure splice helper) and
+/// `TypoDetector.isValidWord`.
 ///
-/// Pure-function level (`OutputFilter.midWordCandidate`) + spell-validation
-/// level (`TypoDetector.isValidWord`). The full drop decision is the AND of
-/// the two and is exercised end-to-end in the probe.
-@Suite("Mid-word coherence guard")
+/// HISTORICAL NOTE (2026-05-27): the generation-time guard that DROPPED a
+/// mid-word splice when `partial+head` wasn't a dictionary word has been
+/// REMOVED. The probe proved fresh greedy output is coherent ("procéd" →
+/// "procédural", "gamif" → "gamifier") and that NSSpellChecker produced false
+/// positives on valid neologisms — dropping the grammatically-correct
+/// completion. `midWordCandidate` survives as a pure helper; these tests pin
+/// its splicing behaviour, not an emission gate.
+@Suite("Mid-word candidate splice (pure helper)")
 struct MidWordCoherenceTests {
 
     // MARK: - OutputFilter.trailingPartialWord
@@ -89,33 +89,18 @@ struct MidWordCoherenceTests {
         #expect(ModelRuntime.OutputFilter.midWordCandidate(userTail: "Il y a un gros problè", ghost: "me-clé du sujet") == "problème")
     }
 
-    // MARK: - End-to-end drop decision (candidate + spell validation)
+    // MARK: - Neologism regression (why the spell-check drop was removed)
 
-    /// Helper mirroring the generateLlama guard : drop when mid-word AND the
-    /// spliced candidate is not a valid word.
-    private func shouldDrop(userTail: String, ghost: String, language: String?, _ checker: TypoDetector) -> Bool {
-        guard let candidate = ModelRuntime.OutputFilter.midWordCandidate(userTail: userTail, ghost: ghost) else {
-            return false
-        }
-        return !checker.isValidWord(candidate, language: language)
-    }
-
-    @Test func dropsIncoherentMidWordSplice() {
+    /// Pins the false-positive that motivated removing the generation-time
+    /// drop: NSSpellChecker rejects the valid neologism "gamifier" while
+    /// accepting "gamification". A spell-check gate would therefore have
+    /// dropped the grammatically-correct mid-word completion ("gamif" → "ier")
+    /// and kept the worse one. The guard is gone; the model's fresh output is
+    /// trusted instead.
+    @Test func spellCheckerRejectsValidNeologism() {
         let checker = TypoDetector()
-        // "procéd" + "blème" → "procédblème" is a non-word → DROP.
-        #expect(shouldDrop(userTail: "Coucou, petit test de procéd", ghost: "blème avec le modèle", language: "French", checker))
-    }
-
-    @Test func keepsCoherentMidWordSplice() {
-        let checker = TypoDetector()
-        // "problè" + "me" → "problème" is valid French → KEEP.
-        #expect(!shouldDrop(userTail: "Il y a un gros problè", ghost: "me avec le modèle", language: "French", checker))
-    }
-
-    @Test func nonMidWordGhostUnaffected() {
-        let checker = TypoDetector()
-        // Caret after a space → never dropped by this guard regardless of ghost.
-        #expect(!shouldDrop(userTail: "Bonjour ", ghost: "zzqxw", language: "French", checker))
+        #expect(!checker.isValidWord("gamifier", language: "French"))   // would have been wrongly dropped
+        #expect(checker.isValidWord("gamification", language: "French"))
     }
 
     // MARK: - TypoDetector.isValidWord
