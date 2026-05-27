@@ -117,25 +117,39 @@ public enum SuggestionPolicy {
     private static let sharedTypoDetector = TypoDetector()
 
     /// Reconstructs the continuous text of a history entry from its stored
-    /// `contextBefore` + `accepted`.
+    /// `contextBefore` + `accepted`, optionally honouring a persisted
+    /// `midWordContinuation` flag.
     ///
-    /// `accepted` is recorded TRIMMED, so the word/next-word boundary is lost.
-    /// The old code unconditionally inserted a space (`contextBefore + " " +
-    /// accepted`), which corrupted MID-WORD accepts: "…vend" + "redi" →
-    /// "vend redi" (should be "vendredi"), "liquida" + "tion" → "liquida tion".
-    /// We restore the boundary by inserting a space ONLY when it is actually
-    /// needed: if the trailing word of `contextBefore` glued to the leading word
-    /// of `accepted` forms a real dictionary word (vendredi, liquidation), it
-    /// was a mid-word completion → no space; otherwise it was a next-word
-    /// completion ("…le" + "montant" → "le montant") → space. Whitespace/
-    /// punctuation boundaries are passed through unchanged.
-    public nonisolated static func joinHistory(_ contextBefore: String, _ accepted: String) -> String {
+    /// When `midWordContinuation` is non-nil the boundary intent is known and
+    /// the flag is used directly — no dictionary guessing:
+    ///   - `true`  → glue verbatim (contextBefore + accepted)
+    ///   - `false` → insert a space (contextBefore + " " + accepted)
+    ///
+    /// When `midWordContinuation` is nil the original heuristic applies (see
+    /// the 2-arg overload). Existing-separator fast-paths still apply for both
+    /// flagged and nil cases so a separator can never be doubled.
+    ///
+    /// The 2-arg overload delegates to `midWordContinuation: nil` and keeps
+    /// every existing HistoryJoinTests case passing unchanged.
+    public nonisolated static func joinHistory(
+        _ contextBefore: String,
+        _ accepted: String,
+        midWordContinuation: Bool?
+    ) -> String {
         guard !contextBefore.isEmpty else { return accepted }
         guard let cb = contextBefore.last, let af = accepted.first else {
             return contextBefore + accepted
         }
-        // Boundary already carries a separator → concat verbatim.
+        // Boundary already carries a separator → concat verbatim regardless of flag.
+        // This guards against double spaces ("les frais " + "de port", flag=false).
         if cb.isWhitespace || af.isWhitespace { return contextBefore + accepted }
+
+        // Non-nil flag: use it directly.
+        if let flag = midWordContinuation {
+            return flag ? contextBefore + accepted : contextBefore + " " + accepted
+        }
+
+        // nil → original dictionary heuristic (unchanged).
         // An uppercase start is a new word / proper noun, never a mid-word
         // continuation ("Bonjour" + "Madame", not "BonjourMadame") → space.
         if af.isUppercase { return contextBefore + " " + accepted }
@@ -153,6 +167,12 @@ public enum SuggestionPolicy {
         // Punctuation boundary (".", "?", …) before a new word → space reads
         // naturally ("corrigé." + "Bonjour" → "corrigé. Bonjour").
         return contextBefore + " " + accepted
+    }
+
+    /// 2-arg overload: delegates to the flag overload with `midWordContinuation: nil`
+    /// (dictionary heuristic). All existing call sites continue to work unchanged.
+    public nonisolated static func joinHistory(_ contextBefore: String, _ accepted: String) -> String {
+        joinHistory(contextBefore, accepted, midWordContinuation: nil)
     }
 
     /// Le mot partiel en fin de `userTail` est-il un mot COMPLET/valide ?
@@ -286,7 +306,8 @@ public enum SuggestionPolicy {
         guard lookback.count >= 6 else { return nil }
         if lookback.last?.isWhitespace == true { return nil }
         for entry in snapshot {
-            let full = joinHistory(entry.contextBefore, entry.accepted)
+            let full = joinHistory(entry.contextBefore, entry.accepted,
+                                   midWordContinuation: entry.midWordContinuation)
             if let r = full.range(of: lookback) {
                 let after = full[r.upperBound...]
                 let trimmed = String(after)
@@ -326,7 +347,8 @@ public enum SuggestionPolicy {
 
         var best: (continuation: String, matchedChars: Int)?
         for entry in snapshot {
-            let full = joinHistory(entry.contextBefore, entry.accepted)
+            let full = joinHistory(entry.contextBefore, entry.accepted,
+                                   midWordContinuation: entry.midWordContinuation)
             // Find the longest suffix of the user tail that occurs in `full`
             // and leaves a non-empty continuation after it.
             var len = min(lookbackFull.count, full.count)
