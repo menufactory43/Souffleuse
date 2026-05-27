@@ -102,6 +102,12 @@ Plan: 1 of 9
 
 Aucun.
 
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260527-v5a | Fix ghost overlay: font size on newlines + suppress ghost mid-word | 2026-05-27 | 9d85b12 | [260527-v5a-fix-ghost-overlay-font-size-on-newlines](./quick/260527-v5a-fix-ghost-overlay-font-size-on-newlines/) |
+
 ### Notes
 
 - Brownfield codebase, mappé le 2026-05-24 (`.planning/codebase/*.md`)
