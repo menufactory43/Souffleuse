@@ -479,11 +479,29 @@ public final class SuggestionPolicyEngine {
             // exige que la continuation commence par une LETTRE — elle complète
             // le mot en cours, pas un saut de mot accidentel — et le seuil
             // mid-word garantit qu'un fragment nu sans contexte ne recale rien.
+            // Is the partial word already a COMPLETE dictionary word (≥N chars)?
+            // Then the caret sits at an effective word boundary: a NEXT-WORD
+            // history/LLM continuation is legitimate, and the system completer
+            // must NOT extend it into a rarer word ("vais" → "vaisselle").
+            // Mirror the gate `onLLMChunk` uses for the same decision.
+            let midWordPartial = OutputFilter.trailingPartialWord(userTail)
+            let partialIsComplete =
+                midWordPartial.count >= SuggestionPolicy.Tuning.midWordLLMMinCompleteWordChars
+                && SuggestionPolicy.defaultPartialWordIsComplete(userTail)
+
+            // Corpus recall: complete the current word (letter-led continuation)
+            // OR, when the word is already complete, continue with the next word
+            // (space/punct-led). We no longer hard-gate on a letter-led
+            // continuation — `prefixFit` (via `score.passesGate`) already encodes
+            // exactly this rule (letter/joiner always, next-word only when the
+            // partial word is complete), so a whitespace-led continuation after a
+            // complete word ("…je vais" → " vous") now survives instead of being
+            // rejected and handed to the word completer.
             if let strong = SuggestionPolicy.strongCorpusMatch(
                 userTail: userTail,
                 snapshot: historySnapshot,
                 minChars: SuggestionPolicy.Tuning.midWordCorpusMatchMinChars
-            ), strong.continuation.first?.isLetter == true {
+            ) {
                 let capped = SuggestionPolicy.capToWords(strong.continuation, max: maxWords)
                 if !capped.isEmpty {
                     let score = Score(
@@ -497,6 +515,10 @@ public final class SuggestionPolicyEngine {
                     }
                 }
             }
+            // System word-completion exists only to FINISH an incomplete partial
+            // word ("Bonj" → "our"). Never extend an already-complete word — that
+            // is the "vais" → "vaisselle" hijack; let the next-word path own it.
+            if partialIsComplete { return nil }
             guard let completion = wordCompleter.completion(for: userTail),
                   completion.count >= 3 else {
                 return nil
