@@ -125,6 +125,40 @@ public enum OutputFilter {
         return s
     }
 
+    /// French typography: insert a space before the double punctuation marks
+    /// « ? ! ; : » when it is missing INSIDE the ghost ("…produit:" →
+    /// "…produit :"). The app is French-first, so a space-less "produit:" reads
+    /// wrong. Idempotent (a mark already preceded by a space is left alone).
+    ///
+    /// Scope is deliberately conservative — we only touch a mark whose PREVIOUS
+    /// character is a LETTER (a word just ended), which by construction never
+    /// fires on a ghost that *starts* with bare punctuation (no preceding char):
+    /// that boundary case ("vous" + "?") depends on the upstream user text and
+    /// is handled elsewhere, not here. Two further guards avoid false positives:
+    /// we skip when the previous char is a digit and when the mark is
+    /// immediately followed by a digit, "/", or another mark — so times
+    /// ("14:30"), ratios, and URLs ("http://") are left intact.
+    public nonisolated static func normalizeFrenchTypography(_ text: String) -> String {
+        guard !text.isEmpty else { return text }
+        let marks: Set<Character> = ["?", "!", ";", ":"]
+        let chars = Array(text)
+        var result = String()
+        result.reserveCapacity(chars.count + 4)
+        for (i, ch) in chars.enumerated() {
+            if marks.contains(ch) {
+                let prev = i > 0 ? chars[i - 1] : nil
+                let next = i + 1 < chars.count ? chars[i + 1] : nil
+                let prevIsLetter = prev?.isLetter ?? false
+                let nextBlocks = next.map { $0.isNumber || $0 == "/" || marks.contains($0) } ?? false
+                if prevIsLetter && !nextBlocks {
+                    result.append(" ")
+                }
+            }
+            result.append(ch)
+        }
+        return result
+    }
+
     /// True when the filtered ghost is a *bare* enumerator / number /
     /// list-marker with no real word behind it — e.g. "1", "1.", "12)",
     /// "1er", "100%", "1/2", "-", "•", or pure punctuation.
