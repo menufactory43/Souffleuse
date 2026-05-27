@@ -47,10 +47,34 @@ import Testing
     // ghost never renders sub-readable.
     let small = OverlayWindow.estimatedFont(forCaretRectHeight: 6)
     #expect((small?.pointSize ?? 0) == 12)
-    // Comically tall rects clamp down so a 200pt header doesn't blast a
-    // huge ghost onto the screen.
+    // Degenerate line-box rects on empty lines (e.g. 200pt) are capped at
+    // 20pt — a conservative ceiling so the ghost never blows up. The
+    // per-bundle reliable-font cache (SouffleuseAppDelegate) is the primary
+    // mitigation; this clamp is the safety net.
     let huge = OverlayWindow.estimatedFont(forCaretRectHeight: 200)
-    #expect((huge?.pointSize ?? 0) == 64)
+    #expect((huge?.pointSize ?? 0) == 20)
+}
+
+// MARK: - SouffleuseAppDelegate mid-text suppression
+
+@MainActor
+@Test func midTextSuppressionRule() {
+    // Caret inside "hello" (next char 'l') → suppress.
+    #expect(SouffleuseAppDelegate.shouldSuppressForCaretContext(text: "hello", caretIndex: 2))
+    // Caret at position 0, next char 'h' → suppress.
+    #expect(SouffleuseAppDelegate.shouldSuppressForCaretContext(text: "hello", caretIndex: 0))
+    // Caret before a space → do NOT suppress.
+    #expect(!SouffleuseAppDelegate.shouldSuppressForCaretContext(text: "hello world", caretIndex: 5))
+    // Caret before a newline → do NOT suppress.
+    #expect(!SouffleuseAppDelegate.shouldSuppressForCaretContext(text: "line one\nline two", caretIndex: 8))
+    // Caret at end of text (no char after) → do NOT suppress.
+    #expect(!SouffleuseAppDelegate.shouldSuppressForCaretContext(text: "hello", caretIndex: 5))
+    // Empty text, caret at 0 → do NOT suppress.
+    #expect(!SouffleuseAppDelegate.shouldSuppressForCaretContext(text: "", caretIndex: 0))
+    // Out-of-range (negative) → defensive false, no crash.
+    #expect(!SouffleuseAppDelegate.shouldSuppressForCaretContext(text: "hello", caretIndex: -1))
+    // Out-of-range (beyond count) → defensive false, no crash.
+    #expect(!SouffleuseAppDelegate.shouldSuppressForCaretContext(text: "hello", caretIndex: 10))
 }
 
 @MainActor

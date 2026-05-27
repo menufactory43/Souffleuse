@@ -124,13 +124,20 @@ public final class OverlayWindow {
     /// × 1.2 for the system text rendering stack, so dividing inverts that.
     /// We divide by 1.1 (not the strict 1.2) on purpose: web/Electron line
     /// boxes run tighter than the system stack, and the user prefers a ghost a
-    /// hair LARGER than the host text rather than slightly smaller. Clamped to
-    /// the readable range so we never produce a 4pt or 200pt ghost from a
-    /// degenerate rect.
+    /// hair LARGER than the host text rather than slightly smaller.
+    ///
+    /// The upper clamp is a conservative 20pt (not 64pt). On empty lines and
+    /// at the start of a new paragraph some apps (Notes, TextEdit) return a
+    /// line-box rect whose height is the full paragraph leading, not the font
+    /// size — feeding that into height/1.1 would produce a ghost ~3× too big.
+    /// The per-bundle reliable-font cache in `SouffleuseAppDelegate` is the
+    /// primary mitigation (it remembers the last trustworthy AX font for each
+    /// app); this 20pt cap is the secondary safety net so the fallback path
+    /// can never blow up the overlay beyond a readable body-text size.
     static func estimatedFont(forCaretRectHeight height: CGFloat) -> NSFont? {
         guard height > 1 else { return nil }
         let estimated = height / 1.1
-        let clamped = max(12, min(64, estimated))
+        let clamped = max(12, min(20, estimated))
         return .systemFont(ofSize: clamped)
     }
 
