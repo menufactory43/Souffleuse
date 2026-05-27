@@ -104,9 +104,10 @@ Aucun.
 
 ### Quick Tasks Completed
 
-| # | Description | Date | Commit | Directory |
-|---|-------------|------|--------|-----------|
-| 260527-v5a | Fix ghost overlay: font size on newlines + suppress ghost mid-word | 2026-05-27 |  6961ea5 | [260527-v5a-fix-ghost-overlay-font-size-on-newlines](./quick/260527-v5a-fix-ghost-overlay-font-size-on-newlines/) |
+| # | Description | Date | Commit | Status | Directory |
+|---|-------------|------|--------|--------|-----------|
+| 260527-v5a | Fix ghost overlay: font size on newlines + suppress ghost mid-word | 2026-05-27 | 6961ea5 |  | [260527-v5a-fix-ghost-overlay-font-size-on-newlines](./quick/260527-v5a-fix-ghost-overlay-font-size-on-newlines/) |
+| 260528-1hn | Fix ghost "vér ifi": word-boundary flag in history + legacy sanitation | 2026-05-28 | 2699e67 | Verified | [260528-1hn-fix-ghost-v-r-ifi-record-word-boundary-f](./quick/260528-1hn-fix-ghost-v-r-ifi-record-word-boundary-f/) |
 
 ### Notes
 
