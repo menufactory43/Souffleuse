@@ -185,7 +185,13 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         _ = AXClient.ensureTrusted(prompt: true)
 
         interceptor = KeyInterceptor { [weak self] key in
-            self?.handleKey(key) ?? false
+            guard let self else { return false }
+            // Called on the tap's DEDICATED thread. Never block on main here —
+            // dispatch the accept/dismiss asynchronously and consume at once.
+            // The tap is enabled only while a ghost is showing, so a Tab/Esc
+            // that reaches us is ours to handle (and to swallow).
+            DispatchQueue.main.async { _ = self.handleKey(key) }
+            return true
         }
         if !interceptor.install() {
             Log.warn(.input, "key_interceptor_install_failed")
@@ -1091,16 +1097,16 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 } else {
                     let rest = String(suggestion.dropFirst(chunk.count))
                     let isLast = rest.isEmpty
-                    // CGEventTap is wired to the main runloop (KeyInterceptor
-                    // calls `CFRunLoopAddSource(CFRunLoopGetMain(), ...)`), so
-                    // handleKey ALREADY runs on the main thread. Update the
-                    // partial-accept state SYNCHRONOUSLY here — if we deferred
-                    // via `DispatchQueue.main.async`, the 200 ms tick could
-                    // fire between handleKey returning and the async block
-                    // running, see `partialRemainder` still empty, and re-fire
-                    // a fresh prediction instead of consuming the remainder.
-                    // That's how "Tab Tab Tab" was producing new words each
-                    // press instead of walking through the cached suggestion.
+                    // handleKey is dispatched onto the main thread (the tap now
+                    // runs on a dedicated thread and hops here via
+                    // `DispatchQueue.main.async`), so this whole body runs as
+                    // ONE synchronous main-thread unit. Update the partial-accept
+                    // state SYNCHRONOUSLY here — a further `DispatchQueue.main.async`
+                    // would let the tick fire in between, see `partialRemainder`
+                    // still empty, and re-fire a fresh prediction instead of
+                    // consuming the remainder. That's how "Tab Tab Tab" was
+                    // producing new words each press instead of walking the
+                    // cached suggestion.
                     MainActor.assumeIsolated {
                         if isPartialContinuation {
                             self.partialAcceptedSoFar += chunk
