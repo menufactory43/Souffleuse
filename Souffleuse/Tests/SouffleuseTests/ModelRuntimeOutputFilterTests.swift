@@ -191,4 +191,38 @@ struct ModelRuntimeOutputFilterTests {
         // length=3, branch terminator skipée, pas de virgule, 1 word → inchangé
         #expect(short == "hi.")
     }
+
+    // MARK: - normalizeFrenchTypography
+
+    @Test func frenchTypographyInsertsSpaceBeforeMarks() {
+        #expect(Filter.normalizeFrenchTypography("produit:") == "produit :")
+        #expect(Filter.normalizeFrenchTypography("comment?") == "comment ?")
+        #expect(Filter.normalizeFrenchTypography("vraiment!") == "vraiment !")
+        #expect(Filter.normalizeFrenchTypography("attention;suite") == "attention ;suite")
+    }
+
+    @Test func frenchTypographyIsIdempotent() {
+        // Already-spaced marks are left untouched (no double space).
+        #expect(Filter.normalizeFrenchTypography("produit :") == "produit :")
+        #expect(Filter.normalizeFrenchTypography("forts de ce produit :") == "forts de ce produit :")
+    }
+
+    @Test func frenchTypographyLeavesLeadingMarkUntouched() {
+        // A ghost that STARTS with a mark has no preceding char → out of scope
+        // (the boundary case depends on upstream user text, handled elsewhere).
+        #expect(Filter.normalizeFrenchTypography("?") == "?")
+        #expect(Filter.normalizeFrenchTypography(": voici") == ": voici")
+    }
+
+    @Test func frenchTypographySkipsTimesRatiosURLs() {
+        // Digit-adjacent and URL/ratio colons must NOT gain a space.
+        #expect(Filter.normalizeFrenchTypography("14:30") == "14:30")
+        #expect(Filter.normalizeFrenchTypography("http://site") == "http://site")
+        #expect(Filter.normalizeFrenchTypography("ratio 3:1") == "ratio 3:1")
+    }
+
+    @Test func frenchTypographyEmptyAndNoMarks() {
+        #expect(Filter.normalizeFrenchTypography("") == "")
+        #expect(Filter.normalizeFrenchTypography("bonjour tout le monde") == "bonjour tout le monde")
+    }
 }

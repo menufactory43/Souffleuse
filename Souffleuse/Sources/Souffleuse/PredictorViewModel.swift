@@ -355,7 +355,7 @@ final class PredictorViewModel {
                 && instantGhost.lowercased().hasPrefix(suggestion.lowercased())
             if !bothLayer0 || extendsCurrent {
                 policy.applyGhost(route.text, source: route.source, score: route.score)
-                suggestion = instantGhost
+                suggestion = ModelRuntime.OutputFilter.normalizeFrenchTypography(instantGhost)
                 suggestionSource = instantSource
             } else {
                 Log.info(.predictor, "ghost_keep_stable", count: suggestion.count)
@@ -391,7 +391,7 @@ final class PredictorViewModel {
                 let capped = ModelRuntime.OutputFilter.capToWords(cached, max: maxWords)
                 let score = SuggestionPolicy.score(source: .cache, ghost: capped, userTail: userTail)
                 if score.value >= SuggestionPolicy.Tuning.cacheFloor {
-                    suggestion = capped
+                    suggestion = ModelRuntime.OutputFilter.normalizeFrenchTypography(capped)
                     predictedForPrefix = forPrefix
                     suggestionSource = .cache
                     planner.cancel()
@@ -702,7 +702,7 @@ final class PredictorViewModel {
                 PredictDebug.log("chunk_applied", "oneLine=\(update.text.debugDescription) prev_source=\(self.suggestionSource)")
                 emitTracker.emitted = true
                 self.policy.applyGhost(update.text, source: .llm, score: update.score)
-                self.suggestion = update.text
+                self.suggestion = ModelRuntime.OutputFilter.normalizeFrenchTypography(update.text)
                 self.predictedForPrefix = forPrefix
                 self.suggestionSource = .llm
             }
