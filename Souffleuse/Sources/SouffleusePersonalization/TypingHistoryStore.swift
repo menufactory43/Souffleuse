@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import SouffleuseLog
+import SouffleuseTyping
 import CSQLCipher
 
 /// Persistent corpus of accepted suggestions, stored in an **encrypted-at-rest
@@ -46,6 +47,11 @@ public actor TypingHistoryStore {
     private var db: OpaquePointer?
     private var loaded: Bool = false
     private var openFailedThisSession: Bool = false
+
+    /// Shared `TypoDetector` instance used for the record-time fragment gate and
+    /// Layer-2 sanitation. `TypoDetector` is `@unchecked Sendable`; safe here
+    /// because the actor serialises all access.
+    private let typoDetector = TypoDetector()
 
     public init(fileURL: URL = TypingHistoryStore.defaultFileURL()) {
         self.fileURL = fileURL
@@ -98,6 +104,7 @@ public actor TypingHistoryStore {
 
         createSchema()
         migrateLegacyBlobIfNeeded(key: key)
+        sanitizeLegacyCorruption()
     }
 
     private func passphrase(from key: SymmetricKey) -> String {
@@ -153,6 +160,32 @@ public actor TypingHistoryStore {
         if sqlite3_exec(db, ddl, nil, nil, nil) != SQLITE_OK {
             Log.warn(.context, "history_schema_failed")
         }
+        // Add nullable mid_word column idempotently. Check PRAGMA first to
+        // avoid the "duplicate column name" error on already-migrated DBs.
+        addMidWordColumnIfNeeded()
+    }
+
+    /// Adds the `mid_word` INTEGER column to `entries` if it does not exist
+    /// yet. Uses `PRAGMA table_info` to check, so re-running is a no-op.
+    private func addMidWordColumnIfNeeded() {
+        guard let db else { return }
+        // PRAGMA table_info returns one row per column; we check for "mid_word".
+        var hasColumn = false
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "PRAGMA table_info(entries);", -1, &stmt, nil) == SQLITE_OK {
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                // Column 1 = name
+                if let namePtr = sqlite3_column_text(stmt, 1) {
+                    let name = String(cString: namePtr)
+                    if name == "mid_word" { hasColumn = true; break }
+                }
+            }
+            sqlite3_finalize(stmt)
+        }
+        guard !hasColumn else { return }
+        if sqlite3_exec(db, "ALTER TABLE entries ADD COLUMN mid_word INTEGER;", nil, nil, nil) == SQLITE_OK {
+            Log.info(.context, "history_midword_column_added")
+        }
     }
 
     /// Normalised prefix key used by the `ctx_norm` index for prefix lookups:
@@ -196,6 +229,46 @@ public actor TypingHistoryStore {
         }
     }
 
+    // MARK: - Layer-2 sanitation
+
+    /// Drops corrupt legacy entries that passed the old record-time gate but
+    /// are known-bad: rows where `mid_word IS NULL`, the contextBefore ends on
+    /// a word-char, accepted starts on a word-char, the merged boundary word is
+    /// NOT a valid dictionary word, and accepted has no further word segment
+    /// (meaning the whole accepted string is a sub-word fragment, never a
+    /// complete next-word continuation). Idempotent — once dropped, the SELECT
+    /// returns nothing and the DELETE is a no-op.
+    private func sanitizeLegacyCorruption() {
+        guard let db else { return }
+        // Fetch legacy rows (NULL mid_word) for the structural+dictionary test.
+        // We need id, context_before, and accepted. Bundle/ts not needed.
+        let selectSQL = "SELECT id, context_before, accepted FROM entries WHERE mid_word IS NULL;"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, selectSQL, -1, &stmt, nil) == SQLITE_OK else { return }
+        var corruptIDs: [Int64] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let rowID = sqlite3_column_int64(stmt, 0)
+            let ctx = columnText(stmt, 1)
+            let acc = columnText(stmt, 2)
+            if isTruncatedFragment(contextBefore: ctx, accepted: acc) {
+                corruptIDs.append(rowID)
+            }
+        }
+        sqlite3_finalize(stmt)
+        guard !corruptIDs.isEmpty else { return }
+        // Build "DELETE FROM entries WHERE id IN (?,?,…)" with integer binds.
+        let placeholders = corruptIDs.map { _ in "?" }.joined(separator: ",")
+        let deleteSQL = "DELETE FROM entries WHERE id IN (\(placeholders));"
+        var delStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, deleteSQL, -1, &delStmt, nil) == SQLITE_OK else { return }
+        for (i, rowID) in corruptIDs.enumerated() {
+            sqlite3_bind_int64(delStmt, Int32(i + 1), rowID)
+        }
+        _ = sqlite3_step(delStmt)
+        sqlite3_finalize(delStmt)
+        Log.info(.context, "history_sanitized_legacy", count: corruptIDs.count)
+    }
+
     // MARK: - Mutations
 
     /// Appends one entry, applying the secret heuristic and FIFO purge.
@@ -214,6 +287,15 @@ public actor TypingHistoryStore {
         // exactly what personalization must learn. Only obvious fragments go.
         if Self.looksLikeFragment(entry.accepted) {
             Log.info(.context, "history_skipped_fragment")
+            return
+        }
+        // Dictionary-aware truncated sub-word gate: if both contextBefore and
+        // accepted share a word boundary (mid-word glue) AND the merged boundary
+        // word is NOT valid AND accepted has no further segment, this is a
+        // truncated fragment — never record it (it would corrupt joinHistory
+        // reconstruction as "vér ifi" later).
+        if isTruncatedFragment(contextBefore: entry.contextBefore, accepted: entry.accepted) {
+            Log.info(.context, "history_skipped_truncated_fragment")
             return
         }
         insert(entry)
@@ -238,9 +320,69 @@ public actor TypingHistoryStore {
         return false
     }
 
+    /// Returns true when (contextBefore, accepted) form a truncated sub-word
+    /// fragment that must NOT be stored. All four conditions must hold:
+    ///  1. Both sides share a word-char boundary (mid-word glue position).
+    ///  2. The merged boundary word (trailingPartialWord(cb) + leadingWordRun(acc))
+    ///     is NOT a valid dictionary word (e.g. "vérifi" is invalid).
+    ///  3. accepted has no further segment beyond its leading word run (i.e. the
+    ///     whole accepted string is just the incomplete word fragment).
+    ///  4. The accepted leading word run is itself NOT a valid standalone word.
+    ///     This guards against next-word accepts where both sides happen to be
+    ///     word-chars ("premiere"+"entrée"): "entrée" IS valid on its own, so it
+    ///     is a complete next-word continuation, not a sub-word fragment.
+    private func isTruncatedFragment(contextBefore: String, accepted: String) -> Bool {
+        guard let cbLast = contextBefore.last, isWordChar(cbLast),
+              let accFirst = accepted.first, isWordChar(accFirst) else {
+            return false  // not a word-char boundary → not a mid-word glue
+        }
+        // Compute merged boundary word.
+        let trailing = trailingPartialWord(contextBefore)
+        let leading = leadingWordRun(accepted)
+        let merged = trailing + leading
+        guard !merged.isEmpty else { return false }
+        // Condition 2: if the merged word IS valid, legitimate mid-word completion.
+        if typoDetector.isValidWord(merged, language: nil) { return false }
+        // Condition 3: accepted must have no further segment beyond the leading word.
+        // "ification" → leading == accepted → bare fragment.
+        // "ification complète" → leading.count < accepted.count → has more → keep.
+        if leading.count < accepted.count { return false }  // more content follows → keep
+        // Condition 4: accepted leading run must NOT be a valid standalone word.
+        // "entrée", "montant", "Madame" — valid standalone → next-word accept, keep.
+        // "ifi", "redi" (when merged is invalid) — not valid standalone → fragment.
+        if !leading.isEmpty, typoDetector.isValidWord(leading, language: nil) { return false }
+        return true  // all conditions met → truncated sub-word fragment
+    }
+
+    /// Whether a character is a word character (mirrors OutputFilter.isWordChar).
+    private func isWordChar(_ c: Character) -> Bool {
+        c.isLetter || c.isNumber || c == "'" || c == "'" || c == "-"
+    }
+
+    /// Returns the trailing run of word-chars from `s` (mirrors
+    /// OutputFilter.trailingPartialWord without the SouffleuseCore import).
+    private func trailingPartialWord(_ s: String) -> String {
+        var end = s.endIndex
+        while end > s.startIndex {
+            let prev = s.index(before: end)
+            let c = s[prev]
+            if isWordChar(c) { end = prev } else { break }
+        }
+        return String(s[end...])
+    }
+
+    /// Returns the leading run of word-chars from `s` (mirrors OutputFilter.leadingWordRun).
+    private func leadingWordRun(_ s: String) -> String {
+        var out = ""
+        for c in s {
+            if isWordChar(c) { out.append(c) } else { break }
+        }
+        return out
+    }
+
     private func insert(_ entry: TypingHistoryEntry) {
         guard let db else { return }
-        let sql = "INSERT INTO entries (ts, context_before, accepted, bundle_id, ctx_norm) VALUES (?, ?, ?, ?, ?);"
+        let sql = "INSERT INTO entries (ts, context_before, accepted, bundle_id, ctx_norm, mid_word) VALUES (?, ?, ?, ?, ?, ?);"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
             Log.warn(.context, "history_insert_prepare_failed")
@@ -252,9 +394,23 @@ public actor TypingHistoryStore {
         bindText(stmt, 3, entry.accepted)
         if let b = entry.bundleID { bindText(stmt, 4, b) } else { sqlite3_bind_null(stmt, 4) }
         bindText(stmt, 5, Self.normalize(entry.contextBefore))
+        // Bind mid_word: nil → NULL, true → 1, false → 0
+        if let flag = entry.midWordContinuation {
+            sqlite3_bind_int(stmt, 6, flag ? 1 : 0)
+        } else {
+            sqlite3_bind_null(stmt, 6)
+        }
         if sqlite3_step(stmt) != SQLITE_DONE {
             Log.warn(.context, "history_insert_failed")
         }
+    }
+
+    /// Test seam: insert an entry directly (bypassing all record-time gates).
+    /// Used to seed corrupt legacy entries for sanitation tests.
+    internal func insertForTesting(_ entry: TypingHistoryEntry) {
+        load()
+        guard db != nil else { return }
+        insert(entry)
     }
 
     /// Test seam: force a FIFO purge down to `cap` without inserting 50k rows.
@@ -290,7 +446,7 @@ public actor TypingHistoryStore {
     public func recentEntries(limit: Int) -> [TypingHistoryEntry] {
         load()
         let n = max(0, limit)
-        let sql = "SELECT ts, context_before, accepted, bundle_id FROM entries ORDER BY id DESC LIMIT ?;"
+        let sql = "SELECT ts, context_before, accepted, bundle_id, mid_word FROM entries ORDER BY id DESC LIMIT ?;"
         let rows = query(sql) { stmt in sqlite3_bind_int(stmt, 1, Int32(n)) }
         // Caller historically receives oldest-first; reverse the DESC result.
         return rows.reversed()
@@ -298,7 +454,7 @@ public actor TypingHistoryStore {
 
     public func allEntries() -> [TypingHistoryEntry] {
         load()
-        return query("SELECT ts, context_before, accepted, bundle_id FROM entries ORDER BY id ASC;", bind: nil)
+        return query("SELECT ts, context_before, accepted, bundle_id, mid_word FROM entries ORDER BY id ASC;", bind: nil)
     }
 
     /// Prefix-keyed lookup over the `ctx_norm` index — accepted continuations
@@ -308,7 +464,7 @@ public actor TypingHistoryStore {
         load()
         let norm = Self.normalize(context)
         guard !norm.isEmpty else { return [] }
-        let sql = "SELECT ts, context_before, accepted, bundle_id FROM entries WHERE ctx_norm = ? ORDER BY id DESC LIMIT ?;"
+        let sql = "SELECT ts, context_before, accepted, bundle_id, mid_word FROM entries WHERE ctx_norm = ? ORDER BY id DESC LIMIT ?;"
         return query(sql) { stmt in
             bindText(stmt, 1, norm)
             sqlite3_bind_int(stmt, 2, Int32(max(0, limit)))
@@ -365,11 +521,19 @@ public actor TypingHistoryStore {
             let ctx = columnText(stmt, 1)
             let acc = columnText(stmt, 2)
             let bundle = sqlite3_column_type(stmt, 3) == SQLITE_NULL ? nil : columnText(stmt, 3)
+            // Column 4: mid_word — NULL → nil, 0 → false, non-zero → true
+            let midWord: Bool?
+            if sqlite3_column_type(stmt, 4) == SQLITE_NULL {
+                midWord = nil
+            } else {
+                midWord = sqlite3_column_int(stmt, 4) != 0
+            }
             out.append(TypingHistoryEntry(
                 timestamp: Date(timeIntervalSince1970: ts),
                 contextBefore: ctx,
                 accepted: acc,
-                bundleID: bundle
+                bundleID: bundle,
+                midWordContinuation: midWord
             ))
         }
         return out

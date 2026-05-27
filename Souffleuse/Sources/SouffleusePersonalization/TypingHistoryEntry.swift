@@ -3,17 +3,62 @@ import Foundation
 /// One accepted suggestion recorded with the prefix that preceded it.
 /// `contextBefore` is the tail of the prefix at the moment of acceptance,
 /// already trimmed to the last sentence and capped in length.
+///
+/// `midWordContinuation` records whether this was a mid-word accept (true),
+/// a next-word accept (false), or unknown/legacy (nil). When non-nil,
+/// `SuggestionPolicy.joinHistory` uses the flag directly instead of guessing
+/// with the dictionary — eliminating the "vér ifi" corruption.
 public struct TypingHistoryEntry: Codable, Sendable, Equatable {
     public let timestamp: Date
     public let contextBefore: String
     public let accepted: String
     public let bundleID: String?
+    /// Whether the accept was mid-word (glue) or next-word (space). nil means
+    /// legacy — no information; `joinHistory` falls back to the dictionary
+    /// heuristic when nil.
+    public let midWordContinuation: Bool?
 
-    public init(timestamp: Date, contextBefore: String, accepted: String, bundleID: String?) {
+    public init(
+        timestamp: Date,
+        contextBefore: String,
+        accepted: String,
+        bundleID: String?,
+        midWordContinuation: Bool? = nil
+    ) {
         self.timestamp = timestamp
         self.contextBefore = contextBefore
         self.accepted = accepted
         self.bundleID = bundleID
+        self.midWordContinuation = midWordContinuation
+    }
+
+    // MARK: - Codable (backward-compatible)
+
+    private enum CodingKeys: String, CodingKey {
+        case timestamp
+        case contextBefore
+        case accepted
+        case bundleID
+        case midWordContinuation
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        timestamp = try c.decode(Date.self, forKey: .timestamp)
+        contextBefore = try c.decode(String.self, forKey: .contextBefore)
+        accepted = try c.decode(String.self, forKey: .accepted)
+        bundleID = try c.decodeIfPresent(String.self, forKey: .bundleID)
+        // Old JSON without the key decodes as nil — backward-compatible.
+        midWordContinuation = try c.decodeIfPresent(Bool.self, forKey: .midWordContinuation)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(timestamp, forKey: .timestamp)
+        try c.encode(contextBefore, forKey: .contextBefore)
+        try c.encode(accepted, forKey: .accepted)
+        try c.encodeIfPresent(bundleID, forKey: .bundleID)
+        try c.encodeIfPresent(midWordContinuation, forKey: .midWordContinuation)
     }
 }
 
