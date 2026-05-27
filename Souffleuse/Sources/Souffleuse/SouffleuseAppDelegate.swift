@@ -63,6 +63,15 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// Token returned by `withObservationTracking` so we can keep re-subscribing.
     private var storeObservationTask: Task<Void, Never>?
 
+    /// Per-bundle cache of the last font obtained from a *reliable* source (AX
+    /// font attribute or OCR-calibrated metrics). When both sources are nil
+    /// (e.g. on an empty line where AX reports no font), we fall back to this
+    /// cached value instead of handing a degenerate line-box rect height to
+    /// `OverlayWindow.estimatedFont` — which, even with the conservative 20pt
+    /// cap, would still be wrong for large-font apps. Only the two reliable
+    /// sources (AX font + OCR calibration) populate this cache; the estimate
+    /// never does.
+    private var lastReliableFontByBundle: [String: NSFont] = [:]
     /// Per-app cache so the ghost stays anchored across frames where AX briefly
     /// returns nil for the bounds query (Notes does this).
     private var lastCaretRectByApp: [String: CGRect] = [:]
@@ -720,19 +729,27 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
 
         // Pick the font we'll hand to the overlay: AX's report wins (rare in
         // web hosts), else the OCR-calibrated point size from the resolver,
-        // else nil — letting `OverlayWindow` fall back to its rect-height
-        // heuristic. Without this hand-off the overlay derives the size from
-        // the calibrated rect's height, which is line-height, not font size,
-        // and produces a ghost ~1.4× too big.
+        // else the last reliable font we saw for this bundle (avoids feeding a
+        // degenerate empty-line rect to estimatedFont), else nil — letting
+        // `OverlayWindow` fall back to its conservative rect-height heuristic.
+        // Only AX font + OCR calibration are considered reliable; the estimate
+        // is never stored so the cache can never degrade.
         let hostFontForOverlay: NSFont? = {
             if let axFont = snap.caretFont {
-                return NSFont(name: axFont.familyName, size: CGFloat(axFont.pointSize))
+                let font = NSFont(name: axFont.familyName, size: CGFloat(axFont.pointSize))
                     ?? .systemFont(ofSize: CGFloat(axFont.pointSize))
+                lastReliableFontByBundle[bundleID] = font
+                return font
             }
             if let metrics = caretResolver.calibration(for: bundleID) {
-                return .systemFont(ofSize: metrics.fontPointSize)
+                let font = NSFont.systemFont(ofSize: metrics.fontPointSize)
+                lastReliableFontByBundle[bundleID] = font
+                return font
             }
-            return nil
+            // Both reliable sources nil — reuse the last known font for this
+            // bundle if available (typical on empty lines in Notes/TextEdit
+            // where AX stops reporting the font).
+            return lastReliableFontByBundle[bundleID]
         }()
 
         // We've cleared every gate: focused, AX-trusted, not blocklisted, real
@@ -814,6 +831,17 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
 
         // Only predict from text up to caret; cap to 2048 chars (matches predictor).
         let prefix = String(text.prefix(caretIndex))
+
+        // Mid-text suppression: when the character immediately after the caret
+        // is a non-whitespace glyph, the user is editing INSIDE existing text,
+        // not appending — the ghost would land in the wrong position and suggest
+        // the wrong continuation. Hide immediately and bail.
+        if Self.shouldSuppressForCaretContext(text: text, caretIndex: caretIndex) {
+            overlay.hide()
+            presence.hide()
+            interceptor.setActive(false)
+            return
+        }
 
         // Live-consume promotion: if there's an active LLM suggestion and the
         // user just typed characters that match its beginning (INCLUDING
