@@ -14,9 +14,25 @@ date: 2026-05-27
 
 ## Commits
 
-- `1b594bd` — test(quick-260527-v5a-01): add failing tests for estimatedFont clamp + mid-text suppression (RED)
-- `ff8c6bf` — feat(quick-260527-v5a-01): lower estimatedFont clamp to 20pt + add shouldSuppressForCaretContext helper (GREEN)
-- `9d85b12` — feat(quick-260527-v5a-01): wire per-bundle reliable-font cache + mid-text guard in tick()
+- `1b594bd` — test: failing tests for estimatedFont clamp + mid-text suppression (RED)
+- `ff8c6bf` — feat: lower estimatedFont clamp to 20pt + add shouldSuppressForCaretContext helper (GREEN)
+- `9d85b12` — feat: wire per-bundle reliable-font cache + mid-text guard in tick()
+- `e2e15cd` — fix: suppress when any non-whitespace follows caret, not just adjacent (live-test refinement)
+- (HEAD) — fix: scope mid-text suppression to current line (stop scan at first newline)
+
+## Live-test refinements (Brave webmail)
+
+Real-device testing in Brave surfaced two iterations on the suppression RULE
+(the AX caret index turned out accurate — `caretIdx=7` on "Test de ghost" =
+right before the space before "ghost"):
+
+1. Initial rule (suppress only if the *adjacent* char is non-whitespace) let
+   the ghost through when clicking between two words, because the caret lands
+   before the inter-word space. → Broadened to "any non-whitespace after caret".
+2. "Any non-whitespace after caret" then killed the ghost when appending at the
+   end of a line that had a signature/paragraph below. → Scoped to the current
+   line: scan stops at the first newline. Appending at end of any line is
+   allowed; only non-whitespace remaining on the current line suppresses.
 
 ## What changed
 
