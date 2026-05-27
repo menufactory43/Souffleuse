@@ -25,10 +25,16 @@ struct SuggestionPolicyTests {
 
     // MARK: - Cascade routing — matrice D-08 (9 rows)
 
-    /// Row 1 : mid-word — L0 exclusif (WordCompleter).
-    /// "Bonjou" (lettre finale) → completion "r" est <3 chars, devrait être nil.
-    /// On vérifie aussi que mid-word avec history n'utilise PAS L1.
-    @Test func midWordWithHistoryDoesNotUseL1() {
+    /// Row 1 : mid-word — historique PRIORITAIRE, puis L0 (WordCompleter).
+    ///
+    /// RÉVISION D-08 (2026-05-27) : la règle « mid-word = L0 exclusif » est
+    /// levée. Preuve terrain (captures Cotypist) : un fragment de mot + son
+    /// contexte précédent doit rappeler la phrase apprise ENTIÈRE ("Bonjour, co"
+    /// → "mment allez-vous ?"). C'est la mécanique Cotypist (rappel d'historique,
+    /// aucune liste intégrée). On vérifie ici que mid-word avec un contexte
+    /// suffisant rappelle bien l'historique (.history), la continuation
+    /// complétant le mot en cours.
+    @Test func midWordWithHistoryRecallsPhrase() {
         let p = Self.engine()
         let snap = [Self.entry("", "Bonne journée à toi aussi")]
         let result = p.routeInstant(
@@ -36,12 +42,8 @@ struct SuggestionPolicyTests {
             historySnapshot: snap,
             wordCompleter: WordCompleter()
         )
-        // L1 history exists, mais mid-word block. WordCompleter peut produire
-        // ou non un résultat selon NSSpellChecker — on vérifie au moins que
-        // si c'est non-nil, ce n'est PAS .history.
-        if let r = result {
-            #expect(r.source != .history)
-        }
+        #expect(result?.source == .history)
+        #expect(result?.text == "ée à toi aussi")
     }
 
     /// Row 3 : mid-word + LLM chunk → AUTORISÉ (D-08 unblocked 2026-05-26).

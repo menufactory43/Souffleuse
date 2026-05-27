@@ -11,9 +11,9 @@ import Testing
 @Suite("buildLlamaPrompt trailing-space strip")
 struct BuildLlamaPromptTests {
 
-    private func build(_ before: String, ctx: String = "", field: String = "") -> String {
+    private func build(_ before: String, instr: String = "", ctx: String = "", field: String = "") -> String {
         ModelRuntime.buildLlamaPrompt(
-            system: "", customInstr: "", ctxPrefix: ctx,
+            system: "", customInstr: instr, ctxPrefix: ctx,
             fieldContext: field, afterCursor: "", beforeCursor: before
         )
     }
@@ -39,5 +39,31 @@ struct BuildLlamaPromptTests {
     @Test("context prefix is prepended, then trimmed beforeCursor")
     func prependsContext() {
         #expect(build("on va y ", ctx: "Note") == "Note\n\non va y")
+    }
+
+    // MARK: - Custom instructions injected as a "Contexte :" prose block
+
+    /// The user's personalisation is injected as a French "Contexte :" prose
+    /// block (not a chat command) so a base model CONTINUES from the stated
+    /// fact — "Je m'appelle " → the right name. (Probe VOLET PERSONA.)
+    @Test("custom instructions become a Contexte: prefix")
+    func injectsCustomInstructionsAsContexte() {
+        #expect(build("Je m'appelle ", instr: "Je m'appelle Gabriel.")
+                == "Contexte : Je m'appelle Gabriel.\n\nJe m'appelle")
+    }
+
+    /// The persona block is prepended FIRST (most global), before the screen/
+    /// field context, and the user's (trimmed) text still ends the prompt.
+    @Test("custom instructions precede the screen context")
+    func customInstructionsPrecedeContext() {
+        #expect(build("Bonjour ", instr: "Je suis Gabriel.", ctx: "App Mail")
+                == "Contexte : Je suis Gabriel.\n\nApp Mail\n\nBonjour")
+    }
+
+    /// Empty / whitespace-only instructions inject nothing (no stray label).
+    @Test("blank custom instructions inject nothing")
+    func blankInstructionsInjectNothing() {
+        #expect(build("salut", instr: "   \n ") == "salut")
+        #expect(build("salut", instr: "") == "salut")
     }
 }

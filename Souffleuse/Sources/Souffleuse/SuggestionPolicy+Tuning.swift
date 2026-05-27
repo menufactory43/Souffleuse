@@ -36,6 +36,18 @@ extension SuggestionPolicy {
         /// the user has clearly re-entered a known context.
         static let strongCorpusMatchMinChars: Int = 16
 
+        /// Mid-word variant of the threshold above. When the caret sits INSIDE a
+        /// word, the in-progress fragment plus its preceding context recalls a
+        /// learned phrase that completes the word — Cotypist parity: "Bonjour,
+        /// co" → "mment allez-vous ?". This fires on a SHORTER matched context
+        /// (the after-space 16-char bar would never trigger on "Bonjour, co" =
+        /// 11 chars) but stays safe two ways: the matched needle still has to
+        /// reach this length (so a bare 2-letter fragment with no context never
+        /// recalls anything), and the continuation must START with a letter (it
+        /// genuinely completes the current word rather than jumping to a new
+        /// one). 8 ≈ one short word of leading context + the fragment.
+        static let midWordCorpusMatchMinChars: Int = 8
+
         /// Source prior for a STRONG corpus fast-path match. Higher than the
         /// regular `.history` prior (0.75) so that a confident instant ghost is
         /// NOT clobbered by a divergent LLM stream — `onLLMChunk`'s replacement

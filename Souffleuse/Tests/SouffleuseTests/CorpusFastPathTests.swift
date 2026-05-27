@@ -123,4 +123,67 @@ struct CorpusFastPathTests {
         )
         #expect(r == nil)
     }
+
+    // MARK: - Mid-word phrase recall (Cotypist "Bonjour, co" → "…allez-vous ?")
+
+    /// The exact Cotypist-parity repro: caret INSIDE "co", the in-progress
+    /// fragment plus its leading context ("Bonjour, co") prefix a learned phrase
+    /// → recall the whole phrase. With the mid-word threshold the 11-char needle
+    /// clears the bar that the 16-char after-space threshold would have missed.
+    @Test func strongMatchRecallsPhraseMidWordWithLowerThreshold() {
+        let snap = [Self.entry("Bonjour,", "comment allez-vous ?")]
+        let m = SuggestionPolicy.strongCorpusMatch(
+            userTail: "Bonjour, co",
+            snapshot: snap,
+            minChars: SuggestionPolicy.Tuning.midWordCorpusMatchMinChars
+        )
+        #expect(m?.continuation == "mment allez-vous ?")
+        // The same call at the stricter after-space threshold would NOT fire
+        // (11-char needle < 16) — that's why mid-word needs its own bar.
+        #expect(SuggestionPolicy.strongCorpusMatch(userTail: "Bonjour, co", snapshot: snap) == nil)
+    }
+
+    /// routeInstant on a mid-word tail recalls the learned phrase DIRECTLY as a
+    /// .history ghost (no LLM), beating the system word completer.
+    @Test func routeInstantRecallsPhraseMidWord() {
+        let p = Self.engine()
+        let snap = [Self.entry("Bonjour,", "comment allez-vous ?")]
+        let r = p.routeInstant(
+            userTail: "Bonjour, co",
+            historySnapshot: snap,
+            wordCompleter: WordCompleter()
+        )
+        #expect(r?.source == .history)
+        #expect(r?.text == "mment allez-vous ?")
+    }
+
+    /// A bare in-progress fragment with NO preceding context must NOT recall a
+    /// phrase — the needle ("co", 2 chars) is below the mid-word threshold, so
+    /// we don't hallucinate "comment allez-vous ?" from two letters.
+    @Test func bareFragmentDoesNotRecallPhrase() {
+        let snap = [Self.entry("Bonjour,", "comment allez-vous ?")]
+        let m = SuggestionPolicy.strongCorpusMatch(
+            userTail: "co",
+            snapshot: snap,
+            minChars: SuggestionPolicy.Tuning.midWordCorpusMatchMinChars
+        )
+        #expect(m == nil)
+    }
+
+    /// The continuation must COMPLETE the current word (start with a letter). A
+    /// match whose continuation begins on a separator would be a word-boundary
+    /// jump, not a mid-word completion — routeInstant's mid-word branch rejects
+    /// it and falls through (here the only entry yields a letter-led
+    /// continuation, so the guard's positive case is what's exercised).
+    @Test func midWordRecallContinuationStartsWithLetter() {
+        let snap = [Self.entry("Je vous remercie", "beaucoup pour votre retour")]
+        let r = Self.engine().routeInstant(
+            userTail: "Je vous remercie bea",
+            historySnapshot: snap,
+            wordCompleter: WordCompleter()
+        )
+        #expect(r?.source == .history)
+        #expect(r?.text.first?.isLetter == true)
+        #expect(r?.text == "ucoup pour votre retour")
+    }
 }

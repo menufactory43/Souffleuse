@@ -888,10 +888,23 @@ final class ModelRuntime {
     /// text). Any contextual prose (app/field context) is prepended as a light
     /// prefix; `beforeCursor` is always last so the continuation extends it.
     ///
-    /// `system` / `customInstr` / `afterCursor` are intentionally NOT injected
-    /// as instructions — a base model can't follow them and they only pollute
-    /// the continuation. Language steering is unnecessary: the base model
-    /// continues in whatever language the input text is already in.
+    /// `system` / `afterCursor` are intentionally NOT injected as instructions —
+    /// a base model can't follow imperative directives and they only pollute the
+    /// continuation. Language steering is unnecessary: the base model continues
+    /// in whatever language the input text is already in.
+    ///
+    /// `customInstr` (the user's personalisation) IS injected — but as a French
+    /// `Contexte :` PROSE block, never as a command. A base/PT model can't obey
+    /// "your name is X", yet it readily CONTINUES from a stated fact: prepending
+    /// "Contexte : Je m'appelle Gabriel." makes "Je m'appelle " complete to
+    /// "Gabriel" instead of a random name. Proven at the probe (VOLET PERSONA):
+    /// every framing fixed the name; the French `Contexte :` label specifically
+    /// did so WITHOUT bleeding the persona into unrelated text (an English "My
+    /// writing:" label dragged "Cocotypist" into a delivery sentence — avoided).
+    /// This mirrors Cotypist, which injects the same kind of labelled block
+    /// (`PromptTemplates` / "My writing:") rather than a chat-template system
+    /// message. The block is prepended FIRST (most global), before the
+    /// screen/field context, so the user's text still ends the prompt.
     static func buildLlamaPrompt(
         system: String,
         customInstr: String,
@@ -901,6 +914,8 @@ final class ModelRuntime {
         beforeCursor: String
     ) -> String {
         var prefix = ""
+        let trimmedInstr = customInstr.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedInstr.isEmpty { prefix += "Contexte : " + trimmedInstr + "\n\n" }
         if !ctxPrefix.isEmpty { prefix += ctxPrefix + "\n\n" }
         if !fieldContext.isEmpty { prefix += fieldContext + "\n\n" }
         // Strip a TRAILING space/tab from the text the model continues. A

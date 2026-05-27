@@ -80,10 +80,15 @@ struct CascadeTighteningTests {
         #expect(oneWordFragment.value < SuggestionPolicy.Tuning.afterSpaceL1Bar)
     }
 
-    /// "Je reviens vers vous conce" (mid-word) : history N'EST PAS dans la voie
-    /// instantanée (routeInstant force L0 only mid-word). Vérifié au niveau du
-    /// routing — pas un test de score mais d'integration via SuggestionPolicyEngine.
-    @Test func jeReviensVersVousConceMidWordSkipsHistoryRoute() {
+    /// "Je reviens vers vous conce" (mid-word) : history rappelle la phrase.
+    ///
+    /// RÉVISION D-08 (2026-05-27) : avant, routeInstant forçait L0-only mid-word
+    /// et ce cas était explicitement exclu de l'historique. C'est désormais le
+    /// comportement VOULU (parité Cotypist) : le fragment "conce" + son contexte
+    /// prolongent une phrase apprise → on rappelle "rnant ma version précédente"
+    /// (capté à maxWords). La continuation complète le mot en cours (commence par
+    /// une lettre), donc c'est un vrai rappel mid-mot, pas un saut de mot.
+    @Test func jeReviensVersVousConceMidWordRecallsHistory() {
         let engine = SuggestionPolicyEngine(maxWords: 8)
         let snap = [
             TypingHistoryEntry(
@@ -93,19 +98,13 @@ struct CascadeTighteningTests {
                 bundleID: nil
             )
         ]
-        // Mid-word "conce" → routeInstant DOIT bloquer L1 history (D-08 mid-word
-        // exclusive à L0). Le wordCompleter peut retourner une completion système
-        // (e.g. "rnant" pour "concernant") — c'est OK, c'est L0 par design. Le
-        // critère qui compte : la source NE DOIT PAS être .history.
         let r = engine.routeInstant(
             userTail: "Je reviens vers vous conce",
             historySnapshot: snap,
             wordCompleter: WordCompleter()
         )
-        if let route = r {
-            #expect(route.source != .history)
-        }
-        // Si r == nil c'est aussi acceptable (L0 ne trouve rien).
+        #expect(r?.source == .history)
+        #expect(r?.text == "rnant ma version précédente")
     }
 
     // MARK: - Cache floor
