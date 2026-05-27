@@ -1383,11 +1383,14 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         !suggestion.isEmpty && predictedForPrefix == currentPrefix
     }
 
-    /// Suppress the ghost ONLY when the character immediately after the caret
-    /// is a non-whitespace glyph — i.e. the caret is inside or directly before
-    /// a word the user is editing. Whitespace/newline-after-caret and
-    /// end-of-text are NOT suppressed (legitimate "before trailing space /
-    /// end of paragraph" cases).
+    /// Suppress the ghost whenever ANY non-whitespace text remains after the
+    /// caret — i.e. the user is editing INSIDE existing content, not appending
+    /// at the end. The ghost only makes sense as an end-of-content append, so a
+    /// caret clicked between two words (which lands right before the inter-word
+    /// space) must still be suppressed even though the immediately-next char is
+    /// whitespace. Trailing whitespace/newlines after the caret are tolerated
+    /// (legitimate "append at the very end of the field, before trailing
+    /// blanks" case), as is end-of-text (nothing after the caret).
     ///
     /// Uses `Character.isWhitespace` which covers space, tab, newline, and
     /// other Unicode whitespace. Never logs any user-supplied text. Do not
@@ -1395,8 +1398,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     static func shouldSuppressForCaretContext(text: String, caretIndex: Int) -> Bool {
         guard caretIndex >= 0, caretIndex < text.count else { return false }
         let idx = text.index(text.startIndex, offsetBy: caretIndex)
-        let nextChar = text[idx]
-        return !nextChar.isWhitespace
+        return text[idx...].contains { !$0.isWhitespace }
     }
 
     /// True when `ghost` was generated while the caret sat MID-WORD (its

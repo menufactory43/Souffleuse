@@ -59,16 +59,22 @@ import Testing
 
 @MainActor
 @Test func midTextSuppressionRule() {
-    // Caret inside "hello" (next char 'l') → suppress.
+    // Rule: suppress whenever ANY non-whitespace text remains after the caret.
+    // Caret inside "hello" (next char 'l', more follows) → suppress.
     #expect(SouffleuseAppDelegate.shouldSuppressForCaretContext(text: "hello", caretIndex: 2))
-    // Caret at position 0, next char 'h' → suppress.
+    // Caret at position 0, whole word follows → suppress.
     #expect(SouffleuseAppDelegate.shouldSuppressForCaretContext(text: "hello", caretIndex: 0))
-    // Caret before a space → do NOT suppress.
-    #expect(!SouffleuseAppDelegate.shouldSuppressForCaretContext(text: "hello world", caretIndex: 5))
-    // Caret before a newline → do NOT suppress.
-    #expect(!SouffleuseAppDelegate.shouldSuppressForCaretContext(text: "line one\nline two", caretIndex: 8))
-    // Caret at end of text (no char after) → do NOT suppress.
+    // Caret clicked between two words (lands before the inter-word space),
+    // "world" still follows → suppress (the real "edit mid-text" case).
+    #expect(SouffleuseAppDelegate.shouldSuppressForCaretContext(text: "hello world", caretIndex: 5))
+    // Caret before a newline with another line after → suppress.
+    #expect(SouffleuseAppDelegate.shouldSuppressForCaretContext(text: "line one\nline two", caretIndex: 8))
+    // Caret at end of text (nothing after) → do NOT suppress.
     #expect(!SouffleuseAppDelegate.shouldSuppressForCaretContext(text: "hello", caretIndex: 5))
+    // Caret before ONLY trailing whitespace (append at very end) → do NOT suppress.
+    #expect(!SouffleuseAppDelegate.shouldSuppressForCaretContext(text: "hello   ", caretIndex: 5))
+    // Caret before a trailing newline only → do NOT suppress.
+    #expect(!SouffleuseAppDelegate.shouldSuppressForCaretContext(text: "hello\n", caretIndex: 5))
     // Empty text, caret at 0 → do NOT suppress.
     #expect(!SouffleuseAppDelegate.shouldSuppressForCaretContext(text: "", caretIndex: 0))
     // Out-of-range (negative) → defensive false, no crash.
