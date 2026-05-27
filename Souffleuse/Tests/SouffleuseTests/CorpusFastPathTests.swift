@@ -171,11 +171,11 @@ struct CorpusFastPathTests {
         #expect(m == nil)
     }
 
-    /// The continuation must COMPLETE the current word (start with a letter). A
-    /// match whose continuation begins on a separator would be a word-boundary
-    /// jump, not a mid-word completion — routeInstant's mid-word branch rejects
-    /// it and falls through (here the only entry yields a letter-led
-    /// continuation, so the guard's positive case is what's exercised).
+    /// A letter-led continuation COMPLETES the current word and is always
+    /// accepted mid-word (the partial here, "bea", is an incomplete fragment).
+    /// Acceptance of a separator-led (next-word) continuation only applies when
+    /// the partial word is already complete — see
+    /// `midWordCompleteWordTakesNextWordHistoryNotExtension`.
     @Test func midWordRecallContinuationStartsWithLetter() {
         let snap = [Self.entry("Je vous remercie", "beaucoup pour votre retour")]
         let r = Self.engine().routeInstant(
@@ -186,5 +186,38 @@ struct CorpusFastPathTests {
         #expect(r?.source == .history)
         #expect(r?.text.first?.isLetter == true)
         #expect(r?.text == "ucoup pour votre retour")
+    }
+
+    /// Regression — the "vais" → "vaisselle" hijack. When the mid-word partial
+    /// is itself a COMPLETE word ("vais"), the caret is at an effective word
+    /// boundary: a next-word (space-led) corpus continuation is legitimate and
+    /// must win. Before the fix, routeInstant's hard `isLetter` guard rejected
+    /// " vous" and handed "vais" to the system completer, which extended it into
+    /// the rarer "vaisselle" (ghost "selle"). Now the next-word history
+    /// continuation is served instead.
+    @Test func midWordCompleteWordTakesNextWordHistoryNotExtension() {
+        let snap = [Self.entry("", "Bonjour, je vais vous montrer le dossier")]
+        let r = Self.engine().routeInstant(
+            userTail: "Bonjour, je vais",
+            historySnapshot: snap,
+            wordCompleter: WordCompleter()
+        )
+        #expect(r?.source == .history)
+        #expect(r?.text.hasPrefix(" vous") == true)
+        #expect(r?.source != .wordComplete)
+    }
+
+    /// A complete mid-word with NO corpus match must NOT be extended by the
+    /// system completer (the same "vais" → "vaisselle" hijack, sans history).
+    /// routeInstant returns nil so the next-word LLM path owns the continuation.
+    /// Deterministic: the complete-word short-circuit returns before
+    /// `WordCompleter` is consulted, so it does not depend on NSSpellChecker.
+    @Test func midWordCompleteWordWithoutHistoryDoesNotExtend() {
+        let r = Self.engine().routeInstant(
+            userTail: "Je mange du pain",
+            historySnapshot: [],
+            wordCompleter: WordCompleter()
+        )
+        #expect(r == nil)
     }
 }
