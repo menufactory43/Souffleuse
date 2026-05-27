@@ -104,6 +104,7 @@ let package = Package(
             dependencies: [
                 "SouffleuseLog",
                 "CSQLCipher",
+                "SouffleuseTyping",
                 .product(name: "MLXLMCommon", package: "mlx-swift-examples"),
             ]
         ),
