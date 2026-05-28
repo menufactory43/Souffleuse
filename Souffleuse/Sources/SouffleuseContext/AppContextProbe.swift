@@ -14,9 +14,60 @@ public struct AppContext: Sendable, Equatable {
         self.windowTitle = windowTitle
     }
 
-    /// Short identifier suitable for the `[App: …]` prefix line.
+    /// Short identifier suitable for the `[App: …]` debug prefix.
     public var displayName: String {
         bundleID ?? localizedName ?? "-"
+    }
+
+    /// App name surfaced in the LLM prompt. Prefers `localizedName` over
+    /// `bundleID` so the model sees "Brave" rather than "com.brave.Browser".
+    ///
+    /// **Web-app refinement.** When the frontmost app is a recognised browser
+    /// AND the window title matches a known web-app surface, the returned
+    /// name is the *web app* (with its role hint), not the browser. The 2026
+    /// Bug-A replay (`.planning/phases/04-cascade-quality-architecture/replay-intercom-bugA.json`)
+    /// established that `App Brave, window "Inbox · Intercom"` gives the base
+    /// LLM far too little signal to pivot to customer-support priors. Naming
+    /// the web app explicitly is a free upstream improvement.
+    public var promptAppName: String {
+        let base = localizedName ?? bundleID ?? "-"
+        guard let title = windowTitle, !title.isEmpty,
+              Self.isWebBrowserName(base) else { return base }
+        return Self.webAppRefinement(forWindowTitle: title) ?? base
+    }
+
+    /// Bundle-ID-agnostic web-browser detector. Matches by display name so
+    /// new browsers (Arc, Vivaldi…) work without a bundleID allowlist.
+    static func isWebBrowserName(_ name: String) -> Bool {
+        let lower = name.lowercased()
+        return webBrowserKeywords.contains { lower.contains($0) }
+    }
+
+    private static let webBrowserKeywords: [String] = [
+        "brave", "chrome", "safari", "arc", "edge", "firefox", "vivaldi", "opera",
+    ]
+
+    /// Maps a browser window title to a web-app role string, or nil if no
+    /// pattern matches. Patterns are intentionally narrow and prose-friendly —
+    /// the goal is to give Gemma enough lexical signal to switch its prior,
+    /// not to ship an exhaustive registry.
+    static func webAppRefinement(forWindowTitle title: String) -> String? {
+        let lower = title.lowercased()
+        if lower.contains("intercom") { return "Intercom (support client)" }
+        if lower.contains("zendesk") { return "Zendesk (support client)" }
+        if lower.contains("helpscout") || lower.contains("help scout") {
+            return "Help Scout (support client)"
+        }
+        if lower.contains("freshdesk") { return "Freshdesk (support client)" }
+        if lower.contains("crisp.chat") || lower.contains(" crisp ") {
+            return "Crisp (support client)"
+        }
+        if lower.contains("gmail") { return "Gmail" }
+        if lower.contains("notion.so") || lower.hasSuffix(" – notion") || lower.hasSuffix(" - notion") {
+            return "Notion"
+        }
+        if lower.contains("linear.app") || lower.contains(" linear") { return "Linear" }
+        return nil
     }
 }
 
