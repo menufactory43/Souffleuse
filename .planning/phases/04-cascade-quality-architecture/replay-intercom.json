@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "scenarios": [
+    {
+      "id": "intercom-greeting",
+      "label": "Intercom-via-Brave: salutation post-merci",
+      "app": "Brave",
+      "windowTitle": "Inbox · Intercom",
+      "visibleText": "",
+      "userTail": "Bonjour Sophie,\n\nMerci pour votre "
+    },
+    {
+      "id": "intercom-empathy",
+      "label": "Intercom-via-Brave: formule d'empathie",
+      "app": "Brave",
+      "windowTitle": "Inbox · Intercom",
+      "visibleText": "",
+      "userTail": "Je suis désolé pour "
+    },
+    {
+      "id": "intercom-resolution",
+      "label": "Intercom-via-Brave: pivot vers résolution technique",
+      "app": "Brave",
+      "windowTitle": "Inbox · Intercom",
+      "visibleText": "",
+      "userTail": "Pour résoudre ce problème, "
+    },
+    {
+      "id": "intercom-closing",
+      "label": "Intercom-via-Brave: formule de fermeture polie (témoin L1)",
+      "app": "Brave",
+      "windowTitle": "Inbox · Intercom",
+      "visibleText": "",
+      "userTail": "N'hésitez pas à "
+    },
+    {
+      "id": "intercom-cold",
+      "label": "Intercom-via-Brave: cold start, userTail vide",
+      "app": "Brave",
+      "windowTitle": "Inbox · Intercom",
+      "visibleText": "",
+      "userTail": ""
+    },
+    {
+      "id": "intercom-question",
+      "label": "Intercom-via-Brave: question ouverte au client",
+      "app": "Brave",
+      "windowTitle": "Inbox · Intercom",
+      "visibleText": "",
+      "userTail": "Pourriez-vous me préciser "
+    }
+  ]
+}

@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "scenarios": [
+    {
+      "id": "A1-empty-ctx",
+      "label": "Bug A check: empathy WITHOUT any app context",
+      "app": null,
+      "windowTitle": null,
+      "visibleText": null,
+      "userTail": "Je suis désolé pour "
+    },
+    {
+      "id": "A2-brave-window",
+      "label": "Bug A check: empathy with current Brave/Intercom window prefix",
+      "app": "Brave",
+      "windowTitle": "Inbox · Intercom",
+      "visibleText": "",
+      "userTail": "Je suis désolé pour "
+    },
+    {
+      "id": "A3-intercom-app",
+      "label": "Bug A check: empathy WITH 'App Intercom' instead of Brave",
+      "app": "Intercom",
+      "windowTitle": "Conversation avec Sophie Martin",
+      "visibleText": "",
+      "userTail": "Je suis désolé pour "
+    },
+    {
+      "id": "A4-rich-context",
+      "label": "Bug A check: empathy WITH rich context (simulated PromptBuilder)",
+      "app": "Intercom",
+      "windowTitle": "Sophie Martin · facturation · Intercom",
+      "visibleText": "Sophie: J'ai été facturée deux fois ce matin pour mon abonnement Pro, pouvez-vous vérifier ?",
+      "userTail": "Je suis désolé pour "
+    },
+    {
+      "id": "B1-resolution-empty-ctx",
+      "label": "Bug A check: resolution WITHOUT any app context",
+      "app": null,
+      "windowTitle": null,
+      "visibleText": null,
+      "userTail": "Pour résoudre ce problème, "
+    },
+    {
+      "id": "B2-resolution-brave",
+      "label": "Bug A check: resolution with current Brave/Intercom window prefix",
+      "app": "Brave",
+      "windowTitle": "Inbox · Intercom",
+      "visibleText": "",
+      "userTail": "Pour résoudre ce problème, "
+    },
+    {
+      "id": "B3-resolution-rich",
+      "label": "Bug A check: resolution WITH rich context (simulated PromptBuilder)",
+      "app": "Intercom",
+      "windowTitle": "Sophie Martin · facturation · Intercom",
+      "visibleText": "Sophie: J'ai été facturée deux fois ce matin pour mon abonnement Pro, pouvez-vous vérifier ?",
+      "userTail": "Pour résoudre ce problème, "
+    }
+  ]
+}

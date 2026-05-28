@@ -25,6 +25,18 @@ extension SuggestionPolicy {
         /// through. Local completions or LLM generations should win unless
         /// history is highly confident.
         public static let afterSpaceL1Bar: Float = 0.6
+
+        /// Runtime-overridable variant. Reads `SOUFFLEUSE_REPLAY_L1_BAR` env
+        /// (parsable Float) and returns it; otherwise returns `afterSpaceL1Bar`.
+        /// Used by `SuggestionPolicy` L1 gate so offline replay can A/B
+        /// different L1 thresholds without recompiling. Production runtime
+        /// without the env var sees the unchanged 0.6 threshold.
+        public static var afterSpaceL1BarRuntime: Float {
+            if let s = ProcessInfo.processInfo.environment["SOUFFLEUSE_REPLAY_L1_BAR"],
+               let f = Float(s) { return f }
+            return afterSpaceL1Bar
+        }
+
         public static let l2UpgradeDelta: Float = 0.15
 
         // MARK: - Phase 3 (b) — Cotypist "short" fast-path (strong corpus match)

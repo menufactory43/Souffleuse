@@ -593,7 +593,7 @@ public final class SuggestionPolicyEngine {
                     ghost: capped,
                     userTail: userTail
                 )
-                if score.value >= SuggestionPolicy.Tuning.afterSpaceL1Bar {
+                if score.value >= SuggestionPolicy.Tuning.afterSpaceL1BarRuntime {
                     Log.info(.predictor, "ghost_history_match", count: capped.count)
                     return GhostUpdate(text: capped, source: .history, score: score)
                 }
