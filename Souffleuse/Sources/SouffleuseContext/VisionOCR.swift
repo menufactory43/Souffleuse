@@ -61,8 +61,32 @@ public actor VisionOCR {
                         return !excluded.contains(centre)
                     }
                 }
-                let lines = observations.compactMap { $0.topCandidates(1).first?.string }
-                let joined = lines.joined(separator: " ")
+                // Spatial clustering — select the bottom-most substantial
+                // cluster (≈ the latest message bubble in a chat surface),
+                // discarding the conversation header, older messages, and
+                // side-pane chrome before the 240-char visible budget is
+                // applied downstream. Disable via SOUFFLEUSE_OCR_NO_CLUSTERING
+                // (escape hatch for the rare case where the heuristic mis-
+                // fires on a layout it wasn't tuned for — falls back to a
+                // flat join of all kept observations).
+                let clusteringDisabled = ProcessInfo.processInfo
+                    .environment["SOUFFLEUSE_OCR_NO_CLUSTERING"]?.isEmpty == false
+                let joined: String
+                if clusteringDisabled {
+                    joined = observations
+                        .compactMap { $0.topCandidates(1).first?.string }
+                        .joined(separator: " ")
+                } else {
+                    let typed: [OCRObservation] = observations.compactMap { obs in
+                        guard let text = obs.topCandidates(1).first?.string else { return nil }
+                        return OCRObservation(
+                            text: text,
+                            boundingBox: obs.boundingBox,
+                            confidence: obs.confidence
+                        )
+                    }
+                    joined = OCRClustering.selectBottomCluster(typed)
+                }
                 if joined.count <= Self.maxChars {
                     cont.resume(returning: joined)
                 } else {
