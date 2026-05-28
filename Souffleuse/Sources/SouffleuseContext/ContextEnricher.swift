@@ -129,6 +129,7 @@ public actor ContextEnricher {
         capturing = true
         defer { capturing = false }
         let text: String?
+        var ocrError: String? = nil
         do {
             let capture = try await capturer.capture(bundleID: bundleID)
             let exclude = focusedFieldRect.flatMap { Self.projectToVisionNormalised($0, window: capture.windowFrame) }
@@ -136,9 +137,40 @@ public actor ContextEnricher {
             text = extracted.isEmpty ? nil : extracted
         } catch {
             text = nil
+            ocrError = String(describing: error)
         }
         visibleCache[bundleID] = CacheEntry(timestamp: Date(), visible: text)
+        Self.debugDumpVisible(bundleID: bundleID, text: text, error: ocrError, hasExclude: focusedFieldRect != nil)
         return text
+    }
+
+    /// Opt-in OCR dump for live triage of what Vision actually returns. Gated
+    /// on `SOUFFLEUSE_PREDICT_LOG`. Writes to `/tmp/souffleuse-ocr.log` so the
+    /// existing predict-log convention is preserved (never used in production,
+    /// never enabled by default, /tmp is acceptable for active debug).
+    private static func debugDumpVisible(bundleID: String, text: String?, error: String?, hasExclude: Bool) {
+        guard ProcessInfo.processInfo.environment["SOUFFLEUSE_PREDICT_LOG"]?.isEmpty == false else { return }
+        let ts = ISO8601DateFormatter().string(from: Date())
+        let preview: String
+        if let t = text {
+            // Replace newlines with ⏎ so each capture is one line and the
+            // file is grep/tail-friendly. Cap mirrored from EnrichedContext.
+            let single = t.replacingOccurrences(of: "\n", with: "⏎")
+            preview = single.count <= 600 ? single : String(single.prefix(600)) + "…"
+        } else if let e = error {
+            preview = "<error: \(e)>"
+        } else {
+            preview = "<nil>"
+        }
+        let line = "[\(ts)] ocr bundle=\(bundleID) excludeFocused=\(hasExclude) len=\(text?.count ?? 0) visible=\(preview.debugDescription)\n"
+        let path = "/tmp/souffleuse-ocr.log"
+        if let data = line.data(using: .utf8) {
+            if let h = FileHandle(forWritingAtPath: path) {
+                h.seekToEndOfFile(); try? h.write(contentsOf: data); try? h.close()
+            } else {
+                FileManager.default.createFile(atPath: path, contents: data)
+            }
+        }
     }
 
     /// Maps a screen-coordinate (Quartz, top-left origin) rect into Vision's
