@@ -199,6 +199,64 @@ func main() async {
     } else {
         err("INFO: loaded \(entries.count) typing-history entries.")
         await engine.setCorpus(entries.map { $0.contextBefore.isEmpty ? $0.accepted : $0.contextBefore + " " + $0.accepted })
+
+        // Corpus quality stats — aggregates only, no stored prose printed.
+        // Gated so it never interferes with a normal replay run.
+        if ProcessInfo.processInfo.environment["SOUFFLEUSE_CORPUS_STATS"]?.isEmpty == false {
+            let total = entries.count
+            // Exact-duplicate ratio over (contextBefore, accepted).
+            var seen = Set<String>()
+            var dupCount = 0
+            var freq: [String: Int] = [:]
+            for e in entries {
+                let key = e.contextBefore + "\u{0}" + e.accepted
+                if seen.contains(key) { dupCount += 1 } else { seen.insert(key) }
+                freq[key, default: 0] += 1
+            }
+            let unique = seen.count
+            // Accepted length histogram.
+            var buckets = [0, 0, 0, 0, 0]  // 3-5, 6-10, 11-20, 21-50, 51+
+            for e in entries {
+                switch e.accepted.count {
+                case ..<6: buckets[0] += 1
+                case ..<11: buckets[1] += 1
+                case ..<21: buckets[2] += 1
+                case ..<51: buckets[3] += 1
+                default: buckets[4] += 1
+                }
+            }
+            // mid_word flag distribution.
+            var midNil = 0, midTrue = 0, midFalse = 0
+            for e in entries {
+                switch e.midWordContinuation {
+                case nil: midNil += 1
+                case .some(true): midTrue += 1
+                case .some(false): midFalse += 1
+                }
+            }
+            // Mid-word-glue candidate population (contextBefore ends word-char AND
+            // accepted starts word-char) — the class joinHistory must reason about.
+            func isWord(_ c: Character) -> Bool { c.isLetter || c.isNumber || c == "'" || c == "-" }
+            let glueCandidates = entries.filter {
+                if let cb = $0.contextBefore.last, let af = $0.accepted.first { return isWord(cb) && isWord(af) }
+                return false
+            }.count
+            // Lone-consonant fragment residue ("s de…").
+            let fragResidue = entries.filter {
+                let t = $0.accepted.trimmingCharacters(in: .whitespacesAndNewlines)
+                let cs = Array(t)
+                guard cs.count >= 2, cs[0].isLetter, cs[1] == " " else { return false }
+                return !"aàyôoAÀYÔO".contains(cs[0])
+            }.count
+            let topRepeat = freq.values.max() ?? 0
+            err("=== CORPUS STATS ===")
+            err("total=\(total) unique=\(unique) duplicates=\(dupCount) (\(total == 0 ? 0 : dupCount * 100 / total)%)")
+            err("accepted_len 3-5=\(buckets[0]) 6-10=\(buckets[1]) 11-20=\(buckets[2]) 21-50=\(buckets[3]) 51+=\(buckets[4])")
+            err("mid_word flag: nil(legacy)=\(midNil) true=\(midTrue) false=\(midFalse)")
+            err("mid_word_glue_candidates=\(glueCandidates) lone_consonant_fragments=\(fragResidue)")
+            err("most_repeated_pair_count=\(topRepeat)")
+            err("====================")
+        }
     }
 
     // 3. Corpus of typed-prefix sequences.
