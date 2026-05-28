@@ -28,7 +28,67 @@ let kMaxTokens = 48          // generation cap for the replay
 let kGGUFPath = ("~/Library/Application Support/app.cotypist.Cotypist/Models/gemma-3-1b.i1-Q5_K_M.gguf" as NSString)
     .expandingTildeInPath
 
+/// Personalization (NgramLogitBias) strength used at inference. Defaults to 0
+/// for backward-compat with the historical "replay: no personalization gain"
+/// behavior. Set `SOUFFLEUSE_REPLAY_STRENGTH` to a Float to reproduce the
+/// live runtime default (1.0) or to A/B the bias effect.
+let kPersonalizationStrength: Float = {
+    if let s = ProcessInfo.processInfo.environment["SOUFFLEUSE_REPLAY_STRENGTH"],
+       let f = Float(s) { return f }
+    return 0
+}()
+
 func err(_ s: String) { FileHandle.standardError.write(Data((s + "\n").utf8)) }
+
+// MARK: - JSON scenario schema
+
+/// Minimal scenario shape for JSON-driven replay. Mirrors the relevant fields
+/// of `SouffleuseCoherence`'s schema but kept local so SouffleuseReplay doesn't
+/// take a new module dependency. The cascade still consults the real
+/// TypingHistoryStore (Keychain-backed) for L0/L1 routing — only the LLM
+/// prompt's context prefix is injected from JSON.
+struct Scenario: Decodable {
+    let id: String
+    let label: String?
+    let app: String?
+    let windowTitle: String?
+    let visibleText: String?
+    let userTail: String
+}
+
+struct ScenarioFile: Decodable {
+    let version: Int
+    let scenarios: [Scenario]
+}
+
+/// Reproduces the relevant subset of `EnrichedContext.prefix` (compact prose,
+/// no `[Label:]` syntax) so the model receives the same shape it would in the
+/// running app, without taking a SouffleuseContext dependency.
+func buildCtxPrefix(_ s: Scenario) -> String {
+    var bits: [String] = []
+    if let app = s.app, !app.isEmpty {
+        if let title = s.windowTitle, !title.isEmpty {
+            bits.append("App \(app), window \"\(title)\".")
+        } else {
+            bits.append("App \(app).")
+        }
+    }
+    if let v = s.visibleText, !v.isEmpty {
+        bits.append("On screen: \(v).")
+    }
+    return bits.joined(separator: " ")
+}
+
+func loadScenarios(_ path: String) -> [Scenario]? {
+    guard let data = FileManager.default.contents(atPath: path) else { return nil }
+    do {
+        let file = try JSONDecoder().decode(ScenarioFile.self, from: data)
+        return file.scenarios
+    } catch {
+        err("FATAL: could not decode scenarios JSON at \(path): \(error)")
+        return nil
+    }
+}
 
 // MARK: - Typed-prefix corpus
 
@@ -116,14 +176,16 @@ func parsePredictLog(_ path: String) -> [String] {
 /// "emit only when changed" rule to produce the final one-line LLM ghost.
 func runLLM(
     engine: LlamaEngine,
-    userTail: String
+    userTail: String,
+    ctxPrefix: String = ""
 ) async -> String {
-    // BARE prompt — empty system / ctx / field / customInstr (offline replay
-    // has no AX snapshot or user instructions). `beforeCursor` = userTail.
+    // BARE prompt by default — empty system / ctx / field / customInstr. JSON
+    // mode injects `ctxPrefix` so the model sees the same "App X, window Y"
+    // shape it would in the live app. `beforeCursor` = userTail.
     let prompt = LlamaPromptBuilder.buildLlamaPrompt(
         system: "",
         customInstr: "",
-        ctxPrefix: "",
+        ctxPrefix: ctxPrefix,
         fieldContext: "",
         afterCursor: "",
         beforeCursor: userTail
@@ -148,7 +210,7 @@ func runLLM(
             temperature: 0,
             repeatPenalty: 1.3,
             repeatLastN: 64,
-            personalizationStrength: 0,      // replay: no personalization gain
+            personalizationStrength: kPersonalizationStrength,  // env-overridable; default 0
             banMarkup: true,
             banDigitsLeading: true,
             banEmoji: true,
@@ -259,21 +321,47 @@ func main() async {
         }
     }
 
-    // 3. Corpus of typed-prefix sequences.
-    let logPath = "/tmp/souffleuse-predict.log"
-    var tails = parsePredictLog(logPath)
-    if tails.isEmpty {
-        err("INFO: \(logPath) missing/empty — using \(fallbackTails.count) hardcoded French prefixes.")
-        tails = fallbackTails
-    } else {
-        err("INFO: parsed \(tails.count) distinct userTails from \(logPath).")
+    // 3. Build the replay items — either from a JSON scenarios file (rich:
+    //    per-scenario id + ctxPrefix) or from the predict log / fallback (plain
+    //    tails with empty ctxPrefix, preserving the historical behavior).
+    struct ReplayItem {
+        let id: String?
+        let userTail: String
+        let ctxPrefix: String
     }
 
-    // 4. Drive the real pipeline per tail.
-    let engineActor = WordCompleter()  // WordCompleter is @unchecked Sendable
-    var mdRows: [String] = ["| userTail | ghost | source |", "|---|---|---|"]
+    let args = CommandLine.arguments
+    var items: [ReplayItem] = []
+    var jsonMode = false
 
-    for tail in tails {
+    if args.count >= 2, args[1].hasSuffix(".json") {
+        guard let scenarios = loadScenarios(args[1]) else { exit(1) }
+        jsonMode = true
+        items = scenarios.map {
+            ReplayItem(id: $0.id, userTail: $0.userTail, ctxPrefix: buildCtxPrefix($0))
+        }
+        err("INFO: loaded \(items.count) scenarios from \(args[1]).")
+        err("INFO: personalizationStrength=\(kPersonalizationStrength), afterSpaceL1BarRuntime=\(SuggestionPolicy.Tuning.afterSpaceL1BarRuntime).")
+    } else {
+        let logPath = "/tmp/souffleuse-predict.log"
+        var tails = parsePredictLog(logPath)
+        if tails.isEmpty {
+            err("INFO: \(logPath) missing/empty — using \(fallbackTails.count) hardcoded French prefixes.")
+            tails = fallbackTails
+        } else {
+            err("INFO: parsed \(tails.count) distinct userTails from \(logPath).")
+        }
+        items = tails.map { ReplayItem(id: nil, userTail: $0, ctxPrefix: "") }
+    }
+
+    // 4. Drive the real pipeline per item.
+    let engineActor = WordCompleter()  // WordCompleter is @unchecked Sendable
+    var mdRows: [String] = jsonMode
+        ? ["| id | userTail | ghost | source |", "|---|---|---|---|"]
+        : ["| userTail | ghost | source |", "|---|---|---|"]
+
+    for item in items {
+        let tail = item.userTail
         // 4a. Instant routing (L0/L1) via the real SuggestionPolicyEngine.
         let routed: GhostUpdate? = await MainActor.run {
             let policy = SuggestionPolicyEngine(maxWords: kMaxWords)
@@ -297,16 +385,16 @@ func main() async {
             // long partial words yield coherent completions (so we could allow
             // mid-word LLM above a length threshold instead of blocking all).
             let partial = OutputFilter.trailingPartialWord(tail)
-            let raw = await runLLM(engine: engine, userTail: tail)
-            printRow(tail: tail, ghost: raw, source: "llm-mid:plen=\(partial.count)", rows: &mdRows)
+            let raw = await runLLM(engine: engine, userTail: tail, ctxPrefix: item.ctxPrefix)
+            printRow(id: item.id, tail: tail, ghost: raw, source: "llm-mid:plen=\(partial.count)", rows: &mdRows, jsonMode: jsonMode)
             continue
         } else {
             // 4b. LLM path — gate at ≥3 trimmed chars (PVM LLM gate).
             guard tail.trimmingCharacters(in: .whitespaces).count >= 3 else {
-                printRow(tail: tail, ghost: "", source: "none", rows: &mdRows)
+                printRow(id: item.id, tail: tail, ghost: "", source: "none", rows: &mdRows, jsonMode: jsonMode)
                 continue
             }
-            let raw = await runLLM(engine: engine, userTail: tail)
+            let raw = await runLLM(engine: engine, userTail: tail, ctxPrefix: item.ctxPrefix)
             if !raw.isEmpty {
                 // 4c. Relevance gate via onLLMChunk on a fresh engine instance.
                 let applied: GhostUpdate? = await MainActor.run {
@@ -319,13 +407,14 @@ func main() async {
                 }
             }
         }
-        printRow(tail: tail, ghost: ghost, source: source, rows: &mdRows)
+        printRow(id: item.id, tail: tail, ghost: ghost, source: source, rows: &mdRows, jsonMode: jsonMode)
     }
 
     // 5. Write the markdown table.
     let md = mdRows.joined(separator: "\n") + "\n"
-    try? md.write(toFile: "/tmp/replay-results.md", atomically: true, encoding: .utf8)
-    err("INFO: wrote /tmp/replay-results.md")
+    let outPath = jsonMode ? "/tmp/replay-results-json.md" : "/tmp/replay-results.md"
+    try? md.write(toFile: outPath, atomically: true, encoding: .utf8)
+    err("INFO: wrote \(outPath)")
 }
 
 func sourceLabel(_ s: SuggestionSource) -> String {
@@ -339,11 +428,16 @@ func sourceLabel(_ s: SuggestionSource) -> String {
     }
 }
 
-func printRow(tail: String, ghost: String, source: String, rows: inout [String]) {
-    print(tail.debugDescription + " → " + ghost.debugDescription + "  [" + source + "]")
+func printRow(id: String?, tail: String, ghost: String, source: String, rows: inout [String], jsonMode: Bool) {
+    let idTag = id.map { "[\($0)] " } ?? ""
+    print(idTag + tail.debugDescription + " → " + ghost.debugDescription + "  [" + source + "]")
     let safeTail = tail.replacingOccurrences(of: "|", with: "\\|").replacingOccurrences(of: "\n", with: "⏎")
     let safeGhost = ghost.replacingOccurrences(of: "|", with: "\\|").replacingOccurrences(of: "\n", with: "⏎")
-    rows.append("| `\(safeTail)` | `\(safeGhost)` | \(source) |")
+    if jsonMode {
+        rows.append("| \(id ?? "—") | `\(safeTail)` | `\(safeGhost)` | \(source) |")
+    } else {
+        rows.append("| `\(safeTail)` | `\(safeGhost)` | \(source) |")
+    }
 }
 
 await main()
