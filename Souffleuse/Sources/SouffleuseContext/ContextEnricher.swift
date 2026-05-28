@@ -154,7 +154,12 @@ public actor ContextEnricher {
                 excludeNormalised: exclude,
                 includeNormalised: include
             )
-            text = extracted.isEmpty ? nil : extracted
+            // Strip Intercom-style meta-events ("Attribution : Workflow",
+            // "Vous avez mis la conversation en pause", Fin automated steps)
+            // before caching so the 240-char visible budget the LLM actually
+            // sees is dominated by customer text rather than UI metadata.
+            let cleaned = VisibleTextCleaner.clean(extracted)
+            text = cleaned.isEmpty ? nil : cleaned
         } catch {
             text = nil
             ocrError = String(describing: error)
