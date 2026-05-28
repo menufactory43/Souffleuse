@@ -184,6 +184,20 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     private var partialAcceptedAtBundleID: String? = nil
     /// Bundle ID we last kicked off enrichment for; used to detect focus changes.
     private var lastEnrichedBundleID: String?
+    /// Last window title we kicked off enrichment for; used to detect *intra-app*
+    /// context changes (browser tab switches in particular — `bundleID` stays
+    /// `com.brave.Browser` across tabs, so without title-tracking the OCR
+    /// captures whatever was visible at the first focus and stays cached for
+    /// the entire session). Re-firing on title change with a debounce lets the
+    /// enricher follow the user across tabs.
+    private var lastEnrichedWindowTitle: String?
+    /// Timestamp of the last enrichment refire, used to debounce title-driven
+    /// re-fires so transient titles during page transitions ("Loading…" →
+    /// "Inbox · Intercom") don't cause back-to-back captures.
+    private var lastEnrichmentAt: Date = .distantPast
+    /// Minimum interval between title-driven refires within the same bundle.
+    /// Bundle changes bypass this — focus moves are always honoured.
+    private static let titleChangeRefireMinInterval: TimeInterval = 2.0
     /// Last computed enrichment prefix, refreshed asynchronously on focus change.
     /// Read synchronously in tick() so prediction stays on the fast path.
     private var cachedEnrichmentPrefix: String = ""
@@ -803,15 +817,36 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         let enrichmentAllowed = store.enrichmentEnabled && allowMode != .suggestionOnly
         let captureAllowedHere = store.captureEnabled && allowMode != .clipboardOnly
 
-        // On focus change, refresh enrichment asynchronously. The prediction below
-        // uses whatever prefix is cached — first tick after focus change runs
-        // without enrichment, subsequent ticks use it once snapshot completes.
-        if enrichmentAllowed, bundleID != lastEnrichedBundleID {
+        // Refresh enrichment when the focused context materially changes:
+        //   - bundle changes (focus moved to a different app) — always honoured
+        //   - window title changes within the same bundle (typical browser tab
+        //     switch) — honoured if at least `titleChangeRefireMinInterval`
+        //     elapsed since the last refire, debouncing transient titles
+        //     during page loads ("Loading…" → "Inbox · Intercom")
+        //
+        // First tick after a refire uses the cached prefix (which has been
+        // cleared); subsequent ticks pick up the fresh snapshot once it
+        // completes.
+        let bundleChanged = bundleID != lastEnrichedBundleID
+        let titleChanged = snap.windowTitle != lastEnrichedWindowTitle
+        let elapsedSinceLast = Date().timeIntervalSince(lastEnrichmentAt)
+        let shouldRefire = enrichmentAllowed && (
+            bundleChanged ||
+            (titleChanged && elapsedSinceLast >= Self.titleChangeRefireMinInterval)
+        )
+        if shouldRefire {
             lastEnrichedBundleID = bundleID
+            lastEnrichedWindowTitle = snap.windowTitle
+            lastEnrichmentAt = Date()
             cachedEnrichmentPrefix = ""
             let appliedCapture = captureAllowedHere
+            // Within-bundle title changes need an explicit cache invalidate —
+            // `visibleCache` in ContextEnricher is keyed on bundleID only and
+            // its 5s TTL would otherwise mask the new tab's content.
+            let invalidate = titleChanged && !bundleChanged
             Task { [weak self] in
                 guard let self else { return }
+                if invalidate { await self.enricher.invalidate() }
                 // Temporarily toggle capture for this snapshot if the rule says clipboard-only.
                 await self.enricher.setCaptureEnabled(appliedCapture)
                 let enriched = await self.enricher.snapshot(focusedFieldRect: snap.elementRect)
@@ -824,6 +859,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         } else if !enrichmentAllowed {
             cachedEnrichmentPrefix = ""
             lastEnrichedBundleID = nil
+            lastEnrichedWindowTitle = nil
         }
 
         // First-keystroke gate: enrichment has been kicked off (pre-warming
