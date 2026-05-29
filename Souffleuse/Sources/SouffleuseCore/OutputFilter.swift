@@ -51,6 +51,40 @@ public enum OutputFilter {
         return false
     }
 
+    /// True when the caret sits just after a COMPLETED sentence and the ghost
+    /// merely RESTATES the opening of a recently-typed sentence — the pt base
+    /// model's classic "open a new sentence by repeating the last one" echo
+    /// ("Vous avez cliqué sur mon lien ? " → ghost "Vous avez"; "Capture d'écran
+    /// s'il vous plait." → ghost "Capture d").
+    ///
+    /// Distinct from `ghostIsRepeatingPrefix`, which only catches repetition
+    /// ADJACENT to the caret (a suffix of the prefix); this catches a jump BACK
+    /// to a sentence start. Kept deliberately TIGHT to avoid dropping a genuine
+    /// new sentence that merely shares an opener ("Je vous écris…" → "Je vous
+    /// remercie…"): the ghost must be ENTIRELY a prefix of a recent sentence
+    /// (pure restatement), not just share the first few words. Only fires when
+    /// the caret is at a sentence boundary — mid-sentence continuations are never
+    /// touched here.
+    public nonisolated static func ghostEchoesRecentSentenceStart(_ ghost: String, prefix: String) -> Bool {
+        // Caret must sit right after terminal punctuation (+ optional spaces):
+        // only there is the model "starting a new sentence" and able to echo one.
+        let trimmedPrefix = String(prefix.reversed().drop(while: { $0.isWhitespace }).reversed())
+        guard let term = trimmedPrefix.last,
+              term == "." || term == "?" || term == "!" || term == "…" else { return false }
+        let g = normalizeForRepeatCheck(String(ghost.prefix(60)))
+        guard g.count >= 5 else { return false }
+        // Inspect the last few completed sentences in a bounded window.
+        let window = String(trimmedPrefix.suffix(240))
+        let sentences = window.split(whereSeparator: { $0 == "." || $0 == "?" || $0 == "!" || $0 == "…" })
+        for seg in sentences.suffix(3) {
+            let s = normalizeForRepeatCheck(String(seg))
+            // Pure restatement: the entire ghost opening is a prefix of the
+            // sentence (the model is re-typing that sentence, not diverging).
+            if s.count >= g.count, s.hasPrefix(g) { return true }
+        }
+        return false
+    }
+
     /// True once `s` contains at least one word→separator transition.
     public nonisolated static func hasCompletedFirstWord(_ s: String) -> Bool {
         var sawWord = false
@@ -173,6 +207,10 @@ public enum OutputFilter {
     public nonisolated static func isDegenerateGhost(_ s: String) -> Bool {
         let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
         if t.isEmpty { return true }
+        // Fragmented garbage: a multi-token ghost with a lone single CONSONANT
+        // token (" f i", "F or", " A p", "ferme r"). The pt base model emits
+        // these when the context derails; real prose never isolates a consonant.
+        if isFragmentedGhost(t) { return true }
         // Any letter present ⇒ there is a real word ⇒ not degenerate.
         if t.contains(where: { $0.isLetter }) {
             // …except a lone ordinal like "1er" / "2nd" / "3ème" / "4e".
@@ -189,6 +227,28 @@ public enum OutputFilter {
         if t.range(of: "^[-*•·–—]$", options: .regularExpression) != nil { return true }
         // Only punctuation / symbols / digits, no letters at all.
         if t.allSatisfy({ !$0.isLetter }) { return true }
+        return false
+    }
+
+    /// True when the ghost is fragmented garbage: ≥2 whitespace tokens where at
+    /// least one token is a lone single CONSONANT letter (" f i", "F or",
+    /// " A p", "ferme r"). The pt base model occasionally derails into isolated
+    /// single letters; a real continuation never isolates a consonant. Vowels
+    /// (a/à/â/e/é/i/o/ô/u/y + accents) are NOT flagged — they can be standalone
+    /// words ("a", "à", "y", "o") or a next word's first emitted char, so only
+    /// consonants trip this, and only when ≥2 tokens make the isolation
+    /// unambiguous (a lone single token is a normal mid-word build).
+    public nonisolated static func isFragmentedGhost(_ s: String) -> Bool {
+        let tokens = s.split(whereSeparator: { $0.isWhitespace })
+        guard tokens.count >= 2 else { return false }
+        let vowels: Set<Character> = [
+            "a", "à", "â", "ä", "e", "é", "è", "ê", "ë",
+            "i", "î", "ï", "o", "ô", "ö", "u", "ù", "û", "ü", "y",
+        ]
+        for tok in tokens where tok.count == 1 {
+            guard let ch = tok.lowercased().first, ch.isLetter else { continue }
+            if !vowels.contains(ch) { return true }
+        }
         return false
     }
 

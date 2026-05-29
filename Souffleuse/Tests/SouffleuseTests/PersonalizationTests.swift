@@ -46,6 +46,44 @@ private func makeEntry(_ accepted: String, _ ctx: String = "ctx") -> TypingHisto
     #expect(tail == "World goes on")
 }
 
+// MARK: - pruneLowQuality (V2 corpus hygiene)
+
+@Test func pruneLowQualityDropsShortSingleTokensKeepsRealPhrases() async {
+    let (store, _, _) = makeStore()
+    // Short single-token word-completer residue → should be pruned.
+    await store.append(makeEntry("ton"))      // 3 chars, single token
+    await store.append(makeEntry("aux"))      // 3 chars, single token
+    await store.append(makeEntry("frais"))    // 5 chars, single token (boundary, pruned)
+    // Real value → must be KEPT.
+    await store.append(makeEntry("fiscal"))                 // 6 chars single token > 5 → keep
+    await store.append(makeEntry("de travail à manches"))   // multi-word → keep
+    await store.append(makeEntry("Bonjour Madame"))         // multi-word → keep
+
+    let before = await store.count()
+    let deleted = await store.pruneLowQuality()
+    let remaining = await store.allEntries().map { $0.accepted }
+
+    #expect(deleted == 3)                          // ton, aux, frais
+    #expect(before - remaining.count == 3)
+    #expect(!remaining.contains("ton"))
+    #expect(!remaining.contains("aux"))
+    #expect(!remaining.contains("frais"))
+    #expect(remaining.contains("fiscal"))          // single token but >5 → kept
+    #expect(remaining.contains("de travail à manches"))
+    #expect(remaining.contains("Bonjour Madame"))
+}
+
+@Test func pruneLowQualityIsIdempotent() async {
+    let (store, _, _) = makeStore()
+    await store.append(makeEntry("ton"))
+    await store.append(makeEntry("Bonjour Madame"))
+    _ = await store.pruneLowQuality()
+    let second = await store.pruneLowQuality()   // nothing short-single left
+    #expect(second == 0)
+    let remaining = await store.allEntries().map { $0.accepted }
+    #expect(remaining == ["Bonjour Madame"])
+}
+
 @Test func secretHeuristicContextTailFallsBackToSuffix() {
     let prefix = String(repeating: "a", count: 200)
     let tail = SecretHeuristic.contextTail(prefix: prefix, maxChars: 50)

@@ -45,12 +45,19 @@ public enum ChunkFilter {
     /// Computes the verdict for one accumulated snapshot. See `ChunkVerdict`
     /// for the caller-side contract. `dropReason` is `nil` unless the verdict
     /// is `.dropKeepGenerating`.
+    ///
+    /// `sentenceComplete` is `true` only when the sentence-terminator truncation
+    /// below actually fired — i.e. the one-line ghost was cut at a `. `/`? `/
+    /// `! `/`… ` boundary, so there was discarded content AFTER a completed
+    /// sentence. The caller uses it to STOP generating (everything past the cut
+    /// is thrown away by the display anyway). Clause boundaries (commas) never
+    /// set it, so a wanted second clause keeps generating.
     public static func filterChunk(
         accumulated: String,
         userTail: String,
         caretAfterSpace: Bool,
         maxWords: Int
-    ) -> (verdict: ChunkVerdict, dropReason: DropReason?) {
+    ) -> (verdict: ChunkVerdict, dropReason: DropReason?, sentenceComplete: Bool) {
         // ── Filter pipeline (verbatim semantics of the generateLlama onChunk body) ──
         let snapshot = OutputFilter.stripPrefixOverlap(accumulated, prefix: userTail)
         // Caret after a space: the model's leading space is redundant (the
@@ -77,6 +84,9 @@ public enum ChunkFilter {
         // greedy can fall back to a byte-fallback token that decodes mid
         // UTF-8 sequence and renders as "" — never show it.
         oneLine = oneLine.replacingOccurrences(of: "\u{FFFD}", with: "")
+        // Set when the sentence-terminator cut below fires (a completed sentence
+        // with discarded content after it) — the caller stops generating on it.
+        var sentenceComplete = false
         if oneLine.count > 3 {
             // Preserve a single LEADING space: a next-word continuation after
             // a complete word ("…les frais" → " de port. Mais") must keep its
@@ -88,6 +98,7 @@ public enum ChunkFilter {
                     var cut = String(oneLine[..<r.upperBound]).trimmingCharacters(in: .whitespaces)
                     if hadLeadingSpace { cut = " " + cut }
                     oneLine = cut
+                    sentenceComplete = true
                     break
                 }
             }
@@ -100,7 +111,14 @@ public enum ChunkFilter {
         }
 
         if OutputFilter.ghostIsRepeatingPrefix(oneLine, prefix: userTail) {
-            return (.reset, nil)
+            return (.reset, nil, false)
+        }
+        // Sentence-start echo: at a sentence boundary the pt base model often
+        // "continues" by restating the sentence it just finished ("…lien ? " →
+        // "Vous avez"). stripPrefixOverlap / ghostIsRepeatingPrefix only catch
+        // repetition adjacent to the caret, not a jump back to the opening.
+        if OutputFilter.ghostEchoesRecentSentenceStart(oneLine, prefix: userTail) {
+            return (.reset, nil, false)
         }
 
         // Drop bare enumerators / lone numbers ("1", "1.", "1er") that the
@@ -108,7 +126,7 @@ public enum ChunkFilter {
         // list-like context. Better to show nothing than a "1" ghost. Keep
         // generating — a later token may yield a real continuation.
         if OutputFilter.isDegenerateGhost(oneLine) {
-            return (.dropKeepGenerating, .degenerate)
+            return (.dropKeepGenerating, .degenerate, false)
         }
 
         // Instruction-echo safety net : in degenerate cases the instruct 1B
@@ -117,9 +135,9 @@ public enum ChunkFilter {
         // truncation above already cut most of it, but a leaked echo is
         // meta-text, never a real completion → drop and keep generating.
         if OutputFilter.echoesInstruction(oneLine) {
-            return (.dropKeepGenerating, .instructionEcho)
+            return (.dropKeepGenerating, .instructionEcho, false)
         }
 
-        return (.emit(oneLine), nil)
+        return (.emit(oneLine), nil, sentenceComplete)
     }
 }
