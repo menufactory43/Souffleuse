@@ -800,7 +800,16 @@ public final class SuggestionPolicyEngine {
             let replacesMicroCorpus = isHistoryFirst
                 && SuggestionPolicy.isMicroCorpusCompletion(ghost: currentGhost, userTail: userTail)
                 && OutputFilter.leadingWordRun(chunk).hasPrefix(OutputFilter.leadingWordRun(currentGhost))
-            if !(beatsBar || l2Upgrades || replacesMicroCorpus) {
+            // Solution C — mid-word L0 override. A shown `.wordComplete` ghost mid-word
+            // is a context-blind NSSpellChecker guess that is often the WRONG word
+            // ("inv"→"invite"). The L2 chunk that reached this bar mid-word already
+            // passed onLLMChunk's admit gate (it is a valid, context-aware whole-word
+            // completion, e.g. "investissement"), so let it replace the blind L0
+            // instead of staying pinned under the lengthFit-based bar. Scoped to
+            // `.wordComplete`: history/cache/after-space ghosts are untouched.
+            let replacesMidWordWordComplete = SuggestionPolicy.Tuning.midWordL2OverridesWordComplete
+                && currentSource == .wordComplete
+            if !(beatsBar || l2Upgrades || replacesMicroCorpus || replacesMidWordWordComplete) {
                 Log.info(.predictor, "ghost_keep_under_bar", count: currentGhost.count)
                 return nil
             }

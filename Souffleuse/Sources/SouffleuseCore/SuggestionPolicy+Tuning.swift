@@ -50,6 +50,16 @@ extension SuggestionPolicy {
 
         public static let l2UpgradeDelta: Float = 0.15
 
+        /// **Solution C — mid-word L2 overrides L0 word-complete.** When `true`,
+        /// an LLM chunk that passes the admit gate mid-word replaces a
+        /// `.wordComplete` ghost regardless of the lengthFit-based replacement
+        /// bar. The spell-checker (L0) is context-blind and often picks the wrong
+        /// word ("inv"→"invite" instead of "investissement"); the admitted LLM
+        /// chunk is context-aware and already passed the dictionary admit gate, so
+        /// it wins. Set to `false` to revert to requiring the full bar for L0
+        /// ghosts too.
+        public static let midWordL2OverridesWordComplete: Bool = true
+
         /// **Token-healing master switch (Task 1 + Task 2).** When `true`, a
         /// mid-word caret feeds the trailing partial word to the engine as a
         /// `healPrefix` so the model re-derives the WHOLE word from a clean
