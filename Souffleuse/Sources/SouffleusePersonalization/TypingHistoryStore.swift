@@ -529,6 +529,45 @@ public actor TypingHistoryStore {
     /// accepts (the user's real phrasing) are always kept regardless of length.
     public static let pruneSingleTokenMaxChars = 5
 
+    /// Imports messages from the staging file written by `SouffleuseCorpusSeed`.
+    /// Reads `corpus-import.json` (array of plain strings) from the app support
+    /// directory, appends each as a `.prose` entry through the normal gates, then
+    /// deletes the file. No-op when the file is absent. Safe to call on every
+    /// launch — idempotent once the file is consumed.
+    @discardableResult
+    public func importPendingIfNeeded() -> Int {
+        let fm = FileManager.default
+        guard let base = try? fm.url(for: .applicationSupportDirectory,
+                                     in: .userDomainMask,
+                                     appropriateFor: nil, create: false)
+        else { return 0 }
+        let queueURL = base
+            .appendingPathComponent("Souffleuse", isDirectory: true)
+            .appendingPathComponent("corpus-import.json")
+        guard fm.fileExists(atPath: queueURL.path),
+              let data = try? Data(contentsOf: queueURL),
+              let messages = try? JSONDecoder().decode([String].self, from: data)
+        else { return 0 }
+        load()
+        var inserted = 0
+        let before = rowCount()
+        for body in messages {
+            let entry = TypingHistoryEntry(
+                timestamp: Date(),
+                contextBefore: "",
+                accepted: body,
+                bundleID: "com.intercom.conversations",
+                source: .prose
+            )
+            append(entry)
+            inserted += 1
+        }
+        let after = rowCount()
+        try? fm.removeItem(at: queueURL)
+        Log.info(.context, "corpus_import_done", count: after - before)
+        return after - before
+    }
+
     /// V2 corpus hygiene — one-time retroactive prune that aligns the existing
     /// corpus with the new record-time rule (no Layer-0 `.wordComplete` accepts).
     /// Deletes short SINGLE-TOKEN accepts ("ton", "aux", "cal", "fis") that the

@@ -251,6 +251,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             let history = await MainActor.run { self.store.history }
             await history.load()
+            // Import any pending messages written by SouffleuseCorpusSeed.
+            await history.importPendingIfNeeded()
             // V2 corpus hygiene: one-time retroactive prune of the short
             // single-token word-completer residue ("ton"/"aux"/"cal") that
             // pollutes mid-word recalls. Runs once (UserDefaults flag); the

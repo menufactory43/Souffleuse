@@ -144,40 +144,39 @@ guard !files.isEmpty else {
 print("Sender filter : \"\(senderFilter)\"")
 print("Files found   : \(files.count)")
 
-let store = TypingHistoryStore()
+// Write to a staging file the app will import on next launch.
+// This avoids the Keychain access issue for unsigned CLI tools.
+let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+let souffleuseDir = appSupport.appendingPathComponent("Souffleuse", isDirectory: true)
+try? FileManager.default.createDirectory(at: souffleuseDir, withIntermediateDirectories: true)
+let queueURL = souffleuseDir.appendingPathComponent("corpus-import.json")
 
-var totalMessages = 0
-var totalInserted = 0
+var allMessages: [String] = []
 
-// TypingHistoryStore is an actor — run everything on a single task.
-let sema = DispatchSemaphore(value: 0)
-Task {
-    await store.load()
-    let beforeCount = await store.count()
-
-    for filePath in files.sorted() {
-        guard let content = try? String(contentsOfFile: filePath, encoding: .utf8) else {
-            fputs("Cannot read: \(filePath)\n", stderr); continue
-        }
-        let messages = parseIntercomFile(content, sender: senderFilter)
-        totalMessages += messages.count
-        for body in messages {
-            let entry = TypingHistoryEntry(
-                timestamp: Date(),
-                contextBefore: "",
-                accepted: body,
-                bundleID: "com.intercom.conversations",
-                source: .prose
-            )
-            await store.append(entry)
-            totalInserted += 1
-        }
-    }
-
-    let afterCount = await store.count()
-    print("Messages parsed : \(totalMessages)")
-    print("Entries inserted: \(afterCount - beforeCount)  (after gates)")
-    print("Corpus total    : \(afterCount)")
-    sema.signal()
+// Load existing queue if any (append mode).
+if let existing = try? Data(contentsOf: queueURL),
+   let decoded = try? JSONDecoder().decode([String].self, from: existing) {
+    allMessages = decoded
 }
-sema.wait()
+
+for filePath in files.sorted() {
+    guard let content = try? String(contentsOfFile: filePath, encoding: .utf8) else {
+        fputs("Cannot read: \(filePath)\n", stderr); continue
+    }
+    allMessages += parseIntercomFile(content, sender: senderFilter)
+}
+
+// Dedup
+let seen = NSMutableOrderedSet(array: allMessages)
+let deduped = seen.array as! [String]
+
+if let data = try? JSONEncoder().encode(deduped) {
+    try? data.write(to: queueURL, options: .atomic)
+    print("Messages parsed : \(allMessages.count)")
+    print("After dedup     : \(deduped.count)")
+    print("Queue written to: \(queueURL.path)")
+    print("→ Lance l'app Souffleuse pour importer dans le corpus.")
+} else {
+    fputs("Failed to write queue file.\n", stderr)
+    exit(1)
+}
