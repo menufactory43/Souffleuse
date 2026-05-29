@@ -39,6 +39,27 @@ extension SuggestionPolicy {
 
         public static let l2UpgradeDelta: Float = 0.15
 
+        /// **Token-healing master switch (Task 1 + Task 2).** When `true`, a
+        /// mid-word caret feeds the trailing partial word to the engine as a
+        /// `healPrefix` so the model re-derives the WHOLE word from a clean
+        /// boundary (engine drops the partial token + masks the first generated
+        /// tokens to be prefix-compatible). `onLLMChunk` then ADMITS the healed
+        /// chunk when `partial + leadingPlainRun(chunk)` forms a valid dictionary
+        /// word, instead of blocking it as a "guess". Set to `false` to revert to
+        /// the un-healed behaviour byte-for-byte (engine default `healPrefix: nil`
+        /// + the original "complete word ≥4 chars" admit rule).
+        public static let midWordHealingEnabled: Bool = true
+
+        /// **Corpus recall quality-gate (Task 4).** When `true`, a strong-corpus
+        /// instant recall whose continuation (after `capToWords`) ends mid-word on
+        /// an INCOMPLETE fragment — and is not sentence-terminated — is rejected so
+        /// the cascade falls through to the LLM. Stops a truncated stored phrase
+        /// ("… il est indiqué s'ils report") from pre-empting a better LLM
+        /// generation via the unbeatable `strongCorpusSourcePrior`. Conservative:
+        /// only clearly-broken recalls are rejected; good recalls keep the speed
+        /// win. Set to `false` to revert to always emitting any strong recall.
+        public static let corpusRecallQualityGateEnabled: Bool = true
+
         // MARK: - Phase 3 (b) — Cotypist "short" fast-path (strong corpus match)
         ///
         /// Minimum matched-context length (in characters) for a corpus
@@ -75,6 +96,36 @@ extension SuggestionPolicy {
         /// in-[0,1] score can never reach. The LLM may therefore only EXTEND
         /// (never replace) a strong corpus ghost, honouring the anti-churn rule.
         public static let strongCorpusSourcePrior: Float = 0.92
+
+        /// A mid-word corpus recall that commits FEWER than this many letters/
+        /// digits of the word the user is still typing is a MICRO completion
+        /// ("Rapport fis" → "c", "…2024" → "9", "qu" → "'a"). It is still shown
+        /// INSTANTLY (with the normal strong prior, so it appears immediately),
+        /// but `onLLMChunk` lets an admitted, gate-passing LLM completion of the
+        /// WHOLE word REPLACE it freely — bypassing the lengthFit-based bar that
+        /// a 1-word healed completion ("cal" → "fiscal") could otherwise never
+        /// clear. At/above this committed length the recall is treated as a
+        /// confident learned completion ("fiscalité", "comment allez-vous ?") and
+        /// keeps the anti-churn bar. 3 ⇒ only 1–2 char completions are overridable.
+        public static let corpusMicroCompletionMaxChars: Int = 3
+
+        // MARK: - LLM context window (coherence, 2026-05-29 measurement)
+        ///
+        /// Number of trailing characters of the (corrected) preceding text fed
+        /// to the model as `beforeCursor`. Sized by a window A/B on the real
+        /// engine (19 FR+EN coherence cases, windows 256→2048): **512 was the
+        /// WORST window** — a 512-char cut can land mid-sentence and sever the
+        /// discourse thread, producing generic filler instead of a
+        /// context-anchored continuation (e.g. a far "remboursement"/"dashboard"
+        /// antecedent is lost). The previous "more context dilutes a 1B model"
+        /// rationale was UNSUPPORTED (0/14 within-512 controls changed across any
+        /// window). 1024 never truncates mid-thought, matches/beats 512
+        /// everywhere, and recovers far-antecedent coherence; cost ≈ +60ms warm
+        /// prefill TTFT, paid once per cold field (KV reuse covers steady
+        /// typing). 2048 added nothing for +185ms. NOTE: conjugation/agreement
+        /// was already correct even at 256 (French cues sit near the caret) — the
+        /// window fixes DISCOURSE coherence, not distance agreement.
+        public static let llmContextWindowChars: Int = 1024
 
         // MARK: - D-08 Cache / undo-cache floors (tightening 2026-05-26)
         ///

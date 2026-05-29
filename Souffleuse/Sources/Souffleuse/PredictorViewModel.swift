@@ -496,6 +496,16 @@ final class PredictorViewModel {
         }
         let basePreamble = parts.isEmpty ? "" : parts.joined(separator: "\n\n") + "\n\n"
 
+        // Dump the assembled prompt skeleton the LLM will actually receive.
+        // `|||SYS|||` / `|||PREAMBLE|||` / `|||TAIL|||` separators keep the
+        // payload single-line and grep-friendly while preserving the three
+        // slots distinctly — lets us cross-reference what's in /tmp/souffleuse-ocr.log
+        // against what actually reaches the model.
+        PredictDebug.log(
+            "final_prompt",
+            "sys=\(systemMessage.debugDescription) |||PREAMBLE||| \(basePreamble.debugDescription) |||TAIL||| \(correctedTail.debugDescription)"
+        )
+
         let maxTokens = self.maxTokens
         let isInstructModel = modelId.range(of: "-it", options: .caseInsensitive) != nil
             || modelId.range(of: "instruct", options: .caseInsensitive) != nil
@@ -598,15 +608,17 @@ final class PredictorViewModel {
             // without ever injecting demonstration text into the prompt.
             // This eliminates cross-pollination by construction.
             //
-            // LLM input window : feed only the last 512 chars of userTail
-            // (~150 tokens) to the model. The full 2048 char cache key
-            // still drives memoisation, but the LLM only needs the recent
-            // context to predict well — anything beyond that dilutes
-            // attention on a 1B model and slows TTFT proportionally.
-            // Model input window : last 512 chars of the CORRECTED prefix.
-            // userTail (the raw typed text) still drives memoisation /
-            // anti-repeat below; only the bytes the LLM sees are corrected.
-            let llmTail = String(correctedTail.suffix(512))
+            // LLM input window : feed the last `llmContextWindowChars` of the
+            // CORRECTED prefix to the model as `beforeCursor`. The full 2048-char
+            // userTail still drives memoisation / anti-repeat below; only the
+            // bytes the LLM SEES are corrected and windowed. Sized by the
+            // 2026-05-29 window A/B (see Tuning.llmContextWindowChars): 512 was
+            // the worst window (a mid-sentence cut severs the discourse thread →
+            // generic filler); 1024 recovers far-antecedent coherence with no
+            // within-window regression, ~+60ms warm prefill paid once per cold
+            // field. The old "more context dilutes a 1B model" rationale was
+            // measured and refuted.
+            let llmTail = String(correctedTail.suffix(SuggestionPolicy.Tuning.llmContextWindowChars))
             let basePromptText = basePreamble + llmTail
             let snapshot: NgramSnapshot? = personalizationStrength > 0
                 ? await ngramModel.snapshot()

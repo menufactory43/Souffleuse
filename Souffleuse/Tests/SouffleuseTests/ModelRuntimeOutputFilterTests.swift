@@ -225,4 +225,42 @@ struct ModelRuntimeOutputFilterTests {
         #expect(Filter.normalizeFrenchTypography("") == "")
         #expect(Filter.normalizeFrenchTypography("bonjour tout le monde") == "bonjour tout le monde")
     }
+
+    // MARK: - ghostEchoesRecentSentenceStart (pt base sentence-restart echo)
+
+    @Test func sentenceEchoCaughtVousAvez() {
+        // Live bug: caret after a completed sentence; the base model restarts it.
+        #expect(Filter.ghostEchoesRecentSentenceStart(
+            "Vous avez", prefix: "Vous avez cliqué sur mon lien ? "))
+    }
+
+    @Test func sentenceEchoCaughtCaptureD() {
+        #expect(Filter.ghostEchoesRecentSentenceStart(
+            "Capture d", prefix: "Capture d'écran s'il vous plait."))
+    }
+
+    @Test func sentenceEchoKeepsDivergentSharedOpener() {
+        // "Je vous remercie…" shares the opener "Je vous" with the previous
+        // sentence but DIVERGES → not a pure restatement → must be kept.
+        #expect(!Filter.ghostEchoesRecentSentenceStart(
+            "Je vous remercie de votre temps",
+            prefix: "Je vous écris pour vous informer. "))
+    }
+
+    @Test func sentenceEchoKeepsUnrelatedContinuation() {
+        #expect(!Filter.ghostEchoesRecentSentenceStart(
+            "Comment allez-vous ?", prefix: "Bonjour. "))
+    }
+
+    @Test func sentenceEchoIgnoredMidSentence() {
+        // Caret NOT at a sentence boundary → never fires (mid-sentence
+        // continuations are out of scope for this guard).
+        #expect(!Filter.ghostEchoesRecentSentenceStart(
+            "cliqué sur le lien", prefix: "Vous avez "))
+    }
+
+    @Test func sentenceEchoShortGhostIgnored() {
+        // < 5 normalized chars → below threshold, never flagged.
+        #expect(!Filter.ghostEchoesRecentSentenceStart("Ok", prefix: "Ok. "))
+    }
 }

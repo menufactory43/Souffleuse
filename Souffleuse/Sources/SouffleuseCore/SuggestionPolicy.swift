@@ -185,6 +185,21 @@ public enum SuggestionPolicy {
         return sharedTypoDetector.isValidWord(partial, language: nil)
     }
 
+    /// Token-healing admit predicate (Task 2). When the caret is mid-word inside
+    /// `partial` and the engine's healed chunk's leading plain run COMPLETES that
+    /// word, `partial + leadingPlainRun(chunk)` forms a single candidate word —
+    /// e.g. "fis"+"cal" = "fiscal", "impe"+"rméable" = "imperméable". Returns
+    /// true iff that merged word is a valid FR/EN dictionary word AND the chunk
+    /// is letter/digit-led (it genuinely continues the same word, not a next-word
+    /// space/punct jump or an apostrophe/hyphen sub-word boundary). Wraps the
+    /// `private` shared `TypoDetector` so `SuggestionPolicyEngine` can reuse it.
+    public nonisolated static func healingMidWordAdmits(partial: String, chunk: String) -> Bool {
+        guard let first = chunk.first, first.isLetter || first.isNumber else { return false }
+        let merged = partial + OutputFilter.leadingPlainRun(chunk)
+        guard !merged.isEmpty else { return false }
+        return sharedTypoDetector.isValidWord(merged, language: nil)
+    }
+
     /// D-06 prefix_fit : le ghost s'enchaîne-t-il avec `userTail` ?
     ///
     /// - **Mid-word** (`userTail.last?.isLetter == true`) :
@@ -396,6 +411,61 @@ public enum SuggestionPolicy {
         }
         return s
     }
+
+    /// Recall quality-gate (Task 4). True when a corpus continuation (already
+    /// `capToWords`-trimmed) is CLEARLY broken: its final word is an incomplete
+    /// fragment AND the continuation is not sentence-terminated. This catches a
+    /// stored phrase that was itself truncated mid-word ("… il est indiqué s'ils
+    /// report") so the unbeatable `strongCorpusSourcePrior` cannot pin a bad
+    /// recall in place and pre-empt a better LLM generation.
+    ///
+    /// Conservative on purpose — only reject when the LAST token is a non-trivial
+    /// letter-led fragment that NSSpellChecker does not recognise. We keep clean
+    /// recalls (last word is a real word, or the continuation ends in sentence
+    /// punctuation) so the corpus fast-path speed win is preserved.
+    public nonisolated static func corpusContinuationIsLowQuality(_ continuation: String) -> Bool {
+        let trimmed = continuation.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        // Sentence-terminated / clause-closed continuations are deliberate stops,
+        // never truncation artefacts.
+        if let last = trimmed.last,
+           last == "." || last == "?" || last == "!" || last == "…"
+            || last == "," || last == ";" || last == ":" || last == ")"
+            || last == "»" || last == "\"" {
+            return false
+        }
+        // Inspect the trailing word (mirrors `trailingPartialWord`'s notion).
+        let lastWord = OutputFilter.trailingPartialWord(trimmed)
+        guard !lastWord.isEmpty else { return false }
+        // Apostrophe/hyphen compounds ("s'ils", "rendez-vous") would be wrongly
+        // rejected by a single-word spell check — leave them alone (conservative).
+        if lastWord.contains(where: { $0 == "'" || $0 == "’" || $0 == "-" }) {
+            return false
+        }
+        // Pure-digit / very short tails are not the truncation case we target.
+        guard lastWord.count >= 3, lastWord.contains(where: { $0.isLetter }) else {
+            return false
+        }
+        // Broken iff the trailing word is not a valid dictionary word.
+        return !sharedTypoDetector.isValidWord(lastWord, language: nil)
+    }
+
+    /// True when the current ghost is a corpus MICRO-completion: a MID-WORD
+    /// (letter/digit tail) recall whose leading word-run commits only 1–2
+    /// letters/digits of the word the user is still typing ("c" completing
+    /// "fis", "9" completing "2024", "'a" completing "qu"). The corpus cannot
+    /// know WHICH longer word the user means, so this is a low-confidence
+    /// instant placeholder that must YIELD to a coherent, gate-passing LLM
+    /// completion of the whole word — see `onLLMChunk`. It is restricted to the
+    /// mid-word case on purpose: an AFTER-SPACE short recall ("…lu mon " → "CV")
+    /// can be HIGH-confidence (many chars of re-entered context matched), so it
+    /// keeps the unbeatable strong prior and the anti-churn replacement bar.
+    public nonisolated static func isMicroCorpusCompletion(ghost: String, userTail: String) -> Bool {
+        guard let last = userTail.last, last.isLetter || last.isNumber else { return false }
+        let committed = OutputFilter.leadingWordRun(ghost)
+            .filter { $0.isLetter || $0.isNumber }.count
+        return committed >= 1 && committed < Tuning.corpusMicroCompletionMaxChars
+    }
 }
 
 // MARK: - GhostUpdate + LifecycleEndReason (Plan 04-02)
@@ -526,14 +596,22 @@ public final class SuggestionPolicyEngine {
             ) {
                 let capped = SuggestionPolicy.capToWords(strong.continuation, max: maxWords)
                 if !capped.isEmpty {
-                    let score = Score(
-                        sourcePrior: SuggestionPolicy.Tuning.strongCorpusSourcePrior,
-                        prefixFit: SuggestionPolicy.prefixFit(ghost: capped, userTail: userTail),
-                        lengthFit: SuggestionPolicy.lengthFit(ghost: capped)
-                    )
-                    if score.passesGate {
-                        Log.info(.predictor, "ghost_corpus_fastpath", count: strong.matchedChars)
-                        return GhostUpdate(text: capped, source: .history, score: score)
+                    // Recall quality-gate (Task 4): drop a clearly-truncated recall
+                    // so the cascade can reach the LLM instead of pinning a broken
+                    // ghost via the unbeatable strong-corpus prior.
+                    if SuggestionPolicy.Tuning.corpusRecallQualityGateEnabled
+                        && SuggestionPolicy.corpusContinuationIsLowQuality(capped) {
+                        Log.info(.predictor, "ghost_corpus_recall_rejected", count: capped.count)
+                    } else {
+                        let score = Score(
+                            sourcePrior: SuggestionPolicy.Tuning.strongCorpusSourcePrior,
+                            prefixFit: SuggestionPolicy.prefixFit(ghost: capped, userTail: userTail),
+                            lengthFit: SuggestionPolicy.lengthFit(ghost: capped)
+                        )
+                        if score.passesGate {
+                            Log.info(.predictor, "ghost_corpus_fastpath", count: strong.matchedChars)
+                            return GhostUpdate(text: capped, source: .history, score: score)
+                        }
                     }
                 }
             }
@@ -567,14 +645,20 @@ public final class SuggestionPolicyEngine {
         ) {
             let capped = SuggestionPolicy.capToWords(strong.continuation, max: maxWords)
             if !capped.isEmpty {
-                let score = Score(
-                    sourcePrior: SuggestionPolicy.Tuning.strongCorpusSourcePrior,
-                    prefixFit: SuggestionPolicy.prefixFit(ghost: capped, userTail: userTail),
-                    lengthFit: SuggestionPolicy.lengthFit(ghost: capped)
-                )
-                if score.passesGate {
-                    Log.info(.predictor, "ghost_corpus_fastpath", count: strong.matchedChars)
-                    return GhostUpdate(text: capped, source: .history, score: score)
+                // Recall quality-gate (Task 4): reject clearly-truncated recalls.
+                if SuggestionPolicy.Tuning.corpusRecallQualityGateEnabled
+                    && SuggestionPolicy.corpusContinuationIsLowQuality(capped) {
+                    Log.info(.predictor, "ghost_corpus_recall_rejected", count: capped.count)
+                } else {
+                    let score = Score(
+                        sourcePrior: SuggestionPolicy.Tuning.strongCorpusSourcePrior,
+                        prefixFit: SuggestionPolicy.prefixFit(ghost: capped, userTail: userTail),
+                        lengthFit: SuggestionPolicy.lengthFit(ghost: capped)
+                    )
+                    if score.passesGate {
+                        Log.info(.predictor, "ghost_corpus_fastpath", count: strong.matchedChars)
+                        return GhostUpdate(text: capped, source: .history, score: score)
+                    }
                 }
             }
         }
@@ -648,11 +732,31 @@ public final class SuggestionPolicyEngine {
             // "corrigé", "vendredi", "contrôle", "exactement") is a real word
             // boundary where the LLM's next-word continuation is reliable.
             let partial = OutputFilter.trailingPartialWord(userTail)
-            let allow = partial.count >= SuggestionPolicy.Tuning.midWordLLMMinCompleteWordChars
+            let completeWordAllow =
+                partial.count >= SuggestionPolicy.Tuning.midWordLLMMinCompleteWordChars
                 && SuggestionPolicy.defaultPartialWordIsComplete(userTail)
-            if !allow {
+
+            // Healing-admit (Task 2): with token healing on, the engine re-derives
+            // the WHOLE current word from a clean boundary and the chunk's leading
+            // run COMPLETES the partial. Admit when `partial + leadingPlainRun(chunk)`
+            // is a valid dictionary word AND the run is letter-led (it continues the
+            // SAME word — not a space/punct next-word jump and not an apostrophe/
+            // hyphen sub-word boundary). E.g. "fis" + "cal" = "fiscal" (valid) →
+            // ADMIT; "impe" + "rméable" = "imperméable" (valid) → ADMIT. Garbage
+            // merges ("Bonjou" + "rné" = "Bonjourné") are NOT valid words → still
+            // blocked, so the four pre-existing block tests are preserved.
+            let healingAdmit = SuggestionPolicy.Tuning.midWordHealingEnabled
+                && SuggestionPolicy.healingMidWordAdmits(partial: partial, chunk: chunk)
+
+            if !(completeWordAllow || healingAdmit) {
                 Log.info(.predictor, "ghost_midword_llm_block", count: chunk.count)
                 return nil
+            }
+            if healingAdmit && !completeWordAllow {
+                // Distinct event for the healed admit (vs. the existing complete-word
+                // boundary admit, which is silent here and scored below as usual).
+                let merged = partial + OutputFilter.leadingPlainRun(chunk)
+                Log.info(.predictor, "ghost_midword_healed", count: merged.count)
             }
         }
 
@@ -677,7 +781,22 @@ public final class SuggestionPolicyEngine {
             let beatsBar = score.beats(currentScore)
             let l2Upgrades = isHistoryFirst
                 && (score.value >= currentScore.value + SuggestionPolicy.Tuning.l2UpgradeDelta)
-            if !(beatsBar || l2Upgrades) {
+            // Micro-completion override: a mid-word corpus ghost that commits only
+            // 1–2 chars ("Rapport fis" → "c") is a low-confidence placeholder. The
+            // lengthFit-based bar can NEVER let a 1-word LLM chunk ("cal", score
+            // 0.36) out-score a 1-word history micro (0.55), so the healed
+            // completion of the WHOLE word would be stuck behind the bar and "c"
+            // would stay pinned — exactly the live bug. Let an admitted LLM chunk
+            // replace it, BUT only when the chunk EXTENDS the micro's committed run
+            // — "c" → "cal" (same word, fuller → fiscal). A DIVERGENT heal does
+            // NOT extend it ("Bonne journ" micro "ée" vs model "al" → journal), so
+            // the user's learned recall is kept rather than clobbered. Scoped to
+            // the mid-word micro case: long and after-space recalls keep the
+            // anti-churn bar above.
+            let replacesMicroCorpus = isHistoryFirst
+                && SuggestionPolicy.isMicroCorpusCompletion(ghost: currentGhost, userTail: userTail)
+                && OutputFilter.leadingWordRun(chunk).hasPrefix(OutputFilter.leadingWordRun(currentGhost))
+            if !(beatsBar || l2Upgrades || replacesMicroCorpus) {
                 Log.info(.predictor, "ghost_keep_under_bar", count: currentGhost.count)
                 return nil
             }

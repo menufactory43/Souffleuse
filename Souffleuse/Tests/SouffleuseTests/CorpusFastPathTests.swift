@@ -220,4 +220,144 @@ struct CorpusFastPathTests {
         )
         #expect(r == nil)
     }
+
+    // MARK: - Micro-completion override ("Rapport fis" → "c" live fix)
+
+    /// The micro-completion is still shown INSTANTLY at the strong prior
+    /// (immediate feedback, Cotypist parity): "…Rapport fisc" recalled at
+    /// "Rapport fis" yields "c" with source .history.
+    @Test func microCorpusGhostShownInstantly() {
+        let p = Self.engine()
+        let snap = [Self.entry("", "Rapport fisc")]
+        let r = p.routeInstant(
+            userTail: "Rapport fis",
+            historySnapshot: snap,
+            wordCompleter: WordCompleter()
+        )
+        #expect(r?.source == .history)
+        #expect(r?.text == "c")
+    }
+
+    /// THE live fix, with the REALISTIC streaming snapshot. The model heals
+    /// "fis" → "fiscal" and the first cumulative one-line chunk is the SINGLE
+    /// word "cal". A 1-word .llm chunk (score 0.36) can NEVER out-score a 1-word
+    /// .history micro (0.55) through the lengthFit-based bar — so the override
+    /// MUST come from the micro-completion replacement rule, not the score.
+    /// Before this rule, feeding "cal" left "c" pinned (the bug the adversarial
+    /// review surfaced — the old test masked it by feeding 3 words).
+    @Test func oneWordHealedLLMOverridesMicroGhost() {
+        let p = Self.engine()
+        let snap = [Self.entry("", "Rapport fisc")]
+        let inst = p.routeInstant(
+            userTail: "Rapport fis",
+            historySnapshot: snap,
+            wordCompleter: WordCompleter()
+        )
+        #expect(inst?.text == "c")
+        p.applyGhost(inst!.text, source: inst!.source, score: inst!.score)
+        // ONE word — the realistic first streaming snapshot, not "cal annuel 2019".
+        let r = p.onLLMChunk("cal", userTail: "Rapport fis")
+        #expect(r != nil)
+        #expect(r?.source == .llm)
+        #expect(r?.text == "cal")
+    }
+
+    /// Regression guard (adversarial review v3, lens a): a LEARNED short
+    /// completion the LLM heals to a DIFFERENT word must NOT be clobbered.
+    /// "Bonne journ" recalls learned "ée" (journée); the model heals "journ" →
+    /// "journal" (chunk "al"). "al" does NOT extend "ée", so the micro-override
+    /// must NOT fire — the user's learned "ée" is kept.
+    @Test func divergentHealDoesNotClobberLearnedMicro() {
+        let p = Self.engine()
+        let micro = Score(
+            sourcePrior: SuggestionPolicy.Tuning.strongCorpusSourcePrior,
+            prefixFit: 1.0,
+            lengthFit: SuggestionPolicy.lengthFit(ghost: "ée")
+        )
+        p.applyGhost("ée", source: .history, score: micro)
+        let r = p.onLLMChunk("al", userTail: "Bonne journ")  // → "journal", diverges from "ée"
+        #expect(r == nil)   // learned "ée" kept; "al" does not extend "ée"
+    }
+
+    /// Conversely, a heal that EXTENDS the micro DOES override: "Bonne journ"
+    /// micro "ée" + model chunk "ée chargée" (extends "ée") → richer suggestion.
+    @Test func extendingHealOverridesMicro() {
+        let p = Self.engine()
+        let micro = Score(
+            sourcePrior: SuggestionPolicy.Tuning.strongCorpusSourcePrior,
+            prefixFit: 1.0,
+            lengthFit: SuggestionPolicy.lengthFit(ghost: "ée")
+        )
+        p.applyGhost("ée", source: .history, score: micro)
+        let r = p.onLLMChunk("ée chargée", userTail: "Bonne journ")  // extends "ée"
+        #expect(r?.source == .llm)
+        #expect(r?.text == "ée chargée")
+    }
+
+    /// Regression guard (adversarial review, lens b): an AFTER-SPACE recall
+    /// whose continuation is a short word ("…lu mon " → "CV") is HIGH-confidence
+    /// (long matched context) and must NOT be treated as a micro-completion — a
+    /// generic LLM phrase must not clobber it. The micro rule is mid-word only.
+    @Test func afterSpaceShortRecallNotClobbered() {
+        let p = Self.engine()
+        let snap = [Self.entry("", "Merci d'avoir lu mon CV")]
+        let inst = p.routeInstant(
+            userTail: "Merci d'avoir lu mon ",
+            historySnapshot: snap,
+            wordCompleter: WordCompleter()
+        )
+        #expect(inst?.text == "CV")
+        #expect(inst?.score.sourcePrior == SuggestionPolicy.Tuning.strongCorpusSourcePrior)
+        p.applyGhost(inst!.text, source: inst!.source, score: inst!.score)
+        let r = p.onLLMChunk("rapport en pièce jointe", userTail: "Merci d'avoir lu mon ")
+        #expect(r == nil)   // confident short recall stays — not a micro-completion
+    }
+
+    /// Classification unit test for the micro-completion predicate, incl. the
+    /// boundaries that protect option-1 behaviour (fiscalité kept; after-space
+    /// short recall protected; next-word continuation unaffected).
+    @Test func isMicroCorpusCompletionClassification() {
+        // Mid-word, 1–2 committed letters/digits → micro (overridable).
+        #expect(SuggestionPolicy.isMicroCorpusCompletion(ghost: "c", userTail: "Rapport fis"))
+        #expect(SuggestionPolicy.isMicroCorpusCompletion(ghost: "9", userTail: "Le total 2024"))
+        #expect(SuggestionPolicy.isMicroCorpusCompletion(ghost: "'a", userTail: "je pense qu"))
+        // ≥3 committed letters → NOT micro: substantial learned completion kept.
+        #expect(!SuggestionPolicy.isMicroCorpusCompletion(ghost: "mment allez-vous ?", userTail: "Bonjour, co"))
+        #expect(!SuggestionPolicy.isMicroCorpusCompletion(ghost: "lité", userTail: "Rapport fisca"))  // fiscalité stays
+        // After-space tail → NOT micro: high-confidence short recall protected.
+        #expect(!SuggestionPolicy.isMicroCorpusCompletion(ghost: "CV", userTail: "Merci d'avoir lu mon "))
+        // Next-word (space-led) continuation → empty leading run → NOT micro.
+        #expect(!SuggestionPolicy.isMicroCorpusCompletion(ghost: " vous montrer", userTail: "Bonjour, je vais"))
+    }
+
+    /// A SUBSTANTIAL mid-word completion (≥3 committed letters) keeps the
+    /// unbeatable strong prior — learned phrases like "comment allez-vous ?"
+    /// (and "fiscalité") stay pinned; the micro rule does not touch them.
+    @Test func longCompletionKeepsStrongPrior() {
+        let p = Self.engine()
+        let snap = [Self.entry("Bonjour,", "comment allez-vous ?")]
+        let r = p.routeInstant(
+            userTail: "Bonjour, co",
+            historySnapshot: snap,
+            wordCompleter: WordCompleter()
+        )
+        #expect(r?.source == .history)
+        #expect(r?.text == "mment allez-vous ?")
+        #expect(r?.score.sourcePrior == SuggestionPolicy.Tuning.strongCorpusSourcePrior)
+    }
+
+    /// A NEXT-WORD continuation (space-led, after a complete word) keeps the
+    /// strong prior — confident recall, not a micro-completion.
+    @Test func nextWordCompletionKeepsStrongPrior() {
+        let p = Self.engine()
+        let snap = [Self.entry("", "Bonjour, je vais vous montrer le dossier")]
+        let r = p.routeInstant(
+            userTail: "Bonjour, je vais",
+            historySnapshot: snap,
+            wordCompleter: WordCompleter()
+        )
+        #expect(r?.source == .history)
+        #expect(r?.text.hasPrefix(" vous") == true)
+        #expect(r?.score.sourcePrior == SuggestionPolicy.Tuning.strongCorpusSourcePrior)
+    }
 }

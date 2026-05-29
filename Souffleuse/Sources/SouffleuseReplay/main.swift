@@ -38,6 +38,22 @@ let kPersonalizationStrength: Float = {
     return 0
 }()
 
+/// Repetition-penalty knobs — env-overridable for the Cotypist-parity
+/// investigation. Defaults mirror generateLlama PROD (1.3 / 64). Hypothesis:
+/// a high penalty over a window that includes the prompt context penalises
+/// context-echo ("fiscale" on screen → model avoids "fiscal"). Override:
+///   SOUFFLEUSE_REPLAY_REPEAT_PENALTY=1.0 SOUFFLEUSE_REPLAY_REPEAT_LAST_N=0
+let kRepeatPenalty: Float = {
+    if let s = ProcessInfo.processInfo.environment["SOUFFLEUSE_REPLAY_REPEAT_PENALTY"],
+       let f = Float(s) { return f }
+    return 1.3
+}()
+let kRepeatLastN: Int32 = {
+    if let s = ProcessInfo.processInfo.environment["SOUFFLEUSE_REPLAY_REPEAT_LAST_N"],
+       let n = Int32(s) { return n }
+    return 64
+}()
+
 func err(_ s: String) { FileHandle.standardError.write(Data((s + "\n").utf8)) }
 
 // MARK: - JSON scenario schema
@@ -190,10 +206,25 @@ func runLLM(
         afterCursor: "",
         beforeCursor: userTail
     )
+    if ProcessInfo.processInfo.environment["DUMP_PROMPT"] != nil {
+        err("=== PROMPT for \(userTail.debugDescription) (rp=\(kRepeatPenalty) rln=\(kRepeatLastN)) ===\n\(prompt)\n=== END PROMPT ===")
+    }
     // Caret derivation — verbatim from generateLlama.
     let caretAfterSpace = userTail.last == " " || userTail.last == "\t"
     let caretMidWord = userTail.last.map { $0.isLetter || $0.isNumber } ?? false
     let minFirstTokenProb: Float = caretMidWord ? LlamaPromptBuilder.midWordMinFirstTokenProb : 0
+
+    // TOKEN HEALING — mirrors production `generateLlama` exactly: mid-word, drop
+    // the trailing partial-word token(s) from the prompt and re-derive the merged
+    // token at a clean boundary (see LlamaSampling.healPrefix). Gated on the same
+    // `Tuning.midWordHealingEnabled` flag the app uses, so the replay's LLM path
+    // is faithful to what the live app generates. `NOHEAL=1` forces it off to
+    // reproduce the pre-V2 garbage baseline for A/B measurement.
+    let healPrefix: String? = (SuggestionPolicy.Tuning.midWordHealingEnabled
+                               && ProcessInfo.processInfo.environment["NOHEAL"] == nil
+                               && caretMidWord)
+        ? OutputFilter.trailingPartialWord(userTail)
+        : nil
 
     // Mutable accumulator + lastEmitted tracker — the caller-side state that
     // ChunkFilter intentionally does NOT own (preserves the live emit sequence).
@@ -208,17 +239,18 @@ func runLLM(
         maxTokens: kMaxTokens,
         sampling: LlamaSampling(
             temperature: 0,
-            repeatPenalty: 1.3,
-            repeatLastN: 64,
+            repeatPenalty: kRepeatPenalty,
+            repeatLastN: kRepeatLastN,
             personalizationStrength: kPersonalizationStrength,  // env-overridable; default 0
             banMarkup: true,
             banDigitsLeading: true,
             banEmoji: true,
-            minFirstTokenProb: minFirstTokenProb
+            minFirstTokenProb: minFirstTokenProb,
+            healPrefix: healPrefix
         )
     ) { piece in
         acc.generated += piece
-        let (verdict, _) = ChunkFilter.filterChunk(
+        let (verdict, _, sentenceComplete) = ChunkFilter.filterChunk(
             accumulated: acc.generated,
             userTail: userTail,
             caretAfterSpace: caretAfterSpace,
@@ -232,10 +264,13 @@ func runLLM(
             if !acc.lastEmitted.isEmpty { acc.lastEmitted = "" }
             return true
         case .emit(let oneLine):
-            guard oneLine != acc.lastEmitted else { return true }
-            acc.lastEmitted = oneLine
-            return true
+            if oneLine != acc.lastEmitted { acc.lastEmitted = oneLine }
+            // Mirror the live path: stop generating at a completed sentence.
+            return !sentenceComplete
         }
+    }
+    if ProcessInfo.processInfo.environment["DUMP_RAW"] != nil {
+        err("RAW gen for \(userTail.debugDescription): generated=\(acc.generated.debugDescription) → emitted=\(acc.lastEmitted.debugDescription)")
     }
     return acc.lastEmitted
 }
@@ -362,50 +397,61 @@ func main() async {
 
     for item in items {
         let tail = item.userTail
-        // 4a. Instant routing (L0/L1) via the real SuggestionPolicyEngine.
-        let routed: GhostUpdate? = await MainActor.run {
-            let policy = SuggestionPolicyEngine(maxWords: kMaxWords)
-            return policy.routeInstant(
-                userTail: tail,
-                historySnapshot: entries,
-                wordCompleter: engineActor
-            )
-        }
-
-        var ghost = ""
-        var source = "none"
-        if let route = routed {
-            ghost = route.text
-            source = sourceLabel(route.source)
-        } else if ProcessInfo.processInfo.environment["EXPMID"] != nil,
-                  let last = tail.last, last.isLetter || last.isNumber,
-                  tail.trimmingCharacters(in: .whitespaces).count >= 3 {
-            // EXPERIMENT: mid-word LLM WITHOUT the Option-A onLLMChunk block,
-            // tagged with the current partial-word length, to test whether
-            // long partial words yield coherent completions (so we could allow
-            // mid-word LLM above a length threshold instead of blocking all).
+        // INVESTIGATION (FORCE_LLM): bypass routeInstant (corpus/L0) entirely and
+        // show the RAW model output for this tail + what the mid-word gate would
+        // decide. Lets us see what the LLM produces at "Rapport fis" even when the
+        // corpus would otherwise pre-empt it with a history recall.
+        if ProcessInfo.processInfo.environment["FORCE_LLM"] != nil {
             let partial = OutputFilter.trailingPartialWord(tail)
             let raw = await runLLM(engine: engine, userTail: tail, ctxPrefix: item.ctxPrefix)
-            printRow(id: item.id, tail: tail, ghost: raw, source: "llm-mid:plen=\(partial.count)", rows: &mdRows, jsonMode: jsonMode)
+            let gated: GhostUpdate? = await MainActor.run {
+                SuggestionPolicyEngine(maxWords: kMaxWords).onLLMChunk(raw, userTail: tail)
+            }
+            printRow(id: item.id, tail: tail, ghost: raw,
+                     source: "llm-raw:plen=\(partial.count):\(gated == nil ? "GATED" : "pass")",
+                     rows: &mdRows, jsonMode: jsonMode)
             continue
-        } else {
-            // 4b. LLM path — gate at ≥3 trimmed chars (PVM LLM gate).
-            guard tail.trimmingCharacters(in: .whitespaces).count >= 3 else {
-                printRow(id: item.id, tail: tail, ghost: "", source: "none", rows: &mdRows, jsonMode: jsonMode)
+        }
+        // EXPMID (legacy investigation hook): raw mid-word LLM when routeInstant
+        // would return nil — kept for ad-hoc probing of the un-gated generation.
+        if ProcessInfo.processInfo.environment["EXPMID"] != nil,
+           let last = tail.last, last.isLetter || last.isNumber,
+           tail.trimmingCharacters(in: .whitespaces).count >= 3 {
+            let routedNil: Bool = await MainActor.run {
+                SuggestionPolicyEngine(maxWords: kMaxWords)
+                    .routeInstant(userTail: tail, historySnapshot: entries, wordCompleter: engineActor) == nil
+            }
+            if routedNil {
+                let partial = OutputFilter.trailingPartialWord(tail)
+                let raw = await runLLM(engine: engine, userTail: tail, ctxPrefix: item.ctxPrefix)
+                printRow(id: item.id, tail: tail, ghost: raw, source: "llm-mid:plen=\(partial.count)", rows: &mdRows, jsonMode: jsonMode)
                 continue
             }
-            let raw = await runLLM(engine: engine, userTail: tail, ctxPrefix: item.ctxPrefix)
-            if !raw.isEmpty {
-                // 4c. Relevance gate via onLLMChunk on a fresh engine instance.
-                let applied: GhostUpdate? = await MainActor.run {
-                    let policy = SuggestionPolicyEngine(maxWords: kMaxWords)
-                    return policy.onLLMChunk(raw, userTail: tail)
-                }
-                if let update = applied {
-                    ghost = update.text
-                    source = "llm"
-                }
+        }
+
+        // TWO-STAGE mirror of PredictorViewModel.predict: stage 1 sets the INSTANT
+        // ghost (routeInstant: corpus recall / L0 word-complete / L1 history),
+        // stage 2 runs the LLM and lets `onLLMChunk` REPLACE it subject to the
+        // relevance gate + replacement bar. We report the FINAL ghost the user
+        // sees after the stream settles — so a healed LLM ("fis"→"cal annuel")
+        // that beats a context-blind L0 ("ton") shows as the llm result, exactly
+        // as it does live. The single-stage "routeInstant wins" model hid this.
+        let needLLM = tail.trimmingCharacters(in: .whitespaces).count >= 3
+        let raw = needLLM ? await runLLM(engine: engine, userTail: tail, ctxPrefix: item.ctxPrefix) : ""
+        let (ghost, source): (String, String) = await MainActor.run {
+            let policy = SuggestionPolicyEngine(maxWords: kMaxWords)
+            var g = "", s = "none"
+            // Stage 1 — instant ghost.
+            if let route = policy.routeInstant(userTail: tail, historySnapshot: entries, wordCompleter: engineActor) {
+                policy.applyGhost(route.text, source: route.source, score: route.score)
+                g = route.text; s = sourceLabel(route.source)
             }
+            // Stage 2 — LLM stream can replace the instant ghost via the gate.
+            if !raw.isEmpty, let update = policy.onLLMChunk(raw, userTail: tail) {
+                policy.applyGhost(update.text, source: update.source, score: update.score)
+                g = update.text; s = sourceLabel(update.source)
+            }
+            return (g, s)
         }
         printRow(id: item.id, tail: tail, ghost: ghost, source: source, rows: &mdRows, jsonMode: jsonMode)
     }

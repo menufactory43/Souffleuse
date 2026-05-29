@@ -357,6 +357,22 @@ final class ModelRuntime {
         let caretMidWord = userTail.last.map { $0.isLetter || $0.isNumber } ?? false
         let minFirstTokenProb: Float = caretMidWord ? Self.midWordMinFirstTokenProb : 0
 
+        // Token healing (Task 1). When the caret sits mid-word, hand the engine
+        // the trailing partial word as `healPrefix`: it drops the partial token
+        // and masks the first generated tokens so the WHOLE word is re-derived
+        // from a clean boundary ("Rapport fis" → " fiscal annuel 2019", not the
+        // broken "fiscaal"). The prompt's `beforeCursor` (llmTail) ends with the
+        // SAME partial as `userTail` — mid-word means no trailing space, and
+        // `llmTail` is just the (corrected) suffix of `userTail` — so the partial
+        // computed from `userTail` is exactly what sits at the end of the prompt.
+        // Gated behind `midWordHealingEnabled` so it is reversible (default nil →
+        // engine output byte-identical to the un-healed path).
+        var healPrefix: String? = nil
+        if SuggestionPolicy.Tuning.midWordHealingEnabled && caretMidWord {
+            let partial = OutputFilter.trailingPartialWord(userTail)
+            if !partial.isEmpty { healPrefix = partial }
+        }
+
         // Accumulator + last-emitted tracker, isolated behind a class so the
         // @Sendable onToken closure can mutate it without crossing the actor
         // boundary back to @MainActor on every token.
@@ -397,7 +413,8 @@ final class ModelRuntime {
                 banMarkup: true,
                 banDigitsLeading: true,
                 banEmoji: true,
-                minFirstTokenProb: minFirstTokenProb
+                minFirstTokenProb: minFirstTokenProb,
+                healPrefix: healPrefix
             )
         ) { piece in
             if Task.isCancelled { return false }
@@ -417,7 +434,7 @@ final class ModelRuntime {
             // proved fresh greedy mid-word output is coherent; the spell-check
             // only produced false positives. `OutputFilter.midWordCandidate` is
             // retained (pure helper + tests) but no longer gates emission.
-            let (verdict, dropReason) = ChunkFilter.filterChunk(
+            let (verdict, dropReason, sentenceComplete) = ChunkFilter.filterChunk(
                 accumulated: acc.generated,
                 userTail: userTail,
                 caretAfterSpace: caretAfterSpace,
@@ -439,14 +456,19 @@ final class ModelRuntime {
                 }
                 return true
             case .emit(let oneLine):
-                // Only emit when the filtered one-line ghost actually changed.
-                guard oneLine != acc.lastEmitted else { return true }
-                acc.lastEmitted = oneLine
-                let chunkOut = oneLine
-                Task { @MainActor in onChunk(chunkOut) }
-                // Stop once we hit a sentence terminator (the truncation above
-                // already trimmed at it) — no value generating further tokens.
-                return true
+                // Emit only when the filtered one-line ghost actually changed.
+                if oneLine != acc.lastEmitted {
+                    acc.lastEmitted = oneLine
+                    let chunkOut = oneLine
+                    Task { @MainActor in onChunk(chunkOut) }
+                }
+                // Stop generating once the ghost was truncated at a sentence
+                // terminator: everything past the cut is discarded by the display
+                // anyway, so further tokens are pure wasted latency (matters on
+                // the long completion preset). Evaluated even when the ghost is
+                // unchanged from the last emit, so a sentence that completes
+                // without changing the displayed text still stops here.
+                return !sentenceComplete
             }
         }
 

@@ -329,4 +329,90 @@ struct SuggestionPolicyTests {
         p.beginPredict()
         #expect(p.currentSource == .llm)
     }
+
+    // MARK: - Mid-word token-healing admit (Task 2)
+
+    /// Healed admit: caret mid-word inside "fis" (an incomplete 3-char fragment,
+    /// NOT a complete word, so the old rule blocked it). With healing on, the
+    /// engine re-derived the whole word; the chunk's leading plain run "cal"
+    /// splices "fis"+"cal" = "fiscal" (valid French word) → ADMIT, source .llm.
+    @Test func midWordHealedAdmitFiscal() {
+        let p = Self.engine()
+        let r = p.onLLMChunk("cal annuel 2019", userTail: "Rapport fis")
+        #expect(r != nil)
+        #expect(r?.source == .llm)
+        #expect(r?.text == "cal annuel 2019")
+    }
+
+    /// Healed admit across an accent boundary: "impe" + leadingPlainRun
+    /// "rméable" = "imperméable" (valid) → ADMIT.
+    @Test func midWordHealedAdmitImpermeable() {
+        let p = Self.engine()
+        let r = p.onLLMChunk("rméable pour femme", userTail: "Une salopette impe")
+        #expect(r != nil)
+        #expect(r?.source == .llm)
+        #expect(r?.text == "rméable pour femme")
+    }
+
+    /// Still blocked under healing: "Bonjou" + "rné" → merged "Bonjourné" is NOT
+    /// a valid word, and the partial "Bonjou" is not a complete word either, so
+    /// NEITHER admit condition fires → nil. Guards the regression that the four
+    /// pre-existing block tests rely on.
+    @Test func midWordHealedStillBlocksGarbageMerge() {
+        let p = Self.engine()
+        let r = p.onLLMChunk("rné", userTail: "Bonjou")
+        #expect(r == nil)
+    }
+
+    // MARK: - Corpus recall quality-gate (Task 4)
+
+    /// A stored phrase truncated mid-word ("… qu'ils transmettr") yields a recall
+    /// continuation whose last word "transmettr" is an incomplete fragment (not a
+    /// valid FR/EN word, no sentence terminator) → REJECTED so the cascade falls
+    /// through to the LLM. routeInstant returns nil for the corpus path.
+    @Test func corpusRecallTruncatedFragmentRejected() {
+        let p = Self.engine()
+        // Entry text joins to "Pour votre déclaration fiscale, il est indiqué
+        // qu'ils transmettr" — the stored continuation breaks off mid-word.
+        let snap = [Self.entry(
+            "Pour votre déclaration fiscale, ",
+            "il est indiqué qu'ils transmettr"
+        )]
+        let r = p.routeInstant(
+            userTail: "Pour votre déclaration fiscale, ",  // after-space, ≥16-char match
+            historySnapshot: snap,
+            wordCompleter: WordCompleter()
+        )
+        #expect(r == nil)
+    }
+
+    /// A clean recall (continuation ends on a complete word) still passes the
+    /// quality-gate and is emitted as the instant .history ghost.
+    @Test func corpusRecallCleanContinuationPasses() {
+        let p = Self.engine()
+        let snap = [Self.entry(
+            "Pour votre déclaration fiscale, ",
+            "merci de joindre les justificatifs"
+        )]
+        let r = p.routeInstant(
+            userTail: "Pour votre déclaration fiscale, ",
+            historySnapshot: snap,
+            wordCompleter: WordCompleter()
+        )
+        #expect(r?.source == .history)
+        #expect(r?.text.contains("justificatifs") == true)
+    }
+
+    /// The quality-gate helper itself: a sentence-terminated continuation is
+    /// always clean even if it would otherwise look truncated; a bare broken
+    /// fragment is low quality.
+    @Test func corpusContinuationQualityHelper() {
+        // Broken trailing fragment (not a valid FR/EN word, no terminator).
+        #expect(SuggestionPolicy.corpusContinuationIsLowQuality("il est indiqué qu'ils transmettr") == true)
+        // Clean: last word is a real word.
+        #expect(SuggestionPolicy.corpusContinuationIsLowQuality("merci de joindre les justificatifs") == false)
+        // Sentence-terminated → always clean even if it looked truncated.
+        #expect(SuggestionPolicy.corpusContinuationIsLowQuality("voici la suite transmettr.") == false)
+        #expect(SuggestionPolicy.corpusContinuationIsLowQuality("") == false)
+    }
 }
