@@ -1,7 +1,19 @@
 import Foundation
 
-/// One accepted suggestion recorded with the prefix that preceded it.
-/// `contextBefore` is the tail of the prefix at the moment of acceptance,
+/// Origin of a corpus entry — separates the user's own prose from accepted
+/// ghost fragments. Entries tagged `.prose` are real sentences captured on
+/// focus change; `.accept` entries are ghost suggestions the user accepted
+/// (full or partial Tab run). Legacy entries without this key decode as
+/// `.accept` so existing corpus files stay valid unchanged.
+public enum EntrySource: String, Codable, Sendable {
+    case prose
+    case accept
+}
+
+/// One corpus entry: either an accepted ghost suggestion or a prose chunk
+/// captured directly from a text field.
+///
+/// `contextBefore` is the tail of the prefix at the moment of capture,
 /// already trimmed to the last sentence and capped in length.
 ///
 /// `midWordContinuation` records whether this was a mid-word accept (true),
@@ -17,19 +29,23 @@ public struct TypingHistoryEntry: Codable, Sendable, Equatable {
     /// legacy — no information; `joinHistory` falls back to the dictionary
     /// heuristic when nil.
     public let midWordContinuation: Bool?
+    /// Origin of this entry. Legacy entries without the key decode as `.accept`.
+    public let source: EntrySource
 
     public init(
         timestamp: Date,
         contextBefore: String,
         accepted: String,
         bundleID: String?,
-        midWordContinuation: Bool? = nil
+        midWordContinuation: Bool? = nil,
+        source: EntrySource = .accept
     ) {
         self.timestamp = timestamp
         self.contextBefore = contextBefore
         self.accepted = accepted
         self.bundleID = bundleID
         self.midWordContinuation = midWordContinuation
+        self.source = source
     }
 
     // MARK: - Codable (backward-compatible)
@@ -40,6 +56,7 @@ public struct TypingHistoryEntry: Codable, Sendable, Equatable {
         case accepted
         case bundleID
         case midWordContinuation
+        case source
     }
 
     public init(from decoder: Decoder) throws {
@@ -48,8 +65,9 @@ public struct TypingHistoryEntry: Codable, Sendable, Equatable {
         contextBefore = try c.decode(String.self, forKey: .contextBefore)
         accepted = try c.decode(String.self, forKey: .accepted)
         bundleID = try c.decodeIfPresent(String.self, forKey: .bundleID)
-        // Old JSON without the key decodes as nil — backward-compatible.
+        // Old JSON without these keys decodes as nil / .accept — backward-compatible.
         midWordContinuation = try c.decodeIfPresent(Bool.self, forKey: .midWordContinuation)
+        source = try c.decodeIfPresent(EntrySource.self, forKey: .source) ?? .accept
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -59,6 +77,7 @@ public struct TypingHistoryEntry: Codable, Sendable, Equatable {
         try c.encode(accepted, forKey: .accepted)
         try c.encodeIfPresent(bundleID, forKey: .bundleID)
         try c.encodeIfPresent(midWordContinuation, forKey: .midWordContinuation)
+        try c.encode(source, forKey: .source)
     }
 }
 

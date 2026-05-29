@@ -16,6 +16,7 @@ let package = Package(
         .executable(name: "SouffleuseAXProbe", targets: ["SouffleuseAXProbe"]),
         .executable(name: "SouffleuseContextProbe", targets: ["SouffleuseContextProbe"]),
         .executable(name: "SouffleuseReplay", targets: ["SouffleuseReplay"]),
+        .executable(name: "SouffleuseCorpusSeed", targets: ["SouffleuseCorpusSeed"]),
         .library(name: "SouffleuseAX", targets: ["SouffleuseAX"]),
         .library(name: "SouffleuseCore", targets: ["SouffleuseCore"]),
         .library(name: "SouffleuseOverlay", targets: ["SouffleuseOverlay"]),
@@ -197,6 +198,13 @@ let package = Package(
                 "SouffleuseLog",
                 "SouffleusePersonalization",
                 "SouffleuseTyping",
+            ]
+        ),
+        .executableTarget(
+            name: "SouffleuseCorpusSeed",
+            dependencies: [
+                "SouffleusePersonalization",
+                "SouffleuseLog",
             ]
         ),
         .testTarget(

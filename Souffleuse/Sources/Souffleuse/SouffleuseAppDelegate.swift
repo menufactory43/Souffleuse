@@ -1396,15 +1396,13 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Records a field's raw text into the corpus when "store without accepted"
-    /// is on — Cotypist's "Store Inputs Without Accepted Completions". Fires on
-    /// focus change with the PREVIOUS field's final text. Gated exactly like
-    /// acceptance recording (personalization master toggle + blocklists), plus
-    /// the store-without-accepted toggle, a minimum length (a real sentence, not
-    /// a stray word), and a consecutive-duplicate dedup. The `append` call adds
-    /// the shared secret-heuristic + fragment + FIFO gates.
+    /// Records a field's raw text into the corpus as a `.prose` entry. Fires on
+    /// focus change with the PREVIOUS field's final text. Gated by the
+    /// personalization master toggle + blocklists, a minimum length (a real
+    /// sentence, not a stray word), and a consecutive-duplicate dedup. The
+    /// `append` call adds the shared secret-heuristic + fragment + FIFO gates.
     private func recordRawInputIfAllowed(text: String, bundleID: String?) {
-        guard store.personalizationEnabled, store.storeWithoutAccepted else { return }
+        guard store.personalizationEnabled else { return }
         guard let bid = bundleID else { return }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count >= 8 else { return }
@@ -1416,7 +1414,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             timestamp: Date(),
             contextBefore: "",
             accepted: String(trimmed.suffix(200)),
-            bundleID: bid
+            bundleID: bid,
+            source: .prose
         )
         let history = self.store.history
         let predictorRef = self.predictor

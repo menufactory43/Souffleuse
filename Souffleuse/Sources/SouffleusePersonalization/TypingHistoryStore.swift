@@ -163,6 +163,28 @@ public actor TypingHistoryStore {
         // Add nullable mid_word column idempotently. Check PRAGMA first to
         // avoid the "duplicate column name" error on already-migrated DBs.
         addMidWordColumnIfNeeded()
+        addSourceColumnIfNeeded()
+    }
+
+    /// Adds the `source` TEXT column (default 'accept') if it does not exist.
+    /// Same idempotent pattern as `addMidWordColumnIfNeeded`.
+    private func addSourceColumnIfNeeded() {
+        guard let db else { return }
+        var hasColumn = false
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "PRAGMA table_info(entries);", -1, &stmt, nil) == SQLITE_OK {
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                if let namePtr = sqlite3_column_text(stmt, 1) {
+                    if String(cString: namePtr) == "source" { hasColumn = true; break }
+                }
+            }
+            sqlite3_finalize(stmt)
+        }
+        guard !hasColumn else { return }
+        let ddl = "ALTER TABLE entries ADD COLUMN source TEXT NOT NULL DEFAULT 'accept';"
+        if sqlite3_exec(db, ddl, nil, nil, nil) == SQLITE_OK {
+            Log.info(.context, "history_source_column_added")
+        }
     }
 
     /// Adds the `mid_word` INTEGER column to `entries` if it does not exist
@@ -385,7 +407,7 @@ public actor TypingHistoryStore {
 
     private func insert(_ entry: TypingHistoryEntry) {
         guard let db else { return }
-        let sql = "INSERT INTO entries (ts, context_before, accepted, bundle_id, ctx_norm, mid_word) VALUES (?, ?, ?, ?, ?, ?);"
+        let sql = "INSERT INTO entries (ts, context_before, accepted, bundle_id, ctx_norm, mid_word, source) VALUES (?, ?, ?, ?, ?, ?, ?);"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
             Log.warn(.context, "history_insert_prepare_failed")
@@ -403,6 +425,7 @@ public actor TypingHistoryStore {
         } else {
             sqlite3_bind_null(stmt, 6)
         }
+        bindText(stmt, 7, entry.source.rawValue)
         if sqlite3_step(stmt) != SQLITE_DONE {
             Log.warn(.context, "history_insert_failed")
         }
@@ -449,7 +472,7 @@ public actor TypingHistoryStore {
     public func recentEntries(limit: Int) -> [TypingHistoryEntry] {
         load()
         let n = max(0, limit)
-        let sql = "SELECT ts, context_before, accepted, bundle_id, mid_word FROM entries ORDER BY id DESC LIMIT ?;"
+        let sql = "SELECT ts, context_before, accepted, bundle_id, mid_word, source FROM entries ORDER BY id DESC LIMIT ?;"
         let rows = query(sql) { stmt in sqlite3_bind_int(stmt, 1, Int32(n)) }
         // Caller historically receives oldest-first; reverse the DESC result.
         return rows.reversed()
@@ -457,7 +480,7 @@ public actor TypingHistoryStore {
 
     public func allEntries() -> [TypingHistoryEntry] {
         load()
-        return query("SELECT ts, context_before, accepted, bundle_id, mid_word FROM entries ORDER BY id ASC;", bind: nil)
+        return query("SELECT ts, context_before, accepted, bundle_id, mid_word, source FROM entries ORDER BY id ASC;", bind: nil)
     }
 
     /// Prefix-keyed lookup over the `ctx_norm` index — accepted continuations
@@ -467,7 +490,7 @@ public actor TypingHistoryStore {
         load()
         let norm = Self.normalize(context)
         guard !norm.isEmpty else { return [] }
-        let sql = "SELECT ts, context_before, accepted, bundle_id, mid_word FROM entries WHERE ctx_norm = ? ORDER BY id DESC LIMIT ?;"
+        let sql = "SELECT ts, context_before, accepted, bundle_id, mid_word, source FROM entries WHERE ctx_norm = ? ORDER BY id DESC LIMIT ?;"
         return query(sql) { stmt in
             bindText(stmt, 1, norm)
             sqlite3_bind_int(stmt, 2, Int32(max(0, limit)))
@@ -567,12 +590,16 @@ public actor TypingHistoryStore {
             } else {
                 midWord = sqlite3_column_int(stmt, 4) != 0
             }
+            // Column 5: source — default 'accept' for legacy rows (DEFAULT clause)
+            let sourceRaw = columnText(stmt, 5)
+            let source = EntrySource(rawValue: sourceRaw) ?? .accept
             out.append(TypingHistoryEntry(
                 timestamp: Date(timeIntervalSince1970: ts),
                 contextBefore: ctx,
                 accepted: acc,
                 bundleID: bundle,
-                midWordContinuation: midWord
+                midWordContinuation: midWord,
+                source: source
             ))
         }
         return out
