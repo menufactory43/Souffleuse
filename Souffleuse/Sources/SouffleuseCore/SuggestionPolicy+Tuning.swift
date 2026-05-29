@@ -37,6 +37,17 @@ extension SuggestionPolicy {
             return afterSpaceL1Bar
         }
 
+        /// L0 system word-completer (mid-word instant fill) — **PAUSED / OFF by
+        /// default** (2026-05-29). Its frequency-ranked pick shows the wrong word
+        /// mid-ambiguity ("est inf" → "informations" instead of "informée") and
+        /// blocks the LLM's context-correct completion. Disabled for now so the
+        /// context-aware LLM owns mid-word; re-enable for A/B by setting
+        /// `SOUFFLEUSE_WORDCOMPLETER=1`. (The LLM-only mid-word path still has its
+        /// own open issues — repetition/fragments — tracked separately.)
+        public static var wordCompleterEnabledRuntime: Bool {
+            ProcessInfo.processInfo.environment["SOUFFLEUSE_WORDCOMPLETER"] != nil
+        }
+
         public static let l2UpgradeDelta: Float = 0.15
 
         /// **Token-healing master switch (Task 1 + Task 2).** When `true`, a
