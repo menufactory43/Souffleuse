@@ -36,6 +36,42 @@ public struct AppContext: Sendable, Equatable {
         return Self.webAppRefinement(forWindowTitle: title) ?? base
     }
 
+    /// Window title with known browser-injected noise stripped (Brave/Chrome
+    /// memory-warning suffixes, trailing browser-brand suffix). Returns nil if
+    /// the cleaned title is empty.
+    ///
+    /// Observed pollution (2026-05-28 OCR triage): Brave appends
+    /// " - Utilisation élevée de la mémoire - 1,3 Go – Brave" to ALL window
+    /// titles when the process is over a memory threshold. That trailing 50+
+    /// chars dilutes Gemma's attention on the title's *useful* prefix (the
+    /// actual page name, e.g. "Boîte de réception Intercom").
+    public var cleanedWindowTitle: String? {
+        guard let raw = windowTitle, !raw.isEmpty else { return nil }
+        let cleaned = Self.cleanWindowTitle(raw)
+        return cleaned.isEmpty ? nil : cleaned
+    }
+
+    static func cleanWindowTitle(_ title: String) -> String {
+        var result = title
+        // Brave/Chrome high-memory notice (FR + EN). Captures the
+        // " - <warning> - X,Y Go – <Browser>" suffix; bounded so it stops
+        // at end-of-line without eating useful prose.
+        let suffixPatterns = [
+            #"\s*[-–—]\s*Utilisation\s+élevée\s+de\s+la\s+mémoire.*$"#,
+            #"\s*[-–—]\s*High\s+memory\s+usage.*$"#,
+            #"\s*[-–—]\s*\d+([.,]\d+)?\s*[GM]o\s*[-–—]\s*(Brave|Google Chrome|Chromium|Edge|Safari|Firefox|Arc|Vivaldi|Opera)\s*$"#,
+            // Trailing browser-brand suffix once the memory tail is gone.
+            // "Inbox · Intercom – Brave" → "Inbox · Intercom".
+            #"\s*[-–—]\s*(Brave|Google Chrome|Chromium|Microsoft Edge|Safari|Firefox|Arc|Vivaldi|Opera)\s*$"#,
+        ]
+        for pattern in suffixPatterns {
+            result = result.replacingOccurrences(
+                of: pattern, with: "", options: .regularExpression
+            )
+        }
+        return result.trimmingCharacters(in: .whitespaces)
+    }
+
     /// Bundle-ID-agnostic web-browser detector. Matches by display name so
     /// new browsers (Arc, Vivaldi…) work without a bundleID allowlist.
     static func isWebBrowserName(_ name: String) -> Bool {

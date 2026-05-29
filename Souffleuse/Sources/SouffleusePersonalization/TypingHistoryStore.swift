@@ -275,7 +275,10 @@ public actor TypingHistoryStore {
     public func append(_ entry: TypingHistoryEntry) {
         load()
         guard db != nil else { return }
-        guard !entry.accepted.isEmpty, entry.accepted.count >= 3 else { return }
+        // Measure the TRIMMED length: a space-padded one-letter payload ("  f")
+        // would otherwise satisfy a raw count>=3 while looksLikeFragment and
+        // isTruncatedFragment (which trim first) miss it. Gate the real payload.
+        guard entry.accepted.trimmingCharacters(in: .whitespacesAndNewlines).count >= 3 else { return }
         if SecretHeuristic.looksLikeSecret(entry.accepted) {
             Log.info(.context, "history_skipped_secretlike")
             return
@@ -496,6 +499,42 @@ public actor TypingHistoryStore {
         loaded = false
         openFailedThisSession = false
         Log.info(.context, "history_cleared")
+    }
+
+    /// Minimum length, in characters, below which a SINGLE-TOKEN accept is
+    /// treated as context-blind word-completer residue and pruned. Multi-word
+    /// accepts (the user's real phrasing) are always kept regardless of length.
+    public static let pruneSingleTokenMaxChars = 5
+
+    /// V2 corpus hygiene — one-time retroactive prune that aligns the existing
+    /// corpus with the new record-time rule (no Layer-0 `.wordComplete` accepts).
+    /// Deletes short SINGLE-TOKEN accepts ("ton", "aux", "cal", "fis") that the
+    /// context-blind word-completer used to record and that the unbeatable
+    /// `strongCorpusMatch` later recalls as junk mid-word. Multi-word accepts
+    /// (real continuations) are never touched. Runs IN the app, where SQLCipher
+    /// decrypts with the live Keychain key. Idempotent. Returns the number of
+    /// rows deleted. The caller is expected to gate it to run once.
+    @discardableResult
+    public func pruneLowQuality() -> Int {
+        load()
+        guard let db else { return 0 }
+        let before = rowCount()
+        // Single-token (no internal whitespace) AND short ⇒ word-completer class.
+        let sql = "DELETE FROM entries WHERE instr(trim(accepted), ' ') = 0 AND length(trim(accepted)) <= ?;"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            Log.warn(.context, "corpus_prune_prepare_failed")
+            return 0
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int(stmt, 1, Int32(Self.pruneSingleTokenMaxChars))
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            Log.warn(.context, "corpus_prune_failed")
+            return 0
+        }
+        let deleted = before - rowCount()
+        Log.info(.context, "corpus_pruned", count: deleted)
+        return deleted
     }
 
     // MARK: - SQLite helpers

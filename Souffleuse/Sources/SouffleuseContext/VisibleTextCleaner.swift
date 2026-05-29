@@ -72,6 +72,47 @@ public enum VisibleTextCleaner {
             #"«\s*Assignment\s+Rules[^»>]{0,80}[»>]?"#,
             // Fin guardrails right-pane chip
             #"\bWarnings\s+Utilisez\s+un\s+langage\s+simple\b"#,
+            // Intercom right-sidebar contact-details header. Observed 2026-05-28:
+            // `Détails • C cin32ls@proton.me *` / `Détails * cin32ls@…` leaked
+            // into the visible-text budget because the ROI's horizontal margin
+            // overlaps the sidebar bounding boxes Vision returns. The bullet
+            // glyph round-trips as `•`, `·`, OR `*` depending on font weight,
+            // so the separator class must accept all three.
+            #"\bDétails\s*[•·*]\s*(?:[A-Z]\s+)?[\w.+\-]+@[\w.\-]+\.[A-Za-z]{2,8}\s*[*•·]?"#,
+            // Bare "Détails" sidebar chip when no email follows.
+            #"\bDétails\s*[•·*]"#,
+            // Stripe customer chip in the same sidebar.
+            #"[•·*]\s*Stripe\b"#,
+            // Time-ago strip ("@ 14 h 13 h jusqu'a demain. 4 h") that Vision
+            // OCRs as a single line from the sidebar's "last seen" widget.
+            // Bounded to a short numeric+unit run so we don't eat customer
+            // prose containing hours of the day.
+            #"@\s*\d{1,2}\s*h\s*\d{1,2}\s*h\s+jusqu'?a\s+\w+\.?\s*\d{1,2}\s*h"#,
+            // Intercom third-person conversation-state events.
+            // Pattern: optional time-ago + agent first name + verb + object.
+            // Bounded: agent is `[A-Z][\w\-]+` (one capitalised word), verb is
+            // a fixed set, object is short — customer prose like "Alexandre a
+            // déjà essayé" doesn't trigger because the trailing phrase must
+            // match an Intercom-known state verb.
+            #"(?:\d{1,2}\s*[hm]\s*)?[&€(]?\s*[A-Z][\w\-]+\s+a\s+repris\s+la\s+conversation"#,
+            #"(?:\d{1,2}\s*[hm]\s*)?[&€(]?\s*[A-Z][\w\-]+\s+a\s+résolu\s+(?:la\s+conversation|le\s+ticket)"#,
+            #"(?:\d{1,2}\s*[hm]\s*)?[&€(]?\s*[A-Z][\w\-]+\s+a\s+ré?ouvert\s+(?:la\s+conversation|le\s+ticket)"#,
+            #"(?:\d{1,2}\s*[hm]\s*)?[&€(]?\s*[A-Z][\w\-]+\s+a\s+assigné\s+(?:la\s+conversation|le\s+ticket)"#,
+            // Cross-system ticket commentary (Linear/Jira-style chip in side
+            // panels): "<Responsable >?<Name> commented on <TICKET-ID>: <…>".
+            // Bounded by ticket-ID + colon, then up to ~120 chars of comment
+            // body so we don't eat downstream customer prose.
+            #"(?:Responsable\s+)?[A-Z][\w\-]+\s+[A-Z][\w\-]+\s+commented\s+on\s+[A-Z]{2,6}-\d{1,6}:\s*[^.]{0,120}\."#,
+            // Sidebar "Liens" / "Ticket de suivi" / "Tickets liés" chips and
+            // their accompanying "X h"/"X min" timestamps. Bounded to known
+            // headers; bare time stamps like "5h" are too ambiguous to strip.
+            #"[•·*]\s*Liens(?:\s+Ticket\s+de\s+suivi)?\b"#,
+            #"\bTickets\s+li[ée]s\b"#,
+            // Standalone date-time sidebar widget OCR'd as
+            // "28 mal, 10:29|" ("mai" → "mal" is a common Vision miss).
+            // Bounded by `|` or end-of-segment so it doesn't eat surrounding
+            // prose if the pipe is missing.
+            #"\b\d{1,2}\s+(?:janv|févr|mars|avril|mai|mal|juin|juil|août|sept|oct|nov|déc)\.?\s*,\s*\d{1,2}:\d{2}\s*\|?"#,
         ]
         // Case-SENSITIVE on purpose. All Intercom UI labels are deterministic
         // ("Attribution", "Workflow", "Vous avez", "Fin", "Consultation",

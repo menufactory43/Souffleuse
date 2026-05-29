@@ -114,7 +114,7 @@ public actor ContextEnricher {
 
         return EnrichedContext(
             app: ctx.promptAppName == "-" ? nil : ctx.promptAppName,
-            windowTitle: ctx.windowTitle,
+            windowTitle: ctx.cleanedWindowTitle,
             clipboard: clip,
             visible: visible
         )
