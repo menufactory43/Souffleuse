@@ -619,7 +619,11 @@ public final class SuggestionPolicyEngine {
             // word ("Bonj" → "our"). Never extend an already-complete word — that
             // is the "vais" → "vaisselle" hijack; let the next-word path own it.
             if partialIsComplete { return nil }
-            guard let completion = wordCompleter.completion(for: userTail),
+            // L0 system completer is PAUSED (off) by default — see
+            // Tuning.wordCompleterEnabledRuntime. Mid-word is owned by the
+            // context-aware LLM; re-enable for A/B via SOUFFLEUSE_WORDCOMPLETER=1.
+            guard SuggestionPolicy.Tuning.wordCompleterEnabledRuntime,
+                  let completion = wordCompleter.completion(for: userTail),
                   completion.count >= 3 else {
                 return nil
             }
