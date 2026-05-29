@@ -5,12 +5,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-BUILD_DIR="build/Build/Products/Debug"
+CONFIGURATION="${CONFIGURATION:-Debug}"
+BUILD_DIR="build/Build/Products/$CONFIGURATION"
 APP_NAME="Souffleuse"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 
-echo "==> xcodebuild..."
-xcodebuild -scheme "$APP_NAME" -derivedDataPath ./build -destination "platform=macOS" build \
+echo "==> xcodebuild ($CONFIGURATION)..."
+xcodebuild -scheme "$APP_NAME" -derivedDataPath ./build -destination "platform=macOS" -configuration "$CONFIGURATION" build \
   -quiet \
   | tail -5
 

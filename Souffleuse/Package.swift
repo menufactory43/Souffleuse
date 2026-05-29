@@ -11,6 +11,8 @@ let package = Package(
         .executable(name: "SouffleuseBench", targets: ["SouffleuseBench"]),
         .executable(name: "SouffleuseCoherence", targets: ["SouffleuseCoherence"]),
         .executable(name: "SouffleuseEnrichmentBench", targets: ["SouffleuseEnrichmentBench"]),
+        .executable(name: "SouffleuseOCRAblation", targets: ["SouffleuseOCRAblation"]),
+        .executable(name: "SouffleuseMidwordEval", targets: ["SouffleuseMidwordEval"]),
         .executable(name: "SouffleuseAXProbe", targets: ["SouffleuseAXProbe"]),
         .executable(name: "SouffleuseContextProbe", targets: ["SouffleuseContextProbe"]),
         .executable(name: "SouffleuseReplay", targets: ["SouffleuseReplay"]),
@@ -175,6 +177,26 @@ let package = Package(
                 "SouffleusePersonalization",
                 .product(name: "MLXLLM", package: "mlx-swift-examples"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-examples"),
+            ]
+        ),
+        .executableTarget(
+            name: "SouffleuseOCRAblation",
+            dependencies: [
+                "SouffleuseCore",
+                "SouffleuseContext",
+                "SouffleuseLlama",
+                "SouffleuseLog",
+                "SouffleusePersonalization",
+            ]
+        ),
+        .executableTarget(
+            name: "SouffleuseMidwordEval",
+            dependencies: [
+                "SouffleuseCore",
+                "SouffleuseLlama",
+                "SouffleuseLog",
+                "SouffleusePersonalization",
+                "SouffleuseTyping",
             ]
         ),
         .testTarget(
