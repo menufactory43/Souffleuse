@@ -1,3 +1,4 @@
+import Accelerate
 import CLlama
 import Foundation
 import SouffleuseLog
@@ -100,6 +101,18 @@ public struct LlamaSampling: Sendable {
     /// legitimate). `0` disables the gate (zero overhead — no softmax scan).
     public var minFirstTokenProb: Float
 
+    /// TOKEN HEALING (experiment). When non-empty, the trailing partial word
+    /// the user has already typed (e.g. "fis" of "Rapport fis"). The base
+    /// SentencePiece model would otherwise tokenize "fis" to ONE complete token
+    /// and freely derive a DIFFERENT word ("fiscaal" / doubled letters). Healing
+    /// pops the prompt token(s) that cover this partial off the tokenized
+    /// prompt, then masks every vocab token whose decoded piece is NOT
+    /// prefix-compatible with the not-yet-consumed partial, until the dropped
+    /// characters are re-derived at a clean token boundary. `nil` (the default)
+    /// means NO healing — the prompt path is byte-identical to a build without
+    /// this field.
+    public var healPrefix: String? = nil
+
     public init(temperature: Float = 0,
                 repeatPenalty: Float = 1.1,
                 repeatLastN: Int32 = 64,
@@ -113,7 +126,8 @@ public struct LlamaSampling: Sendable {
                 banDigitsLeading: Bool = false,
                 banEmoji: Bool = false,
                 nucleusMargin: Float = 0,
-                minFirstTokenProb: Float = 0) {
+                minFirstTokenProb: Float = 0,
+                healPrefix: String? = nil) {
         self.temperature = temperature
         self.repeatPenalty = repeatPenalty
         self.repeatLastN = repeatLastN
@@ -128,6 +142,7 @@ public struct LlamaSampling: Sendable {
         self.banEmoji = banEmoji
         self.nucleusMargin = nucleusMargin
         self.minFirstTokenProb = minFirstTokenProb
+        self.healPrefix = healPrefix
     }
 }
 
@@ -395,6 +410,15 @@ public actor LlamaEngine {
     /// `load`.
     private var emojiBannedTokens: [Int32]?
 
+    /// Cached metaspace-normalized piece for EVERY vocab token id, built once
+    /// per load the first time token healing runs. The heal mask in the decode
+    /// loop compares every vocab token's piece against the not-yet-derived
+    /// partial word; without this cache that was an O(nVocab)
+    /// `llama_token_to_piece` FFI call + String allocation on EVERY healing step
+    /// (the dominant mid-word cost). The piece for a token id is deterministic,
+    /// so caching is byte-identical to recomputing it per step. Reset on `load`.
+    private var healPieceCache: [String]?
+
     /// Noise-robustness tuning for the corpus logit bias (see the decode loop).
     /// `nucleusMargin` : a corpus candidate is only boosted if its logit is
     /// within this many units of the top logit (already plausible to the model).
@@ -493,6 +517,7 @@ public actor LlamaEngine {
         markupBannedTokens = nil
         digitBannedTokens = nil
         emojiBannedTokens = nil
+        healPieceCache = nil
         Log.info(.predictor, "llama_loaded")
         return true
     }
@@ -696,6 +721,43 @@ public actor LlamaEngine {
         return String(decoding: buf[0..<Int(n)].map { UInt8(bitPattern: $0) }, as: UTF8.self)
     }
 
+    /// Token-healing piece normalization. SentencePiece marks a word boundary
+    /// with the metaspace `▁` (U+2581). llama.cpp's `llama_token_to_piece`
+    /// usually renders that as a literal leading space, but we normalize BOTH
+    /// the literal `▁` and a literal leading space to nothing so the result is
+    /// the raw text the token contributes to the surface string (e.g. "fiscal",
+    /// "cal", "rm"). Used to compare a candidate token against the still-typed
+    /// partial word during healing — only ever called while healing is active,
+    /// so it adds zero cost to the normal path.
+    private func healPiece(_ token: Int32) -> String {
+        var p = piece(token)
+        p = p.replacingOccurrences(of: "\u{2581}", with: " ")
+        if p.first == " " { p.removeFirst() }
+        return p
+    }
+
+    /// Builds (once per load) the metaspace-normalized `healPiece` for EVERY
+    /// vocab token id and caches it on the actor. The token-healing mask reads
+    /// this array instead of calling `llama_token_to_piece` + allocating a
+    /// String for every id on every healing step. Same one-shot O(nVocab) vocab
+    /// scan as the ban-set builders; the result is byte-identical to calling
+    /// `healPiece(id)` per id (a token id always decodes to the same piece).
+    /// Reset to nil on `load`.
+    private func healPieceList() -> [String] {
+        if let cached = healPieceCache { return cached }
+        guard let h = handles else { return [] }
+        let nVocab = Int(llama_vocab_n_tokens(h.vocab))
+        var arr = [String](repeating: "", count: nVocab)
+        var id: Int32 = 0
+        while id < Int32(nVocab) {
+            arr[Int(id)] = healPiece(id)
+            id += 1
+        }
+        healPieceCache = arr
+        Log.info(.predictor, "heal_piece_cache_built", count: nVocab)
+        return arr
+    }
+
     /// Counts tokens for a piece of text (used for coarse budgeting). Cheap
     /// wrapper over `tokenize`.
     public func countTokens(_ text: String) -> Int {
@@ -742,6 +804,49 @@ public actor LlamaEngine {
         if maxPrompt > 0, promptTokens.count > maxPrompt {
             promptTokens = Array(promptTokens.suffix(maxPrompt))
             headTruncated = true
+        }
+
+        // ── Token healing (experiment, opt-in) ───────────────────────────────
+        // When `healPrefix` is non-empty the prompt ends mid-word; the trailing
+        // partial tokenized to ONE complete token, freeing the model to derive a
+        // DIFFERENT word ("Rapport fis" → "fiscaal"). We walk back from the END
+        // of promptTokens, accumulating the (metaspace-normalized) pieces, until
+        // the accumulated suffix COVERS the partial word, then pop that run. The
+        // popped text (clamped to the actual partial) seeds `remainingHeal`,
+        // which the decode loop consumes by masking non-prefix-compatible
+        // tokens. `nil`/empty ⇒ this whole block is skipped (byte-identical).
+        var remainingHeal = ""
+        if let heal = sampling.healPrefix, !heal.isEmpty, promptTokens.count > 1 {
+            var acc = ""
+            var popCount = 0
+            // Accumulate from the tail until the partial word is fully covered.
+            // Cap the walk so a pathological vocab can't pop the whole prompt.
+            let maxPop = min(promptTokens.count - 1, 8)
+            while popCount < maxPop {
+                let p = healPiece(promptTokens[promptTokens.count - 1 - popCount])
+                acc = p + acc
+                popCount += 1
+                if acc.hasSuffix(heal) || acc.count >= heal.count { break }
+            }
+            // Only heal if the popped run actually ends with the partial word
+            // (i.e. the boundary is where we expect). If the accumulated suffix
+            // is shorter than the partial (no token covered it), skip healing.
+            if popCount > 0, acc.hasSuffix(heal) {
+                promptTokens.removeLast(popCount)
+                remainingHeal = heal
+                Log.info(.predictor, "token_heal_pop", count: popCount)
+            }
+        }
+
+        // Dev-only boundary debug (DUMP_PROMPT): dump the last ~6 prompt tokens
+        // with their pieces to stderr so the trailing-token boundary that healing
+        // pops can be eyeballed. Gated on an env var; no production code path.
+        if ProcessInfo.processInfo.environment["DUMP_PROMPT"] != nil {
+            let n = promptTokens.count
+            let tail = promptTokens.suffix(6)
+            var lines = "TAIL TOKENS (post-heal, n=\(n), remainingHeal=\(remainingHeal.debugDescription)):\n"
+            for t in tail { lines += "  [\(t)] \(piece(t).debugDescription)\n" }
+            FileHandle.standardError.write(Data(lines.utf8))
         }
 
         // ── KV / prompt cache reuse ──────────────────────────────────────────
@@ -847,6 +952,10 @@ public actor LlamaEngine {
         let leadingBan: [Int32] = (sampling.banDigitsLeading && !sampling.banDigits)
             ? digitBanList() : []
         let banActive = !alwaysBan.isEmpty || !leadingBan.isEmpty
+        // Token-healing mask is active only while there are dropped characters
+        // left to re-derive (`!remainingHeal.isEmpty`, re-checked each step since
+        // `remainingHeal` shrinks as the partial word is consumed). Once empty
+        // the loop reverts to normal unconstrained generation.
         let useSuffixArray = !corpusSuffixArray.isEmpty
         // Sliding window of recently-decoded token ids (prompt tail + emitted)
         // used to compute the current corpus-match context. The suffix array
@@ -855,6 +964,13 @@ public actor LlamaEngine {
         let windowLen = LlamaCorpusSuffixArray.maxMatchLen
         var recentIds: [Int32] = biasActive ? Array(promptTokens.suffix(windowLen)) : []
 
+        // Token-healing piece cache (built once per load, reused across calls).
+        // Empty unless healing is active for THIS generation — `remainingHeal`
+        // only ever shrinks, so if it is empty now it stays empty and we never
+        // touch the cache. When active, the heal mask reads this array instead
+        // of an `llama_token_to_piece` FFI call per vocab id per step.
+        let healPieces: [String] = remainingHeal.isEmpty ? [] : healPieceList()
+
         while produced < maxTokens {
             if Task.isCancelled { break }
 
@@ -862,13 +978,39 @@ public actor LlamaEngine {
             // to each candidate next-token's logit BEFORE sampling, so the
             // sampler chain (penalties + greedy/temp) reads the modified
             // distribution.
-            if (biasActive || banActive), let logits = llama_get_logits_ith(h.context, -1) {
+            if (biasActive || banActive || !remainingHeal.isEmpty),
+               let logits = llama_get_logits_ith(h.context, -1) {
                 // Markup ban : force web-markup tokens to -inf so they can never
                 // be sampled (kills `<strong>`, fenced code, etc. at the source).
                 if banActive {
                     for id in alwaysBan { logits[Int(id)] = -Float.infinity }
                     if produced == 0 {
                         for id in leadingBan { logits[Int(id)] = -Float.infinity }
+                    }
+                }
+                // Token-healing mask : while the dropped partial word is not yet
+                // re-derived, force every vocab token whose (metaspace-normalized)
+                // piece is NOT prefix-compatible with `remainingHeal` to -inf, so
+                // greedy is forced to walk the correct merged token at a clean
+                // boundary. Prefix-compatible = piece starts with remainingHeal
+                // (token overshoots / completes the word, e.g. "fis"→"fiscal") OR
+                // remainingHeal starts with piece (token is a sub-fragment of the
+                // partial, e.g. "fis"→"fi"). Direct O(nVocab) scan — fine for the
+                // experiment. Mid-word ⇒ we also exclude the empty / whitespace-
+                // only piece so we never re-introduce the boundary we just removed.
+                if !remainingHeal.isEmpty {
+                    // Cached per-token pieces (built once per load) — the inner
+                    // compatibility test is now a pure array read, no FFI / no
+                    // String alloc per id. Byte-identical to the old per-id
+                    // `healPiece(id)` scan.
+                    let n = healPieces.count
+                    var i = 0
+                    while i < n {
+                        let p = healPieces[i]
+                        let compatible = !p.isEmpty
+                            && (p.hasPrefix(remainingHeal) || remainingHeal.hasPrefix(p))
+                        if !compatible { logits[i] = -Float.infinity }
+                        i += 1
                     }
                 }
               if biasActive {
@@ -906,10 +1048,15 @@ public actor LlamaEngine {
                 //      boost is capped so a huge count can't blow past the gate.
                 if !candidates.isEmpty && matchLen >= 2 {
                     let nVocab = llama_vocab_n_tokens(h.vocab)
-                    // Top logit (plausibility reference). One scan per biased
-                    // step; only runs when a ≥2-token corpus match exists.
-                    var topLogit = -Float.greatestFiniteMagnitude
-                    for i in 0..<Int(nVocab) where logits[i] > topLogit { topLogit = logits[i] }
+                    // Top logit (plausibility reference). Gemma 3 1B vocab is
+                    // ~256k entries; a Swift `for` scan costs ~15ms per biased
+                    // step on M2 (measured 2026-05-28 ablation bench: with-perso
+                    // ran +327ms over with-ocr for 16 generated tokens, ≈20ms
+                    // per step). `vDSP_maxv` does the same reduction with SIMD
+                    // and drops the per-step cost to <1ms — same algorithm,
+                    // byte-identical output for the bias decision.
+                    var topLogit: Float = -Float.greatestFiniteMagnitude
+                    vDSP_maxv(logits, 1, &topLogit, vDSP_Length(nVocab))
                     let margin = sampling.nucleusMargin > 0 ? sampling.nucleusMargin : Self.nucleusMargin
                     let floor = topLogit - margin
                     let sharpen = 1.0 + 0.5 * Float(max(0, matchLen - 1))
@@ -923,10 +1070,27 @@ public actor LlamaEngine {
                     }
                 }
               }  // if biasActive
-            }  // if (biasActive || banActive)
+            }  // if (biasActive || banActive || healing)
 
             let tokenId = llama_sampler_sample(sampler, h.context, -1)
             if llama_vocab_is_eog(h.vocab, tokenId) { break }
+
+            // Token-healing bookkeeping : subtract the just-sampled piece from
+            // the not-yet-consumed partial. If the piece covers (or overshoots)
+            // the remainder, healing is complete and the mask turns off; if it's
+            // a sub-fragment, drop the consumed prefix and keep masking on the
+            // next step. The mask above guaranteed prefix-compatibility, so one
+            // of these two branches always applies.
+            if !remainingHeal.isEmpty {
+                // `healPieces` is non-empty here (remainingHeal was non-empty at
+                // loop entry, which is what built it) and tokenId is a valid id.
+                let p = healPieces[Int(tokenId)]
+                if p.count >= remainingHeal.count {
+                    remainingHeal = ""           // fully consumed (or overshot)
+                } else {
+                    remainingHeal.removeFirst(p.count)  // sub-fragment consumed
+                }
+            }
 
             // Confidence gate (Cotypist `minBranchProbability` parity). On the
             // FIRST token only, compute the softmax probability the model gave
