@@ -251,6 +251,27 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             let history = await MainActor.run { self.store.history }
             await history.load()
+            // V2 corpus hygiene: one-time retroactive prune of the short
+            // single-token word-completer residue ("ton"/"aux"/"cal") that
+            // pollutes mid-word recalls. Runs once (UserDefaults flag); the
+            // live app holds the working Keychain key so SQLCipher decrypts.
+            if !UserDefaults.standard.bool(forKey: "corpusPrunedV2") {
+                let deleted = await history.pruneLowQuality()
+                UserDefaults.standard.set(true, forKey: "corpusPrunedV2")
+                Log.info(.context, "corpus_prune_v2_done", count: deleted)
+            }
+            // V3 re-prune: the broken-session debugging appended fresh short
+            // single-token residue ("fisc"-class) AFTER the one-time V2 sweep —
+            // exactly the entries the recall fast-path was slicing into a 1-char
+            // ghost ("Rapport fis" → "c"). Re-run the same low-quality prune once
+            // so that residue is gone. The recall prior fix already makes any
+            // surviving micro-completion beatable by the LLM; this removes the
+            // brief instant flash before the LLM overrides.
+            if !UserDefaults.standard.bool(forKey: "corpusPrunedV3") {
+                let deleted = await history.pruneLowQuality()
+                UserDefaults.standard.set(true, forKey: "corpusPrunedV3")
+                Log.info(.context, "corpus_prune_v3_done", count: deleted)
+            }
             let entries = await history.allEntries()
             await self.predictor.rebuildPersonalization(from: entries)
         }
@@ -1258,6 +1279,15 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 guard store.personalizationEnabled, let bid = bundleID else { return false }
                 if bundleBlocklist.contains(bid) { return false }
                 if personalizationBundleBlocklist.contains(where: { bid == $0 || bid.hasPrefix($0) }) { return false }
+                // Corpus hygiene (V2): never record a context-BLIND Layer-0
+                // word-completer accept ("Rapport fis"→"ton"/"fiston",
+                // "impe"→"impeccable"). These are NSSpellChecker dictionary
+                // completions, not the user's own phrasing — recording them
+                // pollutes the corpus with short single-word fragments that the
+                // unbeatable strongCorpusMatch later recalls as junk. Only the
+                // user's real continuations (LLM / history / cache accepts) earn
+                // a corpus entry.
+                if predictor.suggestionSource == .wordComplete { return false }
                 return true
             }
             if recordPersonalization {

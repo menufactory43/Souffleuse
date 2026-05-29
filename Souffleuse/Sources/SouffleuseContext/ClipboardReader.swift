@@ -78,8 +78,44 @@ public actor ClipboardReader {
             return nil
         }
         let cleaned = sanitize(raw)
+        // Drop low-signal payloads (pure numbers, hashes, addresses, UUIDs).
+        // These eat clipboard-budget chars in the prompt without giving the
+        // LLM anything to lock onto — observed 2026-05-28: "0,02486238" leaked
+        // a crypto amount into every keystroke's Context block.
+        if Self.isLowSignalNoise(cleaned) {
+            lastValue = nil
+            return nil
+        }
         lastValue = cleaned
         return cleaned
+    }
+
+    /// True when the clipboard payload is structurally meaningful but
+    /// semantically empty for the LLM: pure numbers, hex hashes, hash-prefixed
+    /// addresses, UUIDs. Real prose (even short — "Bonjour", "OK") falls
+    /// through. Mixed payloads with at least one letter-word are kept.
+    static func isLowSignalNoise(_ s: String) -> Bool {
+        let trimmed = s.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty { return true }
+        let patterns = [
+            // Pure number with optional decimal/thousands separators and sign.
+            #"^[+\-]?\d{1,3}([.,\s]\d{3})*([.,]\d+)?\s*[%‰$€£¥]?$"#,
+            // Bare decimal/integer (covers "0,02486238", "1234.56", "42").
+            #"^[+\-]?\d+([.,]\d+)?$"#,
+            // Hex hash or hex-prefixed value, ≥16 chars.
+            #"^(0x)?[0-9a-fA-F]{16,}$"#,
+            // UUID.
+            #"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"#,
+            // Bitcoin address (legacy/segwit) and Ethereum address.
+            #"^(bc1|[13])[a-zA-HJ-NP-Z0-9]{25,62}$"#,
+            #"^0x[0-9a-fA-F]{40}$"#,
+        ]
+        for p in patterns {
+            if trimmed.range(of: p, options: .regularExpression) != nil {
+                return true
+            }
+        }
+        return false
     }
 
     public func isBlocked(bundleID: String) -> Bool {
