@@ -30,11 +30,13 @@ final class TranslationRuntime {
     /// au prochain `ensureLoaded` (GGUF + chat-template différents).
     private(set) var model: InstructModel = TranslationRuntime.defaultModel()
 
-    /// Défaut : override `SOUFFLEUSE_IT_MODEL` (pour tests rapides), sinon Gemma.
+    /// Défaut : override `SOUFFLEUSE_IT_MODEL` (pour tests rapides), sinon
+    /// **Qwen2.5 1.5B** — nettement meilleur en DE/IT (validé en usage réel), le
+    /// surcoût RAM étant rendu acceptable par le déchargement-idle (Phase 7).
     static func defaultModel() -> InstructModel {
         if let raw = ProcessInfo.processInfo.environment["SOUFFLEUSE_IT_MODEL"],
            let m = InstructModel(rawValue: raw) { return m }
-        return .gemma1b
+        return .qwen1_5b
     }
 
     /// Résout le chemin du GGUF pour `model`. Override TOTAL via `SOUFFLEUSE_IT_GGUF`

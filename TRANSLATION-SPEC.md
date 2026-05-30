@@ -35,7 +35,7 @@ sauf le *style retrieval* (abandonné, voir §2.8). 551 tests verts, `audit.sh` 
 | §2.9 — priorité GPU ghost + anti-troncature | ✅ | `1b464aa` | GpuGate, threads réduits, contexte 2048, maxTokens adaptatif |
 | Phase 7 — déchargement mémoire à l'idle | ✅ | `c519c4f` | instruct libéré après 180 s sans traduction |
 | §3b — HUD repositionnable + persistant par app | ✅ | `d5ddfe3` | active le HUDAnchorStore, drag + `isPinnedByUser` |
-| **Multi-modèles de traduction** (hors plan initial) | ✅ | (en cours) | Gemma 3 1B **ou** Qwen2.5-1.5B-Instruct (meilleur DE/IT/JA), sélectionnable en Préférences ; chat-template par famille ; déchargé à l'idle donc surcoût RAM transitoire |
+| **Multi-modèles de traduction** (hors plan initial) | ✅ | `caa376c` | **Qwen2.5-1.5B-Instruct par DÉFAUT** (validé nettement meilleur DE/IT en usage réel) ; Gemma 3 1B sélectionnable en Préférences ; chat-template par famille ; déchargé à l'idle donc surcoût RAM (~1 Go) transitoire |
 
 **Décisions actées vs spec d'origine :**
 - L'override de cible cible se fait par **touche de cycle** (⌘⇧→ : EN→ES→DE→IT→AUTO,
