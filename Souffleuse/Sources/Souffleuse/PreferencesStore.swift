@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import SouffleusePersonalization
+import SouffleuseInput
 
 /// Catalogue of selectable models. IDs match `mlx-community/...` repos
 /// resolvable by LLMModelFactory. The actual download is triggered by
@@ -131,6 +132,7 @@ final class PreferencesStore {
         static let personalizationOnboardingShown = "personalizationOnboardingShown"
         static let storeWithoutAccepted = "storeWithoutAccepted"
         static let partialAcceptEnabled = "partialAcceptEnabled"
+        static let acceptAllKey = "acceptAllKey"
         static let trailingSpaceOnPartial = "trailingSpaceOnPartial"
         static let prefixCorrectionEnabled = "prefixCorrectionEnabled"
     }
@@ -188,6 +190,11 @@ final class PreferencesStore {
     var partialAcceptEnabled: Bool {
         didSet { UserDefaults.standard.set(partialAcceptEnabled, forKey: K.partialAcceptEnabled) }
     }
+    /// Which key accepts the WHOLE ghost in one press (vs Tab = word-by-word).
+    /// Default → (right arrow); changeable in Preferences. `.disabled` turns it off.
+    var acceptAllKey: AcceptAllKey {
+        didSet { UserDefaults.standard.set(acceptAllKey.rawValue, forKey: K.acceptAllKey) }
+    }
     /// When true, partial accept includes the single space following the
     /// accepted word/punctuation so the caret lands ready for the next word.
     /// Default on.
@@ -233,6 +240,7 @@ final class PreferencesStore {
         self.personalizationOnboardingShown = (d.object(forKey: K.personalizationOnboardingShown) as? Bool) ?? false
         self.storeWithoutAccepted = (d.object(forKey: K.storeWithoutAccepted) as? Bool) ?? false
         self.partialAcceptEnabled = (d.object(forKey: K.partialAcceptEnabled) as? Bool) ?? true
+        self.acceptAllKey = AcceptAllKey(rawValue: d.string(forKey: K.acceptAllKey) ?? "") ?? .rightArrow
         self.trailingSpaceOnPartial = (d.object(forKey: K.trailingSpaceOnPartial) as? Bool) ?? true
         self.prefixCorrectionEnabled = (d.object(forKey: K.prefixCorrectionEnabled) as? Bool) ?? true
     }

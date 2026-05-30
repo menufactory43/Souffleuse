@@ -232,6 +232,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         if !interceptor.install() {
             Log.warn(.input, "key_interceptor_install_failed")
         }
+        interceptor.setAcceptAllKey(store.acceptAllKey)
 
         predictor.maxTokens = store.completionLength.maxTokens
         predictor.maxWords = store.completionLength.maxWords
@@ -386,6 +387,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             _ = store.personalizationEnabled
             _ = store.personalizationStrength
             _ = store.prefixCorrectionEnabled
+            _ = store.acceptAllKey
         } onChange: { [weak self] in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
@@ -418,6 +420,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         if predictor.prefixCorrectionEnabled != store.prefixCorrectionEnabled {
             predictor.prefixCorrectionEnabled = store.prefixCorrectionEnabled
         }
+        interceptor.setAcceptAllKey(store.acceptAllKey)
         if store.captureEnabled != previous.captureEnabled {
             applyCaptureToggle(store.captureEnabled, requestPermissionIfNeeded: true)
         }
@@ -1366,7 +1369,91 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
             return true
+
+        case .acceptAll:
+            // Accept the ENTIRE remaining ghost in one press (vs Tab =
+            // word-by-word). Bound to the user-selected key (Preferences →
+            // acceptAllKey). `pending.llm` is the partial remainder if a
+            // partial accept is in flight, else the full streamed suggestion.
+            if let typo = pending.typo {
+                let count = typo.original.count
+                let replacement = typo.suggestion
+                DispatchQueue.global(qos: .userInitiated).async { [axClient] in
+                    axClient.replaceTrailing(deleteChars: count, with: replacement)
+                }
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.currentTypo = nil
+                    self.predictor.cancel()
+                    self.lastPredictedPrefix = nil
+                    self.overlay.hide()
+                    self.interceptor.setActive(false)
+                }
+                Log.info(.input, "typo_accepted")
+                return true
+            }
+            let suggestion = pending.llm
+            let preSnap = axClient.snapshot()
+            let preCaret = preSnap.caretIndex ?? 0
+            let prePrefix = preSnap.text.map { String($0.prefix(preCaret)) } ?? ""
+            let bundleID = preSnap.bundleID
+            // Consuming the whole ghost — clear any in-flight partial state.
+            MainActor.assumeIsolated {
+                self.partialRemainder = ""
+                self.partialAcceptedSoFar = ""
+                self.partialAcceptedAtPrefix = ""
+                self.partialAcceptedAtBundleID = nil
+            }
+            Log.info(.input, "ghost_accepted_full")
+            return performFullAccept(suggestion: suggestion, prePrefix: prePrefix, bundleID: bundleID)
         }
+    }
+
+    /// Injects the ENTIRE `suggestion` at once, records it to personalization
+    /// (opt-in, gated exactly like the Tab full-accept), and tears down the
+    /// ghost. Used by the configurable accept-all key. Returns true (consumed).
+    nonisolated private func performFullAccept(suggestion: String, prePrefix: String, bundleID: String?) -> Bool {
+        let recordPersonalization: Bool = MainActor.assumeIsolated {
+            guard store.personalizationEnabled, let bid = bundleID else { return false }
+            if bundleBlocklist.contains(bid) { return false }
+            if personalizationBundleBlocklist.contains(where: { bid == $0 || bid.hasPrefix($0) }) { return false }
+            if predictor.suggestionSource == .wordComplete { return false }
+            return true
+        }
+        if recordPersonalization {
+            let storedContext = SecretHeuristic.contextTail(prefix: prePrefix)
+            let entry = TypingHistoryEntry(
+                timestamp: Date(),
+                contextBefore: storedContext,
+                accepted: suggestion,
+                bundleID: bundleID,
+                midWordContinuation: deriveMidWordContinuation(
+                    contextBefore: storedContext,
+                    accepted: suggestion
+                )
+            )
+            let history = MainActor.assumeIsolated { self.store.history }
+            let predictorRef = MainActor.assumeIsolated { self.predictor }
+            Task { [history, predictorRef, entry] in
+                await history.append(entry)
+                await predictorRef.ingestAccepted(entry)
+            }
+        }
+        DispatchQueue.global(qos: .userInitiated).async { [axClient] in
+            axClient.inject(suggestion)
+            let snap = axClient.snapshot()
+            DispatchQueue.main.async { [weak self] in
+                self?.dismissedForText = snap.text ?? ""
+            }
+        }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.predictor.cancel()
+            self.lastPredictedPrefix = nil
+            self.overlay.hide()
+            self.interceptor.setActive(false)
+        }
+        return true
     }
 
     /// Records the cumulative span the user accepted partially into the
