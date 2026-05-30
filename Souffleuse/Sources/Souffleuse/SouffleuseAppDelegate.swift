@@ -233,6 +233,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             Log.warn(.input, "key_interceptor_install_failed")
         }
         interceptor.setAcceptAllKey(store.acceptAllKey)
+        interceptor.setCommitKey(store.commitKey)
 
         predictor.maxTokens = store.completionLength.maxTokens
         predictor.maxWords = store.completionLength.maxWords
@@ -388,6 +389,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             _ = store.personalizationStrength
             _ = store.prefixCorrectionEnabled
             _ = store.acceptAllKey
+            _ = store.commitKey
         } onChange: { [weak self] in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
@@ -421,6 +423,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             predictor.prefixCorrectionEnabled = store.prefixCorrectionEnabled
         }
         interceptor.setAcceptAllKey(store.acceptAllKey)
+        interceptor.setCommitKey(store.commitKey)
         if store.captureEnabled != previous.captureEnabled {
             applyCaptureToggle(store.captureEnabled, requestPermissionIfNeeded: true)
         }
@@ -1418,6 +1421,18 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             }
             Log.info(.input, "ghost_accepted_full")
             return performFullAccept(suggestion: suggestion, prePrefix: prePrefix, bundleID: bundleID)
+
+        case .commit:
+            // PHASE 2 PLACEHOLDER — la vraie traduction arrive en Phase 4. Ici le
+            // commit prouve juste le mécanisme : lire le champ via AX et le
+            // REMPLACER entièrement (≠ continuation / partial accept). La cible
+            // factice = le texte courant en MAJUSCULES, visiblement un placeholder.
+            // NB : le tap n'étant actif que pendant qu'un ghost s'affiche, ⌘↩
+            // n'est pour l'instant intercepté que dans ce cas (élargissement à
+            // « HUD affiché sans ghost » = Phase 5).
+            let current = axClient.snapshot().text ?? ""
+            Log.info(.input, "translate_commit_placeholder")
+            return performCommit(currentText: current, targetText: current.uppercased())
         }
     }
 
@@ -1453,6 +1468,30 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
         DispatchQueue.global(qos: .userInitiated).async { [axClient] in
             axClient.inject(suggestion)
+            let snap = axClient.snapshot()
+            DispatchQueue.main.async { [weak self] in
+                self?.dismissedForText = snap.text ?? ""
+            }
+        }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.predictor.cancel()
+            self.lastPredictedPrefix = nil
+            self.overlay.hide()
+            self.interceptor.setActive(false)
+        }
+        return true
+    }
+
+    /// PHASE 2 — prouve le mécanisme de commit traduction : REMPLACE le texte
+    /// entier du champ focus par `targetText` via AX (≠ inject continuation).
+    /// `replaceTrailing(deleteChars:)` efface depuis le caret — on suppose le
+    /// caret en fin de champ (cas composer). En Phase 4, `targetText` sera la
+    /// traduction streamée du HUD. Tear-down du ghost comme les autres
+    /// acceptations. Renvoie true (consommé).
+    nonisolated private func performCommit(currentText: String, targetText: String) -> Bool {
+        DispatchQueue.global(qos: .userInitiated).async { [axClient] in
+            axClient.replaceTrailing(deleteChars: currentText.count, with: targetText)
             let snap = axClient.snapshot()
             DispatchQueue.main.async { [weak self] in
                 self?.dismissedForText = snap.text ?? ""

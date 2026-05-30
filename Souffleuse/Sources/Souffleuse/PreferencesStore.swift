@@ -133,6 +133,7 @@ final class PreferencesStore {
         static let storeWithoutAccepted = "storeWithoutAccepted"
         static let partialAcceptEnabled = "partialAcceptEnabled"
         static let acceptAllKey = "acceptAllKey"
+        static let commitKey = "commitKey"
         static let trailingSpaceOnPartial = "trailingSpaceOnPartial"
         static let prefixCorrectionEnabled = "prefixCorrectionEnabled"
     }
@@ -195,6 +196,11 @@ final class PreferencesStore {
     var acceptAllKey: AcceptAllKey {
         didSet { UserDefaults.standard.set(acceptAllKey.rawValue, forKey: K.acceptAllKey) }
     }
+    /// Défaut ⌘↩ ; changeable dans Préférences. Valide le HUD de traduction
+    /// (remplace la ligne du champ par le texte en langue cible). `.disabled` off.
+    var commitKey: CommitKey {
+        didSet { UserDefaults.standard.set(commitKey.rawValue, forKey: K.commitKey) }
+    }
     /// When true, partial accept includes the single space following the
     /// accepted word/punctuation so the caret lands ready for the next word.
     /// Default on.
@@ -245,6 +251,7 @@ final class PreferencesStore {
         self.storeWithoutAccepted = (d.object(forKey: K.storeWithoutAccepted) as? Bool) ?? true
         self.partialAcceptEnabled = (d.object(forKey: K.partialAcceptEnabled) as? Bool) ?? true
         self.acceptAllKey = AcceptAllKey(rawValue: d.string(forKey: K.acceptAllKey) ?? "") ?? .rightArrow
+        self.commitKey = CommitKey(rawValue: d.string(forKey: K.commitKey) ?? "") ?? .cmdReturn
         self.trailingSpaceOnPartial = (d.object(forKey: K.trailingSpaceOnPartial) as? Bool) ?? true
         self.prefixCorrectionEnabled = (d.object(forKey: K.prefixCorrectionEnabled) as? Bool) ?? true
     }

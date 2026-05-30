@@ -233,6 +233,7 @@ let package = Package(
                 "SouffleuseAX",
                 "SouffleuseContext",
                 "SouffleuseCore",
+                "SouffleuseInput",
                 "SouffleuseLog",
                 "SouffleuseOverlay",
                 "SouffleuseTyping",
