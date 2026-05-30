@@ -210,9 +210,6 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// conversation's manual target (or EN). Distinct from `cachedEnrichmentPrefix`
     /// which mixes app/window metadata and would skew language detection.
     private var lastEnrichedVisible: String?
-    /// Generation token for the transient "target changed" flash in the HUD, so a
-    /// flash's delayed auto-hide never hides a real translation that started after.
-    private var hudFlashToken = 0
     /// Pending idle-unload of the lazy instruct (translation) engine — cancelled
     /// and rescheduled on each commit so memory is freed only after real idle.
     private var translationIdleUnloadTask: Task<Void, Never>?
@@ -1503,10 +1500,6 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Flashe brièvement la cible choisie dans le panneau de traduction, sans
-    /// lancer de traduction. Auto-masqué après ~1,2 s — sauf si une vraie
-    /// traduction a pris le relais entre-temps (`hudFlashToken`).
-    @MainActor
     /// Décalage de position du HUD mémorisé pour cette app (§3b), `.zero` si jamais
     /// déplacé.
     private func hudSavedOffset(forBundle bundleID: String?) -> CGSize {
@@ -1514,6 +1507,10 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         return CGSize(width: a.offsetX, height: a.offsetY)
     }
 
+    /// Affiche la cible choisie dans le panneau de traduction, sans lancer de
+    /// traduction. Même cycle de vie robuste que le commit (`scheduleAutoHide`) :
+    /// reste affiché, ne disparaît pas tant qu'on le survole → on peut le saisir
+    /// et le déplacer même en cyclant la langue. Un commit (⌘↩) reprend la main.
     private func flashTargetSelection(_ selection: TargetSelection, fieldRect: CGRect?, bundleID: String?) {
         let anchor = fieldRect ?? .zero
         let header: String
@@ -1523,13 +1520,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
         translationHUD.show(at: anchor, header: header, body: "⌘⇧→ changer · ⌘↩ traduire",
                             savedOffset: hudSavedOffset(forBundle: bundleID), bundleID: bundleID)
-        hudFlashToken &+= 1
-        let token = hudFlashToken
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 1_200_000_000)
-            guard let self, self.hudFlashToken == token else { return }
-            self.translationHUD.hide()
-        }
+        translationHUD.scheduleAutoHide(after: SuggestionPolicy.Tuning.translationHUDVisibleSeconds)
     }
 
     /// Injects the ENTIRE `suggestion` at once, records it to personalization
@@ -1590,9 +1581,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // On va réutiliser le moteur instruct : annule un déchargement-idle en
         // attente pour ne pas le libérer en plein usage (Phase 7).
         translationIdleUnloadTask?.cancel()
-        // Invalide tout flash de cible en attente : le panneau appartient
-        // désormais à la traduction, pas au flash.
-        hudFlashToken &+= 1
+        // `show` ci-dessous annule déjà l'auto-masquage d'un flash de cible en
+        // attente : le panneau appartient désormais à la traduction.
         let anchor = fieldRect ?? .zero
         translationHUD.show(at: anchor, header: "FR → \(target.code) · traduction…", body: "…",
                             savedOffset: hudSavedOffset(forBundle: bundleID), bundleID: bundleID)
