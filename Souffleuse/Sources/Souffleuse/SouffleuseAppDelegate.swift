@@ -226,6 +226,15 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// Pending idle-unload of the lazy instruct (translation) engine — cancelled
     /// and rescheduled on each commit so memory is freed only after real idle.
     private var translationIdleUnloadTask: Task<Void, Never>?
+    /// Ghost engine lifecycle ("warm while composing"). The GGUF (~0,8 Go) is
+    /// unloaded after `ghostIdleUnloadSeconds` without a keystroke, and lazily
+    /// reloaded once the user has typed `ghostWarmupMinChars` in a field — so it
+    /// is resident only while the user actually writes a sentence.
+    private var ghostIdleUnloadTask: Task<Void, Never>?
+    private var ghostLoadTask: Task<Void, Never>?
+    /// Last prefix seen by the warmth manager — a change between ticks signals a
+    /// fresh keystroke (rearms the idle timer); identical means the user paused.
+    private var lastGhostActivityPrefix: String = ""
     /// Snapshot of the last applied OCR language list; we reapply when the
     /// user toggles a language in Preferences.
     private var lastOCRLangsApplied: [String] = []
@@ -1083,6 +1092,13 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // Only predict from text up to caret; cap to 2048 chars (matches predictor).
         let prefix = String(text.prefix(caretIndex))
 
+        // Ghost lifecycle ("warm while composing"): a fresh keystroke rearms the
+        // idle-unload timer; once enough has been typed (a real sentence, not a
+        // 2-char search) the model is woken if it dozed off. `typedSinceFocus`
+        // approximates the appended characters via the focus baseline length.
+        let typedSinceFocus = max(0, text.count - (textAtFocusByBundle[bundleID]?.count ?? text.count))
+        manageGhostWarmth(prefix: prefix, typedSinceFocus: typedSinceFocus)
+
         // Mid-text suppression: when the character immediately after the caret
         // is a non-whitespace glyph, the user is editing INSIDE existing text,
         // not appending — the ghost would land in the wrong position and suggest
@@ -1855,6 +1871,61 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             guard !Task.isCancelled, let self else { return }
             await self.translationRuntime.unload()
             Log.info(.predictor, "translate_idle_unload")
+        }
+    }
+
+    /// Garde le moteur ghost « chaud » uniquement pendant que l'utilisateur
+    /// compose. Appelé à chaque tick passé le gate de frappe. Une frappe fraîche
+    /// (prefix changé depuis le tick précédent) réarme le timer d'idle-unload ;
+    /// au-delà de `ghostWarmupMinChars` caractères tapés, réveille le modèle s'il
+    /// dort — assez tard pour ignorer un champ de recherche court.
+    @MainActor
+    private func manageGhostWarmth(prefix: String, typedSinceFocus: Int) {
+        let typingNow = (prefix != lastGhostActivityPrefix)
+        lastGhostActivityPrefix = prefix
+        guard typingNow else { return }
+        scheduleGhostIdleUnload()
+        if !predictor.isModelReady,
+           typedSinceFocus >= SuggestionPolicy.Tuning.ghostWarmupMinChars {
+            loadGhostIfNeeded()
+        }
+    }
+
+    /// (Re)programme le déchargement du moteur ghost après
+    /// `ghostIdleUnloadSeconds` sans frappe. Chaque keystroke annule le timer
+    /// précédent, donc on ne décharge qu'après une vraie pause — ce qui survit
+    /// aux pauses de réflexion en milieu de phrase mais rend la RAM dès qu'on
+    /// passe à autre chose (lecture, app non-texte, idle).
+    @MainActor
+    private func scheduleGhostIdleUnload() {
+        ghostIdleUnloadTask?.cancel()
+        let seconds = SuggestionPolicy.Tuning.ghostIdleUnloadSeconds
+        ghostIdleUnloadTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(seconds) * 1_000_000_000)
+            guard !Task.isCancelled, let self else { return }
+            self.ghostIdleUnloadTask = nil
+            guard self.predictor.isModelReady else { return }
+            await self.predictor.unloadModel()
+            self.overlay.hide()
+            self.presence.hide()
+            self.interceptor.setActive(false)
+            Log.info(.predictor, "ghost_idle_unload")
+        }
+    }
+
+    /// Recharge paresseusement le moteur ghost (~1 s) puis reconstruit le n-gram
+    /// perso en tâche de fond (raffinement — le ghost de base fonctionne sans).
+    /// Idempotent : un seul rechargement à la fois, et no-op si déjà résident.
+    @MainActor
+    private func loadGhostIfNeeded() {
+        guard ghostLoadTask == nil, !predictor.isModelReady else { return }
+        ghostLoadTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.predictor.loadModel()
+            Log.info(.predictor, "ghost_warm_reload")
+            let entries = await self.store.history.allEntries()
+            await self.predictor.rebuildPersonalization(from: entries)
+            self.ghostLoadTask = nil
         }
     }
 

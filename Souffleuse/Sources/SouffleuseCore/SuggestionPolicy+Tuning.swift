@@ -276,6 +276,20 @@ extension SuggestionPolicy {
         /// a clairement quitté le flux de traduction.
         public static let translationIdleUnloadSeconds: Int = 180
 
+        /// Délai d'inactivité (s) de FRAPPE après lequel le moteur ghost (GGUF)
+        /// est déchargé pour rendre la RAM (~0,8 Go). Le déclencheur est l'arrêt
+        /// de la frappe, pas la perte de focus — il survit donc aux pauses de
+        /// réflexion en milieu de phrase, mais rend la RAM dès que l'utilisateur
+        /// lit / designe / passe sur une app non-texte. Rechargé paresseusement
+        /// (~1 s) dès qu'on recommence à composer. 60 s = pause franche.
+        public static let ghostIdleUnloadSeconds: Int = 60
+
+        /// Nombre de caractères tapés (depuis le focus) avant de RÉVEILLER le
+        /// moteur ghost s'il dort. Évite de charger le modèle pour un champ
+        /// court (recherche de 2-3 lettres) : on ne le réveille que quand
+        /// l'utilisateur compose vraiment une phrase. ~6 ≈ un mot.
+        public static let ghostWarmupMinChars: Int = 6
+
         /// Durée (s) d'affichage du panneau de traduction APRÈS la fin de la
         /// traduction, avant l'auto-masquage en fondu — assez longue pour lire et
         /// pour saisir/déplacer le panneau. Le survol souris suspend ce compte.

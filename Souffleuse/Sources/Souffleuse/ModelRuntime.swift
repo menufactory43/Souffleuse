@@ -251,6 +251,25 @@ final class ModelRuntime {
         // No-op by design. Voir doc-comment.
     }
 
+    /// Décharge le moteur ghost (GGUF llama.cpp) ET le container MLX (tokenizer
+    /// du n-gram) pour rendre la RAM quand l'utilisateur ne compose pas. Après
+    /// ça `canGenerate` est faux → `predict()` baille proprement sur son gate.
+    /// Un `loadModel()` ultérieur recharge les deux (le GGUF est idempotent sur
+    /// un chemin déjà chargé, mais `LlamaEngine.unload()` a libéré le model +
+    /// context, donc il recharge réellement). L'appelant DOIT avoir annulé la
+    /// génération en cours avant (cf. `cancel()` côté PVM/AppDelegate) ; l'acteur
+    /// `LlamaEngine` sérialise de toute façon `unload` après tout `generate` en
+    /// vol.
+    func unloadGhost() async {
+        await llamaEngine.unload()
+        llamaReady = false
+        // Drop le container MLX : seul son tokenizer servait (au rebuild n-gram),
+        // jamais la génération (generateMLX est mort). Rechargé au prochain
+        // loadModel(). Rendre la référence permet à l'OS de récupérer ce qui
+        // était matérialisé.
+        container = nil
+    }
+
     // MARK: - OutputFilter / prompt helpers (extracted to SouffleuseCore)
 
     /// `OutputFilter` was moved VERBATIM to `SouffleuseCore.OutputFilter`
