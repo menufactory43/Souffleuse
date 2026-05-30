@@ -261,6 +261,13 @@ private struct GeneralTab: View {
                 }
                 Text("Une touche qui pose toute la réplique d'un coup — active seulement quand un souffle s'affiche, donc elle ne gêne jamais votre frappe.")
                     .font(.callout).foregroundStyle(.secondary)
+                Picker("Valider la traduction avec", selection: $store.commitKey) {
+                    ForEach(CommitKey.allCases, id: \.self) { key in
+                        Text(key.label).tag(key)
+                    }
+                }
+                Text("La touche qui envoie la réplique dans la langue cible (fonction de traduction, en cours de construction).")
+                    .font(.callout).foregroundStyle(.secondary)
             } header: {
                 Text("Accepter le souffle").font(.headline)
             }

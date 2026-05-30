@@ -46,11 +46,44 @@ public enum AcceptAllKey: String, CaseIterable, Sendable {
     }
 }
 
+/// User-selectable key that COMMITS the translation HUD — remplace la ligne du
+/// champ focus par le texte en langue cible. Distincte d'`AcceptAllKey` (qui
+/// pose le ghost FRANÇAIS). Défaut ⌘↩. `.disabled` la désactive. Même forme
+/// (keyCode + masque de flags requis) qu'`AcceptAllKey` pour que
+/// `KeyInterceptor.resolveKey` traite les deux bindings identiquement.
+public enum CommitKey: String, CaseIterable, Sendable {
+    case disabled, cmdReturn, cmdShiftReturn, optionReturn
+
+    public var keyCode: Int64? {
+        switch self {
+        case .disabled: return nil
+        case .cmdReturn, .cmdShiftReturn, .optionReturn: return 36   // ↩
+        }
+    }
+    public var requiredFlagsRaw: UInt64 {
+        switch self {
+        case .cmdReturn: return CGEventFlags.maskCommand.rawValue
+        case .cmdShiftReturn: return CGEventFlags.maskCommand.rawValue | CGEventFlags.maskShift.rawValue
+        case .optionReturn: return CGEventFlags.maskAlternate.rawValue
+        case .disabled: return 0
+        }
+    }
+    public var label: String {
+        switch self {
+        case .disabled: return "Désactivé"
+        case .cmdReturn: return "⌘↩ Cmd + Entrée"
+        case .cmdShiftReturn: return "⌘⇧↩ Cmd + Maj + Entrée"
+        case .optionReturn: return "⌥↩ Option + Entrée"
+        }
+    }
+}
+
 public final class KeyInterceptor: @unchecked Sendable {
-    public enum Key: Sendable {
+    public enum Key: Sendable, Equatable {
         case tab
         case esc
         case acceptAll
+        case commit
     }
 
     /// Called on the tap thread when a Tab/Esc keyDown arrives while active.
@@ -71,6 +104,10 @@ public final class KeyInterceptor: @unchecked Sendable {
     /// raw mask), nil when disabled. Written from the main thread
     /// (`setAcceptAllKey`), read on the tap thread (`handle`); its own lock.
     private let acceptBinding = OSAllocatedUnfairLock<(code: Int64, flagsRaw: UInt64)?>(initialState: nil)
+    /// Configurable "commit" binding (translation HUD → replace field). Même
+    /// forme et même discipline de lock qu'`acceptBinding` ; écrit depuis le main
+    /// (`setCommitKey`), lu sur le thread du tap (`handle`).
+    private let commitBinding = OSAllocatedUnfairLock<(code: Int64, flagsRaw: UInt64)?>(initialState: nil)
 
     public init(handler: @escaping Handler) {
         self.handler = handler
@@ -134,6 +171,39 @@ public final class KeyInterceptor: @unchecked Sendable {
         }
     }
 
+    /// Update the user-selected "commit" key. Safe to call from main.
+    public func setCommitKey(_ k: CommitKey) {
+        commitBinding.withLock { state in
+            state = k.keyCode.map { (code: $0, flagsRaw: k.requiredFlagsRaw) }
+        }
+    }
+
+    /// Modifier bits that matter for binding comparison (caps lock, fn, numeric
+    /// pad, etc. are ignored).
+    static let relevantFlags: UInt64 = CGEventFlags.maskCommand.rawValue | CGEventFlags.maskShift.rawValue
+        | CGEventFlags.maskAlternate.rawValue | CGEventFlags.maskControl.rawValue
+
+    /// Pure keyCode + modifier → `Key` resolution, extracted from `handle` so it
+    /// is unit-testable without a live CGEventTap. `commit` est testé AVANT
+    /// `acceptAll` (priorité à l'action de traduction) ; un binding configuré
+    /// peut recouvrir un Tab modifié (ex. ⇧⇥) donc il est testé avant les
+    /// Tab/Esc nus, qui exigent AUCUN modificateur. Renvoie nil quand rien ne
+    /// matche → la touche passe sans être consommée.
+    static func resolveKey(
+        keyCode: Int64,
+        mods: UInt64,
+        commit: (code: Int64, flagsRaw: UInt64)?,
+        acceptAll: (code: Int64, flagsRaw: UInt64)?
+    ) -> Key? {
+        if let b = commit, keyCode == b.code, mods == (b.flagsRaw & relevantFlags) { return .commit }
+        if let b = acceptAll, keyCode == b.code, mods == (b.flagsRaw & relevantFlags) { return .acceptAll }
+        switch keyCode {
+        case 48 where mods == 0: return .tab
+        case 53 where mods == 0: return .esc
+        default: return nil
+        }
+    }
+
     private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             // macOS disabled the tap (we took too long, or user input quirk).
@@ -147,23 +217,14 @@ public final class KeyInterceptor: @unchecked Sendable {
             return Unmanaged.passUnretained(event)
         }
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-        // Only these modifier bits matter for binding comparison (ignore caps
-        // lock, fn, numeric-pad, etc.).
-        let relevant: UInt64 = CGEventFlags.maskCommand.rawValue | CGEventFlags.maskShift.rawValue
-            | CGEventFlags.maskAlternate.rawValue | CGEventFlags.maskControl.rawValue
-        let mods = event.flags.rawValue & relevant
-        let key: Key
-        // The configurable accept-all binding is checked FIRST (it may overlap a
-        // modified Tab, e.g. ⇧⇥). Plain Tab/Esc then require NO modifiers so a
-        // bound ⇧⇥ is never also treated as a word-by-word Tab.
-        if let b = acceptBinding.withLock({ $0 }), keyCode == b.code, mods == (b.flagsRaw & relevant) {
-            key = .acceptAll
-        } else {
-            switch keyCode {
-            case 48 where mods == 0: key = .tab
-            case 53 where mods == 0: key = .esc
-            default: return Unmanaged.passUnretained(event)
-            }
+        let mods = event.flags.rawValue & Self.relevantFlags
+        guard let key = Self.resolveKey(
+            keyCode: keyCode,
+            mods: mods,
+            commit: commitBinding.withLock { $0 },
+            acceptAll: acceptBinding.withLock { $0 }
+        ) else {
+            return Unmanaged.passUnretained(event)
         }
         if handler(key) {
             return nil
