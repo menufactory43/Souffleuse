@@ -18,19 +18,26 @@ enum CompletionLength: String, CaseIterable, Sendable {
         }
     }
 
-    /// Token cap fed to GenerateParameters. The sentence-end truncation in
-    /// onChunk will still chop early if the model emits `.`, `?`, `!`.
+    /// Hard token backstop fed to GenerateParameters. This is NO LONGER the
+    /// primary brake — generation stops on the COMPLETE-word budget (`maxWords`,
+    /// via `ChunkFilter.reachedWordCap`) or a sentence terminator, whichever
+    /// comes first, so in the common case far fewer tokens are decoded than this
+    /// ceiling. The ceiling only bites in pathological runs (the model never
+    /// completing a word) to bound latency.
     ///
-    /// `.medium = 4` matches the Cotypist Free default and aligns with the
-    /// "~2-4 mots" label (SentencePiece FR ≈ 2-3 mots for 4 tokens). The
-    /// short cap is critical for perceived speed: every token saved is
-    /// ~12-20ms shaved off total stream time, which directly reduces the
-    /// cancel-on-keystroke race window.
+    /// Why generous: measured on the default Gemma 3 1B tokenizer, French words
+    /// cost ~1.2 tok (courant) but élisions/long words cost 3-4 ("l'arbre" = 3,
+    /// "définitivement" = 4). The old caps (short 3 / medium 4) were roughly the
+    /// cost of a SINGLE elided word, so the budget routinely ran out mid-word
+    /// and the ghost froze on "l'". The ceiling is sized at ≈ `maxWords × 4 + 2`
+    /// so "finish the current word" almost never hits it. TTFT is unaffected
+    /// (first token unchanged); only the stream tail can grow, and only when a
+    /// word is genuinely unfinished.
     var maxTokens: Int {
         switch self {
-        case .short: return 3
-        case .medium: return 4
-        case .long: return 20
+        case .short: return 10
+        case .medium: return 14
+        case .long: return 40
         }
     }
 

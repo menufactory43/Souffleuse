@@ -250,7 +250,7 @@ func runLLM(
         )
     ) { piece in
         acc.generated += piece
-        let (verdict, _, sentenceComplete) = ChunkFilter.filterChunk(
+        let (verdict, _, sentenceComplete, reachedWordCap) = ChunkFilter.filterChunk(
             accumulated: acc.generated,
             userTail: userTail,
             caretAfterSpace: caretAfterSpace,
@@ -265,8 +265,9 @@ func runLLM(
             return true
         case .emit(let oneLine):
             if oneLine != acc.lastEmitted { acc.lastEmitted = oneLine }
-            // Mirror the live path: stop generating at a completed sentence.
-            return !sentenceComplete
+            // Mirror the live path: stop at a completed sentence OR once the
+            // complete-word budget is full (never mid-word).
+            return !sentenceComplete && !reachedWordCap
         }
     }
     if ProcessInfo.processInfo.environment["DUMP_RAW"] != nil {

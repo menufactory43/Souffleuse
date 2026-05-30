@@ -122,3 +122,77 @@ struct FragmentedGhostTests {
         #expect(!OutputFilter.isFragmentedGhost("cal"))
     }
 }
+
+/// Dangling-élision trim — a settled ghost must never freeze on a trailing word
+/// that ends in an intra-word joiner (`'` / `-`): "l'", "d'", "qu'", "peut-".
+/// Such a word always demands a continuation, so it is stripped; if nothing
+/// complete remains the chunk is dropped so decoding keeps going (→ "l'arbre").
+@Suite("ChunkFilter — dangling élision trim")
+struct ChunkFilterElisionTests {
+
+    @Test func loneElisionIsDropped() {
+        // "l'" alone has no complete word → drop and keep generating.
+        let r = ChunkFilter.filterChunk(
+            accumulated: "l'", userTail: "", caretAfterSpace: false, maxWords: 20)
+        #expect(r.verdict == .dropKeepGenerating)
+    }
+
+    @Test func trailingElisionStripped() {
+        // "manger l'" → strip the dangling "l'" (and its separating space).
+        let r = ChunkFilter.filterChunk(
+            accumulated: "manger l'", userTail: "", caretAfterSpace: false, maxWords: 20)
+        #expect(r.verdict == .emit("manger"))
+    }
+
+    @Test func openCompoundStripped() {
+        // Open compound ("peut-" wants "-être") is dangling too.
+        let r = ChunkFilter.filterChunk(
+            accumulated: "il peut-", userTail: "", caretAfterSpace: false, maxWords: 20)
+        #expect(r.verdict == .emit("il"))
+    }
+
+    @Test func completeElisionWordKept() {
+        // A COMPLETE elided word ("l'arbre", "aujourd'hui") must survive — the
+        // joiner is internal, the word ends on a letter.
+        let arbre = ChunkFilter.filterChunk(
+            accumulated: "l'arbre", userTail: "", caretAfterSpace: false, maxWords: 20)
+        #expect(arbre.verdict == .emit("l'arbre"))
+        let hui = ChunkFilter.filterChunk(
+            accumulated: "aujourd'hui", userTail: "", caretAfterSpace: false, maxWords: 20)
+        #expect(hui.verdict == .emit("aujourd'hui"))
+    }
+}
+
+/// Complete-word budget — `reachedWordCap` lets the generation caller stop at a
+/// WORD boundary (not a raw token count). A trailing in-progress word, and
+/// especially a dangling élision, must NOT count, so decoding continues until a
+/// real word completes.
+@Suite("ChunkFilter — reachedWordCap (complete-word budget)")
+struct ChunkFilterWordCapTests {
+
+    @Test func reachedAtBudget() {
+        // maxWords = 2, "un deux trois": "un" and "deux" are complete (a word
+        // follows each) → cap reached. Display caps to "un deux".
+        let r = ChunkFilter.filterChunk(
+            accumulated: "un deux trois", userTail: "", caretAfterSpace: false, maxWords: 2)
+        #expect(r.reachedWordCap == true)
+        #expect(r.verdict == .emit("un deux"))
+    }
+
+    @Test func notReachedBelowBudget() {
+        // "un deux": only "un" is complete (trailing "deux" still in progress).
+        let r = ChunkFilter.filterChunk(
+            accumulated: "un deux", userTail: "", caretAfterSpace: false, maxWords: 3)
+        #expect(r.reachedWordCap == false)
+    }
+
+    @Test func danglingElisionDoesNotCountTowardCap() {
+        // "un l'" with maxWords = 2: the dangling "l'" must not count, so the cap
+        // is NOT reached (keep decoding to complete "l'arbre"), and the residual
+        // "l'" is stripped from the display.
+        let r = ChunkFilter.filterChunk(
+            accumulated: "un l'", userTail: "", caretAfterSpace: false, maxWords: 2)
+        #expect(r.reachedWordCap == false)
+        #expect(r.verdict == .emit("un"))
+    }
+}
