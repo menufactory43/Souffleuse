@@ -64,6 +64,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     private var presence: PresenceIndicatorWindow!
     private var interceptor: KeyInterceptor!
     private let predictor = PredictorViewModel()
+    /// Mini Phase 4 — moteur instruct paresseux + petit panneau de traduction.
+    private let translationRuntime = TranslationRuntime()
+    private let translationHUD = TranslationHUDWindow()
     private var pollTimer: Timer?
     private var onboarding: OnboardingWindow?
     private var customInstructions = CustomInstructionsWindow()
@@ -1423,16 +1426,24 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             return performFullAccept(suggestion: suggestion, prePrefix: prePrefix, bundleID: bundleID)
 
         case .commit:
-            // PHASE 2 PLACEHOLDER — la vraie traduction arrive en Phase 4. Ici le
-            // commit prouve juste le mécanisme : lire le champ via AX et le
-            // REMPLACER entièrement (≠ continuation / partial accept). La cible
-            // factice = le texte courant en MAJUSCULES, visiblement un placeholder.
-            // NB : le tap n'étant actif que pendant qu'un ghost s'affiche, ⌘↩
-            // n'est pour l'instant intercepté que dans ce cas (élargissement à
-            // « HUD affiché sans ghost » = Phase 5).
-            let current = axClient.snapshot().text ?? ""
-            Log.info(.input, "translate_commit_placeholder")
-            return performCommit(currentText: current, targetText: current.uppercased())
+            // MINI PHASE 4 — vraie traduction visible. On lit le champ, on rend la
+            // main au ghost (teardown), puis on stream la traduction FR→EN dans un
+            // petit panneau et on remplace le champ. NB : le tap n'étant actif que
+            // pendant qu'un ghost s'affiche, ⌘↩ n'est intercepté que dans ce cas
+            // (élargissement « HUD sans ghost » = Phase 5).
+            let snap = axClient.snapshot()
+            let current = snap.text ?? ""
+            let rect = snap.elementRect
+            Log.info(.input, "translate_commit_start")
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.predictor.cancel()
+                self.lastPredictedPrefix = nil
+                self.overlay.hide()
+                self.interceptor.setActive(false)
+                self.runTranslationCommit(frenchText: current, fieldRect: rect)
+            }
+            return true
         }
     }
 
@@ -1483,27 +1494,46 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
-    /// PHASE 2 — prouve le mécanisme de commit traduction : REMPLACE le texte du
-    /// champ focus par `targetText` via `replaceForCommit` (backspaces + insert
-    /// Unicode, flags vidés → sûr même avec ⌘ tenu, layout-indépendant, jamais de
-    /// ⌘-raccourci). En Phase 4, `targetText` sera la traduction streamée du HUD.
-    /// Tear-down du ghost comme les autres acceptations. Renvoie true (consommé).
-    nonisolated private func performCommit(currentText: String, targetText: String) -> Bool {
-        DispatchQueue.global(qos: .userInitiated).async { [axClient] in
-            axClient.replaceForCommit(deleteChars: currentText.count, with: targetText)
-            let snap = axClient.snapshot()
-            DispatchQueue.main.async { [weak self] in
-                self?.dismissedForText = snap.text ?? ""
-            }
-        }
-        DispatchQueue.main.async { [weak self] in
+    /// MINI PHASE 4 — vraie traduction visible : affiche un petit panneau, charge
+    /// le moteur instruct (paresseux, 1er appel ~1-2 s), stream FR→EN dedans, puis
+    /// remplace le champ via `replaceForCommit` (chemin validé Electron/AZERTY).
+    /// Cible fixe EN pour ce 1er jet ; cible AUTO + chip = Phase 5, panneau
+    /// drag/persistance = Phase 3b.
+    private func runTranslationCommit(frenchText: String, fieldRect: CGRect?) {
+        let text = frenchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        let anchor = fieldRect ?? .zero
+        translationHUD.show(at: anchor, header: "FR → EN · traduction…", body: "…")
+        Task { @MainActor [weak self] in
             guard let self else { return }
-            self.predictor.cancel()
-            self.lastPredictedPrefix = nil
-            self.overlay.hide()
-            self.interceptor.setActive(false)
+            final class Acc: @unchecked Sendable { var s = "" }
+            let acc = Acc()
+            let metrics = await self.translationRuntime.translate(text, into: .en, maxTokens: 220) { piece in
+                acc.s += piece
+                let partial = GemmaChatPrompt.cleanCompletion(acc.s)
+                Task { @MainActor in self.translationHUD.update(partial) }
+                return true
+            }
+            let output = GemmaChatPrompt.cleanCompletion(acc.s)
+            guard metrics != nil, !output.isEmpty else {
+                self.translationHUD.update("⚠︎ modèle de traduction indisponible")
+                try? await Task.sleep(nanoseconds: 1_600_000_000)
+                self.translationHUD.hide()
+                return
+            }
+            self.translationHUD.update(output)
+            // Remplace le champ entier par la traduction.
+            let axClient = self.axClient
+            let deleteCount = frenchText.count
+            DispatchQueue.global(qos: .userInitiated).async {
+                axClient.replaceForCommit(deleteChars: deleteCount, with: output)
+                let s = axClient.snapshot()
+                DispatchQueue.main.async { [weak self] in self?.dismissedForText = s.text ?? "" }
+            }
+            Log.info(.input, "translate_commit_done")
+            try? await Task.sleep(nanoseconds: 2_200_000_000)
+            self.translationHUD.hide()
         }
-        return true
     }
 
     /// Records the cumulative span the user accepted partially into the
