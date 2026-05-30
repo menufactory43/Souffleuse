@@ -936,8 +936,20 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             // a ghost starting with "bonjour" (and vice versa). The user's
             // typed casing wins in the rendered text (AX writes verbatim);
             // only the matching logic ignores case.
-            if Self.isLiveConsumeMatch(ghost: predictor.suggestion, typedSince: typedSince)
-                && !Self.isStaleMidWordCompletion(basePrefix: basePrefix, ghost: predictor.suggestion) {
+            // ANTI-FLICKER (revertable — see note below). We used to also require
+            // `!isStaleMidWordCompletion` here, which forced a hide+re-predict on
+            // EVERY keystroke into a "word-completion + tail" ghost — now the
+            // common case with the corpus (e.g. "achète du Bitcoin."). That blinked
+            // the tail on each letter. We now let these enter the smooth
+            // partial-remainder consume too: a correctly-guessed word consumes
+            // letter-by-letter with no flicker, and a *wrong* guess ("envi" →
+            // "es de manger" while the user types "envie ") still self-corrects —
+            // the divergence break in the partial-remainder block below re-predicts.
+            // Trade-off: on a wrong guess the stale tail shows for ~1 keystroke
+            // before the divergence swap, instead of being hidden.
+            // TO REVERT: re-add `&& !Self.isStaleMidWordCompletion(basePrefix:
+            // basePrefix, ghost: predictor.suggestion)` to the condition below.
+            if Self.isLiveConsumeMatch(ghost: predictor.suggestion, typedSince: typedSince) {
                 // User is consuming the ghost letter-by-letter — set up
                 // partial state so the existing block below renders the
                 // remainder and skips re-prediction.

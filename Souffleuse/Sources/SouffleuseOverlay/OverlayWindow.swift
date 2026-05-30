@@ -85,6 +85,15 @@ public final class OverlayWindow {
         let correctedRect = Self.correctCaretRect(caretRectQuartz, hostText: hostText, caretIndex: caretIndex, font: renderFont)
         let frame = Self.appKitFrame(forGhostAfterCaret: correctedRect, text: text, font: renderFont)
 
+        // Skip redundant repaints (revertable). The 80 ms poll re-calls show()
+        // ~12x/s with identical content; re-running setFrame(display:) every tick
+        // wastes work and, when the caret rect jitters a pixel on Electron hosts,
+        // makes the ghost shimmer. Only repaint when text or frame actually
+        // changed. TO REVERT: delete this guard.
+        if panel.isVisible, text == lastText, frame == lastFrame {
+            return
+        }
+
         label.font = renderFont
         label.stringValue = text
         panel.setFrame(frame, display: true)
