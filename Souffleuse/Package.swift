@@ -233,7 +233,7 @@ let package = Package(
         // engines side by side on this 8 GB machine.
         .executableTarget(
             name: "SouffleuseTranslateBench",
-            dependencies: ["SouffleuseLlama"]
+            dependencies: ["SouffleuseLlama", "SouffleuseCore"]
         ),
         .testTarget(
             name: "SouffleuseTests",
