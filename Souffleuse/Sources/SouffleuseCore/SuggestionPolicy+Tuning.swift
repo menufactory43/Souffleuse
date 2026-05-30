@@ -275,5 +275,10 @@ extension SuggestionPolicy {
         /// fréquent (~1-2 s) ; trop long = RAM tenue inutilement. 180 s = l'utilisateur
         /// a clairement quitté le flux de traduction.
         public static let translationIdleUnloadSeconds: Int = 180
+
+        /// Durée (s) d'affichage du panneau de traduction APRÈS la fin de la
+        /// traduction, avant l'auto-masquage en fondu — assez longue pour lire et
+        /// pour saisir/déplacer le panneau. Le survol souris suspend ce compte.
+        public static let translationHUDVisibleSeconds: Double = 6
     }
 }
