@@ -438,7 +438,7 @@ final class ModelRuntime {
             // proved fresh greedy mid-word output is coherent; the spell-check
             // only produced false positives. `OutputFilter.midWordCandidate` is
             // retained (pure helper + tests) but no longer gates emission.
-            let (verdict, dropReason, sentenceComplete) = ChunkFilter.filterChunk(
+            let (verdict, dropReason, sentenceComplete, reachedWordCap) = ChunkFilter.filterChunk(
                 accumulated: acc.generated,
                 userTail: userTail,
                 caretAfterSpace: caretAfterSpace,
@@ -466,13 +466,17 @@ final class ModelRuntime {
                     let chunkOut = oneLine
                     Task { @MainActor in onChunk(chunkOut) }
                 }
-                // Stop generating once the ghost was truncated at a sentence
-                // terminator: everything past the cut is discarded by the display
-                // anyway, so further tokens are pure wasted latency (matters on
-                // the long completion preset). Evaluated even when the ghost is
-                // unchanged from the last emit, so a sentence that completes
-                // without changing the displayed text still stops here.
-                return !sentenceComplete
+                // Stop generating once the ghost is done. Two conditions, both
+                // evaluated even when the displayed text is unchanged:
+                //   • sentenceComplete — truncated at a sentence terminator;
+                //     everything past the cut is discarded by the display anyway.
+                //   • reachedWordCap — the budget (expressed in COMPLETE words,
+                //     not raw tokens) is full. Stopping here lands on a word
+                //     boundary, never mid-word: a trailing in-progress word (e.g.
+                //     a dangling "l'") is not counted, so decoding keeps going
+                //     until it completes into a real word ("l'arbre"). The raw
+                //     maxTokens cap is only a generous backstop above this.
+                return !sentenceComplete && !reachedWordCap
             }
         }
         GpuGate.shared.ghostEnded()

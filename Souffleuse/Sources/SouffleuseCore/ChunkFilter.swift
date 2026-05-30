@@ -42,6 +42,14 @@ public enum ChunkFilter {
         case instructionEcho
     }
 
+    /// Punctuation that closes a word (so the word before it counts as
+    /// "complete" for the word-budget stop). Apostrophe / hyphen are
+    /// deliberately EXCLUDED — they are intra-word joiners that leave the word
+    /// open (a dangling élision "l'" / open compound "peut-").
+    private static let wordBoundaryPunct: Set<Character> = [
+        ".", ",", ";", ":", "!", "?", "\u{2026}", ")", "]", "}", "\u{00BB}",
+    ]
+
     /// Computes the verdict for one accumulated snapshot. See `ChunkVerdict`
     /// for the caller-side contract. `dropReason` is `nil` unless the verdict
     /// is `.dropKeepGenerating`.
@@ -52,12 +60,19 @@ public enum ChunkFilter {
     /// sentence. The caller uses it to STOP generating (everything past the cut
     /// is thrown away by the display anyway). Clause boundaries (commas) never
     /// set it, so a wanted second clause keeps generating.
+    ///
+    /// `reachedWordCap` is `true` once the accumulated text holds at least
+    /// `maxWords` COMPLETE words (words followed by a separator). The generation
+    /// budget is expressed in whole words, not raw tokens (the token cap is only
+    /// a generous backstop), so the caller stops on it AT A WORD BOUNDARY — a
+    /// trailing in-progress word (notably a dangling élision "l'") is NOT
+    /// counted, so decoding continues until that word completes.
     public static func filterChunk(
         accumulated: String,
         userTail: String,
         caretAfterSpace: Bool,
         maxWords: Int
-    ) -> (verdict: ChunkVerdict, dropReason: DropReason?, sentenceComplete: Bool) {
+    ) -> (verdict: ChunkVerdict, dropReason: DropReason?, sentenceComplete: Bool, reachedWordCap: Bool) {
         // ── Filter pipeline (verbatim semantics of the generateLlama onChunk body) ──
         let snapshot = OutputFilter.stripPrefixOverlap(accumulated, prefix: userTail)
         // Caret after a space: the model's leading space is redundant (the
@@ -106,6 +121,17 @@ public enum ChunkFilter {
         // Punctuation KEPT (Cotypist parity) — no comma truncation. The
         // sentence-terminator cut above + word cap below bound the length.
         let words = oneLine.split(whereSeparator: { $0.isWhitespace })
+        // Word-budget stop signal — computed on the PRE-cap text so it sees the
+        // separator that closes the maxWords-th word (the display cap below
+        // would hide it). A word is complete when followed by a separator:
+        // either the line ends on a boundary char, or there are more words
+        // after it. The trailing run with no following separator is in-progress
+        // and never counted, so a dangling "l'" never trips the cap.
+        let endsOnBoundary = oneLine.last.map {
+            $0.isWhitespace || Self.wordBoundaryPunct.contains($0)
+        } ?? false
+        let completeWords = endsOnBoundary ? words.count : max(0, words.count - 1)
+        let reachedWordCap = completeWords >= maxWords
         if words.count > maxWords {
             // `split` discards the leading empty subsequence, so re-joining the
             // capped words drops a single LEADING space — the same next-word
@@ -123,14 +149,14 @@ public enum ChunkFilter {
         }
 
         if OutputFilter.ghostIsRepeatingPrefix(oneLine, prefix: userTail) {
-            return (.reset, nil, false)
+            return (.reset, nil, false, false)
         }
         // Sentence-start echo: at a sentence boundary the pt base model often
         // "continues" by restating the sentence it just finished ("…lien ? " →
         // "Vous avez"). stripPrefixOverlap / ghostIsRepeatingPrefix only catch
         // repetition adjacent to the caret, not a jump back to the opening.
         if OutputFilter.ghostEchoesRecentSentenceStart(oneLine, prefix: userTail) {
-            return (.reset, nil, false)
+            return (.reset, nil, false, false)
         }
 
         // Drop bare enumerators / lone numbers ("1", "1.", "1er") that the
@@ -138,7 +164,7 @@ public enum ChunkFilter {
         // list-like context. Better to show nothing than a "1" ghost. Keep
         // generating — a later token may yield a real continuation.
         if OutputFilter.isDegenerateGhost(oneLine) {
-            return (.dropKeepGenerating, .degenerate, false)
+            return (.dropKeepGenerating, .degenerate, false, false)
         }
 
         // Instruction-echo safety net : in degenerate cases the instruct 1B
@@ -147,9 +173,54 @@ public enum ChunkFilter {
         // truncation above already cut most of it, but a leaked echo is
         // meta-text, never a real completion → drop and keep generating.
         if OutputFilter.echoesInstruction(oneLine) {
-            return (.dropKeepGenerating, .instructionEcho, false)
+            return (.dropKeepGenerating, .instructionEcho, false, false)
         }
 
-        return (.emit(oneLine), nil, sentenceComplete)
+        // Dangling élision / open-compound trim (safety net). A trailing word
+        // ending in an intra-word joiner ('/'/-) is intrinsically incomplete —
+        // "l'", "d'", "qu'", "aujourd'", "peut-" always demand a continuation.
+        // Frozen on screen it reads as a bug ("l'"). Strip it; if nothing
+        // complete remains, drop and keep generating so the noun ("l'arbre")
+        // can still arrive. The bigger token budget means this rarely fires —
+        // it only catches the residual EOG / token-ban-fallback cases.
+        let deElided = Self.stripTrailingDanglingElision(oneLine)
+        if deElided != oneLine {
+            if deElided.trimmingCharacters(in: .whitespaces).isEmpty {
+                return (.dropKeepGenerating, .degenerate, false, false)
+            }
+            oneLine = deElided
+        }
+
+        return (.emit(oneLine), nil, sentenceComplete, reachedWordCap)
+    }
+
+    /// Strips a trailing word that ends in an intra-word joiner (`'` / `’` /
+    /// `-`) — a dangling élision or open compound ("l'", "d'", "qu'",
+    /// "aujourd'", "peut-"). Such a word is intrinsically incomplete (it always
+    /// demands a continuation), so a settled ghost must never end on it.
+    /// Repeats for back-to-back joiners ("va l' d'" → "va") and preserves a
+    /// single leading separator space. Returns the input unchanged when the
+    /// trailing word is complete or the line does not end on a word char.
+    static func stripTrailingDanglingElision(_ s: String) -> String {
+        var result = Substring(s)
+        while !result.isEmpty {
+            // Trailing run of word-characters (letters/digits + joiners).
+            var runStart = result.endIndex
+            while runStart > result.startIndex {
+                let prev = result.index(before: runStart)
+                if OutputFilter.isWordChar(result[prev]) { runStart = prev } else { break }
+            }
+            // No trailing word run (ends in space/closing punct) → nothing dangling.
+            guard runStart < result.endIndex else { break }
+            let last = result[result.index(before: result.endIndex)]
+            guard last == "'" || last == "\u{2019}" || last == "-" else { break }
+            // Drop the run plus a single separating space before it.
+            var cut = runStart
+            if cut > result.startIndex, result[result.index(before: cut)] == " " {
+                cut = result.index(before: cut)
+            }
+            result = result[result.startIndex..<cut]
+        }
+        return String(result)
     }
 }
