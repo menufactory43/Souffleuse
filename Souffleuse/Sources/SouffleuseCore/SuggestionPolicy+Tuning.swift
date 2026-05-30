@@ -204,5 +204,38 @@ extension SuggestionPolicy {
             0.6,  // 8
             0.3,  // 9+ — trop long
         ]
+
+        // MARK: - Garde-fou C (survie termes/chiffres dans la traduction)
+        //
+        // Mécanisme C (TRANSLATION-SPEC §2.8) : on extrait de la source FR les
+        // tokens « durs » (montants/chiffres, %, termes métier, noms propres) et
+        // on vérifie leur survie dans la traduction. Pitfall 6 : ces seuils
+        // n'existent QUE ici.
+
+        /// Termes métier crypto-fiscalité dont la disparition dans la traduction
+        /// est un signal fort de dérive (le 1B-it les « adapte » parfois).
+        /// Comparaison insensible à la casse. Liste courte et de haute précision :
+        /// un terme listé doit presque toujours survivre tel quel d'une langue à
+        /// l'autre.
+        public static let termSurvivalBusinessTerms: [String] = [
+            "wallet", "Binance", "Coinbase", "Kraken", "Ledger", "MetaMask",
+            "staking", "NFT", "gas", "CSV", "PDF", "Stripe", "Bitcoin", "Ethereum",
+            "BTC", "ETH", "USDC", "USDT", "DeFi", "airdrop", "KYC", "IBAN", "API",
+            "Waltio", "blockchain", "token", "smart contract",
+        ]
+
+        /// Longueur canonique (chiffres seuls) minimale d'un nombre pour être
+        /// surveillé. 2 → on ignore les chiffres isolés (« un 1er… ») tout en
+        /// attrapant montants et pourcentages (la corruption observée au gate —
+        /// « 1 250,50 € » → « 250,50 € » — fait 6 chiffres).
+        public static let termSurvivalMinNumberDigits: Int = 2
+
+        /// Longueur minimale d'un nom propre capitalisé surveillé (réduit le bruit
+        /// sur les mots de 1-2 lettres en tête de phrase).
+        public static let termSurvivalProperNounMinLength: Int = 3
+
+        /// Nombre maximum de tokens manquants listés dans le badge HUD ; au-delà,
+        /// on agrège en « +N ».
+        public static let termSurvivalMaxBadgeItems: Int = 4
     }
 }

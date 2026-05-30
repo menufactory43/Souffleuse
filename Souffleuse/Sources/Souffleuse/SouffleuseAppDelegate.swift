@@ -1588,6 +1588,13 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             self.translationHUD.update(output)
+            // Garde-fou C : signale les tokens durs (chiffres, montants, termes,
+            // noms propres) disparus dans la traduction — zéro appel LLM.
+            let missing = TermSurvivalGuard.missingTokens(source: text, translation: output)
+            if let summary = TermSurvivalGuard.badgeSummary(for: missing) {
+                self.translationHUD.setBadge("⚠︎ à vérifier : \(summary)")
+                Log.info(.input, "translate_guard_flagged")
+            }
             // Remplace le champ entier par la traduction.
             let axClient = self.axClient
             let deleteCount = frenchText.count
