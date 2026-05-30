@@ -7,8 +7,13 @@ import Foundation
 /// la géométrie change pendant le streaming) : l'auto-masquage SONDE plutôt la
 /// position réelle de la souris à l'expiration (cf. `scheduleAutoHide`).
 private final class HoverView: NSView {
+    var onAppearanceChange: (() -> Void)?
     override func resetCursorRects() {
         addCursorRect(bounds, cursor: .openHand)
+    }
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        onAppearanceChange?()   // suit clair/sombre du système, en direct
     }
 }
 
@@ -45,12 +50,43 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
 
     public static let width: CGFloat = 320
 
-    // MARK: - Palette « livret » (papier crème · encre · bordeaux)
-    private static let paper = NSColor(srgbRed: 0.937, green: 0.914, blue: 0.843, alpha: 0.98)
-    private static let ink = NSColor(srgbRed: 0.12, green: 0.10, blue: 0.085, alpha: 1)
-    private static let burgundy = NSColor(srgbRed: 0.46, green: 0.17, blue: 0.17, alpha: 1)
-    private static let ruleColor = NSColor(srgbRed: 0.30, green: 0.24, blue: 0.20, alpha: 0.45)
-    private static let border = NSColor(srgbRed: 0.46, green: 0.17, blue: 0.17, alpha: 0.38)
+    // MARK: - Palette, sensible à l'apparence système
+    // Clair = LE LIVRET (papier crème · encre · bordeaux).
+    // Sombre = LA SALLE DANS LA PÉNOMBRE (charbon tiède · parchemin · or).
+    private static func paper(_ dark: Bool) -> NSColor {
+        dark ? NSColor(srgbRed: 0.11, green: 0.095, blue: 0.085, alpha: 0.97)
+             : NSColor(srgbRed: 0.937, green: 0.914, blue: 0.843, alpha: 0.98)
+    }
+    private static func ink(_ dark: Bool) -> NSColor {
+        dark ? NSColor(srgbRed: 0.90, green: 0.87, blue: 0.80, alpha: 1)
+             : NSColor(srgbRed: 0.12, green: 0.10, blue: 0.085, alpha: 1)
+    }
+    /// En-tête + filets : bordeaux en clair, or doux en sombre.
+    private static func accent(_ dark: Bool) -> NSColor {
+        dark ? NSColor(srgbRed: 0.84, green: 0.70, blue: 0.44, alpha: 1)
+             : NSColor(srgbRed: 0.46, green: 0.17, blue: 0.17, alpha: 1)
+    }
+    /// Badge garde-fou C : bordeaux en clair, ambre en sombre.
+    private static func warn(_ dark: Bool) -> NSColor {
+        dark ? NSColor(srgbRed: 0.90, green: 0.71, blue: 0.36, alpha: 1)
+             : NSColor(srgbRed: 0.46, green: 0.17, blue: 0.17, alpha: 1)
+    }
+    private static func rule(_ dark: Bool) -> NSColor {
+        dark ? NSColor(srgbRed: 0.80, green: 0.66, blue: 0.40, alpha: 0.40)
+             : NSColor(srgbRed: 0.30, green: 0.24, blue: 0.20, alpha: 0.45)
+    }
+    private static func border(_ dark: Bool) -> NSColor {
+        dark ? NSColor(srgbRed: 0.80, green: 0.66, blue: 0.40, alpha: 0.40)
+             : NSColor(srgbRed: 0.46, green: 0.17, blue: 0.17, alpha: 0.38)
+    }
+
+    /// Texte brut de l'en-tête (conservé pour le reconstruire au changement
+    /// d'apparence, sa couleur étant portée par la chaîne attribuée).
+    private var headerRaw = ""
+    /// Apparence sombre actuellement effective pour le panneau ?
+    private var isDark: Bool {
+        container.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+    }
 
     /// Serif d'affichage façon livret : Didot si présent (macOS), sinon le serif
     /// système (New York). `italic` pour la note en marge.
@@ -84,27 +120,23 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
 
         container = HoverView(frame: NSRect(x: 0, y: 0, width: Self.width, height: 80))
         container.wantsLayer = true
-        container.layer?.backgroundColor = Self.paper.cgColor
         container.layer?.cornerRadius = 6
         container.layer?.borderWidth = 1
-        container.layer?.borderColor = Self.border.cgColor
 
         header = NSTextField(labelWithString: "")
         header.alignment = .center
 
-        ruleLeft = NSView();  ruleLeft.wantsLayer = true;  ruleLeft.layer?.backgroundColor = Self.ruleColor.cgColor
-        ruleRight = NSView(); ruleRight.wantsLayer = true; ruleRight.layer?.backgroundColor = Self.ruleColor.cgColor
+        ruleLeft = NSView();  ruleLeft.wantsLayer = true
+        ruleRight = NSView(); ruleRight.wantsLayer = true
 
         body = NSTextField(wrappingLabelWithString: "")
         body.font = Self.serif(size: 15)
-        body.textColor = Self.ink
         body.alignment = .center
         body.maximumNumberOfLines = 0
         body.lineBreakMode = .byWordWrapping
 
         badge = NSTextField(wrappingLabelWithString: "")
         badge.font = Self.serif(size: 11, italic: true)
-        badge.textColor = Self.burgundy
         badge.alignment = .center
         badge.maximumNumberOfLines = 0
         badge.lineBreakMode = .byWordWrapping
@@ -118,6 +150,22 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
         panel.contentView = container
         super.init()
         panel.delegate = self
+        container.onAppearanceChange = { [weak self] in self?.applyColors() }
+        applyColors()
+    }
+
+    /// Applique la palette du mode courant (clair/sombre) à tous les éléments.
+    /// Couleurs explicites (sRGB) → indépendantes du contexte de dessin ; il
+    /// suffit de les ré-appliquer au changement d'apparence.
+    private func applyColors() {
+        let dark = isDark
+        container.layer?.backgroundColor = Self.paper(dark).cgColor
+        container.layer?.borderColor = Self.border(dark).cgColor
+        ruleLeft.layer?.backgroundColor = Self.rule(dark).cgColor
+        ruleRight.layer?.backgroundColor = Self.rule(dark).cgColor
+        body.textColor = Self.ink(dark)
+        badge.textColor = Self.warn(dark)
+        applyHeader(headerRaw)   // la couleur de l'en-tête vit dans la chaîne attribuée
     }
 
     // MARK: - API
@@ -135,9 +183,10 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
         currentBundleID = bundleID
         self.savedOffset = savedOffset
         isPinnedByUser = false
-        applyHeader(headerText)
+        headerRaw = headerText
         bodyText = bodyTextValue
         badgeText = ""
+        applyColors()        // (ré)applique l'apparence courante + construit l'en-tête
         relayout()
         if !panel.isVisible {
             panel.alphaValue = 0
@@ -203,13 +252,14 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
     /// CENTRÉ. NB : poser un `attributedStringValue` ignore `header.alignment` —
     /// le centrage doit vivre dans le `NSParagraphStyle` de la chaîne attribuée.
     private func applyHeader(_ s: String) {
+        headerRaw = s
         let para = NSMutableParagraphStyle()
         para.alignment = .center
         header.attributedStringValue = NSAttributedString(
             string: s.uppercased(),
             attributes: [
                 .font: Self.didot(size: 11),
-                .foregroundColor: Self.burgundy,
+                .foregroundColor: Self.accent(isDark),
                 .kern: 2.2,
                 .paragraphStyle: para,
             ])
