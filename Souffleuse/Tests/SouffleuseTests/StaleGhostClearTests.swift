@@ -87,7 +87,8 @@ struct StaleGhostClearTests {
                 timestamp: Date(),
                 contextBefore: "",
                 accepted: "Bien cordialement, Jean Dupont",
-                bundleID: nil
+                bundleID: nil,
+                source: .prose
             ),
         ]
         let route = engine.routeInstant(

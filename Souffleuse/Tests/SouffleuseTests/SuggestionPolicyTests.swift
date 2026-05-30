@@ -16,8 +16,9 @@ import SouffleuseCore
 @Suite("Phase 4 — Cascade routing (D-08) + Relevance Gate replacement (D-07)")
 struct SuggestionPolicyTests {
 
-    static func entry(_ context: String, _ accepted: String) -> TypingHistoryEntry {
-        TypingHistoryEntry(timestamp: Date(), contextBefore: context, accepted: accepted, bundleID: nil)
+    // Recall verbatim via `routeInstant` n'admet QUE la prose → `.prose` par défaut.
+    static func entry(_ context: String, _ accepted: String, source: EntrySource = .prose) -> TypingHistoryEntry {
+        TypingHistoryEntry(timestamp: Date(), contextBefore: context, accepted: accepted, bundleID: nil, source: source)
     }
 
     static func engine(maxWords: Int = 16) -> SuggestionPolicyEngine {

@@ -349,7 +349,15 @@ final class PredictorViewModel {
         // `suggestion`, and the drop-guard fallback in the LLM stream — sees a
         // clean single line, so the ghost never floats above the caret and a
         // Tab-accept never injects a line break.
-        let instantGhost: String = ModelRuntime.OutputFilter.singleLine(routeResult?.text ?? "")
+        // Anti-répétition : un recall corpus qui redonne le mot déjà tapé
+        // (« …bonjour » → « bonjour, comment… ») est rogné ICI, à la source, donc
+        // tous les usages en aval (gate de stabilité ci-dessous, `suggestion`
+        // affichée, fallback du stream LLM, décision stale-clear) voient le même
+        // ghost dédupliqué. Un recall qui n'est QUE la répétition s'effondre à ""
+        // et le garde `!instantGhost.isEmpty` le saute (le LLM reprend la main).
+        let instantGhost: String = SuggestionPolicy.dedupLeadingRepeat(
+            ghost: ModelRuntime.OutputFilter.singleLine(routeResult?.text ?? ""),
+            userTail: userTail)
         let instantSource: SuggestionSource = routeResult?.source ?? .none
         if !instantGhost.isEmpty, let route = routeResult {
             // Narrow stability gate : only block when this predict and the
@@ -361,7 +369,10 @@ final class PredictorViewModel {
             let extendsCurrent = instantGhost.count > suggestion.count
                 && instantGhost.lowercased().hasPrefix(suggestion.lowercased())
             if !bothLayer0 || extendsCurrent {
-                policy.applyGhost(route.text, source: route.source, score: route.score)
+                // `instantGhost` (dédupliqué + singleLine) plutôt que `route.text`
+                // brut, pour que l'état policy (`currentGhost`, base du calcul de
+                // remplacement par `onLLMChunk`) corresponde à ce qui est affiché.
+                policy.applyGhost(instantGhost, source: route.source, score: route.score)
                 suggestion = ModelRuntime.OutputFilter.normalizeFrenchTypography(instantGhost)
                 suggestionSource = instantSource
             } else {
@@ -533,9 +544,17 @@ final class PredictorViewModel {
         let ngramModel = self.ngramModel
         // Hoisted on the @MainActor side (self is strong here) so the detached
         // generation Task can use it without touching @MainActor state. Filtered
-        // to `.prose` now (never accept-fragments) — this is the few-shot
-        // injection pool (B-prompt).
-        let proseExamplesPool = self.historySnapshot.filter { $0.source == .prose }
+        // to `.prose` (never accept-fragments) AND débarrassé des entrées qui ne
+        // sont QU'une salutation : injectées comme démonstration few-shot dans le
+        // prompt du modèle PT base, elles ré-amorcent la pollution multi-salutations
+        // (« Coucou… » → « Bonjour… », cf. le raisonnement de retrait plus bas).
+        // Elles restent dans `historySnapshot` complet, donc le biais n-gram et
+        // `strongCorpusMatch` rappellent toujours les salutations de l'utilisateur
+        // — on ne les retire QUE comme exemple imitable. Ceci est le pool
+        // d'injection few-shot (B-prompt).
+        let proseExamplesPool = self.historySnapshot.filter {
+            $0.source == .prose && !SuggestionPolicy.isGreetingLike($0.accepted)
+        }
 
         let baseSystem = baseSystemPrompt
         let customInstr = customInstructions
@@ -732,6 +751,27 @@ final class PredictorViewModel {
                     PredictDebug.log("chunk_gated", "oneLine=\(chunk.debugDescription) current=\(self.suggestion.debugDescription) source=\(self.suggestionSource)")
                     return
                 }
+                // Anti-répétition de contenu : rogne un chunk LLM qui redonne le
+                // mot déjà tapé (« …bonjour » → « bonjour, comment… »). Filet de
+                // sécurité distinct du `ghostIsRepeatingPrefix` interne au stream
+                // (qui manque le cas mot-complet-sans-séparateur). Un chunk qui
+                // n'est QUE la répétition retombe sur le ghost instant, comme la
+                // branche `chunk.isEmpty` ci-dessus. La gate stub tourne ENSUITE
+                // sur le texte dédupliqué (un résidu d'un seul caractère est bien
+                // du bruit à écarter).
+                let ghostText = SuggestionPolicy.dedupLeadingRepeat(
+                    ghost: update.text, userTail: userTail)
+                guard !ghostText.isEmpty else {
+                    // Le chunk ACCUMULÉ n'est pour l'instant QUE la répétition du
+                    // mot tapé (la suite n'est pas encore arrivée). On NE touche
+                    // PAS à l'affichage et on attend le token suivant — sinon le
+                    // ghost clignote à chaque démarrage de stream. `emitted` reste
+                    // tel quel : si la génération se termine sans jamais produire
+                    // de suite, le stale-clear du bloc de complétion s'en charge.
+                    Log.info(.predictor, "ghost_dropped_repeat")
+                    PredictDebug.log("ghost_repeat_wait", "raw=\(update.text.debugDescription) userTail=\(userTail.debugDescription)")
+                    return
+                }
                 // Stub guard : a fresh NEXT-WORD ghost (caret at a word
                 // boundary — userTail ends in space/punct/empty) that is just a
                 // single character ("m") is noise. The user can't read intent
@@ -742,9 +782,9 @@ final class PredictorViewModel {
                 // nothing beats a lone "m". Mid-word completions (caret inside a
                 // word, finishing it: "Bonjou" → "r") are exempt: there the last
                 // userTail char is a letter, so this never fires.
-                if Self.isNextWordStub(userTail: userTail, ghost: update.text)
-                    || Self.isMidWordStub(userTail: userTail, ghost: update.text) {
-                    PredictDebug.log("chunk_stub_skip", "text=\(update.text.debugDescription) userTail=\(userTail.debugDescription)")
+                if Self.isNextWordStub(userTail: userTail, ghost: ghostText)
+                    || Self.isMidWordStub(userTail: userTail, ghost: ghostText) {
+                    PredictDebug.log("chunk_stub_skip", "text=\(ghostText.debugDescription) userTail=\(userTail.debugDescription)")
                     return
                 }
                 let fromHigh = (self.suggestionSource == .history
@@ -752,11 +792,21 @@ final class PredictorViewModel {
                              || self.suggestionSource == .undoCache)
                 Log.info(.predictor,
                          fromHigh ? "ghost_swap_to_llm_from_high" : "ghost_apply_llm",
-                         count: update.text.count)
-                PredictDebug.log("chunk_applied", "oneLine=\(update.text.debugDescription) prev_source=\(self.suggestionSource)")
+                         count: ghostText.count)
+                PredictDebug.log("chunk_applied", "oneLine=\(ghostText.debugDescription) prev_source=\(self.suggestionSource)")
                 emitTracker.emitted = true
-                self.policy.applyGhost(update.text, source: .llm, score: update.score)
-                self.suggestion = ModelRuntime.OutputFilter.normalizeFrenchTypography(update.text)
+                // Re-score quand la dédup a raccourci le texte : `update.score` a
+                // été calculé par onLLMChunk sur le chunk BRUT (avec la
+                // répétition). Le stocker tel quel gonfle `currentScore`, et la
+                // barre de remplacement (×1.15) bloquerait alors les extensions
+                // légitimes du chunk suivant — le ghost se fige sur le premier
+                // bout dédupliqué (le bug « le LLM ne tourne plus »). On score ce
+                // qui est RÉELLEMENT affiché.
+                let appliedScore = ghostText == update.text
+                    ? update.score
+                    : SuggestionPolicy.score(source: .llm, ghost: ghostText, userTail: userTail)
+                self.policy.applyGhost(ghostText, source: .llm, score: appliedScore)
+                self.suggestion = ModelRuntime.OutputFilter.normalizeFrenchTypography(ghostText)
                 self.predictedForPrefix = forPrefix
                 self.suggestionSource = .llm
             }

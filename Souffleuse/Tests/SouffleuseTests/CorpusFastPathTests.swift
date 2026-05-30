@@ -12,8 +12,11 @@ import SouffleuseCore
 @Suite("Phase 3 — corpus fast-path routing (strong match vs LLM fallback)")
 struct CorpusFastPathTests {
 
-    static func entry(_ context: String, _ accepted: String) -> TypingHistoryEntry {
-        TypingHistoryEntry(timestamp: Date(), contextBefore: context, accepted: accepted, bundleID: nil)
+    // Recall verbatim via `routeInstant` n'admet QUE la prose ; ces fixtures
+    // exercent le fast-path, donc `.prose` par défaut. (Les tests du helper pur
+    // `strongCorpusMatch`, non filtré, marchent avec n'importe quelle source.)
+    static func entry(_ context: String, _ accepted: String, source: EntrySource = .prose) -> TypingHistoryEntry {
+        TypingHistoryEntry(timestamp: Date(), contextBefore: context, accepted: accepted, bundleID: nil, source: source)
     }
     static func engine() -> SuggestionPolicyEngine { SuggestionPolicyEngine(maxWords: 16) }
 
