@@ -240,17 +240,18 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
 
         container.frame = NSRect(x: 0, y: 0, width: Self.width, height: total)
 
-        // En-tête centré, encadré de deux filets (motif « —— PROGRAMME —— »).
+        // En-tête centré sur TOUTE la largeur (jamais tronqué), encadré de deux
+        // filets posés autour de la largeur RÉELLE du texte (marge de sécurité).
         let headerY = total - pad - headerH
-        let headerW = min(ceil(header.attributedStringValue.size().width) + 2, bodyWidth)
-        let headerX = ((Self.width - headerW) / 2).rounded()
-        header.frame = NSRect(x: headerX, y: headerY, width: headerW, height: headerH)
+        header.frame = NSRect(x: pad, y: headerY, width: bodyWidth, height: headerH)
+        let textW = min(ceil(header.attributedStringValue.size().width) + 8, bodyWidth)
+        let centerX = Self.width / 2
         let ruleY = (headerY + headerH / 2).rounded()
         let ruleSideGap: CGFloat = 12
-        let leftW = max(0, headerX - ruleSideGap - pad)
-        ruleLeft.frame = NSRect(x: pad, y: ruleY, width: leftW, height: 1)
-        let rightX = headerX + headerW + ruleSideGap
-        ruleRight.frame = NSRect(x: rightX, y: ruleY, width: max(0, (Self.width - pad) - rightX), height: 1)
+        let leftEnd = centerX - textW / 2 - ruleSideGap
+        let rightStart = centerX + textW / 2 + ruleSideGap
+        ruleLeft.frame = NSRect(x: pad, y: ruleY, width: max(0, leftEnd - pad), height: 1)
+        ruleRight.frame = NSRect(x: rightStart, y: ruleY, width: max(0, (Self.width - pad) - rightStart), height: 1)
 
         // Corps + badge ancrés en bas (le panneau croît vers le haut au streaming).
         badge.frame = NSRect(x: pad, y: pad, width: bodyWidth, height: badgeH)
