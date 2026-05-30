@@ -70,6 +70,19 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     private var cadenceLastLen = 0
     private var cadenceLastBundle: String?
     private var cadenceLastGrowthAt: Date?
+    // MARK: - Icône vivante (barre des menus)
+    /// En coulisse (endormie) → à l'écoute (champ actif) → elle souffle (ghost) →
+    /// (capture, désactivée). Une seule famille de bulle, lecture instantanée.
+    private enum IconState: Equatable { case disabled, coulisse, listening, souffle, capturing }
+    private var currentIconState: IconState?
+    /// Posé dans `tick` : vrai dès qu'un champ texte éligible est focalisé.
+    private var iconTextFieldFocused = false
+    /// Capture OCR active à l'instant (sondage async de `tick`).
+    private var iconCapturingNow = false
+    /// « Elle souffle » maintenu un court instant après la dernière apparition du
+    /// ghost — anti-strobe pendant la frappe (le ghost cligne à chaque keystroke).
+    private var souffleHoldUntil: Date?
+    private static let souffleHoldSeconds: Double = 0.45
     private let axClient = AXClient()
     private var overlay: OverlayWindow!
     private var presence: PresenceIndicatorWindow!
@@ -349,7 +362,10 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // worst-case detection lag; the AX snapshot cost stays negligible
         // (<1 ms), so the only cost is a few more idle snapshots per second.
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.tick() }
+            MainActor.assumeIsolated {
+                self?.tick()
+                self?.refreshLivingIcon()
+            }
         }
 
         installGlobalHotkey()
@@ -513,7 +529,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
 
     private func installStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        applyStatusItemIcon(capturing: false)
+        refreshLivingIcon()
 
         let menu = NSMenu()
         let toggleItem = NSMenuItem(title: store.enabled ? "Activée ✓" : "Désactivée", action: #selector(toggleEnabled), keyEquivalent: "s")
@@ -654,15 +670,53 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         return m == 0 ? "\(h) h" : "\(h) h \(m)"
     }
 
-    private func applyStatusItemIcon(capturing: Bool) {
-        guard let button = statusItem?.button else { return }
-        let symbol = capturing ? "eye.fill" : "text.bubble"
-        if let img = NSImage(systemSymbolName: symbol, accessibilityDescription: "Souffleuse") {
-            img.isTemplate = !capturing  // tinted (blue) when capturing
-            button.image = img
-            button.contentTintColor = capturing ? NSColor.systemBlue : nil
+    /// Recalcule l'état de l'icône vivante et ne touche l'image QUE s'il change.
+    /// Appelé après chaque tick + au changement de capture. La priorité va au plus
+    /// informatif : désactivée > capture (vie privée) > souffle > écoute > coulisse.
+    private func refreshLivingIcon() {
+        let state: IconState
+        if !store.enabled {
+            state = .disabled
+        } else if iconTextFieldFocused && iconCapturingNow {
+            state = .capturing
+        } else if overlay.isVisible {
+            souffleHoldUntil = Date().addingTimeInterval(Self.souffleHoldSeconds)
+            state = .souffle
+        } else if let until = souffleHoldUntil, until > Date() {
+            state = .souffle
+        } else if iconTextFieldFocused && predictor.isModelReady {
+            state = .listening
         } else {
-            button.title = capturing ? "👁" : "S"
+            state = .coulisse
+        }
+        applyIconState(state)
+    }
+
+    /// Applique une silhouette de bulle par état. Souffle = bulle pleine teintée
+    /// bordeaux (accent livret, or en barre sombre) ; capture = œil bleu (signal
+    /// orthogonal) ; coulisse/désactivée = bulle vide en sourdine.
+    private func applyIconState(_ state: IconState) {
+        guard let button = statusItem?.button, state != currentIconState else { return }
+        currentIconState = state
+        let symbol: String, tint: NSColor?, alpha: CGFloat
+        var template = true
+        switch state {
+        case .disabled:  symbol = "bubble";           tint = nil; alpha = 0.35
+        case .coulisse:  symbol = "bubble";           tint = nil; alpha = 0.55
+        case .listening: symbol = "text.bubble";      tint = nil; alpha = 1.0
+        case .souffle:   symbol = "text.bubble.fill"
+                         tint = LivretPalette.accent(LivretPalette.isDark(button)); alpha = 1.0
+        case .capturing: symbol = "eye.fill"; template = false; tint = .systemBlue; alpha = 1.0
+        }
+        if let img = NSImage(systemSymbolName: symbol, accessibilityDescription: "Souffleuse") {
+            img.isTemplate = template
+            button.image = img
+            button.contentTintColor = tint
+            button.alphaValue = alpha
+        } else {
+            button.image = nil
+            button.title = state == .capturing ? "👁" : "S"
+            button.alphaValue = alpha
         }
     }
 
@@ -809,11 +863,15 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             self.caretRefinementPending = false
             self.tick()
+            self.refreshLivingIcon()
         }
     }
 
     private func tick() {
         guard store.enabled else { return }
+        // Icône vivante : par défaut « pas de champ actif » ; repassé à vrai plus
+        // bas une fois un champ texte éligible confirmé.
+        iconTextFieldFocused = false
         // R1: pause pipeline whenever Souffleuse is the foreground app (Preferences,
         // Onboarding, or CustomInstructions key). Prevents predicting in our own UI
         // and avoids racing AX reads against our own SwiftUI text fields.
@@ -897,6 +955,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             interceptor.setActive(false)
             return
         }
+        // Champ texte éligible et actif → « à l'écoute » (sauf si un ghost s'affiche
+        // ou si la capture tourne, traité par priorité dans refreshLivingIcon).
+        iconTextFieldFocused = true
 
         // Fresh-focus snapshot: when the user lands on a new bundle, capture
         // the host text as our "intent baseline". The ghost stays hidden until
@@ -1018,7 +1079,10 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         Task { [weak self] in
             guard let self else { return }
             let cap = await self.enricher.isCapturing()
-            await MainActor.run { self.applyStatusItemIcon(capturing: cap) }
+            await MainActor.run {
+                self.iconCapturingNow = cap
+                self.refreshLivingIcon()
+            }
         }
 
         // Per-app enrichment policy: suggestionOnly disables enrichment for this
