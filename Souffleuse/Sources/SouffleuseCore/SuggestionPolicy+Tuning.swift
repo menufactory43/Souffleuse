@@ -269,5 +269,11 @@ extension SuggestionPolicy {
             let estimated = sourceChars * 2 / 5 + 48
             return min(translationMaxNewTokensCap, max(translationMaxNewTokensFloor, estimated))
         }
+
+        /// Délai d'inactivité (s) après lequel le moteur instruct (traduction) est
+        /// déchargé pour rendre la RAM (Phase 7). Compromis : trop court = rechargement
+        /// fréquent (~1-2 s) ; trop long = RAM tenue inutilement. 180 s = l'utilisateur
+        /// a clairement quitté le flux de traduction.
+        public static let translationIdleUnloadSeconds: Int = 180
     }
 }
