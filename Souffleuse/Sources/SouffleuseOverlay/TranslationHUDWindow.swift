@@ -199,14 +199,19 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
         }
     }
 
-    /// En-tête « programme » : Didot, capitales, généreusement espacé, bordeaux.
+    /// En-tête « programme » : Didot, capitales, généreusement espacé, bordeaux,
+    /// CENTRÉ. NB : poser un `attributedStringValue` ignore `header.alignment` —
+    /// le centrage doit vivre dans le `NSParagraphStyle` de la chaîne attribuée.
     private func applyHeader(_ s: String) {
+        let para = NSMutableParagraphStyle()
+        para.alignment = .center
         header.attributedStringValue = NSAttributedString(
             string: s.uppercased(),
             attributes: [
                 .font: Self.didot(size: 11),
                 .foregroundColor: Self.burgundy,
                 .kern: 2.2,
+                .paragraphStyle: para,
             ])
     }
 
