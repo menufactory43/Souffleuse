@@ -86,24 +86,23 @@ public final class AXClient: @unchecked Sendable {
 
     private let queue = DispatchQueue(label: "cocotypist.ax.client", qos: .userInitiated)
     private let systemWide: AXUIElement
-    /// PIDs whose Chromium/Electron accessibility tree we have CONFIRMED live
-    /// (a focused-element read succeeded after we set the activation
-    /// attributes). Keyed by PID — NOT bundle id — so a quit+relaunch of the
-    /// same app (a fresh, dormant process) re-activates instead of being
-    /// skipped. Once confirmed we stop re-attempting. Accessed only from
-    /// `queue`, so no extra synchronisation is needed.
-    private var activationConfirmedPIDs: Set<pid_t> = []
-    /// Per-PID activation attempt counter. Chromium/Electron build their AX
-    /// tree ASYNCHRONOUSLY, so the first read after we set the attributes
-    /// routinely races the build and comes back empty; a single fire-once
-    /// attempt (the old bug) never sticks. We retry across snapshot ticks (the
-    /// 80 ms poll doubles as the delay the async build needs) until the tree is
-    /// confirmed live (see `markAccessibilityConfirmed`) or we exhaust
-    /// `maxActivationAttempts` — so a Cocoa app with no live AX tree never
-    /// re-writes the attributes at 12 Hz forever. Confirmation is INDEPENDENT
-    /// of this cap: once a focused read finally succeeds we confirm even past
-    /// the cap, since the attributes were already set on earlier attempts.
-    private var activationAttemptsByPID: [pid_t: Int] = [:]
+    /// PIDs whose AX tree currently reads as LIVE (the last focused-element
+    /// read succeeded). While a PID is live we skip activation entirely — no
+    /// redundant attribute writes. Keyed by PID, not bundle id.
+    private var treeLiveNowPIDs: Set<pid_t> = []
+    /// PIDs whose AX tree has been live AT LEAST ONCE — i.e. confirmed
+    /// Electron/Chromium hosts worth re-waking WITHOUT bound if they go dormant
+    /// again. Chromium's `AutoDisableAccessibility` turns the tree back OFF
+    /// mid-session after the user types without an AT reading (observed live:
+    /// Signal flipped `textLen=21` → `textLen=-1` in one tick), so a one-shot
+    /// "confirmed forever" model never recovers. A never-live PID's initial
+    /// wake is bounded (`maxInitialActivationAttempts`); a known-live PID that
+    /// went dormant is retried every tick until it wakes.
+    private var treeEverLivePIDs: Set<pid_t> = []
+    /// Activation attempts for a PID that has NEVER been live, bounding the
+    /// initial wake so a Cocoa app with no AX tree (Finder, etc.) is not
+    /// re-written at the poll rate forever. Reset once the PID first goes live.
+    private var initialActivationAttempts: [pid_t: Int] = [:]
     /// Live no-op AX observers, keyed by PID. Strongly retained so Chromium
     /// keeps the tree alive for the host process's lifetime. Created AT MOST
     /// once per PID (guarded) so a retry never overwrites — and leaks the
@@ -112,8 +111,10 @@ public final class AXClient: @unchecked Sendable {
     /// long-standing misconception in this file): it only pumps extra run-loop
     /// turns while the tree builds and keeps a live AT signature.
     private var observersByPID: [pid_t: AXObserver] = [:]
-    /// Upper bound on activation attempts per PID (see `activationAttemptsByPID`).
-    static let maxActivationAttempts = 12
+    /// Upper bound on activation attempts for a PID that has never been live
+    /// (~2 s at the 80 ms poll) — generous for Chromium's async tree build,
+    /// bounded so non-Electron apps stop after a couple of seconds.
+    static let maxInitialActivationAttempts = 25
 
     public init() {
         self.systemWide = AXUIElementCreateSystemWide()
@@ -133,7 +134,7 @@ public final class AXClient: @unchecked Sendable {
     ///   1. The tree builds ASYNCHRONOUSLY — the first focused read after the
     ///      attribute-set races the build and comes back empty, so a single
     ///      fire-once attempt never sticks. We retry across snapshot ticks
-    ///      until `readSnapshot` confirms a live tree (`markAccessibilityConfirmed`).
+    ///      until `readSnapshot` reports a live tree (`recordTreeLiveness`).
     ///   2. `AXManualAccessibility` is unsupported on Electron < 23.3.1 even
     ///      though the host IS Electron; `AXEnhancedUserInterface` does the
     ///      work there — so we set BOTH and never gate success on the set's
@@ -142,10 +143,18 @@ public final class AXClient: @unchecked Sendable {
         var pid: pid_t = 0
         AXUIElementGetPid(appEl, &pid)
         guard pid != 0 else { return }
-        if activationConfirmedPIDs.contains(pid) { return }
-        let attempts = activationAttemptsByPID[pid, default: 0]
-        guard attempts < Self.maxActivationAttempts else { return }
-        activationAttemptsByPID[pid] = attempts + 1
+        // Tree is live right now → nothing to do (no redundant attribute writes).
+        if treeLiveNowPIDs.contains(pid) { return }
+        // Dormant. A never-live PID gets a bounded initial wake budget (so a
+        // Cocoa app with no AX tree isn't re-written at the poll rate forever);
+        // a PID that WAS live and went dormant (AutoDisableAccessibility) is
+        // retried unbounded until it wakes again.
+        let everLive = treeEverLivePIDs.contains(pid)
+        if !everLive {
+            let n = initialActivationAttempts[pid, default: 0]
+            guard n < Self.maxInitialActivationAttempts else { return }
+            initialActivationAttempts[pid] = n + 1
+        }
 
         // Step 1: set BOTH activation attributes on the per-application element.
         // Cocoa apps return `.attributeUnsupported` (harmless); Electron honors
@@ -190,7 +199,7 @@ public final class AXClient: @unchecked Sendable {
         }
 
         if ProcessInfo.processInfo.environment["SOUFFLEUSE_PREDICT_LOG"]?.isEmpty == false {
-            let line = "[\(ISO8601DateFormatter().string(from: Date()))] ax_activate bundle=\(bundleID) pid=\(pid) attempt=\(attempts + 1) enhanced=\(axErrorName(r1)) manual=\(axErrorName(r2)) observer=\(axErrorName(observerStatus))\n"
+            let line = "[\(ISO8601DateFormatter().string(from: Date()))] ax_activate bundle=\(bundleID) pid=\(pid) everLive=\(everLive) initAttempt=\(initialActivationAttempts[pid, default: 0]) enhanced=\(axErrorName(r1)) manual=\(axErrorName(r2)) observer=\(axErrorName(observerStatus))\n"
             if let data = line.data(using: .utf8) {
                 let path = "/tmp/souffleuse-tick.log"
                 if let h = FileHandle(forWritingAtPath: path) {
@@ -200,15 +209,22 @@ public final class AXClient: @unchecked Sendable {
         }
     }
 
-    /// Mark `pid`'s accessibility tree CONFIRMED live so we stop re-attempting
-    /// activation. Called by `readSnapshot` whenever a focused-element read
-    /// succeeds. We confirm on ANY focused element, NOT only a text field: an
-    /// awake Chromium host can have a non-text control focused, and gating on a
-    /// focused TEXT element would spin activation forever on such hosts.
-    private func markAccessibilityConfirmed(pid: pid_t) {
+    /// Record the result of `readSnapshot`'s focused-element read so activation
+    /// knows whether the tree is live. Confirm on ANY focused element, NOT only
+    /// a text field: an awake Chromium host can have a non-text control focused,
+    /// and gating on a focused TEXT element would spin activation forever.
+    ///
+    /// `focusedReadable == false` means the tree is dormant (or just went
+    /// dormant via AutoDisableAccessibility) → re-arm so `ensureAccessibilityActivated`
+    /// retries on the next tick.
+    private func recordTreeLiveness(pid: pid_t, focusedReadable: Bool) {
         guard pid != 0 else { return }
-        if activationConfirmedPIDs.insert(pid).inserted {
-            activationAttemptsByPID[pid] = nil  // reclaim the counter slot
+        if focusedReadable {
+            treeLiveNowPIDs.insert(pid)
+            treeEverLivePIDs.insert(pid)
+            initialActivationAttempts[pid] = nil  // reclaim the counter slot
+        } else {
+            treeLiveNowPIDs.remove(pid)
         }
     }
 
@@ -451,23 +467,28 @@ public final class AXClient: @unchecked Sendable {
             return AXSnapshot(bundleID: nil, role: nil, subrole: nil, text: nil, caretIndex: nil, caretRect: nil, caretFont: nil)
         }
 
+        var appPID: pid_t = 0
+        AXUIElementGetPid(appEl, &appPID)
+
         // Chromium/Electron unlock: wake the AX tree on first sight of this
         // app. Cheap no-op on Cocoa-native apps. Done BEFORE the focused-
         // element query so Signal et al. have a chance to populate. Retried
         // across ticks (the tree builds async) until the focused read below
-        // confirms it is live.
+        // reports it live.
         if let bid = bundleID {
             ensureAccessibilityActivated(for: appEl, bundleID: bid)
         }
 
         guard let focused = copyAttr(appEl, kAXFocusedUIElementAttribute) else {
+            // Tree dormant (or just went dormant) ⇒ re-arm so the next ticks
+            // re-wake it — recovers from Chromium's AutoDisableAccessibility
+            // flipping the tree back off mid-session.
+            recordTreeLiveness(pid: appPID, focusedReadable: false)
             return AXSnapshot(bundleID: bundleID, role: nil, subrole: nil, text: nil, caretIndex: nil, caretRect: nil, caretFont: nil)
         }
         // A focused element is readable ⇒ the (Chromium/Electron) AX tree is
         // live ⇒ stop re-attempting activation for this process.
-        var appPID: pid_t = 0
-        AXUIElementGetPid(appEl, &appPID)
-        markAccessibilityConfirmed(pid: appPID)
+        recordTreeLiveness(pid: appPID, focusedReadable: true)
         let element = focused as! AXUIElement
 
         let role = copyStringAttr(element, kAXRoleAttribute)
