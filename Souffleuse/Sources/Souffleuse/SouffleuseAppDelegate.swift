@@ -1504,6 +1504,14 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// `append` call adds the shared secret-heuristic + fragment + FIFO gates.
     private func recordRawInputIfAllowed(text: String, bundleID: String?) {
         guard store.personalizationEnabled else { return }
+        // Opt-in gate. The "Retenir aussi ce que vous écrivez sans accepter"
+        // toggle (PreferencesStore.storeWithoutAccepted, default false) is meant
+        // to govern exactly this prose capture of whole field contents. It was
+        // defined + shown in the UI but read NOWHERE, so prose was captured on
+        // every focus change regardless of the toggle — the over-recording the
+        // user noticed. Honour it now: off ⇒ only accepted suggestions are
+        // stored. TO REVERT: delete this guard.
+        guard store.storeWithoutAccepted else { return }
         guard let bid = bundleID else { return }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count >= 8 else { return }
