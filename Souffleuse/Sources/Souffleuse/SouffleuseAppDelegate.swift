@@ -204,6 +204,15 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// Last computed enrichment prefix, refreshed asynchronously on focus change.
     /// Read synchronously in tick() so prediction stays on the fast path.
     private var cachedEnrichmentPrefix: String = ""
+    /// Last raw *visible* (OCR) text from the enricher, kept so the translation
+    /// commit can AUTO-detect the correspondent's language (P5). Only populated
+    /// when screen capture is enabled — otherwise nil and AUTO falls back to the
+    /// conversation's manual target (or EN). Distinct from `cachedEnrichmentPrefix`
+    /// which mixes app/window metadata and would skew language detection.
+    private var lastEnrichedVisible: String?
+    /// Generation token for the transient "target changed" flash in the HUD, so a
+    /// flash's delayed auto-hide never hides a real translation that started after.
+    private var hudFlashToken = 0
     /// Snapshot of the last applied OCR language list; we reapply when the
     /// user toggles a language in Preferences.
     private var lastOCRLangsApplied: [String] = []
@@ -237,6 +246,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
         interceptor.setAcceptAllKey(store.acceptAllKey)
         interceptor.setCommitKey(store.commitKey)
+        interceptor.setTargetCycleKey(store.targetCycleKey)
 
         predictor.maxTokens = store.completionLength.maxTokens
         predictor.maxWords = store.completionLength.maxWords
@@ -357,6 +367,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         guard store.enrichmentEnabled else { return }
         store.enrichmentEnabled = false
         cachedEnrichmentPrefix = ""
+        lastEnrichedVisible = nil
         lastEnrichedBundleID = nil
         Task { await enricher.invalidate() }
         refreshStatusItem()
@@ -427,6 +438,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
         interceptor.setAcceptAllKey(store.acceptAllKey)
         interceptor.setCommitKey(store.commitKey)
+        interceptor.setTargetCycleKey(store.targetCycleKey)
         if store.captureEnabled != previous.captureEnabled {
             applyCaptureToggle(store.captureEnabled, requestPermissionIfNeeded: true)
         }
@@ -435,6 +447,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
         if !store.enrichmentEnabled && previous.enrichment {
             cachedEnrichmentPrefix = ""
+            lastEnrichedVisible = nil
             lastEnrichedBundleID = nil
             Task { await enricher.invalidate() }
         }
@@ -871,6 +884,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             lastEnrichedWindowTitle = snap.windowTitle
             lastEnrichmentAt = Date()
             cachedEnrichmentPrefix = ""
+            lastEnrichedVisible = nil
             let appliedCapture = captureAllowedHere
             // Within-bundle title changes need an explicit cache invalidate —
             // `visibleCache` in ContextEnricher is keyed on bundleID only and
@@ -886,10 +900,12 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 await self.enricher.setCaptureEnabled(self.store.captureEnabled)
                 await MainActor.run {
                     self.cachedEnrichmentPrefix = enriched.prefix
+                    self.lastEnrichedVisible = enriched.visible
                 }
             }
         } else if !enrichmentAllowed {
             cachedEnrichmentPrefix = ""
+            lastEnrichedVisible = nil
             lastEnrichedBundleID = nil
             lastEnrichedWindowTitle = nil
         }
@@ -1426,24 +1442,71 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             return performFullAccept(suggestion: suggestion, prePrefix: prePrefix, bundleID: bundleID)
 
         case .commit:
-            // MINI PHASE 4 — vraie traduction visible. On lit le champ, on rend la
-            // main au ghost (teardown), puis on stream la traduction FR→EN dans un
-            // petit panneau et on remplace le champ. NB : le tap n'étant actif que
-            // pendant qu'un ghost s'affiche, ⌘↩ n'est intercepté que dans ce cas
-            // (élargissement « HUD sans ghost » = Phase 5).
+            // Vraie traduction visible. On lit le champ, on rend la main au ghost
+            // (teardown), puis on stream la traduction FR→cible dans un petit
+            // panneau et on remplace le champ. La CIBLE (P5) est résolue ici : une
+            // sélection FIXE posée à la touche de cycle l'emporte ; sinon AUTO suit
+            // la langue détectée du correspondant (capture ON) ; sinon EN. Le tap
+            // n'étant actif que pendant qu'un ghost s'affiche, ⌘↩ n'est intercepté
+            // que dans ce cas.
             let snap = axClient.snapshot()
             let current = snap.text ?? ""
             let rect = snap.elementRect
+            let bundleID = snap.bundleID
+            let windowTitle = snap.windowTitle
             Log.info(.input, "translate_commit_start")
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
+                let selection = self.store.conversationTargets.selection(
+                    forBundle: bundleID, windowTitle: windowTitle)
+                let detected = TranslationTarget.detected(in: self.lastEnrichedVisible ?? "")
+                let target = selection.resolve(detected: detected)
                 self.predictor.cancel()
                 self.lastPredictedPrefix = nil
                 self.overlay.hide()
                 self.interceptor.setActive(false)
-                self.runTranslationCommit(frenchText: current, fieldRect: rect)
+                self.runTranslationCommit(frenchText: current, fieldRect: rect, target: target)
             }
             return true
+
+        case .cycleTarget:
+            // Fait défiler la langue cible (EN→ES→DE→IT→AUTO) pour la conversation
+            // courante et FLASHE la nouvelle cible dans le panneau, SANS traduire :
+            // l'utilisateur choisit pendant qu'il compose, puis valide au commit.
+            // Persisté par conversation (bundleID + titre de fenêtre).
+            let snap = axClient.snapshot()
+            let rect = snap.elementRect
+            let bundleID = snap.bundleID
+            let windowTitle = snap.windowTitle
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                let selection = self.store.conversationTargets.cycle(
+                    forBundle: bundleID, windowTitle: windowTitle)
+                Log.info(.input, "translate_target_cycled")
+                self.flashTargetSelection(selection, fieldRect: rect)
+            }
+            return true
+        }
+    }
+
+    /// Flashe brièvement la cible choisie dans le panneau de traduction, sans
+    /// lancer de traduction. Auto-masqué après ~1,2 s — sauf si une vraie
+    /// traduction a pris le relais entre-temps (`hudFlashToken`).
+    @MainActor
+    private func flashTargetSelection(_ selection: TargetSelection, fieldRect: CGRect?) {
+        let anchor = fieldRect ?? .zero
+        let header: String
+        switch selection {
+        case .auto: header = "Cible : AUTO (langue détectée)"
+        case .fixed(let t): header = "Cible : FR → \(t.code)"
+        }
+        translationHUD.show(at: anchor, header: header, body: "⌘⇧→ changer · ⌘↩ traduire")
+        hudFlashToken &+= 1
+        let token = hudFlashToken
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            guard let self, self.hudFlashToken == token else { return }
+            self.translationHUD.hide()
         }
     }
 
@@ -1494,21 +1557,24 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
-    /// MINI PHASE 4 — vraie traduction visible : affiche un petit panneau, charge
-    /// le moteur instruct (paresseux, 1er appel ~1-2 s), stream FR→EN dedans, puis
+    /// Vraie traduction visible : affiche un petit panneau, charge le moteur
+    /// instruct (paresseux, 1er appel ~1-2 s), stream FR→`target` dedans, puis
     /// remplace le champ via `replaceForCommit` (chemin validé Electron/AZERTY).
-    /// Cible fixe EN pour ce 1er jet ; cible AUTO + chip = Phase 5, panneau
-    /// drag/persistance = Phase 3b.
-    private func runTranslationCommit(frenchText: String, fieldRect: CGRect?) {
+    /// La cible est résolue en amont (sélection fixe / AUTO détecté / EN) ; le
+    /// panneau drag/persistance reste Phase 3b.
+    private func runTranslationCommit(frenchText: String, fieldRect: CGRect?, target: TranslationTarget) {
         let text = frenchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        // Invalide tout flash de cible en attente : le panneau appartient
+        // désormais à la traduction, pas au flash.
+        hudFlashToken &+= 1
         let anchor = fieldRect ?? .zero
-        translationHUD.show(at: anchor, header: "FR → EN · traduction…", body: "…")
+        translationHUD.show(at: anchor, header: "FR → \(target.code) · traduction…", body: "…")
         Task { @MainActor [weak self] in
             guard let self else { return }
             final class Acc: @unchecked Sendable { var s = "" }
             let acc = Acc()
-            let metrics = await self.translationRuntime.translate(text, into: .en, maxTokens: 220) { piece in
+            let metrics = await self.translationRuntime.translate(text, into: target, maxTokens: 220) { piece in
                 acc.s += piece
                 let partial = GemmaChatPrompt.cleanCompletion(acc.s)
                 Task { @MainActor in self.translationHUD.update(partial) }

@@ -18,6 +18,9 @@ struct KeyInterceptorMappingTests {
     private func bind(_ ak: AcceptAllKey) -> (code: Int64, flagsRaw: UInt64)? {
         ak.keyCode.map { (code: $0, flagsRaw: ak.requiredFlagsRaw) }
     }
+    private func bind(_ ck: TargetCycleKey) -> (code: Int64, flagsRaw: UInt64)? {
+        ck.keyCode.map { (code: $0, flagsRaw: ck.requiredFlagsRaw) }
+    }
     private func mask(_ flags: CGEventFlags) -> UInt64 { flags.rawValue & K.relevantFlags }
 
     @Test("⌘↩ mappe vers .commit quand commit = cmdReturn")
@@ -89,5 +92,52 @@ struct KeyInterceptorMappingTests {
             == (CGEventFlags.maskCommand.rawValue | CGEventFlags.maskShift.rawValue))
         #expect(CommitKey.optionReturn.requiredFlagsRaw == CGEventFlags.maskAlternate.rawValue)
         #expect(CommitKey.allCases.count == 4)
+    }
+
+    // MARK: - Touche de cycle de cible (P5)
+
+    @Test("⌘⇧→ mappe vers .cycleTarget quand cycle = cmdShiftRight")
+    func cmdShiftRightMapsToCycle() {
+        let key = K.resolveKey(
+            keyCode: 124, mods: mask([.maskCommand, .maskShift]),
+            commit: nil, acceptAll: nil, cycleTarget: bind(.cmdShiftRight))
+        #expect(key == .cycleTarget)
+    }
+
+    @Test("→ nu n'est PAS un cycle (modificateurs requis)")
+    func bareRightArrowIsNotCycle() {
+        let key = K.resolveKey(
+            keyCode: 124, mods: 0,
+            commit: nil, acceptAll: nil, cycleTarget: bind(.cmdShiftRight))
+        #expect(key == nil)
+    }
+
+    @Test("commit a priorité sur cycle si bindings identiques")
+    func commitWinsOverCycle() {
+        // Les deux sur ⌘⇧↩-ish : commit testé en premier dans resolveKey.
+        let same: (code: Int64, flagsRaw: UInt64)? = (code: 36, flagsRaw: CGEventFlags.maskCommand.rawValue)
+        let key = K.resolveKey(
+            keyCode: 36, mods: mask(.maskCommand),
+            commit: same, acceptAll: nil, cycleTarget: same)
+        #expect(key == .commit)
+    }
+
+    @Test("cycle désactivé ne produit aucun match cycle")
+    func disabledCycleNoMatch() {
+        let key = K.resolveKey(
+            keyCode: 124, mods: mask([.maskCommand, .maskShift]),
+            commit: nil, acceptAll: nil, cycleTarget: bind(TargetCycleKey.disabled))
+        #expect(key == nil)
+    }
+
+    @Test("presets TargetCycleKey exposent keyCode + flags")
+    func cycleKeyPresets() {
+        #expect(TargetCycleKey.cmdShiftRight.keyCode == 124)
+        #expect(TargetCycleKey.cmdShiftRight.requiredFlagsRaw
+            == (CGEventFlags.maskCommand.rawValue | CGEventFlags.maskShift.rawValue))
+        #expect(TargetCycleKey.ctrlRight.requiredFlagsRaw == CGEventFlags.maskControl.rawValue)
+        #expect(TargetCycleKey.optionRight.requiredFlagsRaw == CGEventFlags.maskAlternate.rawValue)
+        #expect(TargetCycleKey.disabled.keyCode == nil)
+        #expect(TargetCycleKey.allCases.count == 4)
     }
 }

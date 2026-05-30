@@ -78,12 +78,44 @@ public enum CommitKey: String, CaseIterable, Sendable {
     }
 }
 
+/// Touche qui FAIT DÉFILER la langue cible de la traduction (EN→ES→DE→IT→AUTO),
+/// pour la conversation courante. Active uniquement pendant qu'un ghost s'affiche
+/// (même fenêtre que le commit). Même forme (keyCode + masque de flags) que
+/// `CommitKey`/`AcceptAllKey` → `resolveKey` la traite identiquement. Défaut ⌘⇧→.
+public enum TargetCycleKey: String, CaseIterable, Sendable {
+    case disabled, cmdShiftRight, ctrlRight, optionRight
+
+    public var keyCode: Int64? {
+        switch self {
+        case .disabled: return nil
+        case .cmdShiftRight, .ctrlRight, .optionRight: return 124   // →
+        }
+    }
+    public var requiredFlagsRaw: UInt64 {
+        switch self {
+        case .cmdShiftRight: return CGEventFlags.maskCommand.rawValue | CGEventFlags.maskShift.rawValue
+        case .ctrlRight: return CGEventFlags.maskControl.rawValue
+        case .optionRight: return CGEventFlags.maskAlternate.rawValue
+        case .disabled: return 0
+        }
+    }
+    public var label: String {
+        switch self {
+        case .disabled: return "Désactivé"
+        case .cmdShiftRight: return "⌘⇧→ Cmd + Maj + Flèche droite"
+        case .ctrlRight: return "⌃→ Ctrl + Flèche droite"
+        case .optionRight: return "⌥→ Option + Flèche droite"
+        }
+    }
+}
+
 public final class KeyInterceptor: @unchecked Sendable {
     public enum Key: Sendable, Equatable {
         case tab
         case esc
         case acceptAll
         case commit
+        case cycleTarget
     }
 
     /// Called on the tap thread when a Tab/Esc keyDown arrives while active.
@@ -108,6 +140,10 @@ public final class KeyInterceptor: @unchecked Sendable {
     /// forme et même discipline de lock qu'`acceptBinding` ; écrit depuis le main
     /// (`setCommitKey`), lu sur le thread du tap (`handle`).
     private let commitBinding = OSAllocatedUnfairLock<(code: Int64, flagsRaw: UInt64)?>(initialState: nil)
+    /// Configurable "cycle target language" binding. Même forme et même
+    /// discipline de lock que `commitBinding` ; écrit depuis le main
+    /// (`setTargetCycleKey`), lu sur le thread du tap (`handle`).
+    private let cycleBinding = OSAllocatedUnfairLock<(code: Int64, flagsRaw: UInt64)?>(initialState: nil)
 
     public init(handler: @escaping Handler) {
         self.handler = handler
@@ -178,6 +214,13 @@ public final class KeyInterceptor: @unchecked Sendable {
         }
     }
 
+    /// Update the user-selected "cycle target language" key. Safe to call from main.
+    public func setTargetCycleKey(_ k: TargetCycleKey) {
+        cycleBinding.withLock { state in
+            state = k.keyCode.map { (code: $0, flagsRaw: k.requiredFlagsRaw) }
+        }
+    }
+
     /// Modifier bits that matter for binding comparison (caps lock, fn, numeric
     /// pad, etc. are ignored).
     static let relevantFlags: UInt64 = CGEventFlags.maskCommand.rawValue | CGEventFlags.maskShift.rawValue
@@ -193,9 +236,11 @@ public final class KeyInterceptor: @unchecked Sendable {
         keyCode: Int64,
         mods: UInt64,
         commit: (code: Int64, flagsRaw: UInt64)?,
-        acceptAll: (code: Int64, flagsRaw: UInt64)?
+        acceptAll: (code: Int64, flagsRaw: UInt64)?,
+        cycleTarget: (code: Int64, flagsRaw: UInt64)? = nil
     ) -> Key? {
         if let b = commit, keyCode == b.code, mods == (b.flagsRaw & relevantFlags) { return .commit }
+        if let b = cycleTarget, keyCode == b.code, mods == (b.flagsRaw & relevantFlags) { return .cycleTarget }
         if let b = acceptAll, keyCode == b.code, mods == (b.flagsRaw & relevantFlags) { return .acceptAll }
         switch keyCode {
         case 48 where mods == 0: return .tab
@@ -222,7 +267,8 @@ public final class KeyInterceptor: @unchecked Sendable {
             keyCode: keyCode,
             mods: mods,
             commit: commitBinding.withLock { $0 },
-            acceptAll: acceptBinding.withLock { $0 }
+            acceptAll: acceptBinding.withLock { $0 },
+            cycleTarget: cycleBinding.withLock { $0 }
         ) else {
             return Unmanaged.passUnretained(event)
         }

@@ -134,6 +134,7 @@ final class PreferencesStore {
         static let partialAcceptEnabled = "partialAcceptEnabled"
         static let acceptAllKey = "acceptAllKey"
         static let commitKey = "commitKey"
+        static let targetCycleKey = "targetCycleKey"
         static let trailingSpaceOnPartial = "trailingSpaceOnPartial"
         static let prefixCorrectionEnabled = "prefixCorrectionEnabled"
     }
@@ -201,6 +202,11 @@ final class PreferencesStore {
     var commitKey: CommitKey {
         didSet { UserDefaults.standard.set(commitKey.rawValue, forKey: K.commitKey) }
     }
+    /// Défaut ⌘⇧→ ; fait défiler la langue cible (EN→ES→DE→IT→AUTO) pour la
+    /// conversation courante, pendant qu'un ghost s'affiche. `.disabled` off.
+    var targetCycleKey: TargetCycleKey {
+        didSet { UserDefaults.standard.set(targetCycleKey.rawValue, forKey: K.targetCycleKey) }
+    }
     /// When true, partial accept includes the single space following the
     /// accepted word/punctuation so the caret lands ready for the next word.
     /// Default on.
@@ -217,6 +223,7 @@ final class PreferencesStore {
 
     let allowlist = AllowlistStore()
     let hudAnchors = HUDAnchorStore()
+    let conversationTargets = ConversationTargetStore()
     let history = TypingHistoryStore()
 
     init() {
@@ -253,6 +260,7 @@ final class PreferencesStore {
         self.partialAcceptEnabled = (d.object(forKey: K.partialAcceptEnabled) as? Bool) ?? true
         self.acceptAllKey = AcceptAllKey(rawValue: d.string(forKey: K.acceptAllKey) ?? "") ?? .rightArrow
         self.commitKey = CommitKey(rawValue: d.string(forKey: K.commitKey) ?? "") ?? .cmdReturn
+        self.targetCycleKey = TargetCycleKey(rawValue: d.string(forKey: K.targetCycleKey) ?? "") ?? .cmdShiftRight
         self.trailingSpaceOnPartial = (d.object(forKey: K.trailingSpaceOnPartial) as? Bool) ?? true
         self.prefixCorrectionEnabled = (d.object(forKey: K.prefixCorrectionEnabled) as? Bool) ?? true
     }
