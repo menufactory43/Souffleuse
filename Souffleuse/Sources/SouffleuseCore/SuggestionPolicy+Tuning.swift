@@ -60,6 +60,18 @@ extension SuggestionPolicy {
         /// ghosts too.
         public static let midWordL2OverridesWordComplete: Bool = true
 
+        /// Few-shot prose injection into the live llama prompt (B-prompt,
+        /// 2026-05-30). When true AND personalization is on, PVM retrieves the
+        /// user's own `.prose` history entries (never accept-fragments) and
+        /// `LlamaPromptBuilder.buildLlamaPrompt` injects them as a raw
+        /// demonstration block ahead of the caret text. The SouffleuseInjectionEval
+        /// A/B/C probe showed this anchors the base model to the user's
+        /// register/domain and suppresses off-topic hallucination without the
+        /// multi-greeting cross-pollution that motivated the original removal
+        /// (PVM:600-609). Flip to false to restore sampler-only personalization
+        /// (NgramLogitBias) with no demonstration text in the prompt.
+        public static let examplesInjectionEnabled: Bool = true
+
         /// **Token-healing master switch (Task 1 + Task 2).** When `true`, a
         /// mid-word caret feeds the trailing partial word to the engine as a
         /// `healPrefix` so the model re-derives the WHOLE word from a clean

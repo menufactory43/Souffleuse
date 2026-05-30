@@ -13,6 +13,8 @@ let package = Package(
         .executable(name: "SouffleuseEnrichmentBench", targets: ["SouffleuseEnrichmentBench"]),
         .executable(name: "SouffleuseOCRAblation", targets: ["SouffleuseOCRAblation"]),
         .executable(name: "SouffleuseMidwordEval", targets: ["SouffleuseMidwordEval"]),
+        .executable(name: "SouffleuseRecallEval", targets: ["SouffleuseRecallEval"]),
+        .executable(name: "SouffleuseInjectionEval", targets: ["SouffleuseInjectionEval"]),
         .executable(name: "SouffleuseAXProbe", targets: ["SouffleuseAXProbe"]),
         .executable(name: "SouffleuseContextProbe", targets: ["SouffleuseContextProbe"]),
         .executable(name: "SouffleuseReplay", targets: ["SouffleuseReplay"]),
@@ -198,6 +200,23 @@ let package = Package(
                 "SouffleuseLog",
                 "SouffleusePersonalization",
                 "SouffleuseTyping",
+            ]
+        ),
+        .executableTarget(
+            name: "SouffleuseRecallEval",
+            dependencies: [
+                "SouffleuseCore",
+                "SouffleusePersonalization",
+                "SouffleuseTyping",
+            ]
+        ),
+        .executableTarget(
+            name: "SouffleuseInjectionEval",
+            dependencies: [
+                "SouffleuseCore",
+                "SouffleuseLlama",
+                "SouffleuseLog",
+                "SouffleusePersonalization",
             ]
         ),
         .executableTarget(
