@@ -216,6 +216,7 @@ final class PreferencesStore {
     }
 
     let allowlist = AllowlistStore()
+    let hudAnchors = HUDAnchorStore()
     let history = TypingHistoryStore()
 
     init() {
