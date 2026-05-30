@@ -158,6 +158,16 @@ public enum InstructModel: String, Sendable, CaseIterable, Codable {
         case .qwen1_5b: return 940
         }
     }
+
+    /// Descripteur de téléchargement unifié (consommé par `ModelDownloadManager`).
+    public var downloadable: DownloadableModel {
+        DownloadableModel(
+            id: "translate-" + rawValue,
+            displayName: displayName,
+            filename: ggufFilename,
+            url: downloadURL,
+            approxSizeMB: approxSizeMB)
+    }
 }
 
 public enum GemmaChatPrompt {

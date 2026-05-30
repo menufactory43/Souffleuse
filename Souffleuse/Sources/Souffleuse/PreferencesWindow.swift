@@ -287,10 +287,12 @@ private struct GeneralTab: View {
                     HStack(spacing: 8) {
                         Text(m.displayName).font(.callout)
                         Spacer()
-                        modelDownloadStatus(m)
+                        ModelDownloadBadge(manager: store.modelDownloads, model: m.downloadable)
                     }
                 }
-                .onAppear { store.modelDownloads.refresh() }
+                .onAppear {
+                    store.modelDownloads.refresh(InstructModel.allCases.map(\.downloadable))
+                }
             } header: {
                 Text("Accepter le souffle").font(.headline)
             }
@@ -354,11 +356,17 @@ private struct GeneralTab: View {
         }
     }
 
-    /// État de téléchargement d'un modèle de traduction : coche si installé,
-    /// progression pendant le téléchargement, bouton « Télécharger » si absent.
-    @ViewBuilder
-    private func modelDownloadStatus(_ m: InstructModel) -> some View {
-        switch store.modelDownloads.status[m] ?? .absent {
+}
+
+/// Badge d'état de téléchargement d'un GGUF (traduction ou voix du souffle),
+/// réutilisé dans les deux onglets : coche si installé, progression pendant le
+/// téléchargement, bouton « Télécharger (N Mo) » / « Réessayer » sinon.
+private struct ModelDownloadBadge: View {
+    let manager: ModelDownloadManager
+    let model: DownloadableModel
+
+    var body: some View {
+        switch manager.status(for: model) {
         case .ready:
             Label("Installé", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green).font(.callout)
@@ -368,12 +376,12 @@ private struct GeneralTab: View {
                 Text("\(Int(p * 100)) %").font(.caption).monospacedDigit()
             }
         case .absent:
-            Button("Télécharger (\(m.approxSizeMB) Mo)") { store.modelDownloads.download(m) }
+            Button("Télécharger (\(model.approxSizeMB) Mo)") { manager.download(model) }
                 .controlSize(.small)
         case .failed:
             HStack(spacing: 6) {
                 Text("échec").foregroundStyle(.red).font(.caption)
-                Button("Réessayer") { store.modelDownloads.download(m) }
+                Button("Réessayer") { manager.download(model) }
                     .controlSize(.small)
             }
         }
@@ -404,6 +412,18 @@ private struct ModelTab: View {
                     }
                 }
                 .pickerStyle(.radioGroup)
+                ForEach(GGUFModelOption.catalogue, id: \.id) { (m: GGUFModelOption) in
+                    if let d = m.downloadable {
+                        HStack(spacing: 8) {
+                            Text("\(m.displayName) · \(m.quant)").font(.callout)
+                            Spacer()
+                            ModelDownloadBadge(manager: store.modelDownloads, model: d)
+                        }
+                    }
+                }
+                .onAppear {
+                    store.modelDownloads.refresh(GGUFModelOption.catalogue.compactMap(\.downloadable))
+                }
             } header: {
                 Text("Qui vous souffle").font(.headline)
             } footer: {
@@ -411,7 +431,7 @@ private struct ModelTab: View {
                     Text("Une seule voix souffle à la fois.")
                     Text("La grande est plus juste, mais plus lente et plus gourmande en mémoire ; la petite est rapide — c'est le choix par défaut.")
                         .foregroundStyle(.secondary)
-                    Text("Les voix doivent déjà être présentes sur votre Mac. Aucun téléchargement.")
+                    Text("Une voix absente se télécharge d'un clic ci-dessus.")
                         .foregroundStyle(.secondary)
                 }
                 .font(.callout)

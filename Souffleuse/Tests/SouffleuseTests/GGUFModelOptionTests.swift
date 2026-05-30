@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 @testable import Souffleuse
+import SouffleuseCore
 
 /// GGUF model selector — catalogue, path resolution precedence, and the
 /// PreferencesStore persistence round-trip.
@@ -15,6 +16,25 @@ struct GGUFModelOptionTests {
         #expect(ids == ["gemma-3-1b-q5", "gemma-3-4b-q4"])
         #expect(GGUFModelOption.catalogue[0].fileName == "gemma-3-1b.i1-Q5_K_M.gguf")
         #expect(GGUFModelOption.catalogue[1].fileName == "gemma-3-4b.i1-Q4_K_M.gguf")
+    }
+
+    @Test("le descripteur de téléchargement enregistre la variante -pt sous le nom du catalogue")
+    func ghostDownloadableMapsPtSourceToCatalogFilename() {
+        let d = GGUFModelOption.catalogue[0].downloadable
+        #expect(d != nil)
+        // Destination = nom attendu par le résolveur ; source = GGUF base/pt.
+        #expect(d?.filename == "gemma-3-1b.i1-Q5_K_M.gguf")
+        #expect(d?.url.absoluteString.contains("gemma-3-1b-pt.i1-Q5_K_M.gguf") == true)
+        #expect(d?.url.host == "huggingface.co")
+        #expect((d?.approxSizeMB ?? 0) > 0)
+    }
+
+    @Test("le descripteur de traduction pointe le bon GGUF")
+    func translationDownloadable() {
+        let q = InstructModel.qwen1_5b.downloadable
+        #expect(q.filename == "qwen2.5-1.5b-instruct-q4_k_m.gguf")
+        #expect(q.url.host == "huggingface.co")
+        #expect(q.id == "translate-qwen1_5b")
     }
 
     @Test("default is the 1B Q5 entry")

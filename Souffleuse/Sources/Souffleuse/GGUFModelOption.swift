@@ -1,4 +1,5 @@
 import Foundation
+import SouffleuseCore
 
 /// Catalogue of selectable **GGUF (llama.cpp)** models — the real engine that
 /// drives the ghost text. One model is active at a time (Cotypist-style). This
@@ -25,6 +26,23 @@ struct GGUFModelOption: Identifiable, Sendable, Hashable {
     let hint: String
     /// The on-disk filename this entry resolves.
     let fileName: String
+    /// URL HF du GGUF à télécharger si absent (`nil` = non téléchargeable in-app).
+    /// On télécharge la variante **base/pt** (le souffle FR est une continuation
+    /// brute, pas un chat instruct) et on l'enregistre sous `fileName`.
+    let downloadURL: URL?
+    /// Taille approximative (Mo) pour l'affichage.
+    let approxSizeMB: Int
+
+    /// Descripteur de téléchargement unifié (`nil` si pas d'URL).
+    var downloadable: DownloadableModel? {
+        guard let downloadURL else { return nil }
+        return DownloadableModel(
+            id: "ghost-" + id,
+            displayName: displayName,
+            filename: fileName,
+            url: downloadURL,
+            approxSizeMB: approxSizeMB)
+    }
 
     /// Resolves this entry's local GGUF path. Returns nil when the file can't be
     /// found (entry should be shown disabled). The `SOUFFLEUSE_GGUF` env var, when
@@ -81,14 +99,18 @@ struct GGUFModelOption: Identifiable, Sendable, Hashable {
             displayName: "Gemma 3 1B · Q5_K_M",
             quant: "Q5_K_M",
             hint: "Rapide — défaut, faible RAM",
-            fileName: "gemma-3-1b.i1-Q5_K_M.gguf"
+            fileName: "gemma-3-1b.i1-Q5_K_M.gguf",
+            downloadURL: URL(string: "https://huggingface.co/mradermacher/gemma-3-1b-pt-i1-GGUF/resolve/main/gemma-3-1b-pt.i1-Q5_K_M.gguf"),
+            approxSizeMB: 811
         ),
         GGUFModelOption(
             id: "gemma-3-4b-q4",
             displayName: "Gemma 3 4B · Q4_K_M",
             quant: "Q4_K_M",
             hint: "Qualité — plus lent, ~2.5 Go RAM",
-            fileName: "gemma-3-4b.i1-Q4_K_M.gguf"
+            fileName: "gemma-3-4b.i1-Q4_K_M.gguf",
+            downloadURL: URL(string: "https://huggingface.co/mradermacher/gemma-3-4b-pt-i1-GGUF/resolve/main/gemma-3-4b-pt.i1-Q4_K_M.gguf"),
+            approxSizeMB: 2374
         ),
     ]
 
