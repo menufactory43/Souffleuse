@@ -147,9 +147,11 @@ if overlayMode {
             // Runs on the CGEventTap thread.
             guard suggestionActive else { return false }
             switch key {
-            case .tab:
+            case .tab, .acceptAll:
                 // Inject on a background thread so we don't block the tap. Returning
-                // true consumes the Tab so it doesn't reach the host app.
+                // true consumes the key so it doesn't reach the host app. The
+                // probe accepts the whole ghost for both keys (no partial-accept
+                // chunking here), so `.acceptAll` behaves like `.tab`.
                 DispatchQueue.global(qos: .userInitiated).async {
                     client.inject(ghostText)
                 }
