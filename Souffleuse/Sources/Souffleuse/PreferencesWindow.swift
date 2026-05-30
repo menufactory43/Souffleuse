@@ -268,6 +268,13 @@ private struct GeneralTab: View {
                 }
                 Text("La touche qui envoie la réplique dans la langue cible (fonction de traduction, en cours de construction).")
                     .font(.callout).foregroundStyle(.secondary)
+                Picker("Changer la langue cible avec", selection: $store.targetCycleKey) {
+                    ForEach(TargetCycleKey.allCases, id: \.self) { key in
+                        Text(key.label).tag(key)
+                    }
+                }
+                Text("Fait défiler la langue cible (EN → ES → DE → IT → Auto) pour la conversation en cours — mémorisée par conversation. Auto suit la langue de votre interlocuteur quand la capture d'écran est active.")
+                    .font(.callout).foregroundStyle(.secondary)
             } header: {
                 Text("Accepter le souffle").font(.headline)
             }

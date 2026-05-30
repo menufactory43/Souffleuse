@@ -1,4 +1,5 @@
 import Foundation
+import NaturalLanguage
 
 /// Langues cibles de la traduction HUD.
 ///
@@ -7,7 +8,7 @@ import Foundation
 /// (le 1B-it hallucine — « BNB smart contract » inventé) mais gardé dans l'enum,
 /// `isV1 == false`, pour que l'UI puisse le griser / le marquer « best-effort »
 /// sans type séparé.
-public enum TranslationTarget: String, Sendable, CaseIterable {
+public enum TranslationTarget: String, Sendable, CaseIterable, Codable {
     case en, de, es, it, ja
 
     /// Code affiché dans le chip du HUD (FR → DE).
@@ -34,6 +35,73 @@ public enum TranslationTarget: String, Sendable, CaseIterable {
     public static func from(languageCode raw: String) -> TranslationTarget? {
         let base = raw.lowercased().split(separator: "-").first.map(String.init) ?? raw.lowercased()
         return TranslationTarget(rawValue: base)
+    }
+
+    /// Détecte la langue dominante du **message du correspondant** et la mappe
+    /// vers une cible : la langue DÉTECTÉE est la cible (on traduit le FR vers la
+    /// langue de l'autre). Renvoie `nil` quand on ne doit PAS proposer de cible —
+    /// texte trop court/ambigu (mêmes seuils que `LlamaPromptBuilder.detectLanguage`
+    /// : ≥ 8 chars, confiance ≥ 0.5), français (pas de FR→FR), ou langue hors
+    /// périmètre V1. Pur, on-device (`NLLanguageRecognizer`), aucun réseau.
+    public static func detected(in text: String) -> TranslationTarget? {
+        let trimmed = String(text.suffix(512)).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 8 else { return nil }
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(trimmed)
+        guard let lang = recognizer.dominantLanguage else { return nil }
+        if let confidence = recognizer.languageHypotheses(withMaximum: 1)[lang], confidence < 0.5 {
+            return nil
+        }
+        guard let target = from(languageCode: lang.rawValue), target.isV1 else { return nil }
+        return target
+    }
+}
+
+/// Choix de cible pour UNE conversation : suivre la détection (`auto`) ou une
+/// cible FIXE posée à la main via la touche de cycle.
+///
+/// La capture d'écran étant **opt-in et désactivée par défaut**, l'`auto` est
+/// souvent aveugle (rien à lire) — le cycle manuel est donc le mécanisme de
+/// première classe, l'`auto` un bonus quand la capture est active (cf.
+/// `TRANSLATION-SPEC.md §2.7`, verdict adverse « la cible AUTO est best-effort »).
+public enum TargetSelection: Sendable, Equatable, Codable {
+    case auto
+    case fixed(TranslationTarget)
+
+    /// Ordre de défilement de la touche de cycle : les cibles V1 puis AUTO
+    /// (EN → ES → DE → IT → AUTO → EN…). JA exclu (hors V1).
+    public static let cycleOrder: [TranslationTarget] = [.en, .es, .de, .it]
+
+    /// Cible suivante dans le cycle. Depuis AUTO on entre sur la 1re cible ;
+    /// après la dernière cible fixe on revient à AUTO.
+    public func cycleNext() -> TargetSelection {
+        switch self {
+        case .auto:
+            return .fixed(Self.cycleOrder[0])
+        case .fixed(let t):
+            guard let i = Self.cycleOrder.firstIndex(of: t), i + 1 < Self.cycleOrder.count else {
+                return .auto
+            }
+            return .fixed(Self.cycleOrder[i + 1])
+        }
+    }
+
+    /// Résout la cible effective au moment du commit : une cible fixe l'emporte
+    /// toujours ; `auto` suit `detected` et retombe sur `fallback` (défaut EN)
+    /// quand rien n'a pu être détecté.
+    public func resolve(detected: TranslationTarget?, fallback: TranslationTarget = .en) -> TranslationTarget {
+        switch self {
+        case .fixed(let t): return t
+        case .auto: return detected ?? fallback
+        }
+    }
+
+    /// Libellé court pour le panneau (« AUTO », « EN », « ES »…).
+    public var shortLabel: String {
+        switch self {
+        case .auto: return "AUTO"
+        case .fixed(let t): return t.code
+        }
     }
 }
 
