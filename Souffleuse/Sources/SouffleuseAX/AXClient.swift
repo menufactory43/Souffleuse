@@ -86,80 +86,129 @@ public final class AXClient: @unchecked Sendable {
 
     private let queue = DispatchQueue(label: "cocotypist.ax.client", qos: .userInitiated)
     private let systemWide: AXUIElement
-    /// Bundles where we've already requested an "enhanced accessibility" mode.
-    /// Chromium/Electron apps (Signal, VSCode, Slack, Discord, …) keep their
-    /// accessibility tree dormant until an AT process sets one of these
-    /// attributes — VoiceOver does, we now do too. Once set, the activation
-    /// persists for the lifetime of the host app, so this set is "fire and
-    /// forget" per bundle until Souffleuse itself restarts.
-    /// Accessed only from `queue`, so no extra synchronisation is needed.
-    private var enhancedBundles: Set<String> = []
-    /// Live AX observers we hold per-bundle. Chromium-based apps only enable
-    /// their full accessibility tree once an AT process actually *observes*
-    /// a notification on the app (an attribute-set alone isn't enough — that
-    /// was empirically confirmed against Signal Desktop). The observer is a
-    /// no-op listener; we keep it strongly retained so Chromium keeps the
-    /// tree alive for the host app's lifetime.
-    private var observers: [String: AXObserver] = [:]
+    /// PIDs whose Chromium/Electron accessibility tree we have CONFIRMED live
+    /// (a focused-element read succeeded after we set the activation
+    /// attributes). Keyed by PID — NOT bundle id — so a quit+relaunch of the
+    /// same app (a fresh, dormant process) re-activates instead of being
+    /// skipped. Once confirmed we stop re-attempting. Accessed only from
+    /// `queue`, so no extra synchronisation is needed.
+    private var activationConfirmedPIDs: Set<pid_t> = []
+    /// Per-PID activation attempt counter. Chromium/Electron build their AX
+    /// tree ASYNCHRONOUSLY, so the first read after we set the attributes
+    /// routinely races the build and comes back empty; a single fire-once
+    /// attempt (the old bug) never sticks. We retry across snapshot ticks (the
+    /// 80 ms poll doubles as the delay the async build needs) until the tree is
+    /// confirmed live (see `markAccessibilityConfirmed`) or we exhaust
+    /// `maxActivationAttempts` — so a Cocoa app with no live AX tree never
+    /// re-writes the attributes at 12 Hz forever. Confirmation is INDEPENDENT
+    /// of this cap: once a focused read finally succeeds we confirm even past
+    /// the cap, since the attributes were already set on earlier attempts.
+    private var activationAttemptsByPID: [pid_t: Int] = [:]
+    /// Live no-op AX observers, keyed by PID. Strongly retained so Chromium
+    /// keeps the tree alive for the host process's lifetime. Created AT MOST
+    /// once per PID (guarded) so a retry never overwrites — and leaks the
+    /// run-loop source of — a prior observer (there is no CFRunLoopRemoveSource
+    /// in this class). The observer is NOT itself the activation trigger (a
+    /// long-standing misconception in this file): it only pumps extra run-loop
+    /// turns while the tree builds and keeps a live AT signature.
+    private var observersByPID: [pid_t: AXObserver] = [:]
+    /// Upper bound on activation attempts per PID (see `activationAttemptsByPID`).
+    static let maxActivationAttempts = 12
 
     public init() {
         self.systemWide = AXUIElementCreateSystemWide()
     }
 
-    /// Forces a Chromium/Electron host to expose its accessibility tree by
-    /// setting two well-known attributes that AT processes use. No-op (and
-    /// harmless) on Cocoa-native apps that already expose AX. Idempotent per
-    /// bundle for our run.
+    /// Forces a Chromium/Electron host (Signal Desktop, Slack, Discord, VS
+    /// Code, …) to expose its accessibility tree by setting the two well-known
+    /// activation attributes AT processes use. No-op (and harmless) on Cocoa-
+    /// native apps that already expose AX.
     ///
-    /// Without this, Signal Desktop / Slack / Discord and similar Electron
-    /// apps return `text=nil` for the focused element — there's literally
-    /// nothing in the AX tree for them. Setting `AXEnhancedUserInterface`
-    /// triggers the same activation path Chromium uses when it detects
-    /// VoiceOver is running.
+    /// Without this, Electron hosts return `text=nil` for the focused element
+    /// — their AX tree stays dormant until an AT trips it; then Chromium keeps
+    /// it live for the host PROCESS lifetime (which is why Souffleuse used to
+    /// only work in Signal *after* another AT — Cotypist/VoiceOver — had woken
+    /// it, and kept working even once that AT was killed). Two correctness
+    /// requirements drive the retry design here:
+    ///   1. The tree builds ASYNCHRONOUSLY — the first focused read after the
+    ///      attribute-set races the build and comes back empty, so a single
+    ///      fire-once attempt never sticks. We retry across snapshot ticks
+    ///      until `readSnapshot` confirms a live tree (`markAccessibilityConfirmed`).
+    ///   2. `AXManualAccessibility` is unsupported on Electron < 23.3.1 even
+    ///      though the host IS Electron; `AXEnhancedUserInterface` does the
+    ///      work there — so we set BOTH and never gate success on the set's
+    ///      return code.
     private func ensureAccessibilityActivated(for appEl: AXUIElement, bundleID: String) {
-        if enhancedBundles.contains(bundleID) { return }
-        enhancedBundles.insert(bundleID)
-        // Step 1: set the activation attributes. Most Cocoa apps return
-        // `.attributeUnsupported`; Chromium accepts AXManualAccessibility.
-        let r1 = AXUIElementSetAttributeValue(appEl, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
-        let r2 = AXUIElementSetAttributeValue(appEl, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-        // Step 2: register a no-op AXObserver. Chromium-based hosts (Signal
-        // Desktop confirmed) only spin up the full accessibility tree once
-        // they detect an AT process is actively *observing* notifications,
-        // not merely setting attributes. The callback never fires for us
-        // (we don't care) — registration is the signal.
         var pid: pid_t = 0
         AXUIElementGetPid(appEl, &pid)
-        let observerStatus: AXError = {
+        guard pid != 0 else { return }
+        if activationConfirmedPIDs.contains(pid) { return }
+        let attempts = activationAttemptsByPID[pid, default: 0]
+        guard attempts < Self.maxActivationAttempts else { return }
+        activationAttemptsByPID[pid] = attempts + 1
+
+        // Step 1: set BOTH activation attributes on the per-application element.
+        // Cocoa apps return `.attributeUnsupported` (harmless); Electron honors
+        // at least one. Return codes are NOT a success signal (see doc above).
+        let r1 = AXUIElementSetAttributeValue(appEl, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        let r2 = AXUIElementSetAttributeValue(appEl, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+
+        // Step 2: trip the modern (Feb-2021 Chromium) read-trigger — reading an
+        // attribute off a Chrome accessibility element enables basic a11y. The
+        // value is unused; the read itself is the point.
+        _ = copyAttr(appEl, kAXRoleAttribute)
+
+        // Step 3: register a no-op AXObserver ONCE per PID. It is NOT the
+        // activation trigger — it only pumps extra run-loop turns while the
+        // tree builds and keeps a live AT signature. Guarded on
+        // `observersByPID[pid] == nil` so a retry never overwrites and leaks a
+        // prior observer's run-loop source.
+        var observerStatus: AXError = .success
+        if observersByPID[pid] == nil {
             var observer: AXObserver?
-            let callback: AXObserverCallback = { _, _, _, _ in
-                // No-op. Registration alone is what triggers Chromium's
-                // accessibility activation; we don't process notifications.
-            }
+            let callback: AXObserverCallback = { _, _, _, _ in }
             let create = AXObserverCreate(pid, callback, &observer)
-            guard create == .success, let observer else { return create }
-            let add = AXObserverAddNotification(
-                observer, appEl,
-                kAXFocusedUIElementChangedNotification as CFString,
-                nil
-            )
-            guard add == .success else { return add }
-            CFRunLoopAddSource(
-                CFRunLoopGetMain(),
-                AXObserverGetRunLoopSource(observer),
-                .defaultMode
-            )
-            self.observers[bundleID] = observer  // strong retain
-            return .success
-        }()
+            if create == .success, let observer {
+                let add = AXObserverAddNotification(
+                    observer, appEl,
+                    kAXFocusedUIElementChangedNotification as CFString,
+                    nil
+                )
+                if add == .success {
+                    CFRunLoopAddSource(
+                        CFRunLoopGetMain(),
+                        AXObserverGetRunLoopSource(observer),
+                        .defaultMode
+                    )
+                    observersByPID[pid] = observer  // strong retain
+                } else {
+                    observerStatus = add
+                }
+            } else {
+                observerStatus = create
+            }
+        }
+
         if ProcessInfo.processInfo.environment["SOUFFLEUSE_PREDICT_LOG"]?.isEmpty == false {
-            let line = "[\(ISO8601DateFormatter().string(from: Date()))] ax_activate bundle=\(bundleID) enhanced=\(axErrorName(r1)) manual=\(axErrorName(r2)) observer=\(axErrorName(observerStatus))\n"
+            let line = "[\(ISO8601DateFormatter().string(from: Date()))] ax_activate bundle=\(bundleID) pid=\(pid) attempt=\(attempts + 1) enhanced=\(axErrorName(r1)) manual=\(axErrorName(r2)) observer=\(axErrorName(observerStatus))\n"
             if let data = line.data(using: .utf8) {
                 let path = "/tmp/souffleuse-tick.log"
                 if let h = FileHandle(forWritingAtPath: path) {
                     h.seekToEndOfFile(); try? h.write(contentsOf: data); try? h.close()
                 } else { FileManager.default.createFile(atPath: path, contents: data) }
             }
+        }
+    }
+
+    /// Mark `pid`'s accessibility tree CONFIRMED live so we stop re-attempting
+    /// activation. Called by `readSnapshot` whenever a focused-element read
+    /// succeeds. We confirm on ANY focused element, NOT only a text field: an
+    /// awake Chromium host can have a non-text control focused, and gating on a
+    /// focused TEXT element would spin activation forever on such hosts.
+    private func markAccessibilityConfirmed(pid: pid_t) {
+        guard pid != 0 else { return }
+        if activationConfirmedPIDs.insert(pid).inserted {
+            activationAttemptsByPID[pid] = nil  // reclaim the counter slot
         }
     }
 
@@ -403,8 +452,10 @@ public final class AXClient: @unchecked Sendable {
         }
 
         // Chromium/Electron unlock: wake the AX tree on first sight of this
-        // bundle. Cheap no-op on Cocoa-native apps. Done BEFORE the focused-
-        // element query so Signal et al. have a chance to populate.
+        // app. Cheap no-op on Cocoa-native apps. Done BEFORE the focused-
+        // element query so Signal et al. have a chance to populate. Retried
+        // across ticks (the tree builds async) until the focused read below
+        // confirms it is live.
         if let bid = bundleID {
             ensureAccessibilityActivated(for: appEl, bundleID: bid)
         }
@@ -412,6 +463,11 @@ public final class AXClient: @unchecked Sendable {
         guard let focused = copyAttr(appEl, kAXFocusedUIElementAttribute) else {
             return AXSnapshot(bundleID: bundleID, role: nil, subrole: nil, text: nil, caretIndex: nil, caretRect: nil, caretFont: nil)
         }
+        // A focused element is readable ⇒ the (Chromium/Electron) AX tree is
+        // live ⇒ stop re-attempting activation for this process.
+        var appPID: pid_t = 0
+        AXUIElementGetPid(appEl, &appPID)
+        markAccessibilityConfirmed(pid: appPID)
         let element = focused as! AXUIElement
 
         let role = copyStringAttr(element, kAXRoleAttribute)
