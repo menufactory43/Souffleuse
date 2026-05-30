@@ -280,5 +280,38 @@ extension SuggestionPolicy {
         /// traduction, avant l'auto-masquage en fondu — assez longue pour lire et
         /// pour saisir/déplacer le panneau. Le survol souris suspend ce compte.
         public static let translationHUDVisibleSeconds: Double = 6
+
+        // MARK: - Carnet d'usage (frappes épargnées / temps gagné)
+
+        /// Cadence de frappe par défaut (ms/caractère) tant qu'on n'a pas assez
+        /// d'échantillons pour calibrer sur l'utilisateur. ~180 ms/char ≈ 5,5 char/s
+        /// ≈ 65 mots/min — un dactylo moyen. Volontairement conservateur.
+        public static let ledgerDefaultMillisPerChar: Double = 180
+
+        /// Nombre de caractères frappés à accumuler avant d'utiliser la cadence
+        /// MESURÉE plutôt que le défaut — en-dessous l'estimation serait trop
+        /// bruitée par la quantification du poll.
+        public static let ledgerCadenceMinSampleChars: Int = 200
+
+        /// Coût (s) d'ACCEPTER un ghost (lire + presser Tab), soustrait du temps
+        /// gagné pour ne pas sur-vendre. Conservateur = crédible.
+        public static let ledgerAcceptOverheadSeconds: Double = 0.4
+
+        /// Au-delà de ce delta de caractères entre deux polls, on n'échantillonne
+        /// PAS la cadence : c'est un collage ou une injection d'accept, pas de la
+        /// frappe humaine (qui fait 1-4 char par tick de 80 ms).
+        public static let ledgerCadenceMaxCharsPerSample: Int = 6
+
+        /// Écart max (s) entre deux croissances de texte encore comptées comme de
+        /// la frappe continue. Au-delà = pause / réflexion, on ne mesure pas.
+        public static let ledgerCadenceMaxGapSeconds: Double = 2.0
+
+        /// Nombre de jours d'historique conservés dans le carnet (sparkline).
+        public static let ledgerHistoryDays: Int = 30
+
+        /// Intervalle min (s) entre deux écritures disque du carnet, pour ne pas
+        /// marteler le disque à chaque frappe mesurée. Les accepts/actes forcent
+        /// une écriture immédiate (rares).
+        public static let ledgerSaveThrottleSeconds: Double = 5
     }
 }
