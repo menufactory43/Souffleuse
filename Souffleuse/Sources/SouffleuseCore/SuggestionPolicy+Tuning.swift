@@ -237,5 +237,37 @@ extension SuggestionPolicy {
         /// Nombre maximum de tokens manquants listés dans le badge HUD ; au-delà,
         /// on agrège en « +N ».
         public static let termSurvivalMaxBadgeItems: Int = 4
+
+        // MARK: - Traduction : contexte, ordonnancement GPU, longueur de sortie
+        //
+        // TRANSLATION-SPEC §2.9. Single source of truth (les littéraux de
+        // longueur/fenêtre de traduction vivent ICI, pas aux points d'appel).
+
+        /// Fenêtre de contexte du moteur instruct (traduction). 2048 (vs 1024)
+        /// laisse de quoi conserver INTÉGRALEMENT la consigne + un long message +
+        /// sa traduction sans head-truncation (qui amputerait la consigne de
+        /// fidélité, en tête de prompt). Coût mémoire KV modeste sur un 1B.
+        public static let translationContextTokens: UInt32 = 2048
+
+        /// Attente maximale (ms) que le ghost FR se taise avant de DÉMARRER une
+        /// traduction. Bornée : au-delà on lance quand même (la traduction ne doit
+        /// jamais être bloquée indéfiniment).
+        public static let translationGhostWaitMaxMillis: Int = 400
+        /// Pas de sondage de l'attente ci-dessus.
+        public static let translationGhostWaitPollMillis: Int = 30
+
+        /// Plancher / plafond du nombre de tokens générés pour une traduction.
+        public static let translationMaxNewTokensFloor: Int = 160
+        public static let translationMaxNewTokensCap: Int = 768
+
+        /// Nombre de tokens de sortie ADAPTÉ à la longueur de la source : une
+        /// traduction fait ~la longueur du message, donc plafonner à une constante
+        /// trop basse tronque les longs messages (= traduction imparfaite). On
+        /// estime ~0,4 token par caractère source + une marge, clampé. Pur,
+        /// testable.
+        public static func translationMaxNewTokens(sourceChars: Int) -> Int {
+            let estimated = sourceChars * 2 / 5 + 48
+            return min(translationMaxNewTokensCap, max(translationMaxNewTokensFloor, estimated))
+        }
     }
 }

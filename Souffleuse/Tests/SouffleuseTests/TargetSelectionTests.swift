@@ -84,3 +84,30 @@ struct TargetSelectionTests {
         #expect(TargetSelection.fixed(.de).shortLabel == "DE")
     }
 }
+
+/// Couvre le budget de tokens adaptatif de la traduction (TRANSLATION-SPEC §2.9,
+/// anti-troncature) : proportionnel à la source, mais clampé plancher/plafond.
+@Suite("Traduction — budget de tokens adaptatif")
+struct TranslationMaxTokensTests {
+    typealias T = SuggestionPolicy.Tuning
+
+    @Test("un message court prend le plancher (pas en-dessous)")
+    func shortMessageHitsFloor() {
+        #expect(T.translationMaxNewTokens(sourceChars: 10) == T.translationMaxNewTokensFloor)
+        #expect(T.translationMaxNewTokens(sourceChars: 0) == T.translationMaxNewTokensFloor)
+    }
+
+    @Test("un message long est plafonné (jamais au-delà du cap)")
+    func longMessageHitsCap() {
+        #expect(T.translationMaxNewTokens(sourceChars: 100_000) == T.translationMaxNewTokensCap)
+    }
+
+    @Test("un message moyen grandit avec la source (entre plancher et plafond)")
+    func mediumScalesWithSource() {
+        let small = T.translationMaxNewTokens(sourceChars: 600)
+        let big = T.translationMaxNewTokens(sourceChars: 1200)
+        #expect(small > T.translationMaxNewTokensFloor)
+        #expect(small < T.translationMaxNewTokensCap)
+        #expect(big > small)   // monotone croissant
+    }
+}

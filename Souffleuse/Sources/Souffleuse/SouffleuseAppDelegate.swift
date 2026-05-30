@@ -1570,11 +1570,13 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         hudFlashToken &+= 1
         let anchor = fieldRect ?? .zero
         translationHUD.show(at: anchor, header: "FR → \(target.code) · traduction…", body: "…")
-        Task { @MainActor [weak self] in
+        // Priorité basse : la traduction « a le droit de traîner », elle ne doit
+        // pas voler un thread/priorité au ghost FR (§2.9).
+        Task(priority: .utility) { @MainActor [weak self] in
             guard let self else { return }
             final class Acc: @unchecked Sendable { var s = "" }
             let acc = Acc()
-            let metrics = await self.translationRuntime.translate(text, into: target, maxTokens: 220) { piece in
+            let metrics = await self.translationRuntime.translate(text, into: target) { piece in
                 acc.s += piece
                 let partial = GemmaChatPrompt.cleanCompletion(acc.s)
                 Task { @MainActor in self.translationHUD.update(partial) }

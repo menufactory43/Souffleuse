@@ -461,8 +461,11 @@ public actor LlamaEngine {
     ///
     /// Returns true on success. On failure logs `llama_load_failed` and leaves
     /// the engine in an unloaded state.
+    /// `threads` (nil = défaut `cores - 1`) permet au moteur SECONDAIRE (la
+    /// traduction) de réduire son parallélisme (ex. `cores / 2`) pour ne pas
+    /// sur-souscrire le CPU face au ghost FR (TRANSLATION-SPEC §2.9).
     @discardableResult
-    public func load(modelPath path: String, contextTokens: UInt32 = 4096) -> Bool {
+    public func load(modelPath path: String, contextTokens: UInt32 = 4096, threads: Int32? = nil) -> Bool {
         if loadedPath == path, handles != nil { return true }
         _ = LlamaEngine.backendOnce
         unload()
@@ -488,8 +491,9 @@ public actor LlamaEngine {
         ctxParams.n_ctx = contextTokens
         ctxParams.n_batch = contextTokens
         let cores = ProcessInfo.processInfo.activeProcessorCount
-        ctxParams.n_threads = Int32(max(1, cores - 1))
-        ctxParams.n_threads_batch = Int32(max(1, cores - 1))
+        let nThreads = threads ?? Int32(max(1, cores - 1))
+        ctxParams.n_threads = max(1, nThreads)
+        ctxParams.n_threads_batch = max(1, nThreads)
 
         guard let context = llama_init_from_model(model, ctxParams) else {
             llama_model_free(model)

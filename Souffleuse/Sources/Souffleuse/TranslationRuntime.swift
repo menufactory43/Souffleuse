@@ -40,7 +40,16 @@ final class TranslationRuntime {
     @discardableResult
     func ensureLoaded() async -> Bool {
         if ready { return true }
-        let ok = await engine.load(modelPath: Self.resolveInstructPath(), contextTokens: 1024)
+        // Moteur SECONDAIRE : moins de threads que le ghost pour ne pas
+        // sur-souscrire le CPU (§2.9), et un contexte large pour ne jamais
+        // tronquer la consigne + un long message (§2.9, traduction fidèle).
+        let cores = ProcessInfo.processInfo.activeProcessorCount
+        let reducedThreads = Int32(max(1, cores / 2))
+        let ok = await engine.load(
+            modelPath: Self.resolveInstructPath(),
+            contextTokens: SuggestionPolicy.Tuning.translationContextTokens,
+            threads: reducedThreads
+        )
         ready = ok
         if !ok { Log.error(.predictor, "translate_model_load_failed") }
         return ok
@@ -53,19 +62,28 @@ final class TranslationRuntime {
     /// `onToken` est `@Sendable` (il franchit la frontière de l'acteur moteur) ;
     /// l'appelant fait lui-même le hop MainActor pour mettre à jour le HUD.
     /// Retourne `true` pour continuer la génération, `false` pour l'arrêter.
+    /// `maxTokens == nil` → adapté à la longueur de la source (anti-troncature) ;
+    /// passer une valeur ne sert qu'aux bench/tests.
     @discardableResult
     func translate(
         _ frenchText: String,
         into target: TranslationTarget,
         examples: [String] = [],
-        maxTokens: Int = 160,
+        maxTokens: Int? = nil,
         onToken: @escaping @Sendable (String) -> Bool
     ) async -> LlamaMetrics? {
         guard await ensureLoaded() else { return nil }
         let prompt = GemmaChatPrompt.translation(of: frenchText, into: target, examples: examples)
+        let budget = maxTokens ?? SuggestionPolicy.Tuning.translationMaxNewTokens(sourceChars: frenchText.count)
+        // Priorité au ghost FR : on attend (borné) qu'il se taise avant de lancer
+        // le décode lourd de la traduction, pour qu'il reste *instantané* (§2.9).
+        await GpuGate.shared.awaitGhostIdle(
+            maxWaitMillis: SuggestionPolicy.Tuning.translationGhostWaitMaxMillis,
+            pollMillis: SuggestionPolicy.Tuning.translationGhostWaitPollMillis
+        )
         return await engine.generate(
             prompt: prompt,
-            maxTokens: maxTokens,
+            maxTokens: budget,
             sampling: LlamaSampling(temperature: 0, repeatPenalty: 1.1, repeatLastN: 64),
             onToken: onToken
         )
