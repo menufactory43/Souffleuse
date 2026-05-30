@@ -14,10 +14,43 @@ import os
 ///
 /// The tap is created up-front but kept disabled until `setActive(true)`.
 /// Disabling when no suggestion shows means normal typing never touches the tap.
+/// User-selectable key that accepts the WHOLE ghost at once (vs Tab = the
+/// word-by-word partial accept). Maps each preset to a hardware keycode + the
+/// relevant modifier flags. `.disabled` turns the feature off.
+public enum AcceptAllKey: String, CaseIterable, Sendable {
+    case disabled, rightArrow, cmdRight, returnKey, shiftTab
+
+    public var keyCode: Int64? {
+        switch self {
+        case .disabled: return nil
+        case .rightArrow, .cmdRight: return 124   // →
+        case .returnKey: return 36                // ↩
+        case .shiftTab: return 48                 // ⇥ (+ shift)
+        }
+    }
+    public var requiredFlagsRaw: UInt64 {
+        switch self {
+        case .cmdRight: return CGEventFlags.maskCommand.rawValue
+        case .shiftTab: return CGEventFlags.maskShift.rawValue
+        default: return 0
+        }
+    }
+    public var label: String {
+        switch self {
+        case .disabled: return "Désactivé"
+        case .rightArrow: return "→ Flèche droite"
+        case .cmdRight: return "⌘→ Cmd + Flèche droite"
+        case .returnKey: return "↩ Entrée"
+        case .shiftTab: return "⇧⇥ Maj + Tab"
+        }
+    }
+}
+
 public final class KeyInterceptor: @unchecked Sendable {
     public enum Key: Sendable {
         case tab
         case esc
+        case acceptAll
     }
 
     /// Called on the tap thread when a Tab/Esc keyDown arrives while active.
@@ -34,6 +67,10 @@ public final class KeyInterceptor: @unchecked Sendable {
     /// `active` is written from the main thread (`setActive`) and read on the
     /// tap thread (`handle`), so it is guarded by a lock.
     private let lock = OSAllocatedUnfairLock(initialState: false)
+    /// Configurable "accept all" binding (keyCode + relevant modifier flags as a
+    /// raw mask), nil when disabled. Written from the main thread
+    /// (`setAcceptAllKey`), read on the tap thread (`handle`); its own lock.
+    private let acceptBinding = OSAllocatedUnfairLock<(code: Int64, flagsRaw: UInt64)?>(initialState: nil)
 
     public init(handler: @escaping Handler) {
         self.handler = handler
@@ -90,6 +127,13 @@ public final class KeyInterceptor: @unchecked Sendable {
         CGEvent.tapEnable(tap: tap, enable: active)
     }
 
+    /// Update the user-selected "accept all" key. Safe to call from main.
+    public func setAcceptAllKey(_ k: AcceptAllKey) {
+        acceptBinding.withLock { state in
+            state = k.keyCode.map { (code: $0, flagsRaw: k.requiredFlagsRaw) }
+        }
+    }
+
     private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             // macOS disabled the tap (we took too long, or user input quirk).
@@ -103,11 +147,23 @@ public final class KeyInterceptor: @unchecked Sendable {
             return Unmanaged.passUnretained(event)
         }
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+        // Only these modifier bits matter for binding comparison (ignore caps
+        // lock, fn, numeric-pad, etc.).
+        let relevant: UInt64 = CGEventFlags.maskCommand.rawValue | CGEventFlags.maskShift.rawValue
+            | CGEventFlags.maskAlternate.rawValue | CGEventFlags.maskControl.rawValue
+        let mods = event.flags.rawValue & relevant
         let key: Key
-        switch keyCode {
-        case 48: key = .tab
-        case 53: key = .esc
-        default: return Unmanaged.passUnretained(event)
+        // The configurable accept-all binding is checked FIRST (it may overlap a
+        // modified Tab, e.g. ⇧⇥). Plain Tab/Esc then require NO modifiers so a
+        // bound ⇧⇥ is never also treated as a word-by-word Tab.
+        if let b = acceptBinding.withLock({ $0 }), keyCode == b.code, mods == (b.flagsRaw & relevant) {
+            key = .acceptAll
+        } else {
+            switch keyCode {
+            case 48 where mods == 0: key = .tab
+            case 53 where mods == 0: key = .esc
+            default: return Unmanaged.passUnretained(event)
+            }
         }
         if handler(key) {
             return nil

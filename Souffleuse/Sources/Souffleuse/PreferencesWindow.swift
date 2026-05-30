@@ -1,6 +1,7 @@
 import AppKit
 import SouffleuseAX
 import SouffleuseContext
+import SouffleuseInput
 import SouffleusePersonalization
 import SwiftUI
 
@@ -252,6 +253,13 @@ private struct GeneralTab: View {
                 Toggle("Ajouter un espace après le mot accepté", isOn: $store.trailingSpaceOnPartial)
                     .disabled(!store.partialAcceptEnabled)
                 Text("Place le curseur prêt à enchaîner. Désactive si tu préfères contrôler l'espace toi-même.")
+                    .font(.callout).foregroundStyle(.secondary)
+                Picker("Tout accepter avec", selection: $store.acceptAllKey) {
+                    ForEach(AcceptAllKey.allCases, id: \.self) { key in
+                        Text(key.label).tag(key)
+                    }
+                }
+                Text("Une touche qui insère TOUTE la suggestion d'un coup (au lieu du mot-à-mot). Interceptée uniquement quand un ghost s'affiche — elle ne gêne donc pas la frappe normale.")
                     .font(.callout).foregroundStyle(.secondary)
             } header: {
                 Text("Acceptation").font(.headline)
