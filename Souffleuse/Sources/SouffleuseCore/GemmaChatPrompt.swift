@@ -138,6 +138,26 @@ public enum InstructModel: String, Sendable, CaseIterable, Codable {
         case .qwen1_5b: return "Qwen2.5 1.5B — multilingue (DE/IT/JA)"
         }
     }
+
+    /// URL HF (resolve) du GGUF, pour le téléchargement in-app si absent. Réseau
+    /// autorisé UNIQUEMENT pour ce premier téléchargement (cf. contraintes : pas
+    /// de réseau au runtime sauf récupération du modèle).
+    public var downloadURL: URL {
+        switch self {
+        case .gemma1b:
+            return URL(string: "https://huggingface.co/ggml-org/gemma-3-1b-it-GGUF/resolve/main/gemma-3-1b-it-Q4_K_M.gguf")!
+        case .qwen1_5b:
+            return URL(string: "https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf")!
+        }
+    }
+
+    /// Taille approximative (Mo) du GGUF, pour l'affichage du bouton de téléchargement.
+    public var approxSizeMB: Int {
+        switch self {
+        case .gemma1b: return 769
+        case .qwen1_5b: return 940
+        }
+    }
 }
 
 public enum GemmaChatPrompt {
