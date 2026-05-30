@@ -154,7 +154,14 @@ public enum OutputFilter {
         // below bound the length to one natural clause/sentence.
         let words = s.split(whereSeparator: { $0.isWhitespace })
         if words.count > max {
+            // `split` drops the leading empty subsequence, so re-joining the
+            // capped words loses a single LEADING space — the next-word
+            // separator after a complete word ("…les balances" → " négatives …").
+            // Restore it, guarded so it never double-spaces and stays inert
+            // mid-word / after a space (caretAfterSpace already stripped it).
+            let hadLeadingSpace = s.first == " "
             s = words.prefix(max).joined(separator: " ")
+            if hadLeadingSpace, s.first != " ", !s.isEmpty { s = " " + s }
         }
         return s
     }

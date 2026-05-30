@@ -415,4 +415,24 @@ struct SuggestionPolicyTests {
         #expect(SuggestionPolicy.corpusContinuationIsLowQuality("voici la suite transmettr.") == false)
         #expect(SuggestionPolicy.corpusContinuationIsLowQuality("") == false)
     }
+
+    // MARK: - capToWords (corpus recall word-cap leading-space)
+
+    @Test func capToWordsPreservesLeadingSpaceWhenWordCapped() {
+        // The corpus-recall word-cap branch must keep the single leading
+        // separator space of a next-word continuation after a complete word.
+        // " négatives dans votre compte bancaire" capped to 3 → " négatives
+        // dans votre" (NOT "négatives dans votre", which renders/inserts glued
+        // onto the user's "balances"). Regression for the split()/joined()
+        // leading-space loss.
+        #expect(SuggestionPolicy.capToWords(" négatives dans votre compte bancaire", max: 3)
+            == " négatives dans votre")
+    }
+
+    @Test func capToWordsWordCapNoLeadingSpaceUnchanged() {
+        // No leading space (mid-word same-word continuation) → restore is a
+        // no-op: no spurious leading space, no double space.
+        #expect(SuggestionPolicy.capToWords("négatives dans votre compte bancaire", max: 3)
+            == "négatives dans votre")
+    }
 }

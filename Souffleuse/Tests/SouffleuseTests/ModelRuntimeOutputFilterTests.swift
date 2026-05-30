@@ -183,6 +183,24 @@ struct ModelRuntimeOutputFilterTests {
         #expect(r == " de port.")
     }
 
+    @Test func capToWordsPreservesLeadingSpaceWhenWordCapped() {
+        // Word-cap branch (no terminator): re-joining the capped words must NOT
+        // drop the single leading separator space of a next-word continuation
+        // after a complete word. " négatives dans votre compte bancaire" capped
+        // to 3 → " négatives dans votre" (NOT "négatives dans votre", which
+        // would render/insert glued: "balancesnégatives"). Regression for the
+        // split()/joined() leading-space loss.
+        let r = Filter.capToWords(" négatives dans votre compte bancaire", max: 3)
+        #expect(r == " négatives dans votre")
+    }
+
+    @Test func capToWordsWordCapNoLeadingSpaceUnchanged() {
+        // No leading space (mid-word same-word continuation) → the restore is a
+        // no-op: no spurious leading space, no double space.
+        let r = Filter.capToWords("négatives dans votre compte bancaire", max: 3)
+        #expect(r == "négatives dans votre")
+    }
+
     @Test func capToWordsShortStringIgnoresTerminator() {
         // length <= 3 → la branche terminator est skipée.
         // "a. b" length=4 > 3 → terminator-branch s'applique : coupe après "a."
