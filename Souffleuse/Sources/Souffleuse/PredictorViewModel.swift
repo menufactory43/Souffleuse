@@ -650,15 +650,16 @@ final class PredictorViewModel {
             var examplesBlock = ""
             if personalizationStrength > 0 && SuggestionPolicy.Tuning.examplesInjectionEnabled {
                 let prose = proseExamplesPool
-                var examples = SimilarHistoryRetrieval.rank(
+                // Only inject genuinely-similar examples (ranked by Jaccard over
+                // the current userTail). We deliberately do NOT backfill with
+                // arbitrary prose when fewer than defaultK match: padding the
+                // prompt with unrelated past lines hurt relevance and could leak
+                // a specific, unrelated sentence the user typed into the model's
+                // context. Nothing similar ⇒ inject nothing.
+                // TO REVERT: re-add the `if examples.count < defaultK { … }` backfill loop.
+                let examples = SimilarHistoryRetrieval.rank(
                     entries: prose, userTail: userTail, limit: SimilarHistoryRetrieval.defaultK
                 )
-                if examples.count < SimilarHistoryRetrieval.defaultK {
-                    for e in prose where !examples.contains(e) {
-                        examples.append(e)
-                        if examples.count >= SimilarHistoryRetrieval.defaultK { break }
-                    }
-                }
                 examplesBlock = SimilarHistoryRetrieval.buildExamplesBlock(from: examples)
                 if !examples.isEmpty {
                     Log.info(.predictor, "ghost_examples_injected", count: examples.count)

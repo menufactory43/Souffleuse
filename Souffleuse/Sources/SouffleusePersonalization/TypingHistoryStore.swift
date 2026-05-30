@@ -23,10 +23,16 @@ import CSQLCipher
 /// existing callers and tests keep working. `fileLocation` now points at the
 /// `.db` file.
 public actor TypingHistoryStore {
-    /// Hard cap on stored entries. Raised from the legacy 200 to 50k now that
-    /// the corpus lives in a queryable, indexed database. Oldest rows are
-    /// purged once this is exceeded (FIFO by `ts`/`id`).
-    public static let maxEntries: Int = 50_000
+    /// Hard cap on stored entries (FIFO by `ts`/`id` — oldest purged first).
+    /// Lowered from 50k to 2k: the few-shot retrieval only ever scans the most
+    /// recent ~200 entries, and the n-gram is rebuilt from the whole corpus at
+    /// startup, so 50k was mostly stale hoarding that bloated the DB and slowed
+    /// startup without improving suggestions. At 2k, FIFO eviction is actually
+    /// active — stale one-offs age out while frequently re-typed phrases survive
+    /// (each re-type refreshes recency via the dedup in `append`), keeping the
+    /// corpus recent, diverse and representative. That is the "keep only the
+    /// best" retention. TO REVERT: restore 50_000 and drop the dedup in append().
+    public static let maxEntries: Int = 2_000
 
     public static func defaultFileURL() -> URL {
         let fm = FileManager.default
@@ -323,6 +329,15 @@ public actor TypingHistoryStore {
             Log.info(.context, "history_skipped_truncated_fragment")
             return
         }
+        // Dedup: collapse exact repeats of the same accepted text (same source)
+        // so typing a phrase N times doesn't consume N slots and skew the recent
+        // window toward one string. Deleting the old row before inserting also
+        // REFRESHES recency — a frequently re-typed phrase keeps moving to the
+        // front and never ages out of the FIFO. Keeps the bounded corpus diverse
+        // ("only the best"). Trade-off: the startup n-gram now sees each phrase
+        // once rather than N times; recency-survival compensates.
+        // TO REVERT: delete this deleteDuplicate(of:) call.
+        deleteDuplicate(of: entry)
         insert(entry)
         purgeIfNeeded()
     }
@@ -429,6 +444,21 @@ public actor TypingHistoryStore {
         if sqlite3_step(stmt) != SQLITE_DONE {
             Log.warn(.context, "history_insert_failed")
         }
+    }
+
+    /// Removes any existing row whose `accepted` + `source` exactly matches
+    /// `entry` (recency-refresh dedup — see `append`). Exact match only: case /
+    /// whitespace variants are kept on purpose (they are genuinely different
+    /// renderings the user produced). At the 2k cap this full scan is sub-ms.
+    private func deleteDuplicate(of entry: TypingHistoryEntry) {
+        guard let db else { return }
+        let sql = "DELETE FROM entries WHERE accepted = ? AND source = ?;"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, entry.accepted)
+        bindText(stmt, 2, entry.source.rawValue)
+        _ = sqlite3_step(stmt)
     }
 
     /// Test seam: insert an entry directly (bypassing all record-time gates).
