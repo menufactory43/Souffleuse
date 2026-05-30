@@ -31,3 +31,6 @@ build/
 # Local secrets
 .env
 .env.local
+
+# Claude Code local state (worktrees, settings, multi-GB cache) — never commit
+.claude/

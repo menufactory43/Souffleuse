@@ -362,6 +362,20 @@
     border-color: var(--rouge);
   }
   .souffleur__tab:hover { color: var(--ink); }
+  /* L'onglet « À vous » : un point bordeaux qui dit « ici, c'est interactif ». */
+  .souffleur__tab--live::before {
+    content: "";
+    display: inline-block;
+    width: 5px; height: 5px;
+    margin-right: 0.34em;
+    border-radius: 50%;
+    background: var(--rouge);
+    vertical-align: middle;
+    opacity: 0.55;
+    transition: opacity .2s, transform .2s;
+  }
+  .souffleur__tab--live[aria-selected="true"]::before { opacity: 1; }
+  .souffleur__view[hidden] { display: none; }
 
   .souffleur__stage {
     padding: 1.7rem 1.6rem 1.5rem;
@@ -427,6 +441,26 @@
     50%      { opacity: 0.78; }
   }
 
+  /* La réplique prise : elle quitte l'encre pâle, perd l'italique et se range
+     dans le tapé — exactement le geste de Tab dans l'app. */
+  .souffle__word.is-took {
+    opacity: 1;
+    filter: blur(0);
+    transform: none;
+    color: var(--ink);
+    font-style: normal;
+    transition: color 0.24s ease, transform 0.24s ease, filter 0.24s ease, opacity 0.24s ease;
+  }
+  /* Bref éclat sur le texte au moment où la réplique vient d'être prise. */
+  @keyframes prise-eclat {
+    0%   { background: rgba(168, 154, 130, 0.30); }
+    100% { background: transparent; }
+  }
+  .typed.just-took { animation: prise-eclat 0.6s ease forwards; border-radius: 2px; }
+  /* On peut prendre la réplique d'un clic, aussi. */
+  .souffle { cursor: default; }
+  .souffleur.is-armed .souffle { cursor: pointer; }
+
   /* Le curseur posé entre le tapé et le soufflé : il respire, lui aussi. */
   .caret {
     display: inline-block;
@@ -464,7 +498,63 @@
     box-shadow: 1px 1px 0 rgba(26,22,19,0.25);
     color: var(--ink);
   }
-  .souffleur__hint span { display: inline-flex; align-items: center; gap: 0.45rem; }
+  .souffleur__hint span,
+  .souffleur__hint .hint-key { display: inline-flex; align-items: center; gap: 0.45rem; }
+  /* Les indices Tab / Esc sont de vrais boutons : cliquables, et qui s'allument
+     quand la réplique est réellement prenable (démo survolée ou au focus). */
+  .hint-key {
+    appearance: none;
+    border: 0;
+    margin: 0;
+    padding: 0;
+    background: none;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+    transition: opacity .2s;
+  }
+  .hint-key:disabled { cursor: default; opacity: 0.45; }
+  .hint-key kbd { transition: border-color .2s, color .2s, box-shadow .2s; }
+  .souffleur.is-armed #demo-accept:not(:disabled) kbd {
+    border-color: var(--rouge);
+    color: var(--rouge);
+    box-shadow: 1px 1px 0 rgba(127, 29, 29, 0.30);
+  }
+  .hint-key:not(:disabled):hover kbd,
+  .hint-key:focus-visible kbd { border-color: var(--rouge); color: var(--rouge); }
+  .hint-count { margin-left: 0.1em; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+
+  /* ===== Vue interactive « À vous » ===== */
+  /* Texte tapé et réplique soufflée vivent sur la MÊME ligne (mêmes spans que la
+     vue scénarisée) : la réplique coule juste après le texte, aucun calcul de
+     position, alignement parfait. Le texte tapé est un span editable. */
+  .tryinput {
+    outline: none;
+    caret-color: var(--rouge);
+    white-space: pre-wrap;
+    /* pas de saut de ligne : la démo tient sur une réplique */
+  }
+  .tryinput:empty::before {
+    content: attr(data-placeholder);
+    color: var(--ink-faint);
+    font-style: italic;
+    pointer-events: none;
+  }
+  .tryghost {
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .18s ease, color .2s ease;
+  }
+  .tryghost.is-shown { opacity: 1; cursor: pointer; pointer-events: auto; }
+  /* La branche easter-egg : l'encre vire à l'or. */
+  .tryghost.is-egg { color: #c8861d; }
+  #demo-tryline.is-egg .tryinput { color: #a96f12; transition: color .3s ease; }
+  @keyframes egg-pop {
+    0%   { transform: translateY(0)   scale(1);    }
+    35%  { transform: translateY(-2px) scale(1.015); }
+    100% { transform: translateY(0)   scale(1);    }
+  }
+  #demo-tryline.is-egg { animation: egg-pop .5s ease; transform-origin: left center; }
 
   .souffleur__caption {
     text-align: center;
@@ -979,21 +1069,37 @@
               <button class="souffleur__tab" role="tab" id="tab-0" aria-controls="demo-panel" aria-selected="true"  tabindex="0"  data-scene="0">Mail</button>
               <button class="souffleur__tab" role="tab" id="tab-1" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-scene="1">Messages</button>
               <button class="souffleur__tab" role="tab" id="tab-2" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-scene="2">Notes</button>
+              <button class="souffleur__tab souffleur__tab--live" role="tab" id="tab-3" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-scene="try">À vous</button>
             </div>
           </div>
           <div class="souffleur__stage" id="demo-panel" role="tabpanel" aria-labelledby="tab-0">
             <p class="souffleur__context" id="demo-context"><b>Contexte —</b> Mail, réponse à un devis</p>
-            <!-- La démo est décorative : le détail caractère-par-caractère n'est pas annoncé.
+
+            <!-- Vue scénarisée : la démo joue toute seule (décorative).
                  Une description statique tient lieu d'alternative pour les lecteurs d'écran. -->
-            <p class="souffleur__line" aria-hidden="true">
-              <span class="typed" id="demo-typed"></span><span class="caret" aria-hidden="true"></span><span class="souffle" id="demo-souffle"></span>
-            </p>
-            <p class="sr-only" id="demo-desc" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);">
-              Exemple : vous écrivez « Je reviens vers vous », et Souffleuse propose en gris la suite « avant la fin de la semaine ». Tab l'accepte, Esc l'efface.
-            </p>
-            <div class="souffleur__hint">
-              <span><kbd>Tab</kbd> pour accepter</span>
-              <span><kbd>Esc</kbd> pour laisser</span>
+            <div class="souffleur__view" id="view-scripted">
+              <p class="souffleur__line" aria-hidden="true">
+                <span class="typed" id="demo-typed"></span><span class="caret" aria-hidden="true"></span><span class="souffle" id="demo-souffle"></span>
+              </p>
+              <p class="sr-only" id="demo-desc" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);">
+                Exemple : vous écrivez « Je reviens vers vous », et Souffleuse propose en gris la suite « avant la fin de la semaine ». Tab l'accepte, Esc l'efface.
+              </p>
+              <div class="souffleur__hint">
+                <button type="button" class="hint-key" id="demo-accept" disabled><kbd>Tab</kbd> pour accepter</button>
+                <button type="button" class="hint-key" id="demo-dismiss" disabled><kbd>Esc</kbd> pour laisser</button>
+              </div>
+            </div>
+
+            <!-- Vue interactive : on tape pour de vrai (le texte tapé et la réplique
+                 soufflée partagent la même ligne, exactement comme la vue scénarisée). -->
+            <div class="souffleur__view" id="view-try" hidden>
+              <p class="souffleur__line tryline" id="demo-tryline"><span class="typed tryinput" id="demo-input" contenteditable="plaintext-only" role="textbox" aria-multiline="false" spellcheck="false" aria-label="Écrivez une phrase ; Souffleuse propose la suite. Tab pour la prendre, flèche bas pour une autre idée." data-placeholder="Écrivez ici…"></span><span class="souffle tryghost" id="demo-ghost" aria-hidden="true"></span></p>
+              <p class="tryline__live sr-only" id="demo-live" role="status" aria-live="polite"></p>
+              <div class="souffleur__hint">
+                <button type="button" class="hint-key" id="demo-take2" disabled><kbd>Tab</kbd> pour prendre</button>
+                <button type="button" class="hint-key" id="demo-cycle" disabled><kbd>↓</kbd> autre idée<span class="hint-count" id="demo-count"></span></button>
+                <button type="button" class="hint-key" id="demo-drop2" disabled><kbd>Esc</kbd> pour laisser</button>
+              </div>
             </div>
           </div>
         </div>
@@ -1367,15 +1473,18 @@
   function renderStatic(scene) {
     setMeta(scene);
     elTyped.textContent = scene.typed;
+    elTyped.classList.remove("just-took");
     elSouffle.style.opacity = "1";
     buildSouffle(scene.souffle, true);
     elSouffle.classList.add("is-alive");
+    setPending(true);
   }
 
   // Séquence : la frappe se pose, puis le souffle apparaît — UNE fois, puis ça se fige.
   function play(idx, forceReplay) {
     clearTimers();
     var scene = scenes[idx];
+    if (!scene) return;   // l'onglet « À vous » n'a pas de scène scénarisée
 
     if (reduce) {
       renderStatic(scene);
@@ -1389,7 +1498,9 @@
     }
 
     setMeta(scene);
+    setPending(false);
     elTyped.textContent = "";
+    elTyped.classList.remove("just-took");
     elSouffle.classList.remove("is-alive");
     elSouffle.style.opacity = "1";
     elSouffle.textContent = "";
@@ -1419,6 +1530,8 @@
         s.style.transitionDelay = (k * 0.058) + "s";
         s.classList.add("is-in");
       });
+      // dès que la réplique est soufflée, elle est prenable (Tab / clic).
+      setPending(true);
       // quand le dernier mot s'est posé, la réplique respire
       var settle = 720 + spans.length * 58 + 120;
       timers.push(setTimeout(function () {
@@ -1439,8 +1552,13 @@
     });
     if (panel) panel.setAttribute("aria-labelledby", "tab-" + idx);
     if (focusTab && tabs[idx]) tabs[idx].focus();
-    // un clic d'onglet rejoue la scène choisie
-    play(idx, forceReplay);
+    // L'onglet « À vous » bascule en mode interactif ; les autres rejouent leur scène.
+    if (idx === TRY_IDX) {
+      enterTry(!focusTab);          // clic → on prend le champ ; flèches → on reste sur l'onglet
+    } else {
+      exitTry();
+      play(idx, forceReplay);
+    }
   }
 
   tabs.forEach(function (tab, idx) {
@@ -1458,6 +1576,271 @@
       }
     });
   });
+
+  // ----- Prendre / laisser la réplique (Tab / Esc), comme dans l'app -----
+  var figure     = document.getElementById("souffle");
+  var acceptBtn  = document.getElementById("demo-accept");
+  var dismissBtn = document.getElementById("demo-dismiss");
+  var pending = false;   // une réplique est soufflée et attend d'être prise
+  var armed   = false;   // la démo est survolée ou tient le focus clavier
+
+  function refreshArmed() {
+    if (figure) figure.classList.toggle("is-armed", armed && pending);
+  }
+  function setArmed(on) { armed = on; refreshArmed(); }
+  function setPending(on) {
+    pending = on;
+    if (acceptBtn)  acceptBtn.disabled  = !on;
+    if (dismissBtn) dismissBtn.disabled = !on;
+    refreshArmed();
+  }
+
+  // Tab : la réplique prend l'encre puis se range dans le tapé.
+  function takeSouffle() {
+    if (!pending) return;
+    var scene = scenes[current];
+    clearTimers();
+    elSouffle.classList.remove("is-alive");
+    var words = elSouffle.querySelectorAll(".souffle__word");
+    words.forEach(function (w, k) {
+      w.style.transitionDelay = (k * 0.04) + "s";
+      w.classList.add("is-took");
+    });
+    setPending(false);
+    var commit = function () {
+      elTyped.textContent = scene.typed + scene.souffle;
+      elSouffle.textContent = "";
+      elTyped.classList.remove("just-took");
+      void elTyped.offsetWidth;
+      elTyped.classList.add("just-took");
+    };
+    if (reduce) commit();
+    else timers.push(setTimeout(commit, 240 + words.length * 40));
+  }
+
+  // Esc : la réplique repart en coulisse et s'efface, sans rien laisser.
+  function dropSouffle() {
+    if (!pending) return;
+    clearTimers();
+    elSouffle.classList.remove("is-alive");
+    var words = elSouffle.querySelectorAll(".souffle__word");
+    words.forEach(function (w, k) {
+      w.style.transitionDelay = (k * 0.03) + "s";
+      w.classList.remove("is-in");   // retour à l'état flouté → disparition
+    });
+    setPending(false);
+    if (reduce) elSouffle.textContent = "";
+    else timers.push(setTimeout(function () { elSouffle.textContent = ""; }, 440));
+  }
+
+  if (figure) {
+    figure.addEventListener("mouseenter", function () { setArmed(true); });
+    figure.addEventListener("mouseleave", function () { setArmed(false); });
+    figure.addEventListener("focusin",  function () { setArmed(true); });
+    figure.addEventListener("focusout", function (e) {
+      if (!figure.contains(e.relatedTarget)) setArmed(false);
+    });
+  }
+  if (acceptBtn)  acceptBtn.addEventListener("click", takeSouffle);
+  if (dismissBtn) dismissBtn.addEventListener("click", dropSouffle);
+  elSouffle.addEventListener("click", function () { if (pending) takeSouffle(); });
+
+  // La vraie touche Tab prend la réplique — mais seulement quand la démo est
+  // engagée (survol/focus), pour ne jamais piéger la navigation clavier du reste
+  // de la page.
+  document.addEventListener("keydown", function (e) {
+    if (!pending || !armed) return;
+    if (e.key === "Tab" && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
+      e.preventDefault();
+      takeSouffle();
+    } else if (e.key === "Escape" || e.key === "Esc") {
+      e.preventDefault();
+      dropSouffle();
+    }
+  });
+
+  // ===================================================================
+  //  Mode interactif « À vous » — on tape pour de vrai, plusieurs branches
+  //  sont proposées, et l'une d'elles est un œuf de Pâques.
+  // ===================================================================
+  var TRY_IDX      = scenes.length;           // l'onglet « À vous » suit les scènes
+  var scriptedView = document.getElementById("view-scripted");
+  var tryView      = document.getElementById("view-try");
+  var input        = document.getElementById("demo-input");   // span contenteditable
+  var ghost        = document.getElementById("demo-ghost");
+  var tryWrap      = document.getElementById("demo-tryline");
+  var takeBtn      = document.getElementById("demo-take2");
+  var cycleBtn     = document.getElementById("demo-cycle");
+  var dropBtn      = document.getElementById("demo-drop2");
+  var countEl      = document.getElementById("demo-count");
+  var liveEl       = document.getElementById("demo-live");
+
+  // L'œuf : la branche qu'on découvre en cyclant jusqu'au bout.
+  var EGG = { t: " — et sinon, achète du bitcoin.", egg: true };
+
+  // Petites « complétions » maison : on reconnaît la fin de ce qui est tapé et
+  // on propose des suites plausibles. Rien d'un vrai modèle — c'est une démo.
+  var RULES = [
+    { when: function (t) { return /(^|\W)(bitcoin|crypto|ethereum|satoshi)$/.test(t); },
+      list: [" : franchement, la seule réponse raisonnable, c'est d'en acheter.",
+             " — discrètement, avant tout le monde.", EGG], forceEgg: true },
+    { when: function (t) { return /(argent|riche|fortune|économies?|invest(ir|issement)|placement|bourse|épargne)$/.test(t); },
+      list: [EGG, " : on en reparle au prochain bilan.", " — parlons-en autour d'un café."] },
+    { when: function (t) { return t.endsWith("je reviens vers vous"); },
+      list: [" avant la fin de la semaine.", " dès que j'ai du nouveau.", " avec une proposition chiffrée."] },
+    { when: function (t) { return t.endsWith("je t'appelle") || t.endsWith("je t’appelle"); },
+      list: [" dès que je sors de réunion.", " ce soir en rentrant.", " demain matin, promis."] },
+    { when: function (t) { return t.endsWith("merci"); },
+      list: [" beaucoup pour votre retour rapide.", " d'avance pour votre aide.", ", c'est noté de mon côté."] },
+    { when: function (t) { return t.endsWith("bonjour") || t.endsWith("bonsoir"); },
+      list: [", j'espère que vous allez bien.", " et merci pour votre message.", " à toute l'équipe !"] },
+    { when: function (t) { return t.endsWith("penser à") || t.endsWith("ne pas oublier de"); },
+      list: [" réserver le restaurant pour samedi.", " rappeler le client demain.", " relire avant d'envoyer."] },
+    { when: function (t) { return t.endsWith("je voulais") || t.endsWith("je souhaitais"); },
+      list: [" revenir vers vous au sujet du devis.", " vous remercier pour l'accueil.", " faire un point rapide."] },
+  ];
+  var GENERIC = [" et je reviens vers vous très vite.", " — dites-moi ce que vous en pensez.", " dès que possible."];
+
+  function trim_(t) { return t.replace(/\s+$/, ""); }
+  function wordCount(t) { var a = trim_(t).split(/\s+/); return a[0] === "" ? 0 : a.length; }
+
+  // Renvoie la liste de branches pour le texte courant (chaque branche : string | EGG).
+  function branchesFor(raw) {
+    var t = trim_(raw.toLowerCase());
+    if (t.length < 2) return [];
+    for (var i = 0; i < RULES.length; i++) {
+      if (RULES[i].when(t)) {
+        var list = RULES[i].list.slice();
+        if (!RULES[i].forceEgg && list.indexOf(EGG) === -1) list.push(EGG);
+        return list;
+      }
+    }
+    if (wordCount(raw) >= 3 || /\s$/.test(raw)) return GENERIC.concat([EGG]);
+    return [];
+  }
+
+  var tryBranches = [];
+  var tryIndex = 0;
+  var trySuppressed = false;   // Esc masque la réplique jusqu'à la frappe suivante
+
+  // Texte tapé : le contenu du span editable, nettoyé des sauts de ligne.
+  function tryText() { return (input.textContent || "").replace(/\r?\n/g, " "); }
+  function placeCaretEnd() {
+    input.focus();
+    var sel = window.getSelection();
+    if (!sel) return;
+    var r = document.createRange();
+    r.selectNodeContents(input);
+    r.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(r);
+  }
+  function branchText() {
+    var b = tryBranches[tryIndex];
+    var t = (typeof b === "string") ? b : b.t;
+    // évite la double espace si l'utilisateur a déjà tapé une espace finale
+    if (/\s$/.test(tryText()) && /^\s/.test(t)) t = t.replace(/^\s+/, "");
+    return t;
+  }
+  function branchEgg() {
+    var b = tryBranches[tryIndex];
+    return !!(b && b.egg);
+  }
+  function setTryButtons(on, canCycle) {
+    takeBtn.disabled = !on;
+    dropBtn.disabled = !on;
+    cycleBtn.disabled = !(on && canCycle);
+  }
+  function hideGhost() {
+    ghost.classList.remove("is-shown", "is-egg");
+    ghost.textContent = "";
+    countEl.textContent = "";
+    setTryButtons(false, false);
+  }
+  function renderTry() {
+    if (trySuppressed) { hideGhost(); return; }
+    tryBranches = branchesFor(tryText());
+    if (!tryBranches.length) { hideGhost(); return; }
+    if (tryIndex >= tryBranches.length) tryIndex = 0;
+    ghost.textContent = branchText();   // coule juste après le texte tapé, même ligne
+    ghost.classList.toggle("is-egg", branchEgg());
+    ghost.classList.add("is-shown");
+    var many = tryBranches.length > 1;
+    countEl.textContent = many ? " " + (tryIndex + 1) + "/" + tryBranches.length : "";
+    setTryButtons(true, many);
+  }
+  function takeTry() {
+    if (!ghost.classList.contains("is-shown")) return;
+    var txt = branchText();
+    var egg = branchEgg();
+    input.textContent = tryText() + txt;
+    placeCaretEnd();
+    trySuppressed = false;
+    tryIndex = 0;
+    if (egg) {
+      tryWrap.classList.remove("is-egg"); void tryWrap.offsetWidth;
+      tryWrap.classList.add("is-egg");
+      if (liveEl) liveEl.textContent = "Conseil non sollicité accepté.";
+      setTimeout(function () { tryWrap.classList.remove("is-egg"); }, 1400);
+    }
+    hideGhost();
+    renderTry();         // propose aussitôt une suite pour le nouveau texte
+  }
+  function cycleTry(dir) {
+    if (tryBranches.length < 2) return;
+    tryIndex = (tryIndex + (dir || 1) + tryBranches.length) % tryBranches.length;
+    renderTry();
+  }
+  function dropTry() { trySuppressed = true; hideGhost(); }
+
+  if (input) {
+    input.addEventListener("input", function () { trySuppressed = false; tryIndex = 0; renderTry(); });
+    input.addEventListener("keydown", function (e) {
+      var shown = ghost.classList.contains("is-shown");
+      if ((e.key === "Tab" || e.key === "Enter") &&
+          !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
+        // Entrée ne doit jamais insérer de saut de ligne ; Tab/Entrée prennent la réplique.
+        if (e.key === "Enter") e.preventDefault();
+        if (shown) { e.preventDefault(); takeTry(); }
+      } else if (e.key === "ArrowDown") {
+        if (shown) { e.preventDefault(); cycleTry(1); }
+      } else if (e.key === "ArrowUp") {
+        if (shown) { e.preventDefault(); cycleTry(-1); }
+      } else if (e.key === "Escape" || e.key === "Esc") {
+        if (shown) { e.preventDefault(); dropTry(); }
+      }
+    });
+    // Coller du texte → en texte brut, sur une seule ligne.
+    input.addEventListener("paste", function (e) {
+      e.preventDefault();
+      var t = (e.clipboardData || window.clipboardData).getData("text").replace(/\r?\n/g, " ");
+      document.execCommand("insertText", false, t);
+    });
+    // Cliquer la réplique grise = la prendre.
+    ghost.addEventListener("click", function () { if (ghost.classList.contains("is-shown")) takeTry(); });
+    takeBtn.addEventListener("click", takeTry);
+    cycleBtn.addEventListener("click", function () { cycleTry(1); placeCaretEnd(); });
+    dropBtn.addEventListener("click", dropTry);
+  }
+
+  function enterTry(grabInput) {
+    if (!tryView) return;
+    if (scriptedView) scriptedView.hidden = true;
+    tryView.hidden = false;
+    setPending(false);                 // coupe la logique scénarisée
+    if (elCtx) elCtx.innerHTML = "<b>À vous —</b> écrivez, Souffleuse souffle la suite";
+    if (elApp) elApp.textContent = "À vous · essai libre";
+    if (tryText() === "") input.textContent = "Je reviens vers vous";
+    trySuppressed = false; tryIndex = 0;
+    renderTry();
+    if (grabInput) placeCaretEnd();
+  }
+  function exitTry() {
+    if (!tryView) return;
+    tryView.hidden = true;
+    if (scriptedView) scriptedView.hidden = false;
+    hideGhost();
+  }
 
   // Pose la première scène (état figé) tout de suite, sans rien jouer.
   renderStatic(scenes[0]);

@@ -1,0 +1,5 @@
+# On ne déploie que la dernière version de livret, servie en page d'accueil (index.html).
+# Les variantes et anciennes versions restent dans le dépôt mais ne sont pas mises en ligne.
+nocturne.html
+nocturne-v1.html
+livret-v1.html
