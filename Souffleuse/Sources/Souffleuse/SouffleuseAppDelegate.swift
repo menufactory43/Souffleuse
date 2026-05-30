@@ -1483,15 +1483,14 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
-    /// PHASE 2 — prouve le mécanisme de commit traduction : REMPLACE le texte
-    /// entier du champ focus par `targetText` via AX (≠ inject continuation).
-    /// `replaceTrailing(deleteChars:)` efface depuis le caret — on suppose le
-    /// caret en fin de champ (cas composer). En Phase 4, `targetText` sera la
-    /// traduction streamée du HUD. Tear-down du ghost comme les autres
-    /// acceptations. Renvoie true (consommé).
+    /// PHASE 2 — prouve le mécanisme de commit traduction : REMPLACE le texte du
+    /// champ focus par `targetText` via `replaceForCommit` (backspaces + insert
+    /// Unicode, flags vidés → sûr même avec ⌘ tenu, layout-indépendant, jamais de
+    /// ⌘-raccourci). En Phase 4, `targetText` sera la traduction streamée du HUD.
+    /// Tear-down du ghost comme les autres acceptations. Renvoie true (consommé).
     nonisolated private func performCommit(currentText: String, targetText: String) -> Bool {
         DispatchQueue.global(qos: .userInitiated).async { [axClient] in
-            axClient.replaceTrailing(deleteChars: currentText.count, with: targetText)
+            axClient.replaceForCommit(deleteChars: currentText.count, with: targetText)
             let snap = axClient.snapshot()
             DispatchQueue.main.async { [weak self] in
                 self?.dismissedForText = snap.text ?? ""
