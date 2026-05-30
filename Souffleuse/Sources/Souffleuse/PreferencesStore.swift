@@ -238,7 +238,11 @@ final class PreferencesStore {
         self.personalizationEnabled = (d.object(forKey: K.personalizationEnabled) as? Bool) ?? false
         self.personalizationStrength = (d.object(forKey: K.personalizationStrength) as? Double) ?? 1.0
         self.personalizationOnboardingShown = (d.object(forKey: K.personalizationOnboardingShown) as? Bool) ?? false
-        self.storeWithoutAccepted = (d.object(forKey: K.storeWithoutAccepted) as? Bool) ?? false
+        // Prose capture defaults ON (the user keeps it on for a smarter ghost);
+        // the now-wired toggle lets anyone disable it. The corpus stays bounded
+        // (2k + dedup) and the prompt no longer gets random prose, so the
+        // footprint is small. TO REVERT to opt-in: change `?? true` to `?? false`.
+        self.storeWithoutAccepted = (d.object(forKey: K.storeWithoutAccepted) as? Bool) ?? true
         self.partialAcceptEnabled = (d.object(forKey: K.partialAcceptEnabled) as? Bool) ?? true
         self.acceptAllKey = AcceptAllKey(rawValue: d.string(forKey: K.acceptAllKey) ?? "") ?? .rightArrow
         self.trailingSpaceOnPartial = (d.object(forKey: K.trailingSpaceOnPartial) as? Bool) ?? true
