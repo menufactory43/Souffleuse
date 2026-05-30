@@ -111,10 +111,13 @@ public final class AXClient: @unchecked Sendable {
     /// long-standing misconception in this file): it only pumps extra run-loop
     /// turns while the tree builds and keeps a live AT signature.
     private var observersByPID: [pid_t: AXObserver] = [:]
-    /// Upper bound on activation attempts for a PID that has never been live
-    /// (~2 s at the 80 ms poll) — generous for Chromium's async tree build,
-    /// bounded so non-Electron apps stop after a couple of seconds.
-    static let maxInitialActivationAttempts = 25
+    /// Upper bound on activation attempts for a PID that has never been live —
+    /// generous for Chromium's async tree build, bounded so non-Electron apps
+    /// stop after a few seconds. NOTE: ticks where the AX app element returns
+    /// `.cannotComplete` (host still coming to the foreground) do NOT count
+    /// against this budget (see `ensureAccessibilityActivated`), so this bounds
+    /// REAL attempts where the app actually responded, not foreground latency.
+    static let maxInitialActivationAttempts = 40
 
     public init() {
         self.systemWide = AXUIElementCreateSystemWide()
@@ -148,12 +151,12 @@ public final class AXClient: @unchecked Sendable {
         // Dormant. A never-live PID gets a bounded initial wake budget (so a
         // Cocoa app with no AX tree isn't re-written at the poll rate forever);
         // a PID that WAS live and went dormant (AutoDisableAccessibility) is
-        // retried unbounded until it wakes again.
+        // retried unbounded until it wakes again. The attempt is COUNTED below,
+        // after the sets, and only when the app actually responded — so the
+        // foreground-latency window (cannotComplete) never burns the budget.
         let everLive = treeEverLivePIDs.contains(pid)
         if !everLive {
-            let n = initialActivationAttempts[pid, default: 0]
-            guard n < Self.maxInitialActivationAttempts else { return }
-            initialActivationAttempts[pid] = n + 1
+            guard initialActivationAttempts[pid, default: 0] < Self.maxInitialActivationAttempts else { return }
         }
 
         // Step 1: set BOTH activation attributes on the per-application element.
@@ -196,6 +199,19 @@ public final class AXClient: @unchecked Sendable {
             } else {
                 observerStatus = create
             }
+        }
+
+        // Count this attempt against the initial-wake budget ONLY when the app
+        // actually responded. `.cannotComplete` on BOTH sets means the AX
+        // application element isn't ready yet (host still coming to the
+        // foreground) — those ticks must not burn the budget, or a slow
+        // foreground exhausts it before the attribute set even lands (live
+        // trace: attempts 1-10 were cannotComplete; AXManualAccessibility only
+        // began succeeding at attempt 11, right against the old cap of 25).
+        // `.success` (Electron accepted it) and the unsupported codes (Cocoa →
+        // no tree, must stay bounded) both count.
+        if !everLive, !(r1 == .cannotComplete && r2 == .cannotComplete) {
+            initialActivationAttempts[pid, default: 0] += 1
         }
 
         if ProcessInfo.processInfo.environment["SOUFFLEUSE_PREDICT_LOG"]?.isEmpty == false {
