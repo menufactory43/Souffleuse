@@ -13,6 +13,7 @@
 import Foundation
 import Darwin
 import SouffleuseLlama
+import SouffleuseCore
 
 // ── Resident-footprint probe (phys_footprint = what the OS actually charges us)
 func physFootprintMB() -> Double {
@@ -38,24 +39,9 @@ let instructPath = ProcessInfo.processInfo.environment["SOUFFLEUSE_IT_GGUF"]
 let basePath = ProcessInfo.processInfo.environment["SOUFFLEUSE_GGUF"]
     .map(expand) ?? expand("~/Library/Application Support/app.cotypist.Cotypist/Models/gemma-3-1b.i1-Q5_K_M.gguf")
 
-// ── Gemma instruct chat-template, built caller-side (engine stays raw-prompt).
-func translationPrompt(_ frenchText: String, into languageFR: String) -> String {
-    let instruction = """
-    Tu es un traducteur professionnel pour le support client de Waltio (logiciel de fiscalité crypto).
-    Traduis le message ci-dessous du français vers le \(languageFR).
-    Conserve EXACTEMENT les noms propres, montants, pourcentages, dates, nombres et termes techniques (wallet, Binance, staking, NFT, gas, CSV, PDF, Stripe…).
-    Réponds UNIQUEMENT par la traduction, sans commentaire ni guillemets.
-
-    Message : \(frenchText)
-    """
-    return "<start_of_turn>user\n\(instruction)<end_of_turn>\n<start_of_turn>model\n"
-}
-
-func clean(_ s: String) -> String {
-    var t = s
-    if let r = t.range(of: "<end_of_turn>") { t = String(t[..<r.lowerBound]) }
-    return t.trimmingCharacters(in: .whitespacesAndNewlines)
-}
+// Le prompt chat-template + la normalisation de sortie sont DOGFOODÉS depuis
+// `SouffleuseCore.GemmaChatPrompt` (source unique : ce que mesure ce bench EST
+// ce que `TranslationRuntime` enverra en prod).
 
 // ── Real Waltio support sentences (numbers / names / domain terms on purpose).
 let phrases: [String] = [
@@ -71,9 +57,7 @@ let phrases: [String] = [
     "Je vous confirme que vos données restent stockées localement et chiffrées.",
 ]
 
-let targets: [(code: String, fr: String)] = [
-    ("EN", "anglais"), ("DE", "allemand"), ("ES", "espagnol"), ("IT", "italien"), ("JA", "japonais"),
-]
+let targets = TranslationTarget.allCases   // en, de, es, it, ja
 
 let sampling = LlamaSampling(temperature: 0, repeatPenalty: 1.1, repeatLastN: 64)
 
@@ -101,7 +85,7 @@ for (i, fr) in phrases.enumerated() {
     print("\n#\(i + 1)  FR  \(fr)")
     for t in targets {
         let sink = Sink()
-        let m = await action.generate(prompt: translationPrompt(fr, into: t.fr),
+        let m = await action.generate(prompt: GemmaChatPrompt.translation(of: fr, into: t),
                                        maxTokens: 120, sampling: sampling) { tok in
             sink.s += tok; return true
         }
@@ -109,7 +93,8 @@ for (i, fr) in phrases.enumerated() {
         if let v = m.tokensPerSecond { toksPerSec.append(v) }
         let ttft = m.ttftMillis.map { "\($0)ms" } ?? "—"
         let tps = m.tokensPerSecond.map { String(format: "%.0f tok/s", $0) } ?? "—"
-        print(String(format: "    %@  %@   [ttft %@, %@]", t.code, clean(sink.s), ttft, tps))
+        let v1 = t.isV1 ? "" : " (hors V1)"
+        print(String(format: "    %@%@  %@   [ttft %@, %@]", t.code, v1, GemmaChatPrompt.cleanCompletion(sink.s), ttft, tps))
     }
 }
 
@@ -133,7 +118,7 @@ if baseOK {
                              maxTokens: 8, sampling: LlamaSampling(temperature: 0, repeatPenalty: 1.1)) { tok in
         sink.s += tok; return true
     }
-    print("  [SANITY ghost base] 'Merci beaucoup pour votre' → \(clean(sink.s).debugDescription)")
+    print("  [SANITY ghost base] 'Merci beaucoup pour votre' → \(GemmaChatPrompt.cleanCompletion(sink.s).debugDescription)")
     mem("après une génération ghost (2 modèles)")
 } else {
     print("❌ LOAD BASE FAILED (manque de mémoire ?) — c'est en soi un résultat du gate.")
