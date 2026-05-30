@@ -407,7 +407,14 @@ public enum SuggestionPolicy {
         }
         let words = s.split(whereSeparator: { $0.isWhitespace })
         if words.count > max {
+            // `split` drops the leading empty subsequence, so re-joining the
+            // capped words loses a single LEADING space — the next-word
+            // separator a corpus recall after a complete word carries
+            // ("…les balances" → " négatives …"). Restore it, guarded so it
+            // never double-spaces and stays inert mid-word / after a space.
+            let hadLeadingSpace = s.first == " "
             s = words.prefix(max).joined(separator: " ")
+            if hadLeadingSpace, s.first != " ", !s.isEmpty { s = " " + s }
         }
         return s
     }

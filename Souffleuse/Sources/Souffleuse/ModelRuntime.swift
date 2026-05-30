@@ -868,7 +868,16 @@ final class ModelRuntime {
                         }
                         let words = oneLine.split(whereSeparator: { $0.isWhitespace })
                         if words.count > maxWords {
+                            // `split` drops the leading empty subsequence, so
+                            // re-joining the capped words loses a single LEADING
+                            // space — the next-word separator after a complete
+                            // word. Restore it (mirrors ChunkFilter), guarded so
+                            // it never double-spaces and stays inert otherwise.
+                            let hadLeadingSpace = oneLine.first == " "
                             oneLine = words.prefix(maxWords).joined(separator: " ")
+                            if hadLeadingSpace, oneLine.first != " ", !oneLine.isEmpty {
+                                oneLine = " " + oneLine
+                            }
                         }
                         // Anti-repeat safety net : if the ghost starts by
                         // restating the prefix, drop. We signal the drop

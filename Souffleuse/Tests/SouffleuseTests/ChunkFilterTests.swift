@@ -58,6 +58,30 @@ struct ChunkFilterTests {
             userTail: "Rapport fis", caretAfterSpace: false, maxWords: 20)
         #expect(r.sentenceComplete == false)
     }
+
+    @Test func wordCapPreservesLeadingSpace() {
+        // The word-cap branch (no terminator) must KEEP the single leading
+        // separator space of a next-word continuation after a complete word.
+        // Caret right after "balances" (no trailing space → caretAfterSpace
+        // false), model continues " négatives dans votre compte bancaire";
+        // capped to 3 words this must stay " négatives dans votre" (NOT
+        // "négatives dans votre", which renders/inserts glued as
+        // "balancesnégatives"). Regression for the split()/joined() leading-
+        // space loss — the screenshot bug.
+        let r = ChunkFilter.filterChunk(
+            accumulated: " négatives dans votre compte bancaire",
+            userTail: "de réconcilier les balances", caretAfterSpace: false, maxWords: 3)
+        #expect(r.verdict == .emit(" négatives dans votre"))
+    }
+
+    @Test func wordCapAfterSpaceAddsNoLeadingSpace() {
+        // caretAfterSpace strips the model's leading space upstream, so the
+        // word-cap restore must be a no-op — no spurious / double leading space.
+        let r = ChunkFilter.filterChunk(
+            accumulated: " négatives dans votre compte bancaire",
+            userTail: "les balances ", caretAfterSpace: true, maxWords: 3)
+        #expect(r.verdict == .emit("négatives dans votre"))
+    }
 }
 
 /// Fragmented-garbage detection — the pt base model derails into isolated

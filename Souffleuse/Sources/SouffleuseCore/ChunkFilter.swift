@@ -107,7 +107,19 @@ public enum ChunkFilter {
         // sentence-terminator cut above + word cap below bound the length.
         let words = oneLine.split(whereSeparator: { $0.isWhitespace })
         if words.count > maxWords {
+            // `split` discards the leading empty subsequence, so re-joining the
+            // capped words drops a single LEADING space — the same next-word
+            // separator the sentence-terminator cut above takes care to keep
+            // ("…les balances" → " négatives dans votre …" must render
+            // "balances négatives …", not "balancesnégatives …"). Restore it.
+            // Guarded so it never double-spaces (no-op when the space already
+            // survived) and is inert mid-word ("Bonj" → "our" has no leading
+            // space) and after a space (caretAfterSpace stripped it upstream).
+            let hadLeadingSpace = oneLine.first == " "
             oneLine = words.prefix(maxWords).joined(separator: " ")
+            if hadLeadingSpace, oneLine.first != " ", !oneLine.isEmpty {
+                oneLine = " " + oneLine
+            }
         }
 
         if OutputFilter.ghostIsRepeatingPrefix(oneLine, prefix: userTail) {
