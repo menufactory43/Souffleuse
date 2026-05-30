@@ -112,6 +112,10 @@ public final class OverlayWindow {
         }
     }
 
+    /// Vrai quand un ghost est actuellement affiché — lu par l'icône vivante de la
+    /// barre des menus pour refléter l'état « elle souffle ».
+    public var isVisible: Bool { panel.isVisible }
+
     /// Convert a Quartz (top-left origin) caret rect into an AppKit (bottom-left origin)
     /// rect sized to render `text` immediately after the caret.
     ///
