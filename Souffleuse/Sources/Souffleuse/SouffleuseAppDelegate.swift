@@ -259,6 +259,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         interceptor.setAcceptAllKey(store.acceptAllKey)
         interceptor.setCommitKey(store.commitKey)
         interceptor.setTargetCycleKey(store.targetCycleKey)
+        Task { await self.translationRuntime.setModel(self.store.translationModel) }
 
         predictor.maxTokens = store.completionLength.maxTokens
         predictor.maxWords = store.completionLength.maxWords
@@ -451,6 +452,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         interceptor.setAcceptAllKey(store.acceptAllKey)
         interceptor.setCommitKey(store.commitKey)
         interceptor.setTargetCycleKey(store.targetCycleKey)
+        Task { await self.translationRuntime.setModel(self.store.translationModel) }
         if store.captureEnabled != previous.captureEnabled {
             applyCaptureToggle(store.captureEnabled, requestPermissionIfNeeded: true)
         }

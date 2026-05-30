@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SouffleuseCore
 import SouffleusePersonalization
 import SouffleuseInput
 
@@ -135,6 +136,7 @@ final class PreferencesStore {
         static let acceptAllKey = "acceptAllKey"
         static let commitKey = "commitKey"
         static let targetCycleKey = "targetCycleKey"
+        static let translationModel = "translationModel"
         static let trailingSpaceOnPartial = "trailingSpaceOnPartial"
         static let prefixCorrectionEnabled = "prefixCorrectionEnabled"
     }
@@ -207,6 +209,11 @@ final class PreferencesStore {
     var targetCycleKey: TargetCycleKey {
         didSet { UserDefaults.standard.set(targetCycleKey.rawValue, forKey: K.targetCycleKey) }
     }
+    /// Modèle utilisé pour la TRADUCTION (ghost FR inchangé). Le changer recharge
+    /// paresseusement l'autre GGUF ; déchargé à l'idle (Phase 7).
+    var translationModel: InstructModel {
+        didSet { UserDefaults.standard.set(translationModel.rawValue, forKey: K.translationModel) }
+    }
     /// When true, partial accept includes the single space following the
     /// accepted word/punctuation so the caret lands ready for the next word.
     /// Default on.
@@ -261,6 +268,7 @@ final class PreferencesStore {
         self.acceptAllKey = AcceptAllKey(rawValue: d.string(forKey: K.acceptAllKey) ?? "") ?? .rightArrow
         self.commitKey = CommitKey(rawValue: d.string(forKey: K.commitKey) ?? "") ?? .cmdReturn
         self.targetCycleKey = TargetCycleKey(rawValue: d.string(forKey: K.targetCycleKey) ?? "") ?? .cmdShiftRight
+        self.translationModel = InstructModel(rawValue: d.string(forKey: K.translationModel) ?? "") ?? TranslationRuntime.defaultModel()
         self.trailingSpaceOnPartial = (d.object(forKey: K.trailingSpaceOnPartial) as? Bool) ?? true
         self.prefixCorrectionEnabled = (d.object(forKey: K.prefixCorrectionEnabled) as? Bool) ?? true
     }
