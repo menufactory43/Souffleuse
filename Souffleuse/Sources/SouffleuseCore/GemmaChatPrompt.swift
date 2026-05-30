@@ -55,6 +55,23 @@ public enum TranslationTarget: String, Sendable, CaseIterable, Codable {
         guard let target = from(languageCode: lang.rawValue), target.isV1 else { return nil }
         return target
     }
+
+    /// Vrai si le **message du correspondant** est dominé par le français — signal
+    /// de routage vers la RELECTURE (FR→FR) plutôt que la traduction. Symétrique de
+    /// `detected(in:)` (mêmes seuils ≥ 8 chars / confiance ≥ 0.5) mais renvoie
+    /// précisément le cas que `detected` écarte volontairement (le français). Pur,
+    /// on-device (`NLLanguageRecognizer`), aucun réseau.
+    public static func correspondentSpeaksFrench(in text: String) -> Bool {
+        let trimmed = String(text.suffix(512)).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 8 else { return false }
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(trimmed)
+        guard let lang = recognizer.dominantLanguage else { return false }
+        if let confidence = recognizer.languageHypotheses(withMaximum: 1)[lang], confidence < 0.5 {
+            return false
+        }
+        return lang == .french
+    }
 }
 
 /// Choix de cible pour UNE conversation : suivre la détection (`auto`) ou une
@@ -67,42 +84,73 @@ public enum TranslationTarget: String, Sendable, CaseIterable, Codable {
 public enum TargetSelection: Sendable, Equatable, Codable {
     case auto
     case fixed(TranslationTarget)
+    /// Relecture FR→FR : on ne traduit pas, on RÉÉCRIT le message français selon
+    /// le ton de l'app. Posée à la main par la touche de cycle (après IT) ou
+    /// déduite en AUTO quand le correspondant écrit français.
+    case reformulate
 
-    /// Ordre de défilement de la touche de cycle : les cibles V1 puis AUTO
-    /// (EN → ES → DE → IT → AUTO → EN…). JA exclu (hors V1).
+    /// Ordre de défilement des cibles de traduction. Le cycle complet ajoute
+    /// `.reformulate` puis AUTO autour (AUTO → EN → ES → DE → IT → FR↺ → AUTO),
+    /// géré par `cycleNext`. JA exclu (hors V1).
     public static let cycleOrder: [TranslationTarget] = [.en, .es, .de, .it]
 
-    /// Cible suivante dans le cycle. Depuis AUTO on entre sur la 1re cible ;
-    /// après la dernière cible fixe on revient à AUTO.
+    /// Sélection suivante dans le cycle. Depuis AUTO on entre sur la 1re cible ;
+    /// après la dernière cible fixe on passe à la RELECTURE ; après la relecture
+    /// on revient à AUTO.
     public func cycleNext() -> TargetSelection {
         switch self {
         case .auto:
             return .fixed(Self.cycleOrder[0])
         case .fixed(let t):
             guard let i = Self.cycleOrder.firstIndex(of: t), i + 1 < Self.cycleOrder.count else {
-                return .auto
+                return .reformulate
             }
             return .fixed(Self.cycleOrder[i + 1])
+        case .reformulate:
+            return .auto
         }
     }
 
-    /// Résout la cible effective au moment du commit : une cible fixe l'emporte
-    /// toujours ; `auto` suit `detected` et retombe sur `fallback` (défaut EN)
-    /// quand rien n'a pu être détecté.
+    /// Résout la cible de TRADUCTION effective : une cible fixe l'emporte ;
+    /// `auto` suit `detected` et retombe sur `fallback`. `.reformulate` n'est pas
+    /// une traduction — il retombe sur `fallback` ici et doit être aiguillé en
+    /// amont via `action(…)`.
     public func resolve(detected: TranslationTarget?, fallback: TranslationTarget = .en) -> TranslationTarget {
         switch self {
         case .fixed(let t): return t
         case .auto: return detected ?? fallback
+        case .reformulate: return fallback
         }
     }
 
-    /// Libellé court pour le panneau (« AUTO », « EN », « ES »…).
+    /// Décide quoi faire au commit ⌘↩ : traduire vers une cible, ou relire (FR→FR).
+    /// `.reformulate` relit toujours ; `.fixed` traduit toujours ; `.auto` relit si
+    /// le correspondant écrit français, sinon traduit vers la langue détectée
+    /// (défaut `fallback`).
+    public func action(detected: TranslationTarget?, correspondentIsFrench: Bool,
+                       fallback: TranslationTarget = .en) -> CommitAction {
+        switch self {
+        case .reformulate: return .reformulate
+        case .fixed(let t): return .translate(t)
+        case .auto: return correspondentIsFrench ? .reformulate : .translate(detected ?? fallback)
+        }
+    }
+
+    /// Libellé court pour le panneau (« AUTO », « EN », « FR↺ »…).
     public var shortLabel: String {
         switch self {
         case .auto: return "AUTO"
         case .fixed(let t): return t.code
+        case .reformulate: return "FR↺"
         }
     }
+}
+
+/// Action effective déclenchée par le commit ⌘↩ : traduire vers une cible, ou
+/// relire le message français (réécriture FR→FR selon le ton de l'app).
+public enum CommitAction: Sendable, Equatable {
+    case translate(TranslationTarget)
+    case reformulate
 }
 
 /// Construit le prompt **chat-template Gemma-3 instruct** pour la traduction.
@@ -200,6 +248,44 @@ public enum GemmaChatPrompt {
                 + "<|im_start|>user\n" + frenchText + "<|im_end|>\n"
                 + "<|im_start|>assistant\n"
         }
+    }
+
+    /// Assemble le prompt de **relecture FR→FR** (réécriture selon `tone`) selon
+    /// le chat-template du `model`. Strictement symétrique de `translation(…)` :
+    /// même découpe, message EN DERNIER pour Gemma (réutilisation KV-cache LCP),
+    /// consigne en système pour Qwen.
+    public static func reformulation(
+        of frenchText: String,
+        tone: Tone,
+        examples: [String] = [],
+        model: InstructModel = .gemma1b
+    ) -> String {
+        let instruction = reformulationInstruction(tone: tone, examples: examples)
+        switch model {
+        case .gemma1b:
+            let user = instruction + "\n\nMessage : \(frenchText)"
+            return userOpen + user + turnClose + modelOpen
+        case .qwen1_5b:
+            return "<|im_start|>system\n" + instruction + "<|im_end|>\n"
+                + "<|im_start|>user\n" + frenchText + "<|im_end|>\n"
+                + "<|im_start|>assistant\n"
+        }
+    }
+
+    /// Consigne de relecture (sans le message). Partagée par les deux familles de
+    /// template. Réécrit fidèlement (corrige, ne répond pas) au registre `tone`,
+    /// avec la même clause de survie des entités dures que la traduction.
+    static func reformulationInstruction(tone: Tone, examples: [String]) -> String {
+        var instruction = """
+        Tu es un correcteur-rédacteur professionnel. Réécris EN FRANÇAIS le message ci-dessous : corrige l'orthographe, la grammaire et la formulation, sans en changer le sens ni y répondre.
+        \(tone.registerInstruction)
+        Conserve exactement les noms propres, montants, pourcentages, dates, nombres et termes techniques (wallet, Binance, staking, NFT, gas, CSV, PDF, Stripe…).
+        Réponds UNIQUEMENT par la réécriture, sans commentaire ni guillemets.
+        """
+        if !examples.isEmpty {
+            instruction += "\n\nExemples de mon style :\n" + examples.joined(separator: "\n")
+        }
+        return instruction
     }
 
     /// Consigne de traduction fidèle (sans le message). Partagée par les deux

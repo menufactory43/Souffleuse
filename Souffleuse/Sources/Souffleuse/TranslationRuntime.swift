@@ -114,6 +114,32 @@ final class TranslationRuntime {
         )
     }
 
+    /// Relit/réécrit `frenchText` EN FRANÇAIS selon `tone` (FR→FR), en streamant
+    /// via `onToken`. Même tuyau que `translate` : lazy-load du moteur, attente
+    /// bornée du ghost (`GpuGate`), budget de tokens adaptatif, sampling déterministe.
+    @discardableResult
+    func reformulate(
+        _ frenchText: String,
+        tone: Tone,
+        examples: [String] = [],
+        maxTokens: Int? = nil,
+        onToken: @escaping @Sendable (String) -> Bool
+    ) async -> LlamaMetrics? {
+        guard await ensureLoaded() else { return nil }
+        let prompt = GemmaChatPrompt.reformulation(of: frenchText, tone: tone, examples: examples, model: model)
+        let budget = maxTokens ?? SuggestionPolicy.Tuning.translationMaxNewTokens(sourceChars: frenchText.count)
+        await GpuGate.shared.awaitGhostIdle(
+            maxWaitMillis: SuggestionPolicy.Tuning.translationGhostWaitMaxMillis,
+            pollMillis: SuggestionPolicy.Tuning.translationGhostWaitPollMillis
+        )
+        return await engine.generate(
+            prompt: prompt,
+            maxTokens: budget,
+            sampling: LlamaSampling(temperature: 0, repeatPenalty: 1.1, repeatLastN: 64),
+            onToken: onToken
+        )
+    }
+
     /// Libère le modèle instruct (unload à l'idle — stratégie mémoire de repli /
     /// Phase 7).
     func unload() async {

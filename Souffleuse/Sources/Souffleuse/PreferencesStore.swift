@@ -238,6 +238,7 @@ final class PreferencesStore {
     let allowlist = AllowlistStore()
     let hudAnchors = HUDAnchorStore()
     let conversationTargets = ConversationTargetStore()
+    let tones = ToneStore()
     let modelDownloads = ModelDownloadManager()
     let history = TypingHistoryStore()
 
