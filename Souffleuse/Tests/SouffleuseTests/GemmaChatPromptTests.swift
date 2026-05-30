@@ -116,4 +116,55 @@ struct GemmaChatPromptTests {
         #expect(InstructModel.allCases.count == 2)
         #expect(!InstructModel.qwen1_5b.displayName.isEmpty)
     }
+
+    // MARK: - Relecture FR→FR (reformulation)
+
+    @Test("la relecture Gemma enveloppe la consigne et place le message EN DERNIER")
+    func reformulationGemmaTurnMarkers() {
+        let p = GemmaChatPrompt.reformulation(of: "slt ça va le wallet", tone: .neutral)
+        #expect(p.hasPrefix("<start_of_turn>user\n"))
+        #expect(p.hasSuffix("<start_of_turn>model\n"))
+        let after = String(p[p.range(of: "Message : ")!.upperBound...])
+        #expect(after.hasPrefix("slt ça va le wallet"))
+        #expect(after.contains("<end_of_turn>"))
+    }
+
+    @Test("la consigne de relecture réécrit (ne traduit pas) et garde les entités dures")
+    func reformulationInstructionContent() {
+        let p = GemmaChatPrompt.reformulation(of: "x", tone: .neutral)
+        #expect(p.contains("Réécris EN FRANÇAIS"))
+        #expect(p.contains("correcteur-rédacteur"))
+        #expect(!p.contains("traducteur professionnel"))  // surtout PAS de traduction
+        #expect(p.contains("noms propres, montants"))
+    }
+
+    @Test("chaque ton injecte son registre")
+    func reformulationToneFragment() {
+        #expect(GemmaChatPrompt.reformulation(of: "x", tone: .casual).contains("tutoiement"))
+        #expect(GemmaChatPrompt.reformulation(of: "x", tone: .neutral).contains("neutre"))
+        #expect(GemmaChatPrompt.reformulation(of: "x", tone: .formal).contains("vouvoiement"))
+    }
+
+    @Test("la relecture Qwen utilise ChatML (consigne système, message user)")
+    func reformulationQwenChatML() {
+        let p = GemmaChatPrompt.reformulation(of: "le wallet", tone: .formal, model: .qwen1_5b)
+        #expect(p.hasPrefix("<|im_start|>system\n"))
+        #expect(p.hasSuffix("<|im_start|>assistant\n"))
+        #expect(p.contains("<|im_start|>user\nle wallet<|im_end|>"))
+        #expect(p.contains("vouvoiement"))
+        #expect(!p.contains("<start_of_turn>"))
+    }
+
+    @Test("les exemples de style sont injectés AVANT le message en relecture")
+    func reformulationExamplesBeforeMessage() {
+        let p = GemmaChatPrompt.reformulation(of: "msg", tone: .neutral, examples: ["EXEMPLE_STYLE"])
+        #expect(p.range(of: "EXEMPLE_STYLE")!.lowerBound < p.range(of: "Message :")!.lowerBound)
+    }
+
+    @Test("la traduction reste intacte (registre traducteur, pas de relecture)")
+    func translationStillTranslates() {
+        let p = GemmaChatPrompt.translation(of: "Bonjour", into: .de)
+        #expect(p.contains("traducteur professionnel"))
+        #expect(!p.contains("Réécris EN FRANÇAIS"))
+    }
 }

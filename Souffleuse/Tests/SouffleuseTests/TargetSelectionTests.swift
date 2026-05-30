@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 @testable import SouffleuseCore
 
 /// Couvre la résolution de cible de traduction (P5) : détection de la langue du
@@ -41,22 +42,60 @@ struct TargetSelectionTests {
         #expect(TranslationTarget.detected(in: "こんにちは、ウォレットから資金を引き出せません。助けてください。") == nil)
     }
 
+    // MARK: - TranslationTarget.correspondentSpeaksFrench
+
+    @Test("un correspondant qui écrit français → relecture (vrai)")
+    func detectsFrenchCorrespondent() {
+        #expect(TranslationTarget.correspondentSpeaksFrench(in: "Bonjour, je n'arrive pas à retirer mes fonds du portefeuille."))
+    }
+
+    @Test("un correspondant qui écrit anglais → pas de relecture (faux)")
+    func englishCorrespondentNotFrench() {
+        #expect(!TranslationTarget.correspondentSpeaksFrench(in: "Hello, I cannot withdraw my funds, please help."))
+    }
+
+    @Test("texte trop court → pas de relecture (mêmes seuils que detected)")
+    func shortCorrespondentNotFrench() {
+        #expect(!TranslationTarget.correspondentSpeaksFrench(in: "ok"))
+        #expect(!TranslationTarget.correspondentSpeaksFrench(in: "   "))
+    }
+
     // MARK: - TargetSelection.cycleNext
 
-    @Test("le cycle suit EN→ES→DE→IT→AUTO→EN")
+    @Test("le cycle suit EN→ES→DE→IT→FR↺(relecture)→AUTO→EN")
     func cycleOrder() {
         var s: TargetSelection = .auto
         s = s.cycleNext(); #expect(s == .fixed(.en))
         s = s.cycleNext(); #expect(s == .fixed(.es))
         s = s.cycleNext(); #expect(s == .fixed(.de))
         s = s.cycleNext(); #expect(s == .fixed(.it))
+        s = s.cycleNext(); #expect(s == .reformulate)
         s = s.cycleNext(); #expect(s == .auto)
         s = s.cycleNext(); #expect(s == .fixed(.en))
     }
 
-    @Test("une cible hors ordre de cycle (JA) revient à AUTO")
+    @Test("une cible hors ordre de cycle (JA) bascule en relecture")
     func cycleFromNonCycleTarget() {
-        #expect(TargetSelection.fixed(.ja).cycleNext() == .auto)
+        #expect(TargetSelection.fixed(.ja).cycleNext() == .reformulate)
+    }
+
+    // MARK: - TargetSelection.action (aiguillage traduire vs relire)
+
+    @Test(".reformulate posé au cycle relit toujours, quelle que soit la détection")
+    func reformulateAlwaysReformulates() {
+        #expect(TargetSelection.reformulate.action(detected: .de, correspondentIsFrench: false) == .reformulate)
+    }
+
+    @Test("une cible fixe traduit toujours, même si le correspondant écrit français")
+    func fixedAlwaysTranslates() {
+        #expect(TargetSelection.fixed(.de).action(detected: nil, correspondentIsFrench: true) == .translate(.de))
+    }
+
+    @Test("AUTO relit si le correspondant écrit français, sinon traduit")
+    func autoRoutesByCorrespondent() {
+        #expect(TargetSelection.auto.action(detected: nil, correspondentIsFrench: true) == .reformulate)
+        #expect(TargetSelection.auto.action(detected: .it, correspondentIsFrench: false) == .translate(.it))
+        #expect(TargetSelection.auto.action(detected: nil, correspondentIsFrench: false) == .translate(.en))
     }
 
     // MARK: - TargetSelection.resolve
@@ -82,6 +121,14 @@ struct TargetSelectionTests {
         #expect(TargetSelection.auto.shortLabel == "AUTO")
         #expect(TargetSelection.fixed(.en).shortLabel == "EN")
         #expect(TargetSelection.fixed(.de).shortLabel == "DE")
+        #expect(TargetSelection.reformulate.shortLabel == "FR↺")
+    }
+
+    @Test("la relecture survit à l'aller-retour Codable (persistance par conversation)")
+    func reformulateCodableRoundTrip() throws {
+        let data = try JSONEncoder().encode(TargetSelection.reformulate)
+        let back = try JSONDecoder().decode(TargetSelection.self, from: data)
+        #expect(back == .reformulate)
     }
 }
 

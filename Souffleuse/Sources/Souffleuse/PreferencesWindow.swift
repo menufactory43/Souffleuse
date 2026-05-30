@@ -85,6 +85,8 @@ private struct PreferencesRoot: View {
             .tabItem { Label("Personnalisation", systemImage: "person.crop.circle.badge.checkmark") }
             AllowlistTab(store: store)
                 .tabItem { Label("Par application", systemImage: "list.bullet.rectangle") }
+            ToneTab(store: store)
+                .tabItem { Label("Ton", systemImage: "textformat") }
             AboutTab(onOpenOnboarding: onOpenOnboarding)
                 .tabItem { Label("À propos", systemImage: "info.circle") }
         }
@@ -626,6 +628,95 @@ private struct RuleEditor: View {
                 Button("Enregistrer") { onSave(rule) }
                     .keyboardShortcut(.defaultAction)
                     .disabled(rule.bundleID.trimmingCharacters(in: .whitespaces).isEmpty || !regexValid)
+            }
+        }
+        .padding(20)
+        .frame(width: 420)
+    }
+}
+
+private struct ToneTab: View {
+    @Bindable var store: PreferencesStore
+    @State private var selection: UUID?
+    @State private var draft: ToneRule?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Quand le correspondant écrit en français, ⌘↩ ne traduit pas : la souffleuse relit ton message. Choisis le registre — un défaut, et des exceptions par application.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            Picker("Ton par défaut", selection: Binding(
+                get: { store.tones.defaultTone },
+                set: { store.tones.setDefaultTone($0) }
+            )) {
+                ForEach(Tone.allCases, id: \.self) { t in
+                    Text(t.displayName).tag(t)
+                }
+            }
+            .pickerStyle(.segmented)
+            .fixedSize()
+
+            Table(store.tones.rules, selection: $selection) {
+                TableColumn("Bundle ID") { rule in
+                    Text(rule.bundleID).font(.system(.body, design: .monospaced))
+                }
+                TableColumn("Ton") { rule in
+                    Text(rule.tone.displayName)
+                }
+            }
+            .frame(minHeight: 200)
+
+            HStack {
+                Button(action: { draft = ToneRule(bundleID: "") }) {
+                    Image(systemName: "plus")
+                }
+                Button(action: { if let id = selection { store.tones.delete(id); selection = nil } }) {
+                    Image(systemName: "minus")
+                }
+                .disabled(selection == nil)
+                Button("Modifier…") {
+                    if let id = selection, let r = store.tones.rules.first(where: { $0.id == id }) {
+                        draft = r
+                    }
+                }
+                .disabled(selection == nil)
+                Spacer()
+            }
+        }
+        .sheet(item: $draft) { rule in
+            ToneRuleEditor(rule: rule) { saved in
+                store.tones.upsert(saved)
+                draft = nil
+            } onCancel: {
+                draft = nil
+            }
+        }
+    }
+}
+
+private struct ToneRuleEditor: View {
+    @State var rule: ToneRule
+    let onSave: (ToneRule) -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        Form {
+            TextField("Bundle ID", text: $rule.bundleID, prompt: Text("com.tinyspeck.slackmacgap"))
+                .textFieldStyle(.roundedBorder)
+                .font(.system(.body, design: .monospaced))
+            Picker("Ton", selection: $rule.tone) {
+                ForEach(Tone.allCases, id: \.self) { t in
+                    Text(t.displayName).tag(t)
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Annuler", role: .cancel, action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Button("Enregistrer") { onSave(rule) }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(rule.bundleID.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
         .padding(20)

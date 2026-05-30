@@ -1470,13 +1470,25 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 let selection = self.store.conversationTargets.selection(
                     forBundle: bundleID, windowTitle: windowTitle)
-                let detected = TranslationTarget.detected(in: self.lastEnrichedVisible ?? "")
-                let target = selection.resolve(detected: detected)
+                let context = self.lastEnrichedVisible ?? ""
+                let detected = TranslationTarget.detected(in: context)
+                let frCorrespondent = TranslationTarget.correspondentSpeaksFrench(in: context)
+                let action = selection.action(detected: detected, correspondentIsFrench: frCorrespondent)
                 self.predictor.cancel()
                 self.lastPredictedPrefix = nil
                 self.overlay.hide()
                 self.interceptor.setActive(false)
-                self.runTranslationCommit(frenchText: current, fieldRect: rect, target: target, bundleID: bundleID)
+                // Aiguillage P-relecture : si le correspondant parle français (ou si
+                // l'utilisateur a posé FR↺ au cycle) on RELIT le message FR selon le
+                // ton de l'app ; sinon on traduit vers la cible. Même panneau, même
+                // moteur instruct, même garde-fou.
+                switch action {
+                case .translate(let target):
+                    self.runTranslationCommit(frenchText: current, fieldRect: rect, target: target, bundleID: bundleID)
+                case .reformulate:
+                    let tone = self.store.tones.tone(forBundle: bundleID)
+                    self.runReformulateCommit(frenchText: current, fieldRect: rect, tone: tone, bundleID: bundleID)
+                }
             }
             return true
 
@@ -1517,6 +1529,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         switch selection {
         case .auto: header = "Cible : AUTO (langue détectée)"
         case .fixed(let t): header = "Cible : FR → \(t.code)"
+        case .reformulate: header = "Relecture : FR (réécriture selon le ton de l'app)"
         }
         translationHUD.show(at: anchor, header: header, body: "⌘⇧→ changer · ⌘↩ traduire",
                             savedOffset: hudSavedOffset(forBundle: bundleID), bundleID: bundleID)
@@ -1628,6 +1641,54 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             // Programme le déchargement mémoire du moteur instruct après une
             // période d'inactivité (Phase 7) : en régime « pas de traduction » la
             // RAM du 2e moteur retombe à zéro sur la machine 8 Go.
+            self.scheduleTranslationIdleUnload()
+        }
+    }
+
+    /// Relecture FR→FR visible : même chemin que `runTranslationCommit`, mais le
+    /// moteur instruct RÉÉCRIT le message français selon le `tone` de l'app au lieu
+    /// de traduire. Panneau, garde-fou, remplacement de champ et déchargement-idle
+    /// strictement identiques.
+    private func runReformulateCommit(frenchText: String, fieldRect: CGRect?, tone: Tone, bundleID: String?) {
+        let text = frenchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        translationIdleUnloadTask?.cancel()
+        let anchor = fieldRect ?? .zero
+        translationHUD.show(at: anchor, header: "FR ↺ relecture · \(tone.displayName)…", body: "…",
+                            savedOffset: hudSavedOffset(forBundle: bundleID), bundleID: bundleID)
+        Task(priority: .utility) { @MainActor [weak self] in
+            guard let self else { return }
+            final class Acc: @unchecked Sendable { var s = "" }
+            let acc = Acc()
+            let metrics = await self.translationRuntime.reformulate(text, tone: tone) { piece in
+                acc.s += piece
+                let partial = GemmaChatPrompt.cleanCompletion(acc.s)
+                Task { @MainActor in self.translationHUD.update(partial) }
+                return true
+            }
+            let output = GemmaChatPrompt.cleanCompletion(acc.s)
+            guard metrics != nil, !output.isEmpty else {
+                self.translationHUD.update("⚠︎ modèle de relecture indisponible")
+                self.translationHUD.scheduleAutoHide(after: 3)
+                return
+            }
+            self.translationHUD.update(output)
+            // Garde-fou C : même réécriture FR→FR ne doit pas perdre un chiffre,
+            // un montant ou un nom propre — zéro appel LLM.
+            let missing = TermSurvivalGuard.missingTokens(source: text, translation: output)
+            if let summary = TermSurvivalGuard.badgeSummary(for: missing) {
+                self.translationHUD.setBadge("⚠︎ à vérifier : \(summary)")
+                Log.info(.input, "reformulate_guard_flagged")
+            }
+            let axClient = self.axClient
+            let deleteCount = frenchText.count
+            DispatchQueue.global(qos: .userInitiated).async {
+                axClient.replaceForCommit(deleteChars: deleteCount, with: output)
+                let s = axClient.snapshot()
+                DispatchQueue.main.async { [weak self] in self?.dismissedForText = s.text ?? "" }
+            }
+            Log.info(.input, "reformulate_commit_done")
+            self.translationHUD.scheduleAutoHide(after: SuggestionPolicy.Tuning.translationHUDVisibleSeconds)
             self.scheduleTranslationIdleUnload()
         }
     }
