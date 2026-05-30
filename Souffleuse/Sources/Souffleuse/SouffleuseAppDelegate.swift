@@ -235,6 +235,15 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // the next tick — no relaunch needed.
         _ = AXClient.ensureTrusted(prompt: true)
 
+        // §3b : quand l'utilisateur déplace le panneau de traduction, on mémorise
+        // sa position (offset relatif au champ) PAR APP via le HUDAnchorStore.
+        translationHUD.onMoved = { [weak self] bundleID, offset in
+            guard let self, let bid = bundleID else { return }
+            self.store.hudAnchors.upsert(
+                HUDAnchor(bundleID: bid, edge: .left,
+                          offsetX: Double(offset.width), offsetY: Double(offset.height)))
+        }
+
         interceptor = KeyInterceptor { [weak self] key in
             guard let self else { return false }
             // Called on the tap's DEDICATED thread. Never block on main here —
@@ -1468,7 +1477,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 self.lastPredictedPrefix = nil
                 self.overlay.hide()
                 self.interceptor.setActive(false)
-                self.runTranslationCommit(frenchText: current, fieldRect: rect, target: target)
+                self.runTranslationCommit(frenchText: current, fieldRect: rect, target: target, bundleID: bundleID)
             }
             return true
 
@@ -1486,7 +1495,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 let selection = self.store.conversationTargets.cycle(
                     forBundle: bundleID, windowTitle: windowTitle)
                 Log.info(.input, "translate_target_cycled")
-                self.flashTargetSelection(selection, fieldRect: rect)
+                self.flashTargetSelection(selection, fieldRect: rect, bundleID: bundleID)
             }
             return true
         }
@@ -1496,14 +1505,22 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// lancer de traduction. Auto-masqué après ~1,2 s — sauf si une vraie
     /// traduction a pris le relais entre-temps (`hudFlashToken`).
     @MainActor
-    private func flashTargetSelection(_ selection: TargetSelection, fieldRect: CGRect?) {
+    /// Décalage de position du HUD mémorisé pour cette app (§3b), `.zero` si jamais
+    /// déplacé.
+    private func hudSavedOffset(forBundle bundleID: String?) -> CGSize {
+        guard let bid = bundleID, let a = store.hudAnchors.anchor(forBundle: bid) else { return .zero }
+        return CGSize(width: a.offsetX, height: a.offsetY)
+    }
+
+    private func flashTargetSelection(_ selection: TargetSelection, fieldRect: CGRect?, bundleID: String?) {
         let anchor = fieldRect ?? .zero
         let header: String
         switch selection {
         case .auto: header = "Cible : AUTO (langue détectée)"
         case .fixed(let t): header = "Cible : FR → \(t.code)"
         }
-        translationHUD.show(at: anchor, header: header, body: "⌘⇧→ changer · ⌘↩ traduire")
+        translationHUD.show(at: anchor, header: header, body: "⌘⇧→ changer · ⌘↩ traduire",
+                            savedOffset: hudSavedOffset(forBundle: bundleID), bundleID: bundleID)
         hudFlashToken &+= 1
         let token = hudFlashToken
         Task { @MainActor [weak self] in
@@ -1565,7 +1582,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// remplace le champ via `replaceForCommit` (chemin validé Electron/AZERTY).
     /// La cible est résolue en amont (sélection fixe / AUTO détecté / EN) ; le
     /// panneau drag/persistance reste Phase 3b.
-    private func runTranslationCommit(frenchText: String, fieldRect: CGRect?, target: TranslationTarget) {
+    private func runTranslationCommit(frenchText: String, fieldRect: CGRect?, target: TranslationTarget, bundleID: String?) {
         let text = frenchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         // On va réutiliser le moteur instruct : annule un déchargement-idle en
@@ -1575,7 +1592,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // désormais à la traduction, pas au flash.
         hudFlashToken &+= 1
         let anchor = fieldRect ?? .zero
-        translationHUD.show(at: anchor, header: "FR → \(target.code) · traduction…", body: "…")
+        translationHUD.show(at: anchor, header: "FR → \(target.code) · traduction…", body: "…",
+                            savedOffset: hudSavedOffset(forBundle: bundleID), bundleID: bundleID)
         // Priorité basse : la traduction « a le droit de traîner », elle ne doit
         // pas voler un thread/priorité au ghost FR (§2.9).
         Task(priority: .utility) { @MainActor [weak self] in
@@ -1613,7 +1631,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             }
             Log.info(.input, "translate_commit_done")
             try? await Task.sleep(nanoseconds: 2_200_000_000)
-            self.translationHUD.hide()
+            // Si l'utilisateur a saisi le panneau pour le déplacer (§3b), on ne
+            // l'auto-masque pas — il reste jusqu'au prochain commit / Esc.
+            if !self.translationHUD.isPinnedByUser { self.translationHUD.hide() }
             // Programme le déchargement mémoire du moteur instruct après une
             // période d'inactivité (Phase 7) : en régime « pas de traduction » la
             // RAM du 2e moteur retombe à zéro sur la machine 8 Go.

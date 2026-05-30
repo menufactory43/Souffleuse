@@ -8,7 +8,7 @@ import Foundation
 /// cliquable, pas de persistance — juste rendre une vraie traduction VISIBLE.
 /// Le panneau riche (drag, hitTest, multi-rangées, ancrage mémorisé) = Phase 3b.
 @MainActor
-public final class TranslationHUDWindow {
+public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
     private let panel: NSPanel
     private let container: NSView
     private let header: NSTextField
@@ -19,10 +19,27 @@ public final class TranslationHUDWindow {
     private var anchorRectQuartz: CGRect = .zero
     private var bodyText: String = ""
     private var badgeText: String = ""
+    /// Décalage (points écran AppKit) appliqué à la position par défaut, mémorisé
+    /// par app (§3b). `.zero` = position par défaut (bord gauche, au-dessus).
+    private var savedOffset: CGSize = .zero
+    /// App courante — pour persister la position quand l'utilisateur déplace.
+    private var currentBundleID: String?
+    /// Origine AppKit SANS offset (position par défaut clampée), conservée pour
+    /// mesurer le déplacement utilisateur (delta = origine courante − défaut).
+    private var defaultOriginAppKit: CGPoint = .zero
+    /// Vrai dès que l'utilisateur a fait glisser le panneau pendant cet affichage
+    /// → on cesse de l'auto-masquer (drag confortable sur un panneau transitoire).
+    public private(set) var isPinnedByUser = false
+    /// Marque les `setFrame` programmatiques pour ignorer le `windowDidMove`
+    /// qu'ils déclenchent (on ne persiste QUE les déplacements utilisateur).
+    private var programmaticMove = false
+    /// Notifié quand l'utilisateur déplace le panneau : `(bundleID, offset)` à
+    /// persister par app. Appelé sur le main actor.
+    public var onMoved: (@MainActor (String?, CGSize) -> Void)?
 
     public static let width: CGFloat = 320
 
-    public init() {
+    public override init() {
         panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 80),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -36,7 +53,11 @@ public final class TranslationHUDWindow {
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = true
-        panel.ignoresMouseEvents = true
+        // Le panneau reçoit la souris pour être DÉPLAÇABLE (§3b) : on le tire par
+        // son fond. Non-activating → le déplacer ne vole pas le focus à l'app hôte
+        // dans laquelle l'utilisateur tape.
+        panel.ignoresMouseEvents = false
+        panel.isMovableByWindowBackground = true
 
         container = NSView(frame: NSRect(x: 0, y: 0, width: Self.width, height: 80))
         container.wantsLayer = true
@@ -66,12 +87,25 @@ public final class TranslationHUDWindow {
         container.addSubview(body)
         container.addSubview(badge)
         panel.contentView = container
+        super.init()
+        panel.delegate = self
     }
 
-    /// Affiche le panneau ancré à droite du cadre du champ (`fieldRectQuartz`,
-    /// coordonnées Quartz top-left).
-    public func show(at fieldRectQuartz: CGRect, header headerText: String, body bodyTextValue: String) {
+    /// Affiche le panneau près du cadre du champ (`fieldRectQuartz`, coordonnées
+    /// Quartz top-left). `savedOffset` replace le panneau là où l'utilisateur
+    /// l'avait déplacé pour cette app ; `bundleID` sert à persister un nouveau
+    /// déplacement.
+    public func show(
+        at fieldRectQuartz: CGRect,
+        header headerText: String,
+        body bodyTextValue: String,
+        savedOffset: CGSize = .zero,
+        bundleID: String? = nil
+    ) {
         anchorRectQuartz = fieldRectQuartz
+        currentBundleID = bundleID
+        self.savedOffset = savedOffset
+        isPinnedByUser = false
         header.stringValue = headerText
         bodyText = bodyTextValue
         badgeText = ""
@@ -126,16 +160,52 @@ public final class TranslationHUDWindow {
         badge.frame = NSRect(x: pad, y: pad, width: bodyWidth, height: badgeH)
         body.frame = NSRect(x: pad, y: pad + badgeBlock, width: bodyWidth, height: bodyH)
 
-        // Ancré au bord GAUCHE du champ, juste AU-DESSUS de son bord haut → bien
-        // visible près du composer. Le bas du panneau est fixe (juste au-dessus du
-        // champ) et il grandit vers le HAUT au fil du streaming. Clampé à l'écran.
+        // Position par défaut : bord GAUCHE du champ, juste AU-DESSUS de son bord
+        // haut (bas du panneau fixe, croît vers le haut au fil du streaming).
+        // L'`savedOffset` (déplacement utilisateur mémorisé par app) s'y ajoute.
+        // Tout est clampé à l'écran.
         let screen = NSScreen.screens.first ?? NSScreen.main
         let screenH = screen?.frame.height ?? 0
         let screenW = screen?.frame.width ?? 0
-        var x = anchorRectQuartz.minX
-        var y = screenH - anchorRectQuartz.minY + 6   // bas du panneau, au-dessus du champ
-        x = min(max(8, x), max(8, screenW - Self.width - 8))
-        y = min(max(8, y), max(8, screenH - total - 8))
-        panel.setFrame(NSRect(x: x, y: y, width: Self.width, height: total), display: true)
+        let panelSize = CGSize(width: Self.width, height: total)
+        let screenSize = CGSize(width: screenW, height: screenH)
+        let defaultOrigin = CGPoint(x: anchorRectQuartz.minX, y: screenH - anchorRectQuartz.minY + 6)
+        defaultOriginAppKit = Self.clampedOrigin(
+            defaultOrigin: defaultOrigin, offset: .zero,
+            panelSize: panelSize, screenSize: screenSize)
+        let placed = Self.clampedOrigin(
+            defaultOrigin: defaultOrigin, offset: savedOffset,
+            panelSize: panelSize, screenSize: screenSize)
+        programmaticMove = true
+        panel.setFrame(NSRect(x: placed.x, y: placed.y, width: Self.width, height: total), display: true)
+        programmaticMove = false
+    }
+
+    /// Origine AppKit (bord bas-gauche) du panneau = défaut + offset, clampée à
+    /// l'écran (marge 8 pt). Pure, testable sans écran réel.
+    nonisolated static func clampedOrigin(
+        defaultOrigin: CGPoint, offset: CGSize,
+        panelSize: CGSize, screenSize: CGSize
+    ) -> CGPoint {
+        var x = defaultOrigin.x + offset.width
+        var y = defaultOrigin.y + offset.height
+        x = min(max(8, x), max(8, screenSize.width - panelSize.width - 8))
+        y = min(max(8, y), max(8, screenSize.height - panelSize.height - 8))
+        return CGPoint(x: x, y: y)
+    }
+
+    // MARK: - NSWindowDelegate (déplacement utilisateur → persistance §3b)
+
+    public func windowDidMove(_ notification: Notification) {
+        guard !programmaticMove, panel.isVisible else { return }
+        let origin = panel.frame.origin
+        let offset = CGSize(
+            width: origin.x - defaultOriginAppKit.x,
+            height: origin.y - defaultOriginAppKit.y)
+        // Ignore le bruit sous le pixel.
+        if abs(offset.width - savedOffset.width) < 1, abs(offset.height - savedOffset.height) < 1 { return }
+        savedOffset = offset
+        isPinnedByUser = true   // l'utilisateur a saisi le panneau → on ne l'auto-masque plus
+        onMoved?(currentBundleID, offset)
     }
 }
