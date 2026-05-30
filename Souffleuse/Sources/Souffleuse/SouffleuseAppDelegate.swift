@@ -1611,8 +1611,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             let output = GemmaChatPrompt.cleanCompletion(acc.s)
             guard metrics != nil, !output.isEmpty else {
                 self.translationHUD.update("⚠︎ modèle de traduction indisponible")
-                try? await Task.sleep(nanoseconds: 1_600_000_000)
-                self.translationHUD.hide()
+                self.translationHUD.scheduleAutoHide(after: 3)
                 return
             }
             self.translationHUD.update(output)
@@ -1632,10 +1631,10 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 DispatchQueue.main.async { [weak self] in self?.dismissedForText = s.text ?? "" }
             }
             Log.info(.input, "translate_commit_done")
-            try? await Task.sleep(nanoseconds: 2_200_000_000)
-            // Si l'utilisateur a saisi le panneau pour le déplacer (§3b), on ne
-            // l'auto-masque pas — il reste jusqu'au prochain commit / Esc.
-            if !self.translationHUD.isPinnedByUser { self.translationHUD.hide() }
+            // Le panneau reste affiché ~6 s (réglable), en fondu — assez pour lire
+            // et pour le saisir/déplacer. Le survol souris suspend le compte ; un
+            // déplacement l'épingle. Toute la logique vit dans le panneau.
+            self.translationHUD.scheduleAutoHide(after: SuggestionPolicy.Tuning.translationHUDVisibleSeconds)
             // Programme le déchargement mémoire du moteur instruct après une
             // période d'inactivité (Phase 7) : en régime « pas de traduction » la
             // RAM du 2e moteur retombe à zéro sur la machine 8 Go.
