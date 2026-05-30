@@ -64,9 +64,8 @@ public enum GemmaChatPrompt {
         examples: [String] = []
     ) -> String {
         var instruction = """
-        Tu es un traducteur professionnel pour le support client de Waltio (logiciel de fiscalité crypto).
-        Traduis le message ci-dessous du français vers \(target.towardName).
-        Conserve EXACTEMENT les noms propres, montants, pourcentages, dates, nombres et termes techniques (wallet, Binance, staking, NFT, gas, CSV, PDF, Stripe…).
+        Tu es un traducteur professionnel. Traduis FIDÈLEMENT le message ci-dessous du français vers \(target.towardName) — ne le reformule pas, n'y réponds pas, ne l'adapte pas (« comment allez-vous » → « how are you », jamais « how can I help you »).
+        Conserve exactement le sens, le registre, les noms propres, montants, pourcentages, dates, nombres et termes techniques (wallet, Binance, staking, NFT, gas, CSV, PDF, Stripe…).
         Réponds UNIQUEMENT par la traduction, sans commentaire ni guillemets.
         """
         if !examples.isEmpty {
