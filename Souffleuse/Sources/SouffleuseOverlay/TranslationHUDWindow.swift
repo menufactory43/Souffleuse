@@ -51,54 +51,26 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
     public static let width: CGFloat = 320
 
     // MARK: - Palette, sensible à l'apparence système
-    // Clair = LE LIVRET (papier crème · encre · bordeaux).
-    // Sombre = LA SALLE DANS LA PÉNOMBRE (charbon tiède · parchemin · or).
-    private static func paper(_ dark: Bool) -> NSColor {
-        dark ? NSColor(srgbRed: 0.11, green: 0.095, blue: 0.085, alpha: 0.97)
-             : NSColor(srgbRed: 0.937, green: 0.914, blue: 0.843, alpha: 0.98)
-    }
-    private static func ink(_ dark: Bool) -> NSColor {
-        dark ? NSColor(srgbRed: 0.90, green: 0.87, blue: 0.80, alpha: 1)
-             : NSColor(srgbRed: 0.12, green: 0.10, blue: 0.085, alpha: 1)
-    }
-    /// En-tête + filets : bordeaux en clair, or doux en sombre.
-    private static func accent(_ dark: Bool) -> NSColor {
-        dark ? NSColor(srgbRed: 0.84, green: 0.70, blue: 0.44, alpha: 1)
-             : NSColor(srgbRed: 0.46, green: 0.17, blue: 0.17, alpha: 1)
-    }
-    /// Badge garde-fou C : bordeaux en clair, ambre en sombre.
-    private static func warn(_ dark: Bool) -> NSColor {
-        dark ? NSColor(srgbRed: 0.90, green: 0.71, blue: 0.36, alpha: 1)
-             : NSColor(srgbRed: 0.46, green: 0.17, blue: 0.17, alpha: 1)
-    }
-    private static func rule(_ dark: Bool) -> NSColor {
-        dark ? NSColor(srgbRed: 0.80, green: 0.66, blue: 0.40, alpha: 0.40)
-             : NSColor(srgbRed: 0.30, green: 0.24, blue: 0.20, alpha: 0.45)
-    }
-    private static func border(_ dark: Bool) -> NSColor {
-        dark ? NSColor(srgbRed: 0.80, green: 0.66, blue: 0.40, alpha: 0.40)
-             : NSColor(srgbRed: 0.46, green: 0.17, blue: 0.17, alpha: 0.38)
-    }
+    // Charte partagée des apparitions : `LivretPalette` (source de vérité unique).
+    private static func paper(_ dark: Bool) -> NSColor { LivretPalette.paper(dark) }
+    private static func ink(_ dark: Bool) -> NSColor { LivretPalette.ink(dark) }
+    private static func accent(_ dark: Bool) -> NSColor { LivretPalette.accent(dark) }
+    private static func warn(_ dark: Bool) -> NSColor { LivretPalette.warn(dark) }
+    private static func rule(_ dark: Bool) -> NSColor { LivretPalette.rule(dark) }
+    private static func border(_ dark: Bool) -> NSColor { LivretPalette.border(dark) }
 
     /// Texte brut de l'en-tête (conservé pour le reconstruire au changement
     /// d'apparence, sa couleur étant portée par la chaîne attribuée).
     private var headerRaw = ""
     /// Apparence sombre actuellement effective pour le panneau ?
-    private var isDark: Bool {
-        container.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-    }
+    private var isDark: Bool { LivretPalette.isDark(container) }
 
-    /// Serif d'affichage façon livret : Didot si présent (macOS), sinon le serif
-    /// système (New York). `italic` pour la note en marge.
+    /// Serif d'affichage façon livret (Didot, repli serif système).
     private static func didot(size: CGFloat, italic: Bool = false) -> NSFont {
-        if let d = NSFont(name: italic ? "Didot-Italic" : "Didot", size: size) { return d }
-        return serif(size: size, italic: italic)
+        LivretPalette.didot(size: size, italic: italic)
     }
     private static func serif(size: CGFloat, italic: Bool = false) -> NSFont {
-        let base = NSFont.systemFont(ofSize: size, weight: .regular)
-        var desc = base.fontDescriptor.withDesign(.serif) ?? base.fontDescriptor
-        if italic { desc = desc.withSymbolicTraits(.italic) }
-        return NSFont(descriptor: desc, size: size) ?? base
+        LivretPalette.serif(size: size, italic: italic)
     }
 
     public override init() {

@@ -59,6 +59,17 @@ private func deriveMidWordContinuation(contextBefore: String, accepted: String) 
 @MainActor
 final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
+    /// Carnet d'usage : frappes épargnées, cadence mesurée, actes — affiché au clic
+    /// sur l'icône (« mieux qu'un compteur de mots collé à l'icône »).
+    private let ledger = UsageLedger()
+    private var carnetRepliquesItem: NSMenuItem?
+    private var carnetFrappesItem: NSMenuItem?
+    private var carnetTempsItem: NSMenuItem?
+    private var carnetActesItem: NSMenuItem?
+    /// État de la mesure de cadence de frappe (croissance de texte entre deux polls).
+    private var cadenceLastLen = 0
+    private var cadenceLastBundle: String?
+    private var cadenceLastGrowthAt: Date?
     private let axClient = AXClient()
     private var overlay: OverlayWindow!
     private var presence: PresenceIndicatorWindow!
@@ -67,6 +78,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// Mini Phase 4 — moteur instruct paresseux + petit panneau de traduction.
     private let translationRuntime = TranslationRuntime()
     private let translationHUD = TranslationHUDWindow()
+    /// Le Carnet — apparition livret convoquée au clic sur l'icône (sparkline + stats).
+    private let carnet = CarnetWindow()
     private var pollTimer: Timer?
     private var onboarding: OnboardingWindow?
     private var customInstructions = CustomInstructionsWindow()
@@ -513,6 +526,18 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         )
         captureItem.target = self
         menu.addItem(captureItem)
+        menu.addItem(NSMenuItem.separator())
+        let carnetHeader = NSMenuItem(title: "Carnet de la souffleuse — aujourd'hui", action: nil, keyEquivalent: "")
+        carnetHeader.isEnabled = false
+        menu.addItem(carnetHeader)
+        let repliques = Self.carnetLine(); menu.addItem(repliques); carnetRepliquesItem = repliques
+        let frappes = Self.carnetLine(); menu.addItem(frappes); carnetFrappesItem = frappes
+        let temps = Self.carnetLine(); menu.addItem(temps); carnetTempsItem = temps
+        let actes = Self.carnetLine(); menu.addItem(actes); carnetActesItem = actes
+        let carnetOpen = NSMenuItem(title: "Ouvrir le carnet…", action: #selector(openCarnet), keyEquivalent: "")
+        carnetOpen.target = self
+        menu.addItem(carnetOpen)
+        menu.addItem(NSMenuItem.separator())
         let instructionsItem = NSMenuItem(
             title: "Instructions personnalisées…",
             action: #selector(openCustomInstructions),
@@ -532,7 +557,92 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         let quitItem = NSMenuItem(title: "Quitter", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
+        menu.delegate = self   // rafraîchit le carnet à chaque ouverture
         statusItem.menu = menu
+    }
+
+    /// Une ligne d'information non cliquable du carnet (grisée, titre posé au refresh).
+    private static func carnetLine() -> NSMenuItem {
+        let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        return item
+    }
+
+    /// Met à jour les lignes du carnet (frappes, temps, actes) à partir du ledger.
+    private func refreshCarnet() {
+        let t = ledger.today
+        carnetRepliquesItem?.title = "  \(Self.frenchInt(t.ghostsAccepted)) " +
+            Self.plural(t.ghostsAccepted, "réplique soufflée", "répliques soufflées")
+        carnetFrappesItem?.title = "  \(Self.frenchInt(t.keystrokesSaved)) " +
+            Self.plural(t.keystrokesSaved, "frappe épargnée", "frappes épargnées")
+        let suffix = ledger.cadenceCalibrated ? " (à ta cadence)" : ""
+        carnetTempsItem?.title = "  ≈ \(Self.formatDuration(ledger.estimatedSecondsSavedToday)) gagnées\(suffix)"
+        var parts: [String] = []
+        if t.translations > 0 { parts.append("\(t.translations) " + Self.plural(t.translations, "traduite", "traduites")) }
+        if t.reformulations > 0 { parts.append("\(t.reformulations) " + Self.plural(t.reformulations, "relue", "relues")) }
+        if parts.isEmpty {
+            carnetActesItem?.isHidden = true
+        } else {
+            carnetActesItem?.isHidden = false
+            carnetActesItem?.title = "  " + parts.joined(separator: " · ")
+        }
+    }
+
+    private static let frenchNumberFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.groupingSeparator = "\u{202F}"   // espace fine insécable
+        f.locale = Locale(identifier: "fr_FR")
+        return f
+    }()
+
+    private static func frenchInt(_ n: Int) -> String {
+        frenchNumberFormatter.string(from: NSNumber(value: n)) ?? "\(n)"
+    }
+
+    private static func plural(_ n: Int, _ singular: String, _ plural: String) -> String {
+        n <= 1 ? singular : plural
+    }
+
+    /// Convoque (ou congédie) le Carnet livret. Active l'app pour que la fenêtre
+    /// prenne le focus et capte Échap ; un clic en dehors la referme.
+    @objc private func openCarnet() {
+        if carnet.isVisible { carnet.hide(); return }
+        NSApp.activate(ignoringOtherApps: true)
+        carnet.show(currentCarnetData())
+    }
+
+    /// Assemble les données du carnet depuis le ledger — toute la copie française
+    /// (formats, pluriels) reste ici, source unique ; la fenêtre ne fait que rendre.
+    private func currentCarnetData() -> CarnetData {
+        let t = ledger.today
+        let repliques = "\(Self.frenchInt(t.ghostsAccepted)) "
+            + Self.plural(t.ghostsAccepted, "réplique soufflée", "répliques soufflées")
+        let frappes = "\(Self.frenchInt(t.keystrokesSaved)) "
+            + Self.plural(t.keystrokesSaved, "frappe épargnée", "frappes épargnées")
+        let suffix = ledger.cadenceCalibrated ? " · à ta cadence" : ""
+        let temps = "≈ \(Self.formatDuration(ledger.estimatedSecondsSavedToday)) gagnées\(suffix)"
+        var parts: [String] = []
+        if t.translations > 0 { parts.append("\(t.translations) " + Self.plural(t.translations, "traduite", "traduites")) }
+        if t.reformulations > 0 { parts.append("\(t.reformulations) " + Self.plural(t.reformulations, "relue", "relues")) }
+        let days = 7
+        return CarnetData(
+            repliquesLine: repliques,
+            frappesLine: frappes,
+            tempsLine: temps,
+            actesLine: parts.isEmpty ? nil : parts.joined(separator: " · "),
+            sparkline: ledger.lastDays(days).map(\.keystrokesSaved),
+            sparklineCaption: "les \(days) derniers jours")
+    }
+
+    /// Durée humaine, arrondie et conservatrice : « moins d'1 min », « 6 min »,
+    /// « 1 h 12 ». Jamais de fausse précision à la seconde.
+    private static func formatDuration(_ seconds: Double) -> String {
+        if seconds < 60 { return "moins d'1 min" }
+        let mins = Int((seconds / 60).rounded())
+        if mins < 60 { return "\(mins) min" }
+        let h = mins / 60, m = mins % 60
+        return m == 0 ? "\(h) h" : "\(h) h \(m)"
     }
 
     private func applyStatusItemIcon(capturing: Bool) {
@@ -648,6 +758,35 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         NSApp.terminate(nil)
     }
 
+    /// Mesure la cadence de frappe réelle à partir de la croissance du texte entre
+    /// deux polls (~80 ms). N'échantillonne que la frappe humaine continue : ignore
+    /// les changements de champ/app, les suppressions, les pauses (> seuil) et les
+    /// gros deltas (collage / injection d'un accept). Le résultat calibre « temps
+    /// gagné » sur l'utilisateur plutôt que sur une moyenne générique.
+    private func observeTypingCadence(text: String, bundleID: String) {
+        let len = text.count
+        defer { cadenceLastLen = len; cadenceLastBundle = bundleID }
+        guard bundleID == cadenceLastBundle else {
+            cadenceLastGrowthAt = Date()   // nouveau champ/app : (re)démarre l'horloge
+            return
+        }
+        let now = Date()
+        let delta = len - cadenceLastLen
+        guard delta > 0 else {
+            if delta < 0 { cadenceLastGrowthAt = now }   // suppression : on ne mesure pas
+            return
+        }
+        if let last = cadenceLastGrowthAt {
+            let gap = now.timeIntervalSince(last)
+            if gap > 0,
+               gap < SuggestionPolicy.Tuning.ledgerCadenceMaxGapSeconds,
+               delta <= SuggestionPolicy.Tuning.ledgerCadenceMaxCharsPerSample {
+                ledger.recordTyping(chars: delta, seconds: gap)
+            }
+        }
+        cadenceLastGrowthAt = now
+    }
+
     // MARK: - Poll loop
 
     /// Coalesces multiple "I want to re-tick now" requests within a single
@@ -735,6 +874,11 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             interceptor.setActive(false)
             return
         }
+
+        // Mesure passive de la cadence de frappe (croissance de texte entre deux
+        // polls) — alimente l'estimation « temps gagné » du carnet. Hors de tout
+        // gate de suggestion : on veut mesurer partout où l'utilisateur tape.
+        observeTypingCadence(text: text, bundleID: bundleID)
 
         // Per-app allowlist override (after blocklist, before any prediction work).
         let allowMode = store.allowlist.mode(forBundle: bundleID, windowTitle: snap.windowTitle)
@@ -1281,6 +1425,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                     // producing new words each press instead of walking the
                     // cached suggestion.
                     MainActor.assumeIsolated {
+                        self.ledger.recordAccepted(charsSaved: chunk.count - 1)
                         if isPartialContinuation {
                             self.partialAcceptedSoFar += chunk
                         } else {
@@ -1372,6 +1517,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             }
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
+                self.ledger.recordAccepted(charsSaved: suggestion.count - 1)
                 self.predictor.cancel()
                 self.lastPredictedPrefix = nil
                 self.overlay.hide()
@@ -1575,6 +1721,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            self.ledger.recordAccepted(charsSaved: suggestion.count - 1)
             self.predictor.cancel()
             self.lastPredictedPrefix = nil
             self.overlay.hide()
@@ -1634,6 +1781,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 DispatchQueue.main.async { [weak self] in self?.dismissedForText = s.text ?? "" }
             }
             Log.info(.input, "translate_commit_done")
+            self.ledger.recordTranslation()
             // Le panneau reste affiché ~6 s (réglable), en fondu — assez pour lire
             // et pour le saisir/déplacer. Le survol souris suspend le compte ; un
             // déplacement l'épingle. Toute la logique vit dans le panneau.
@@ -1688,6 +1836,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 DispatchQueue.main.async { [weak self] in self?.dismissedForText = s.text ?? "" }
             }
             Log.info(.input, "reformulate_commit_done")
+            self.ledger.recordReformulation()
             self.translationHUD.scheduleAutoHide(after: SuggestionPolicy.Tuning.translationHUDVisibleSeconds)
             self.scheduleTranslationIdleUnload()
         }
@@ -1871,5 +2020,14 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // continues past it. A word-run that IS the whole ghost ("our") just
         // completes the word and is safe to consume.
         return ModelRuntime.OutputFilter.leadingWordRun(ghost).count < ghost.count
+    }
+}
+
+extension SouffleuseAppDelegate: NSMenuDelegate {
+    /// Rafraîchit l'état des bascules ET le carnet juste avant l'ouverture du menu,
+    /// pour que les chiffres soient toujours à jour au clic.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        refreshStatusItem()
+        refreshCarnet()
     }
 }
