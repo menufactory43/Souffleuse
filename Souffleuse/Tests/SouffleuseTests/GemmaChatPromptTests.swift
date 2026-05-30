@@ -78,4 +78,42 @@ struct GemmaChatPromptTests {
         #expect(TranslationTarget.de.code == "DE")
         #expect(TranslationTarget.ja.code == "JA")
     }
+
+    // MARK: - Multi-modèles (Gemma vs Qwen ChatML)
+
+    @Test("modèle par défaut = Gemma (sortie inchangée)")
+    func defaultModelIsGemma() {
+        let withDefault = GemmaChatPrompt.translation(of: "Bonjour", into: .de)
+        let explicit = GemmaChatPrompt.translation(of: "Bonjour", into: .de, model: .gemma1b)
+        #expect(withDefault == explicit)
+    }
+
+    @Test("Qwen utilise le chat-template ChatML (system + user + assistant)")
+    func qwenChatMLTemplate() {
+        let p = GemmaChatPrompt.translation(of: "le wallet de 1 250,50 €", into: .en, model: .qwen1_5b)
+        #expect(p.hasPrefix("<|im_start|>system\n"))
+        #expect(p.hasSuffix("<|im_start|>assistant\n"))
+        #expect(p.contains("<|im_end|>\n<|im_start|>user\n"))
+        // La consigne de fidélité est dans le système ; le message dans le user.
+        #expect(p.contains("traducteur professionnel"))
+        #expect(p.contains("<|im_start|>user\nle wallet de 1 250,50 €<|im_end|>"))
+        // Aucun marqueur Gemma.
+        #expect(!p.contains("<start_of_turn>"))
+    }
+
+    @Test("cleanCompletion gère aussi le token de fin Qwen")
+    func cleanHandlesQwenStop() {
+        #expect(GemmaChatPrompt.cleanCompletion("  Hello world<|im_end|>") == "Hello world")
+        #expect(GemmaChatPrompt.cleanCompletion("Hello<|endoftext|> extra") == "Hello")
+        // Tronque à la PREMIÈRE balise rencontrée, peu importe la famille.
+        #expect(GemmaChatPrompt.cleanCompletion("A<|im_end|>B<end_of_turn>C") == "A")
+    }
+
+    @Test("chaque modèle expose son GGUF et un libellé")
+    func instructModelMetadata() {
+        #expect(InstructModel.gemma1b.ggufFilename == "gemma-3-1b-it-Q4_K_M.gguf")
+        #expect(InstructModel.qwen1_5b.ggufFilename == "qwen2.5-1.5b-instruct-q4_k_m.gguf")
+        #expect(InstructModel.allCases.count == 2)
+        #expect(!InstructModel.qwen1_5b.displayName.isEmpty)
+    }
 }

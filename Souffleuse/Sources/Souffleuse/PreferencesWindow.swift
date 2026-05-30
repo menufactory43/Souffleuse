@@ -1,6 +1,7 @@
 import AppKit
 import SouffleuseAX
 import SouffleuseContext
+import SouffleuseCore
 import SouffleuseInput
 import SouffleusePersonalization
 import SwiftUI
@@ -274,6 +275,13 @@ private struct GeneralTab: View {
                     }
                 }
                 Text("Fait défiler la langue cible (EN → ES → DE → IT → Auto) pour la conversation en cours — mémorisée par conversation. Auto suit la langue de votre interlocuteur quand la capture d'écran est active.")
+                    .font(.callout).foregroundStyle(.secondary)
+                Picker("Modèle de traduction", selection: $store.translationModel) {
+                    ForEach(InstructModel.allCases, id: \.self) { m in
+                        Text(m.displayName).tag(m)
+                    }
+                }
+                Text("Le moteur de traduction (le souffle français reste inchangé). Qwen 2.5 1.5B traduit mieux l'allemand/italien/japonais mais tient ~1 Go de RAM en plus pendant l'usage — libéré après inactivité. Le changement prend effet à la prochaine traduction.")
                     .font(.callout).foregroundStyle(.secondary)
             } header: {
                 Text("Accepter le souffle").font(.headline)

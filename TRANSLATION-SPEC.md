@@ -17,6 +17,37 @@
 
 ---
 
+## 0. État d'implémentation (2026-05-30, branche `feat/translation`)
+
+**Feature traduction : presque terminée.** Toutes les phases du plan sont livrées
+sauf le *style retrieval* (abandonné, voir §2.8). 551 tests verts, `audit.sh` vert.
+
+| Phase / section | Statut | Commit | Notes |
+|---|---|---|---|
+| P0 — gate qualité+mémoire | ✅ | `b1dbce0` | 1B-it : EN/ES bons, DE/IT fragiles, JA hors V1 |
+| P1 — moteur instruct paresseux + chat-template | ✅ | `241953b` | |
+| P2 — touche commit ⌘↩ configurable + remplacement AX | ✅ | `5f2de3e` | chemin Electron/AZERTY robuste |
+| P3a — HUDAnchorStore (position par app) | ✅ | `a639768` | |
+| mini P4 — vraie traduction visible au commit | ✅ | `38404b7` | |
+| P5 — langue cible AUTO + **touche de cycle** | ✅ | `d7e68de` | **décision : cycle-key ⌘⇧→, PAS chip cliquable** (cf. §2.7) |
+| §2.8 garde-fou C — survie termes/chiffres + badge | ✅ | `49d0ce6` | attrape la corruption « 1 250,50 € → 250,50 € » |
+| §2.8 style retrieval | ❌ **abandonné** | — | le corpus n'a **pas de paires FR→cible** ; injecter le style FR ne transfère pas vers la langue cible (cf. §2.8) |
+| §2.9 — priorité GPU ghost + anti-troncature | ✅ | `1b464aa` | GpuGate, threads réduits, contexte 2048, maxTokens adaptatif |
+| Phase 7 — déchargement mémoire à l'idle | ✅ | `c519c4f` | instruct libéré après 180 s sans traduction |
+| §3b — HUD repositionnable + persistant par app | ✅ | `d5ddfe3` | active le HUDAnchorStore, drag + `isPinnedByUser` |
+| **Multi-modèles de traduction** (hors plan initial) | ✅ | (en cours) | Gemma 3 1B **ou** Qwen2.5-1.5B-Instruct (meilleur DE/IT/JA), sélectionnable en Préférences ; chat-template par famille ; déchargé à l'idle donc surcoût RAM transitoire |
+
+**Décisions actées vs spec d'origine :**
+- L'override de cible cible se fait par **touche de cycle** (⌘⇧→ : EN→ES→DE→IT→AUTO,
+  collant par conversation), pas par un chip cliquable — fidèle au « moins d'UI possible ».
+- Le garde-fou C **signale** (badge ambre) mais ne **corrige** pas ; le repair
+  automatique n'a pas été retenu (le 1B-it ne se rattrape pas de façon fiable).
+- Pour viser une meilleure qualité, le levier retenu est le **changement de modèle**
+  (Qwen2.5-1.5B) plutôt que le few-shot, justement parce que le déchargement-idle
+  (Phase 7) rend le surcoût RAM acceptable.
+
+---
+
 ## 1. Design verrouillé (résumé exécutif)
 
 Décisions déjà prises — **ne pas redébattre**, la spec en évalue le COMMENT.
@@ -399,7 +430,11 @@ demander la langue via un mini-prompt au moteur instruct si NLLanguageRecognizer
   liste) et vérifie leur survie dans la cible. Retourne `[String]` manquants →
   badge HUD. **Tous les seuils** (liste termes, sensibilité) DOIVENT vivre dans
   `SuggestionPolicy+Tuning.swift` (Pitfall 6 : aucun littéral de seuil ailleurs).
-- **Style (optionnel)** : `SimilarHistoryRetrieval.rank(entries:.prose, userTail: texteFR, limit:)`
+- **Style (optionnel) — ❌ ABANDONNÉ (voir §0).** Le corpus ne contient que de la
+  prose FR (ce que Gabriel écrit), **pas de paires FR→cible** : on ne peut injecter
+  qu'un style français qui ne transfère pas vers la langue de sortie. Gain ~nul,
+  non implémenté. Le mécanisme C (ci-dessus) est, lui, livré. ~~Description d'origine :~~
+  ~~`SimilarHistoryRetrieval.rank(entries:.prose, userTail: texteFR, limit:)`~~
   fournit des exemplars de **registre** (ton de Gabriel) injectés dans le prompt
   instruct via `GemmaChatPrompt` (format labellisé `FR: …\nXX: …` autorisé car
   modèle INSTRUCT, contrairement au base). **Pas de migration DB requise** pour

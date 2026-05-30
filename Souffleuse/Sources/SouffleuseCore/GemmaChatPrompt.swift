@@ -115,6 +115,31 @@ public enum TargetSelection: Sendable, Equatable, Codable {
 /// Validé par le gate Phase 0 : TTFT 71 ms, 77 tok/s. Le texte FR est placé
 /// EN DERNIER pour que le préfixe stable (consigne + exemples par langue) soit
 /// réutilisé par le KV-cache LCP de llama.cpp entre deux traductions.
+/// Modèle instruct utilisé pour la TRADUCTION. Chaque modèle a son GGUF et son
+/// chat-template — familles INCOMPATIBLES (Gemma `<start_of_turn>` vs Qwen ChatML
+/// `<|im_start|>`), d'où l'aiguillage dans `GemmaChatPrompt.translation`. Déchargé
+/// à l'idle (Phase 7) → le surcoût RAM du plus gros n'est tenu que pendant l'usage.
+public enum InstructModel: String, Sendable, CaseIterable, Codable {
+    case gemma1b
+    case qwen1_5b
+
+    /// Nom de fichier GGUF attendu dans `~/Library/Application Support/Souffleuse/Models/`.
+    public var ggufFilename: String {
+        switch self {
+        case .gemma1b: return "gemma-3-1b-it-Q4_K_M.gguf"
+        case .qwen1_5b: return "qwen2.5-1.5b-instruct-q4_k_m.gguf"
+        }
+    }
+
+    /// Libellé Préférences.
+    public var displayName: String {
+        switch self {
+        case .gemma1b: return "Gemma 3 1B — léger, rapide"
+        case .qwen1_5b: return "Qwen2.5 1.5B — multilingue (DE/IT/JA)"
+        }
+    }
+}
+
 public enum GemmaChatPrompt {
     /// Marqueurs de tour (chat-template Gemma). Le BOS est ajouté par le
     /// tokenizer (`addSpecial: true`), donc PAS inclus ici.
@@ -122,15 +147,34 @@ public enum GemmaChatPrompt {
     static let turnClose = "<end_of_turn>\n"
     static let modelOpen = "<start_of_turn>model\n"
 
-    /// Assemble le prompt de traduction. `examples` (paires FR→cible de style,
-    /// optionnelles, issues du corpus) sont injectées AVANT le message pour
-    /// biaiser le ton — placées avant le message pour que celui-ci reste en
-    /// dernier (réutilisation KV-LCP).
+    /// Assemble le prompt de traduction selon le chat-template du `model`.
+    /// `examples` (paires FR→cible de style, optionnelles) sont injectées dans la
+    /// consigne, AVANT le message, pour que celui-ci reste en dernier (KV-LCP).
     public static func translation(
         of frenchText: String,
         into target: TranslationTarget,
-        examples: [String] = []
+        examples: [String] = [],
+        model: InstructModel = .gemma1b
     ) -> String {
+        let instruction = translationInstruction(target: target, examples: examples)
+        switch model {
+        case .gemma1b:
+            // Gemma-3 : pas de rôle système séparé → consigne + message dans le
+            // tour user, message EN DERNIER (réutilisation KV-cache LCP).
+            let user = instruction + "\n\nMessage : \(frenchText)"
+            return userOpen + user + turnClose + modelOpen
+        case .qwen1_5b:
+            // Qwen2.5 : ChatML, consigne en SYSTÈME (préfixe stable → KV-LCP),
+            // message en user.
+            return "<|im_start|>system\n" + instruction + "<|im_end|>\n"
+                + "<|im_start|>user\n" + frenchText + "<|im_end|>\n"
+                + "<|im_start|>assistant\n"
+        }
+    }
+
+    /// Consigne de traduction fidèle (sans le message). Partagée par les deux
+    /// familles de template.
+    static func translationInstruction(target: TranslationTarget, examples: [String]) -> String {
         var instruction = """
         Tu es un traducteur professionnel. Traduis FIDÈLEMENT le message ci-dessous du français vers \(target.towardName) — ne le reformule pas, n'y réponds pas, ne l'adapte pas (« comment allez-vous » → « how are you », jamais « how can I help you »).
         Conserve exactement le sens, le registre, les noms propres, montants, pourcentages, dates, nombres et termes techniques (wallet, Binance, staking, NFT, gas, CSV, PDF, Stripe…).
@@ -139,17 +183,17 @@ public enum GemmaChatPrompt {
         if !examples.isEmpty {
             instruction += "\n\nExemples de mon style :\n" + examples.joined(separator: "\n")
         }
-        // Message EN DERNIER → préfixe stable (réutilisation KV-cache LCP).
-        instruction += "\n\nMessage : \(frenchText)"
-        return userOpen + instruction + turnClose + modelOpen
+        return instruction
     }
 
-    /// Retire la queue `<end_of_turn>` + les blancs autour d'une complétion
-    /// streamée. Selon `maxTokens`, le moteur s'arrête ou non sur l'EOS ; ceci
-    /// normalise la string finale pour l'affichage / le commit.
+    /// Tronque à la PREMIÈRE balise de fin de tour rencontrée (Gemma
+    /// `<end_of_turn>`, Qwen ChatML `<|im_end|>` / `<|endoftext|>`) puis retire les
+    /// blancs — robuste aux deux familles, que le moteur s'arrête sur l'EOS ou non.
     public static func cleanCompletion(_ raw: String) -> String {
-        var t = raw
-        if let r = t.range(of: "<end_of_turn>") { t = String(t[..<r.lowerBound]) }
-        return t.trimmingCharacters(in: .whitespacesAndNewlines)
+        var cut = raw.endIndex
+        for stop in ["<end_of_turn>", "<|im_end|>", "<|endoftext|>"] {
+            if let r = raw.range(of: stop), r.lowerBound < cut { cut = r.lowerBound }
+        }
+        return String(raw[..<cut]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
