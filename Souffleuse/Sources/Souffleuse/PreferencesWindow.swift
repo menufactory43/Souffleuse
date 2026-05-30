@@ -283,6 +283,14 @@ private struct GeneralTab: View {
                 }
                 Text("Le moteur de traduction (le souffle français reste inchangé). Qwen 2.5 1.5B traduit mieux l'allemand/italien/japonais mais tient ~1 Go de RAM en plus pendant l'usage — libéré après inactivité. Le changement prend effet à la prochaine traduction.")
                     .font(.callout).foregroundStyle(.secondary)
+                ForEach(InstructModel.allCases, id: \.self) { m in
+                    HStack(spacing: 8) {
+                        Text(m.displayName).font(.callout)
+                        Spacer()
+                        modelDownloadStatus(m)
+                    }
+                }
+                .onAppear { store.modelDownloads.refresh() }
             } header: {
                 Text("Accepter le souffle").font(.headline)
             }
@@ -343,6 +351,31 @@ private struct GeneralTab: View {
     private func openAccessibilitySettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(url)
+        }
+    }
+
+    /// État de téléchargement d'un modèle de traduction : coche si installé,
+    /// progression pendant le téléchargement, bouton « Télécharger » si absent.
+    @ViewBuilder
+    private func modelDownloadStatus(_ m: InstructModel) -> some View {
+        switch store.modelDownloads.status[m] ?? .absent {
+        case .ready:
+            Label("Installé", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green).font(.callout)
+        case .downloading(let p):
+            HStack(spacing: 6) {
+                ProgressView(value: p).frame(width: 90)
+                Text("\(Int(p * 100)) %").font(.caption).monospacedDigit()
+            }
+        case .absent:
+            Button("Télécharger (\(m.approxSizeMB) Mo)") { store.modelDownloads.download(m) }
+                .controlSize(.small)
+        case .failed:
+            HStack(spacing: 6) {
+                Text("échec").foregroundStyle(.red).font(.caption)
+                Button("Réessayer") { store.modelDownloads.download(m) }
+                    .controlSize(.small)
+            }
         }
     }
 }
