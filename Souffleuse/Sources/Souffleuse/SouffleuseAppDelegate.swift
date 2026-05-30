@@ -213,6 +213,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// Generation token for the transient "target changed" flash in the HUD, so a
     /// flash's delayed auto-hide never hides a real translation that started after.
     private var hudFlashToken = 0
+    /// Pending idle-unload of the lazy instruct (translation) engine — cancelled
+    /// and rescheduled on each commit so memory is freed only after real idle.
+    private var translationIdleUnloadTask: Task<Void, Never>?
     /// Snapshot of the last applied OCR language list; we reapply when the
     /// user toggles a language in Preferences.
     private var lastOCRLangsApplied: [String] = []
@@ -1565,6 +1568,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     private func runTranslationCommit(frenchText: String, fieldRect: CGRect?, target: TranslationTarget) {
         let text = frenchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        // On va réutiliser le moteur instruct : annule un déchargement-idle en
+        // attente pour ne pas le libérer en plein usage (Phase 7).
+        translationIdleUnloadTask?.cancel()
         // Invalide tout flash de cible en attente : le panneau appartient
         // désormais à la traduction, pas au flash.
         hudFlashToken &+= 1
@@ -1608,6 +1614,26 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             Log.info(.input, "translate_commit_done")
             try? await Task.sleep(nanoseconds: 2_200_000_000)
             self.translationHUD.hide()
+            // Programme le déchargement mémoire du moteur instruct après une
+            // période d'inactivité (Phase 7) : en régime « pas de traduction » la
+            // RAM du 2e moteur retombe à zéro sur la machine 8 Go.
+            self.scheduleTranslationIdleUnload()
+        }
+    }
+
+    /// (Re)programme la libération du moteur instruct après
+    /// `translationIdleUnloadSeconds` sans nouvelle traduction. Chaque commit
+    /// annule le précédent timer ; le prochain `translate` rechargera
+    /// paresseusement (~1-2 s) si besoin.
+    @MainActor
+    private func scheduleTranslationIdleUnload() {
+        translationIdleUnloadTask?.cancel()
+        let seconds = SuggestionPolicy.Tuning.translationIdleUnloadSeconds
+        translationIdleUnloadTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(seconds) * 1_000_000_000)
+            guard !Task.isCancelled, let self else { return }
+            await self.translationRuntime.unload()
+            Log.info(.predictor, "translate_idle_unload")
         }
     }
 
