@@ -13,7 +13,12 @@ public final class TranslationHUDWindow {
     private let container: NSView
     private let header: NSTextField
     private let body: NSTextField
+    /// Rangée d'avertissement ambre (garde-fou C : tokens durs disparus). Masquée
+    /// quand vide.
+    private let badge: NSTextField
     private var anchorRectQuartz: CGRect = .zero
+    private var bodyText: String = ""
+    private var badgeText: String = ""
 
     public static let width: CGFloat = 320
 
@@ -50,48 +55,76 @@ public final class TranslationHUDWindow {
         body.maximumNumberOfLines = 0
         body.lineBreakMode = .byWordWrapping
 
+        badge = NSTextField(wrappingLabelWithString: "")
+        badge.font = .systemFont(ofSize: 11, weight: .medium)
+        badge.textColor = NSColor(srgbRed: 0.91, green: 0.69, blue: 0.27, alpha: 1)
+        badge.maximumNumberOfLines = 0
+        badge.lineBreakMode = .byWordWrapping
+        badge.isHidden = true
+
         container.addSubview(header)
         container.addSubview(body)
+        container.addSubview(badge)
         panel.contentView = container
     }
 
     /// Affiche le panneau ancré à droite du cadre du champ (`fieldRectQuartz`,
     /// coordonnées Quartz top-left).
-    public func show(at fieldRectQuartz: CGRect, header headerText: String, body bodyText: String) {
+    public func show(at fieldRectQuartz: CGRect, header headerText: String, body bodyTextValue: String) {
         anchorRectQuartz = fieldRectQuartz
         header.stringValue = headerText
-        relayout(bodyText)
+        bodyText = bodyTextValue
+        badgeText = ""
+        relayout()
         if !panel.isVisible { panel.orderFrontRegardless() }
     }
 
     /// Met à jour le texte de traduction (appelé pendant le streaming).
     public func update(_ text: String) {
-        relayout(text)
+        bodyText = text
+        relayout()
+    }
+
+    /// Pose (ou efface avec `nil`) la rangée d'avertissement ambre du garde-fou C.
+    public func setBadge(_ text: String?) {
+        badgeText = text ?? ""
+        relayout()
     }
 
     public func hide() {
         if panel.isVisible { panel.orderOut(nil) }
     }
 
-    private func relayout(_ bodyText: String) {
+    private func relayout() {
         body.stringValue = bodyText.isEmpty ? "…" : bodyText
+        badge.stringValue = badgeText
+        badge.isHidden = badgeText.isEmpty
         let pad: CGFloat = 12
         let gap: CGFloat = 6
         let headerH: CGFloat = 14
         let bodyWidth = Self.width - pad * 2
 
-        let attrs: [NSAttributedString.Key: Any] = [.font: body.font as Any]
-        let bounding = (body.stringValue as NSString).boundingRect(
-            with: NSSize(width: bodyWidth, height: .greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: attrs
-        )
-        let bodyH = max(18, ceil(bounding.height))
-        let total = pad + headerH + gap + bodyH + pad
+        func textHeight(_ s: String, font: NSFont?, minH: CGFloat) -> CGFloat {
+            guard !s.isEmpty else { return 0 }
+            let attrs: [NSAttributedString.Key: Any] = [.font: font as Any]
+            let bounding = (s as NSString).boundingRect(
+                with: NSSize(width: bodyWidth, height: .greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin, .usesFontLeading],
+                attributes: attrs
+            )
+            return max(minH, ceil(bounding.height))
+        }
+
+        let bodyH = textHeight(body.stringValue, font: body.font, minH: 18)
+        let badgeH = badgeText.isEmpty ? 0 : textHeight(badgeText, font: badge.font, minH: 15)
+        let badgeBlock = badgeText.isEmpty ? 0 : gap + badgeH
+        let total = pad + headerH + gap + bodyH + badgeBlock + pad
 
         container.frame = NSRect(x: 0, y: 0, width: Self.width, height: total)
         header.frame = NSRect(x: pad, y: total - pad - headerH, width: bodyWidth, height: headerH)
-        body.frame = NSRect(x: pad, y: pad, width: bodyWidth, height: bodyH)
+        // Le badge occupe le bas (y = pad) ; le corps est posé au-dessus.
+        badge.frame = NSRect(x: pad, y: pad, width: bodyWidth, height: badgeH)
+        body.frame = NSRect(x: pad, y: pad + badgeBlock, width: bodyWidth, height: bodyH)
 
         // Ancré au bord GAUCHE du champ, juste AU-DESSUS de son bord haut → bien
         // visible près du composer. Le bas du panneau est fixe (juste au-dessus du
