@@ -342,7 +342,14 @@ final class PredictorViewModel {
             historySnapshot: historySnapshot,
             wordCompleter: wordCompleter
         )
-        let instantGhost: String = routeResult?.text ?? ""
+        // `singleLine` here is the single chokepoint for the instant path:
+        // corpus / `.history` entries captured from prose can carry a trailing
+        // "\n" (e.g. "achète du Bitcoin.\n"). Sanitising at the source means
+        // every downstream use — the stability comparison below, the displayed
+        // `suggestion`, and the drop-guard fallback in the LLM stream — sees a
+        // clean single line, so the ghost never floats above the caret and a
+        // Tab-accept never injects a line break.
+        let instantGhost: String = ModelRuntime.OutputFilter.singleLine(routeResult?.text ?? "")
         let instantSource: SuggestionSource = routeResult?.source ?? .none
         if !instantGhost.isEmpty, let route = routeResult {
             // Narrow stability gate : only block when this predict and the
@@ -391,7 +398,8 @@ final class PredictorViewModel {
                 let capped = ModelRuntime.OutputFilter.capToWords(cached, max: maxWords)
                 let score = SuggestionPolicy.score(source: .cache, ghost: capped, userTail: userTail)
                 if score.value >= SuggestionPolicy.Tuning.cacheFloor {
-                    suggestion = ModelRuntime.OutputFilter.normalizeFrenchTypography(capped)
+                    suggestion = ModelRuntime.OutputFilter.normalizeFrenchTypography(
+                        ModelRuntime.OutputFilter.singleLine(capped))
                     predictedForPrefix = forPrefix
                     suggestionSource = .cache
                     planner.cancel()
@@ -430,7 +438,7 @@ final class PredictorViewModel {
                 let score = SuggestionPolicy.score(source: .undoCache, ghost: capped, userTail: userTail)
                 if score.value >= SuggestionPolicy.Tuning.undoCacheFloor {
                     planner.cancel()
-                    suggestion = capped
+                    suggestion = ModelRuntime.OutputFilter.singleLine(capped)
                     predictedForPrefix = forPrefix
                     suggestionSource = .undoCache
                     Log.info(.predictor, "cache_undo_hit", count: Int(score.value * 100))
