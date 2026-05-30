@@ -348,6 +348,69 @@ public final class AXClient: @unchecked Sendable {
         return injectViaCGEvent(text)
     }
 
+    /// Replace the trailing `deleteChars` characters with `text`, SAFE to call
+    /// while the user still physically holds the commit modifier (⌘). Used by the
+    /// translation commit.
+    ///
+    /// Two hazards this avoids vs the naive paths:
+    /// 1. **Held modifier contamination** — `replaceTrailing`/`injectViaCGEvent`
+    ///    post events whose flags reflect the hardware state (`.hidSystemState`),
+    ///    so a held ⌘ turns each Backspace into ⌘-Backspace (delete-line) and the
+    ///    Unicode insert into a no-op ⌘-shortcut. Here every event's `flags` is
+    ///    EXPLICITLY cleared and the source is `.privateState`.
+    /// 2. **Layout-dependent ⌘-shortcuts** — we never synthesize ⌘A/⌘V: on AZERTY
+    ///    `virtualKey 0` is 'Q', so ⌘+virtualKey0 = ⌘Q would QUIT the host app.
+    ///    Backspace (keyCode 51) and `keyboardSetUnicodeString` are
+    ///    layout-independent.
+    /// Refuses secure fields.
+    @discardableResult
+    public func replaceForCommit(deleteChars: Int, with text: String) -> Bool {
+        queue.sync {
+            // Secure-field guard (mirrors inject()).
+            if let appEl = focusedAppElement() {
+                var focusedRef: AnyObject?
+                if AXUIElementCopyAttributeValue(appEl, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
+                   let focused = focusedRef {
+                    let element = focused as! AXUIElement
+                    if copyStringAttr(element, kAXSubroleAttribute) == "AXSecureTextField" {
+                        return false
+                    }
+                }
+            }
+            // Private source + cleared flags → the physically-held ⌘ never bleeds
+            // into our synthetic Backspace / insert events.
+            let source = CGEventSource(stateID: .privateState)
+            let noFlags = CGEventFlags(rawValue: 0)
+            usleep(5_000)
+            for _ in 0..<max(0, deleteChars) {
+                guard let down = CGEvent(keyboardEventSource: source, virtualKey: 51, keyDown: true),
+                      let up = CGEvent(keyboardEventSource: source, virtualKey: 51, keyDown: false) else {
+                    return false
+                }
+                down.flags = noFlags
+                up.flags = noFlags
+                down.post(tap: .cghidEventTap)
+                up.post(tap: .cghidEventTap)
+                usleep(1_500)
+            }
+            usleep(5_000)
+            let utf16 = Array(text.utf16)
+            guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
+                  let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else {
+                return false
+            }
+            down.flags = noFlags
+            up.flags = noFlags
+            utf16.withUnsafeBufferPointer { buf in
+                down.keyboardSetUnicodeString(stringLength: buf.count, unicodeString: buf.baseAddress)
+                up.keyboardSetUnicodeString(stringLength: buf.count, unicodeString: buf.baseAddress)
+            }
+            down.post(tap: .cghidEventTap)
+            up.post(tap: .cghidEventTap)
+            return true
+        }
+    }
+
     private func injectViaCGEvent(_ text: String) -> Bool {
         let source = CGEventSource(stateID: .hidSystemState)
         let utf16 = Array(text.utf16)
