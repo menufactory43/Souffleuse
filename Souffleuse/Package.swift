@@ -19,6 +19,7 @@ let package = Package(
         .executable(name: "SouffleuseContextProbe", targets: ["SouffleuseContextProbe"]),
         .executable(name: "SouffleuseReplay", targets: ["SouffleuseReplay"]),
         .executable(name: "SouffleuseCorpusSeed", targets: ["SouffleuseCorpusSeed"]),
+        .executable(name: "SouffleuseTranslateBench", targets: ["SouffleuseTranslateBench"]),
         .library(name: "SouffleuseAX", targets: ["SouffleuseAX"]),
         .library(name: "SouffleuseCore", targets: ["SouffleuseCore"]),
         .library(name: "SouffleuseOverlay", targets: ["SouffleuseOverlay"]),
@@ -225,6 +226,14 @@ let package = Package(
                 "SouffleusePersonalization",
                 "SouffleuseLog",
             ]
+        ),
+        // Phase-0 gate bench for the translation HUD feature. Dev-only,
+        // print()-heavy, NOT in audit.sh SHIPPING_DIRS. Measures gemma-3-1b-it
+        // translation quality + the memory cost of running base + instruct
+        // engines side by side on this 8 GB machine.
+        .executableTarget(
+            name: "SouffleuseTranslateBench",
+            dependencies: ["SouffleuseLlama"]
         ),
         .testTarget(
             name: "SouffleuseTests",
