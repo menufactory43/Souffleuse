@@ -1,31 +1,15 @@
 import AppKit
 import Foundation
 
-/// Vue de fond du panneau : suit le survol souris (pour suspendre l'auto-masquage
-/// et permettre de saisir le panneau) et affiche un curseur « main » d'affordance
-/// de déplacement.
+/// Vue de fond du panneau. Curseur « main » d'affordance de déplacement. Le
+/// survol n'est PAS suivi via `NSTrackingArea` (peu fiable sur un panneau
+/// non-activating de niveau status-bar — il émet des enter/exit parasites quand
+/// la géométrie change pendant le streaming) : l'auto-masquage SONDE plutôt la
+/// position réelle de la souris à l'expiration (cf. `scheduleAutoHide`).
 private final class HoverView: NSView {
-    var onHover: ((Bool) -> Void)?
-    private var tracking: NSTrackingArea?
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let t = tracking { removeTrackingArea(t) }
-        let t = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
-            owner: self, userInfo: nil)
-        addTrackingArea(t)
-        tracking = t
-    }
-
     override func resetCursorRects() {
-        // Curseur « main » : signale, sobrement, que la réplique est déplaçable.
         addCursorRect(bounds, cursor: .openHand)
     }
-
-    override func mouseEntered(with event: NSEvent) { onHover?(true) }
-    override func mouseExited(with event: NSEvent) { onHover?(false) }
 }
 
 /// Panneau flottant de traduction — « la réplique soufflée ». Pensé dans l'esprit
@@ -59,15 +43,13 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
     private var programmaticMove = false
     public var onMoved: (@MainActor (String?, CGSize) -> Void)?
 
-    /// Tâche d'auto-masquage en attente (annulée au survol / au prochain affichage).
+    /// Tâche d'auto-masquage en attente (annulée au prochain affichage).
     private var autoHideTask: Task<Void, Never>?
-    /// Souris actuellement sur le panneau ?
-    private var hovering = false
     /// Génération de fondu-sortie : un `show` ou un nouveau `hide` l'incrémente
     /// pour invalider un `orderOut` différé encore en vol.
     private var hideGeneration = 0
-    /// Délai d'auto-masquage après que la souris a quitté le panneau.
-    private static let hoverExitHideSeconds: Double = 1.6
+    /// Intervalle de re-sondage tant que la souris reste sur le panneau.
+    private static let hoverRecheckSeconds: Double = 1.0
 
     public static let width: CGFloat = 320
 
@@ -140,7 +122,6 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
         panel.contentView = container
         super.init()
         panel.delegate = self
-        container.onHover = { [weak self] inside in self?.handleHover(inside) }
     }
 
     // MARK: - API
@@ -186,16 +167,29 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
         relayout()
     }
 
-    /// Programme l'auto-masquage en fondu après `seconds`, sauf si la souris
-    /// survole le panneau ou s'il a été épinglé par un déplacement.
+    /// Programme l'auto-masquage en fondu après `seconds`. À l'expiration, si la
+    /// souris est SUR le panneau (sondage direct de sa position — robuste, sans
+    /// tracking area) ou s'il a été épinglé par un déplacement, on repousse au
+    /// lieu de masquer : on peut lire / saisir / déplacer aussi longtemps qu'on
+    /// le survole.
     public func scheduleAutoHide(after seconds: Double) {
         autoHideTask?.cancel()
         autoHideTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
             guard !Task.isCancelled, let self else { return }
-            if self.hovering || self.isPinnedByUser { return }
+            if self.isPinnedByUser { return }
+            if self.mouseIsOverPanel() {
+                self.scheduleAutoHide(after: Self.hoverRecheckSeconds)
+                return
+            }
             self.hide()
         }
+    }
+
+    /// La souris est-elle actuellement au-dessus du panneau ? `NSEvent.mouseLocation`
+    /// et `panel.frame` sont tous deux en coordonnées écran AppKit (bas-gauche).
+    private func mouseIsOverPanel() -> Bool {
+        panel.isVisible && panel.frame.contains(NSEvent.mouseLocation)
     }
 
     public func hide() {
@@ -215,14 +209,6 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
         }
     }
 
-    private func handleHover(_ inside: Bool) {
-        hovering = inside
-        if inside {
-            autoHideTask?.cancel()       // on garde le panneau tant qu'on le survole
-        } else if !isPinnedByUser {
-            scheduleAutoHide(after: Self.hoverExitHideSeconds)
-        }
-    }
 
     private func applyHeader(_ s: String) {
         // Façon « programme de théâtre » : capitales, légèrement espacées.
