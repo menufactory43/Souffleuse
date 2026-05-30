@@ -12,55 +12,52 @@ private final class HoverView: NSView {
     }
 }
 
-/// Panneau flottant de traduction — « la réplique soufflée ». Pensé dans l'esprit
-/// *souffleuse de théâtre* : salle dans la pénombre (charbon chaud), filet doré
-/// façon programme, réplique en **serif** sous une lumière de scène, apparition /
-/// disparition en **fondu** (fluide). Reste affiché tant que la souris le survole
-/// (on peut le lire, le saisir, le déplacer) ; position mémorisée par app (§3b).
-///
-/// `NSPanel` borderless non-activating, niveau status-bar, toutes les Spaces.
+/// Panneau flottant de traduction — « la réplique soufflée ». Habillé comme le
+/// livret de Souffleuse : papier crème, encre noire en **serif**, accent
+/// **bordeaux**, en-tête en petites capitales espacées entre deux filets (motif
+/// « programme de théâtre »). Apparition / disparition en **fondu**. Reste
+/// affiché tant que la souris le survole ; position mémorisée par app (§3b).
 @MainActor
 public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
     private let panel: NSPanel
     private let container: HoverView
     private let header: NSTextField
-    private let rule: NSView
+    private let ruleLeft: NSView
+    private let ruleRight: NSView
     private let body: NSTextField
-    /// Rangée d'avertissement ambre (garde-fou C : tokens durs disparus). Masquée
-    /// quand vide.
+    /// Rangée d'avertissement (garde-fou C : tokens durs disparus). Masquée si vide.
     private let badge: NSTextField
     private var anchorRectQuartz: CGRect = .zero
     private var bodyText: String = ""
     private var badgeText: String = ""
-    /// Décalage (points écran AppKit) appliqué à la position par défaut, mémorisé
-    /// par app (§3b). `.zero` = position par défaut (bord gauche, au-dessus).
     private var savedOffset: CGSize = .zero
     private var currentBundleID: String?
     private var defaultOriginAppKit: CGPoint = .zero
-    /// Vrai dès que l'utilisateur a fait glisser le panneau pendant cet affichage
-    /// → on cesse de l'auto-masquer.
+    /// Vrai dès que l'utilisateur a fait glisser le panneau pendant cet affichage.
     public private(set) var isPinnedByUser = false
     private var programmaticMove = false
     public var onMoved: (@MainActor (String?, CGSize) -> Void)?
 
-    /// Tâche d'auto-masquage en attente (annulée au prochain affichage).
     private var autoHideTask: Task<Void, Never>?
-    /// Génération de fondu-sortie : un `show` ou un nouveau `hide` l'incrémente
-    /// pour invalider un `orderOut` différé encore en vol.
     private var hideGeneration = 0
     /// Intervalle de re-sondage tant que la souris reste sur le panneau.
     private static let hoverRecheckSeconds: Double = 1.0
 
     public static let width: CGFloat = 320
 
-    // MARK: - Palette « théâtre »
-    private static let bgColor = NSColor(srgbRed: 0.105, green: 0.088, blue: 0.078, alpha: 0.97)
-    private static let goldBorder = NSColor(srgbRed: 0.80, green: 0.66, blue: 0.40, alpha: 0.55)
-    private static let goldHeader = NSColor(srgbRed: 0.86, green: 0.73, blue: 0.47, alpha: 1)
-    private static let goldRule = NSColor(srgbRed: 0.80, green: 0.66, blue: 0.40, alpha: 0.32)
-    private static let parchment = NSColor(srgbRed: 0.93, green: 0.90, blue: 0.83, alpha: 1)
-    private static let amber = NSColor(srgbRed: 0.90, green: 0.71, blue: 0.36, alpha: 1)
+    // MARK: - Palette « livret » (papier crème · encre · bordeaux)
+    private static let paper = NSColor(srgbRed: 0.937, green: 0.914, blue: 0.843, alpha: 0.98)
+    private static let ink = NSColor(srgbRed: 0.12, green: 0.10, blue: 0.085, alpha: 1)
+    private static let burgundy = NSColor(srgbRed: 0.46, green: 0.17, blue: 0.17, alpha: 1)
+    private static let ruleColor = NSColor(srgbRed: 0.30, green: 0.24, blue: 0.20, alpha: 0.45)
+    private static let border = NSColor(srgbRed: 0.46, green: 0.17, blue: 0.17, alpha: 0.38)
 
+    /// Serif d'affichage façon livret : Didot si présent (macOS), sinon le serif
+    /// système (New York). `italic` pour la note en marge.
+    private static func didot(size: CGFloat, italic: Bool = false) -> NSFont {
+        if let d = NSFont(name: italic ? "Didot-Italic" : "Didot", size: size) { return d }
+        return serif(size: size, italic: italic)
+    }
     private static func serif(size: CGFloat, italic: Bool = false) -> NSFont {
         let base = NSFont.systemFont(ofSize: size, weight: .regular)
         var desc = base.fontDescriptor.withDesign(.serif) ?? base.fontDescriptor
@@ -82,41 +79,40 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = true
-        // Reçoit la souris : déplaçable (tiré par son fond) + survol suivi. Non-
-        // activating → déplacer ne vole pas le focus à l'app hôte.
         panel.ignoresMouseEvents = false
         panel.isMovableByWindowBackground = true
 
         container = HoverView(frame: NSRect(x: 0, y: 0, width: Self.width, height: 80))
         container.wantsLayer = true
-        container.layer?.backgroundColor = Self.bgColor.cgColor
-        container.layer?.cornerRadius = 14
+        container.layer?.backgroundColor = Self.paper.cgColor
+        container.layer?.cornerRadius = 6
         container.layer?.borderWidth = 1
-        container.layer?.borderColor = Self.goldBorder.cgColor
+        container.layer?.borderColor = Self.border.cgColor
 
         header = NSTextField(labelWithString: "")
-        header.font = .systemFont(ofSize: 10, weight: .semibold)
-        header.textColor = Self.goldHeader
+        header.alignment = .center
 
-        rule = NSView()
-        rule.wantsLayer = true
-        rule.layer?.backgroundColor = Self.goldRule.cgColor
+        ruleLeft = NSView();  ruleLeft.wantsLayer = true;  ruleLeft.layer?.backgroundColor = Self.ruleColor.cgColor
+        ruleRight = NSView(); ruleRight.wantsLayer = true; ruleRight.layer?.backgroundColor = Self.ruleColor.cgColor
 
         body = NSTextField(wrappingLabelWithString: "")
         body.font = Self.serif(size: 15)
-        body.textColor = Self.parchment
+        body.textColor = Self.ink
+        body.alignment = .center
         body.maximumNumberOfLines = 0
         body.lineBreakMode = .byWordWrapping
 
         badge = NSTextField(wrappingLabelWithString: "")
         badge.font = Self.serif(size: 11, italic: true)
-        badge.textColor = Self.amber
+        badge.textColor = Self.burgundy
+        badge.alignment = .center
         badge.maximumNumberOfLines = 0
         badge.lineBreakMode = .byWordWrapping
         badge.isHidden = true
 
+        container.addSubview(ruleLeft)
+        container.addSubview(ruleRight)
         container.addSubview(header)
-        container.addSubview(rule)
         container.addSubview(body)
         container.addSubview(badge)
         panel.contentView = container
@@ -133,7 +129,7 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
         savedOffset: CGSize = .zero,
         bundleID: String? = nil
     ) {
-        hideGeneration &+= 1            // annule un fondu-sortie en attente
+        hideGeneration &+= 1
         autoHideTask?.cancel()
         anchorRectQuartz = fieldRectQuartz
         currentBundleID = bundleID
@@ -151,27 +147,23 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
                 panel.animator().alphaValue = 1
             }
         } else {
-            panel.alphaValue = 1        // au cas où un fondu-sortie était en cours
+            panel.alphaValue = 1
         }
     }
 
-    /// Met à jour le texte de traduction (appelé pendant le streaming).
     public func update(_ text: String) {
         bodyText = text
         relayout()
     }
 
-    /// Pose (ou efface avec `nil`) la rangée d'avertissement ambre du garde-fou C.
     public func setBadge(_ text: String?) {
         badgeText = text ?? ""
         relayout()
     }
 
-    /// Programme l'auto-masquage en fondu après `seconds`. À l'expiration, si la
-    /// souris est SUR le panneau (sondage direct de sa position — robuste, sans
-    /// tracking area) ou s'il a été épinglé par un déplacement, on repousse au
-    /// lieu de masquer : on peut lire / saisir / déplacer aussi longtemps qu'on
-    /// le survole.
+    /// Auto-masquage en fondu après `seconds`. À l'expiration, si la souris est
+    /// SUR le panneau (sondage direct, robuste) ou s'il est épinglé, on repousse
+    /// au lieu de masquer.
     public func scheduleAutoHide(after seconds: Double) {
         autoHideTask?.cancel()
         autoHideTask = Task { @MainActor [weak self] in
@@ -186,8 +178,6 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
         }
     }
 
-    /// La souris est-elle actuellement au-dessus du panneau ? `NSEvent.mouseLocation`
-    /// et `panel.frame` sont tous deux en coordonnées écran AppKit (bas-gauche).
     private func mouseIsOverPanel() -> Bool {
         panel.isVisible && panel.frame.contains(NSEvent.mouseLocation)
     }
@@ -209,15 +199,14 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
         }
     }
 
-
+    /// En-tête « programme » : Didot, capitales, généreusement espacé, bordeaux.
     private func applyHeader(_ s: String) {
-        // Façon « programme de théâtre » : capitales, légèrement espacées.
         header.attributedStringValue = NSAttributedString(
             string: s.uppercased(),
             attributes: [
-                .font: header.font as Any,
-                .foregroundColor: Self.goldHeader,
-                .kern: 1.4,
+                .font: Self.didot(size: 11),
+                .foregroundColor: Self.burgundy,
+                .kern: 2.2,
             ])
     }
 
@@ -227,11 +216,10 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
         body.stringValue = bodyText.isEmpty ? "…" : bodyText
         badge.stringValue = badgeText
         badge.isHidden = badgeText.isEmpty
-        let pad: CGFloat = 14
+        let pad: CGFloat = 16
+        let headerH: CGFloat = 15
+        let headerGap: CGFloat = 13   // sous la rangée d'en-tête
         let gap: CGFloat = 8
-        let headerH: CGFloat = 14
-        let ruleTopGap: CGFloat = 7
-        let ruleH: CGFloat = 1
         let bodyWidth = Self.width - pad * 2
 
         func textHeight(_ s: String, font: NSFont?, minH: CGFloat) -> CGFloat {
@@ -248,17 +236,26 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
         let bodyH = textHeight(body.stringValue, font: body.font, minH: 20)
         let badgeH = badgeText.isEmpty ? 0 : textHeight(badgeText, font: badge.font, minH: 15)
         let badgeBlock = badgeText.isEmpty ? 0 : gap + badgeH
-        let total = pad + headerH + ruleTopGap + ruleH + gap + bodyH + badgeBlock + pad
+        let total = pad + headerH + headerGap + bodyH + badgeBlock + pad
 
         container.frame = NSRect(x: 0, y: 0, width: Self.width, height: total)
-        header.frame = NSRect(x: pad, y: total - pad - headerH, width: bodyWidth, height: headerH)
-        rule.frame = NSRect(x: pad, y: header.frame.minY - ruleTopGap, width: bodyWidth, height: ruleH)
-        // Le badge occupe le bas (y = pad) ; le corps est posé au-dessus.
+
+        // En-tête centré, encadré de deux filets (motif « —— PROGRAMME —— »).
+        let headerY = total - pad - headerH
+        let headerW = min(ceil(header.attributedStringValue.size().width) + 2, bodyWidth)
+        let headerX = ((Self.width - headerW) / 2).rounded()
+        header.frame = NSRect(x: headerX, y: headerY, width: headerW, height: headerH)
+        let ruleY = (headerY + headerH / 2).rounded()
+        let ruleSideGap: CGFloat = 12
+        let leftW = max(0, headerX - ruleSideGap - pad)
+        ruleLeft.frame = NSRect(x: pad, y: ruleY, width: leftW, height: 1)
+        let rightX = headerX + headerW + ruleSideGap
+        ruleRight.frame = NSRect(x: rightX, y: ruleY, width: max(0, (Self.width - pad) - rightX), height: 1)
+
+        // Corps + badge ancrés en bas (le panneau croît vers le haut au streaming).
         badge.frame = NSRect(x: pad, y: pad, width: bodyWidth, height: badgeH)
         body.frame = NSRect(x: pad, y: pad + badgeBlock, width: bodyWidth, height: bodyH)
 
-        // Position par défaut : bord GAUCHE du champ, juste AU-DESSUS de son bord
-        // haut ; `savedOffset` (déplacement mémorisé) s'y ajoute ; clampé à l'écran.
         let screen = NSScreen.screens.first ?? NSScreen.main
         let screenH = screen?.frame.height ?? 0
         let screenW = screen?.frame.width ?? 0
@@ -299,7 +296,7 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
             height: origin.y - defaultOriginAppKit.y)
         if abs(offset.width - savedOffset.width) < 1, abs(offset.height - savedOffset.height) < 1 { return }
         savedOffset = offset
-        isPinnedByUser = true   // saisi par l'utilisateur → on ne l'auto-masque plus
+        isPinnedByUser = true
         autoHideTask?.cancel()
         onMoved?(currentBundleID, offset)
     }
