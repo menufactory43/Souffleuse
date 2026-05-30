@@ -193,6 +193,30 @@ public enum OutputFilter {
         return result
     }
 
+    /// Collapse a ghost suggestion to a single inline line.
+    ///
+    /// The corpus / `.history` fast-path can surface entries captured from
+    /// prose, which carry a trailing (or embedded) newline — e.g.
+    /// "achète du Bitcoin.\n". The LLM path is already one-lined in
+    /// `ModelRuntime`; the instant path is not. A newline in the ghost both
+    /// (1) renders the overlay one line ABOVE the caret — the panel is
+    /// bottom-anchored to the caret rect, so a trailing "\n" adds a phantom
+    /// line — and (2) gets injected verbatim on Tab-accept, inserting a line
+    /// break (or sending the message) in chat hosts. We keep only the first
+    /// non-empty physical line; leading/trailing spaces inside it are
+    /// preserved (" manger" is a legitimate continuation after a word).
+    public nonisolated static func singleLine(_ text: String) -> String {
+        // `Character.isNewline` (not `== "\n"`) on purpose: in Swift "\r\n" is a
+        // SINGLE grapheme cluster, so an explicit "\n"/"\r" comparison misses
+        // CRLF endings (common in imported/web prose). `isNewline` also covers
+        // U+0085, U+2028 and U+2029.
+        for line in text.split(omittingEmptySubsequences: false,
+                               whereSeparator: { $0.isNewline }) {
+            if !line.isEmpty { return String(line) }
+        }
+        return ""
+    }
+
     /// True when the filtered ghost is a *bare* enumerator / number /
     /// list-marker with no real word behind it — e.g. "1", "1.", "12)",
     /// "1er", "100%", "1/2", "-", "•", or pure punctuation.

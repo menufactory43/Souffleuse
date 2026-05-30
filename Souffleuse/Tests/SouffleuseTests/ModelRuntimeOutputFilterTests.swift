@@ -263,4 +263,40 @@ struct ModelRuntimeOutputFilterTests {
         // < 5 normalized chars → below threshold, never flagged.
         #expect(!Filter.ghostEchoesRecentSentenceStart("Ok", prefix: "Ok. "))
     }
+
+    // MARK: - singleLine
+
+    @Test func singleLineDropsTrailingNewline() {
+        // The Signal repro: a prose corpus entry stored with a trailing "\n"
+        // floated the ghost one line above the caret AND injected a break on
+        // Tab-accept. Only the first physical line survives.
+        #expect(Filter.singleLine("achète du Bitcoin.\n") == "achète du Bitcoin.")
+    }
+
+    @Test func singleLineKeepsFirstOfMultiline() {
+        #expect(Filter.singleLine("Bonjour.\nComment ça va ?") == "Bonjour.")
+    }
+
+    @Test func singleLineSkipsLeadingNewline() {
+        #expect(Filter.singleLine("\nachète du Bitcoin.") == "achète du Bitcoin.")
+    }
+
+    @Test func singleLineHandlesCRLF() {
+        #expect(Filter.singleLine("ok\r\nsuite") == "ok")
+    }
+
+    @Test func singleLinePreservesLeadingSpace() {
+        // " manger" is a legitimate continuation after a word boundary —
+        // the leading space must NOT be trimmed.
+        #expect(Filter.singleLine(" manger") == " manger")
+    }
+
+    @Test func singleLinePassthroughNoNewline() {
+        #expect(Filter.singleLine("chète du Bitcoin.") == "chète du Bitcoin.")
+    }
+
+    @Test func singleLineEmptyInputs() {
+        #expect(Filter.singleLine("") == "")
+        #expect(Filter.singleLine("\n") == "")
+    }
 }

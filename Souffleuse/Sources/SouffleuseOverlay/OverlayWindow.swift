@@ -60,6 +60,17 @@ public final class OverlayWindow {
     private var lastText: String = ""
 
     public func show(text: String, at caretRectQuartz: CGRect, hostText: String?, caretIndex: Int?, hostFont: NSFont?) {
+        // Safety net: a ghost must never contain a hard line break. A newline
+        // (e.g. a prose corpus entry stored as "…Bitcoin.\n") renders the
+        // overlay one line ABOVE the caret — the panel is bottom-anchored to
+        // the caret rect, so `appKitFrame` measures a two-line box and the
+        // visible text floats up. The instant/corpus path is sanitised at the
+        // source (OutputFilter.singleLine); this guards every other caller.
+        // Newlines become spaces so nothing is silently dropped at render.
+        let text = text
+            .replacingOccurrences(of: "\r\n", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
         guard !text.isEmpty else { hide(); return }
         // When AX can't expose the host font (Notes title, some Electron apps,
         // styled rich-text editors), `systemFont(ofSize: 15)` produces width
