@@ -75,7 +75,7 @@ private struct PreferencesRoot: View {
             ModelTab(store: store)
                 .tabItem { Label("Modèle", systemImage: "cpu") }
             EnrichmentTab(store: store, onCaptureToggle: onCaptureToggle)
-                .tabItem { Label("Enrichissement", systemImage: "doc.text.magnifyingglass") }
+                .tabItem { Label("Contexte", systemImage: "doc.text.magnifyingglass") }
             PersonalizationTab(
                 store: store,
                 onOpenViewer: onOpenHistoryViewer,
@@ -83,7 +83,7 @@ private struct PreferencesRoot: View {
             )
             .tabItem { Label("Personnalisation", systemImage: "person.crop.circle.badge.checkmark") }
             AllowlistTab(store: store)
-                .tabItem { Label("Allowlist", systemImage: "list.bullet.rectangle") }
+                .tabItem { Label("Par application", systemImage: "list.bullet.rectangle") }
             AboutTab(onOpenOnboarding: onOpenOnboarding)
                 .tabItem { Label("À propos", systemImage: "info.circle") }
         }
@@ -105,20 +105,20 @@ private struct PersonalizationTab: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Apprendre de mes frappes", isOn: $store.personalizationEnabled)
+                Toggle("Apprendre votre plume", isOn: $store.personalizationEnabled)
                     .onChange(of: store.personalizationEnabled) { _, on in
                         if on && !store.personalizationOnboardingShown {
                             showingOnboarding = true
                         }
                     }
-                Text("Stocké chiffré localement (AES-GCM, clé Keychain). Jamais envoyé sur internet.")
+                Text("Gardé sous clé sur votre Mac. Rien ne part en ligne.")
                     .font(.callout).foregroundStyle(.secondary)
-                Toggle("Enregistrer aussi sans complétion acceptée", isOn: $store.storeWithoutAccepted)
+                Toggle("Retenir aussi ce que vous écrivez sans accepter", isOn: $store.storeWithoutAccepted)
                     .disabled(!store.personalizationEnabled)
-                Text("Enregistre le contenu des champs même quand vous n'acceptez aucune suggestion — un dataset plus riche de votre style. À éviter si vous manipulez des informations sensibles.")
+                Text("Souffleuse apprend alors de tout ce que vous tapez, pas seulement des suggestions retenues — un meilleur reflet de votre style. À éviter si vous écrivez des choses sensibles.")
                     .font(.callout).foregroundStyle(.secondary)
             } header: {
-                Text("Collecte").font(.headline)
+                Text("Apprendre de vous").font(.headline)
             }
 
             Section {
@@ -138,25 +138,25 @@ private struct PersonalizationTab: View {
                         .font(.callout).foregroundStyle(.secondary)
                 }
             } header: {
-                Text("Influence sur les suggestions").font(.headline)
+                Text("Sa part dans le souffle").font(.headline)
             } footer: {
-                Text("À zéro, la perso ne touche pas le modèle (collecte seule). Au max, les n-grammes habituels sont fortement boostés.")
+                Text("À zéro, Souffleuse observe sans rien changer. Au maximum, vos tournures familières reviennent fortement.")
                     .font(.callout).foregroundStyle(.secondary)
             }
 
             Section {
                 HStack {
-                    Text("Entrées collectées")
+                    Text("Phrases retenues")
                     Spacer()
                     Text("\(entryCount)").font(.system(.body, design: .monospaced))
                 }
                 HStack {
-                    Text("Taille du fichier")
+                    Text("Place occupée")
                     Spacer()
                     Text(formatBytes(sizeBytes)).font(.system(.body, design: .monospaced))
                 }
                 HStack {
-                    Button("Voir mes données…", action: onOpenViewer)
+                    Button("Consulter…", action: onOpenViewer)
                     Spacer()
                     Button(role: .destructive) {
                         showingClearConfirm = true
@@ -170,28 +170,28 @@ private struct PersonalizationTab: View {
         }
         .formStyle(.grouped)
         .task(id: store.personalizationEnabled) { await refresh() }
-        .alert("Activer la personnalisation ?", isPresented: $showingOnboarding) {
+        .alert("Apprendre votre plume ?", isPresented: $showingOnboarding) {
             Button("Annuler", role: .cancel) {
                 store.personalizationEnabled = false
             }
-            Button("Activer") {
+            Button("Apprendre") {
                 store.personalizationOnboardingShown = true
             }
         } message: {
-            Text("Souffleuse va enregistrer les phrases que tu acceptes (Tab) pour personnaliser tes futures suggestions. Les données sont chiffrées sur ton Mac et jamais envoyées sur internet. Tu peux les consulter ou les supprimer à tout moment depuis cet onglet.")
+            Text("Souffleuse retiendra les phrases que vous acceptez, pour mieux vous souffler la suite. Tout est gardé sous clé sur votre Mac, jamais envoyé en ligne. Vous pouvez tout consulter ou tout effacer ici, à tout moment.")
         }
         .confirmationDialog(
-            "Supprimer toutes les données collectées ?",
+            "Effacer tout ce que Souffleuse a retenu ?",
             isPresented: $showingClearConfirm,
             titleVisibility: .visible
         ) {
-            Button("Tout supprimer", role: .destructive) {
+            Button("Tout effacer", role: .destructive) {
                 onClearAll()
                 Task { await refresh() }
             }
             Button("Annuler", role: .cancel) {}
         } message: {
-            Text("Le fichier chiffré et la clé Keychain seront détruits. Cette action est irréversible.")
+            Text("Tout ce que Souffleuse a retenu disparaît pour de bon. Sans retour.")
         }
     }
 
@@ -218,66 +218,66 @@ private struct GeneralTab: View {
             Section {
                 accessibilityBadge
             } header: {
-                Text("Permissions système").font(.headline)
+                Text("Autorisations").font(.headline)
             } footer: {
-                Text("Sans Accessibility, Souffleuse ne peut ni lire le champ texte focalisé ni y écrire la suggestion acceptée. À chaque rebuild de l'app le cdhash change : si Souffleuse apparaît cochée dans Réglages mais l'app dit « manquante », retire l'entrée puis re-glisse le bundle.")
+                Text("Sans cet accès, Souffleuse ne peut ni lire le champ où vous écrivez ni y poser le mot juste. Après une mise à jour, si Souffleuse apparaît cochée dans les Réglages mais se dit « absente », retirez l'entrée puis re-glissez l'app.")
                     .font(.callout).foregroundStyle(.secondary)
             }
             Section {
-                Toggle("Activée", isOn: $store.enabled)
-                Text("Raccourci d'activation : ⌃⌥⌘S")
+                Toggle("Souffleuse à l'écoute", isOn: $store.enabled)
+                Text("Entrer / sortir de scène : ⌃⌥⌘S")
                     .font(.callout)
                     .foregroundStyle(.secondary)
-                Text("Raccourci kill-switch enrichissement : ⌃⌥⌘E")
+                Text("Couper le contexte d'un coup : ⌃⌥⌘E")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             } header: {
-                Text("Comportement").font(.headline)
+                Text("Activation").font(.headline)
             }
             Section {
-                Picker("Longueur des suggestions", selection: $store.completionLength) {
+                Picker("Longueur du souffle", selection: $store.completionLength) {
                     ForEach(CompletionLength.allCases, id: \.self) { l in
                         Text(l.label).tag(l)
                     }
                 }
             } header: {
-                Text("Suggestions").font(.headline)
+                Text("Le souffle").font(.headline)
             } footer: {
-                Text("Les suggestions plus longues peuvent dévier de l'intention. Tab accepte ; Esc rejette pour ce texte.")
+                Text("Plus c'est long, plus ça peut s'éloigner de votre intention. Tab accepte ; Esc écarte.")
                     .font(.callout).foregroundStyle(.secondary)
             }
             Section {
-                Toggle("Accepter mot par mot", isOn: $store.partialAcceptEnabled)
-                Text("Tab insère un seul mot à la fois ; le reste de la suggestion reste en gris. Tab à nouveau pour le mot suivant, Esc pour effacer.")
+                Toggle("Accepter mot à mot", isOn: $store.partialAcceptEnabled)
+                Text("Tab pose un mot ; le reste attend en gris. Tab encore pour le suivant, Esc pour tout écarter.")
                     .font(.callout).foregroundStyle(.secondary)
-                Toggle("Ajouter un espace après le mot accepté", isOn: $store.trailingSpaceOnPartial)
+                Toggle("Ajouter l'espace après le mot", isOn: $store.trailingSpaceOnPartial)
                     .disabled(!store.partialAcceptEnabled)
-                Text("Place le curseur prêt à enchaîner. Désactive si tu préfères contrôler l'espace toi-même.")
+                Text("Le curseur se place, prêt pour la suite. Désactivez pour gérer l'espace vous-même.")
                     .font(.callout).foregroundStyle(.secondary)
                 Picker("Tout accepter avec", selection: $store.acceptAllKey) {
                     ForEach(AcceptAllKey.allCases, id: \.self) { key in
                         Text(key.label).tag(key)
                     }
                 }
-                Text("Une touche qui insère TOUTE la suggestion d'un coup (au lieu du mot-à-mot). Interceptée uniquement quand un ghost s'affiche — elle ne gêne donc pas la frappe normale.")
+                Text("Une touche qui pose toute la réplique d'un coup — active seulement quand un souffle s'affiche, donc elle ne gêne jamais votre frappe.")
                     .font(.callout).foregroundStyle(.secondary)
             } header: {
-                Text("Acceptation").font(.headline)
+                Text("Accepter le souffle").font(.headline)
             }
             Section {
-                Toggle("Correction typos", isOn: $store.typoEnabled)
-                Toggle("Masquer les suggestions quand un typo est suspecté", isOn: $store.hideOnTypo)
+                Toggle("Corriger les coquilles", isOn: $store.typoEnabled)
+                Toggle("Se taire quand une coquille est en cours", isOn: $store.hideOnTypo)
                     .disabled(!store.typoEnabled)
                 Toggle("Expansion emoji (\u{003A}smile\u{003A} → 😄)", isOn: $store.emojiEnabled)
-                Toggle("Corriger les fautes avant de compléter", isOn: $store.prefixCorrectionEnabled)
+                Toggle("Corriger le texte avant de souffler", isOn: $store.prefixCorrectionEnabled)
             } header: {
-                Text("Aide à la frappe").font(.headline)
+                Text("Coups de pouce").font(.headline)
             } footer: {
-                Text("Désactivés automatiquement dans Xcode, VS Code, JetBrains, terminaux. La correction avant complétion ne change que ce que voit le modèle — votre texte reste tel que tapé.")
+                Text("Mis en sommeil dans Xcode, VS Code, JetBrains et les terminaux. La correction ne change que ce que voit Souffleuse — votre texte reste tel que tapé.")
                     .font(.callout).foregroundStyle(.secondary)
             }
             Section {
-                Text("Lancement au démarrage : à venir.")
+                Text("Au démarrage du Mac : bientôt.")
                     .font(.callout)
                     .foregroundStyle(.tertiary)
             }
@@ -293,19 +293,19 @@ private struct GeneralTab: View {
                 .foregroundStyle(hasAccessibility ? .green : .orange)
             VStack(alignment: .leading, spacing: 6) {
                 Text(hasAccessibility
-                     ? "Accessibility : accordée."
-                     : "Accessibility manquante. Souffleuse ne peut pas lire/écrire le champ texte tant que tu ne l'as pas accordée.")
+                     ? "Accès accordé — Souffleuse peut lire le champ et y souffler."
+                     : "Accès manquant. Souffleuse ne peut ni lire ni souffler tant que vous ne l'avez pas accordé.")
                     .font(.callout)
                     .foregroundStyle(hasAccessibility ? .secondary : .primary)
                 if !hasAccessibility {
                     HStack(spacing: 8) {
-                        Button("Demander la permission") {
+                        Button("Donner l'accès") {
                             // Prompt=true shows the system alert AND opens
                             // Settings to the right pane if not yet trusted.
                             _ = AXClient.ensureTrusted(prompt: true)
                             hasAccessibility = AXClient.isTrusted
                         }
-                        Button("Ouvrir Réglages système") {
+                        Button("Ouvrir les Réglages") {
                             openAccessibilitySettings()
                         }
                         Button("Vérifier") {
@@ -331,7 +331,7 @@ private struct ModelTab: View {
     var body: some View {
         Form {
             Section {
-                Picker("Modèle actif", selection: $store.ggufModelID) {
+                Picker("Voix active", selection: $store.ggufModelID) {
                     ForEach(GGUFModelOption.catalogue, id: \.id) { (m: GGUFModelOption) in
                         VStack(alignment: .leading, spacing: 1) {
                             HStack(spacing: 6) {
@@ -340,7 +340,7 @@ private struct ModelTab: View {
                                     .font(.caption.monospaced())
                                     .foregroundStyle(.secondary)
                             }
-                            Text(m.isResolvable ? m.hint : "fichier introuvable")
+                            Text(m.isResolvable ? m.hint : "introuvable sur votre Mac")
                                 .font(.caption)
                                 .foregroundStyle(m.isResolvable ? Color.secondary : Color.red)
                         }
@@ -350,13 +350,13 @@ private struct ModelTab: View {
                 }
                 .pickerStyle(.radioGroup)
             } header: {
-                Text("Modèle du ghost (GGUF · llama.cpp)").font(.headline)
+                Text("Qui vous souffle").font(.headline)
             } footer: {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Ces modèles tournent via llama.cpp. Les anciens modèles MLX ne sont plus utilisés.")
-                    Text("Un seul modèle est actif à la fois. Le 4B est plus précis mais plus lent et consomme plus de RAM ; le 1B est le défaut rapide.")
+                    Text("Une seule voix souffle à la fois.")
+                    Text("La grande est plus juste, mais plus lente et plus gourmande en mémoire ; la petite est rapide — c'est le choix par défaut.")
                         .foregroundStyle(.secondary)
-                    Text("Les fichiers GGUF doivent déjà être présents localement (partagés avec Cotypist). Aucun téléchargement réseau.")
+                    Text("Les voix doivent déjà être présentes sur votre Mac. Aucun téléchargement.")
                         .foregroundStyle(.secondary)
                 }
                 .font(.callout)
@@ -377,8 +377,8 @@ private struct EnrichmentTab: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Enrichissement contextuel", isOn: $store.enrichmentEnabled)
-                Toggle("Inclure capture d'écran (OCR)", isOn: Binding(
+                Toggle("Tenir compte du contexte", isOn: $store.enrichmentEnabled)
+                Toggle("Lire ce qui est à l'écran", isOn: Binding(
                     get: { store.captureEnabled },
                     set: { onCaptureToggle($0) }
                 ))
@@ -387,11 +387,11 @@ private struct EnrichmentTab: View {
                     permissionBadge
                 }
             } header: {
-                Text("Sources").font(.headline)
+                Text("Autour de votre texte").font(.headline)
             } footer: {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Le clipboard et l'OCR ne sont jamais persistés. La capture exclut Souffleuse elle-même.")
-                    Text("Note : la capture OCR aide dans les emails (récupère sujet/destinataire) mais peut nuire dans les chats — le modèle base 1B mélange parfois le vocabulaire du message lu avec ta réponse. Désactive-la pour les conversations casual.")
+                    Text("Le presse-papiers et l'écran ne sont jamais conservés. Souffleuse ne se lit pas elle-même.")
+                    Text("Lire l'écran aide dans les emails (sujet, destinataire) mais peut troubler les chats — Souffleuse mêle parfois ce qu'elle lit à votre réponse. Désactivez-la pour les conversations légères.")
                         .foregroundStyle(.orange)
                 }
                 .font(.callout).foregroundStyle(.secondary)
@@ -401,9 +401,9 @@ private struct EnrichmentTab: View {
                 Toggle("Anglais", isOn: $store.ocrLangEN)
                 Toggle("Espagnol", isOn: $store.ocrLangES)
             } header: {
-                Text("Langues OCR").font(.headline)
+                Text("Langues à l'écran").font(.headline)
             } footer: {
-                Text("Au moins une langue requise. Si aucune n'est cochée, le français est utilisé par défaut.")
+                Text("Au moins une langue. Si aucune n'est cochée, le français est utilisé par défaut.")
                     .font(.callout).foregroundStyle(.secondary)
             }
         }
@@ -424,13 +424,13 @@ private struct EnrichmentTab: View {
                 .foregroundStyle(hasScreenRecordingPermission ? .green : .orange)
             VStack(alignment: .leading, spacing: 6) {
                 Text(hasScreenRecordingPermission
-                     ? "Permission Enregistrement de l'écran : accordée."
-                     : "Permission Enregistrement de l'écran manquante. La capture OCR est inactive tant que tu n'as pas accordé Souffleuse dans Réglages > Confidentialité.")
+                     ? "Lecture d'écran autorisée."
+                     : "Lecture d'écran non autorisée. Souffleuse ne voit pas l'écran tant que vous ne l'avez pas accordé dans Réglages › Confidentialité.")
                     .font(.callout)
                     .foregroundStyle(hasScreenRecordingPermission ? .secondary : .primary)
                 if !hasScreenRecordingPermission {
                     HStack(spacing: 8) {
-                        Button("Demander la permission") {
+                        Button("Autoriser") {
                             // forcePermissionPrompt hits ScreenCaptureKit
                             // directly — that's the only reliable way to
                             // make macOS register the app in TCC when
@@ -442,7 +442,7 @@ private struct EnrichmentTab: View {
                                 }
                             }
                         }
-                        Button("Ouvrir Réglages système") {
+                        Button("Ouvrir les Réglages") {
                             openScreenRecordingSettings()
                         }
                         Button("Vérifier") {
@@ -472,7 +472,7 @@ private struct AllowlistTab: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Règles évaluées dans l'ordre. La première qui matche bundle + titre l'emporte. Apps non listées : mode actif par défaut.")
+            Text("Des règles, dans l'ordre : la première qui correspond (application + titre de fenêtre) l'emporte. Partout ailleurs, Souffleuse est active par défaut.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
@@ -566,41 +566,53 @@ private struct AboutTab: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Souffleuse \(version)").font(.title2).bold()
-            Text("Autocomplete macOS local. Vos mots restent chez vous.")
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Souffleuse")
+                    .font(.system(size: 32, weight: .semibold, design: .serif))
+                Text("Le mot juste, soufflé à voix basse.")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                Text("Tout reste sur votre Mac — rien ne passe en coulisses.")
+                    .font(.callout)
+                    .foregroundStyle(.tertiary)
+                Text("version \(version)")
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 3)
+            }
             Divider()
             VStack(alignment: .leading, spacing: 6) {
-                Text("Conflit avec les prédictions Apple")
+                Text("Le souffle apparaît en double ?")
                     .font(.headline)
-                Text("macOS Sequoia affiche ses propres suggestions inline qui se superposent à celles de Souffleuse. Désactive-les pour éviter le double ghost.")
+                Text("macOS glisse parfois ses propres suggestions par-dessus celles de Souffleuse. Désactivez-les pour n'en garder qu'une voix.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
-                Button("Ouvrir Réglages Clavier") {
+                Button("Ouvrir les réglages Clavier") {
                     let url = URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension")!
                     NSWorkspace.shared.open(url)
                 }
+                .padding(.top, 2)
             }
             Divider()
             HStack {
-                Button("Permissions…", action: onOpenOnboarding)
-                Button("Ouvrir le log") {
+                Button("Autorisations…", action: onOpenOnboarding)
+                Button("Ouvrir le journal") {
                     let url = FileManager.default.homeDirectoryForCurrentUser
                         .appendingPathComponent("Library/Logs/Souffleuse.log")
                     NSWorkspace.shared.activateFileViewerSelecting([url])
                 }
-                Button("Révoquer les permissions") {
+                Button("Revoir les accès") {
                     let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
                     NSWorkspace.shared.open(url)
                 }
             }
             Spacer()
-            Text("Aucune connexion réseau hors téléchargement de modèle. Aucun texte utilisateur n'est écrit dans les logs.")
+            Text("Aucune connexion, hormis le premier téléchargement de la voix. Aucun de vos mots n'est écrit dans les journaux.")
                 .font(.callout)
                 .foregroundStyle(.tertiary)
         }
-        .padding(8)
+        .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
