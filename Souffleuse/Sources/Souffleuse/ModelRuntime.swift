@@ -383,6 +383,9 @@ final class ModelRuntime {
         }
         let acc = Acc()
 
+        // Le ghost réclame le GPU : la traduction (2e moteur) retarde son décode
+        // tant que ce compteur n'est pas retombé à zéro (TRANSLATION-SPEC §2.9).
+        GpuGate.shared.ghostBegan()
         let metrics = await llamaEngine.generate(
             prompt: prompt,
             maxTokens: maxTokens,
@@ -472,6 +475,7 @@ final class ModelRuntime {
                 return !sentenceComplete
             }
         }
+        GpuGate.shared.ghostEnded()
 
         if Task.isCancelled { return nil }
         var m = StreamMetrics()
