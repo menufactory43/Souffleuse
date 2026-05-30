@@ -93,14 +93,16 @@ public final class TranslationHUDWindow {
         header.frame = NSRect(x: pad, y: total - pad - headerH, width: bodyWidth, height: headerH)
         body.frame = NSRect(x: pad, y: pad, width: bodyWidth, height: bodyH)
 
-        // Reposition (top-left fixe) à chaque relayout pour que le panneau
-        // grandisse vers le BAS au fil du streaming, pas vers le haut.
-        let screenH = NSScreen.screens.first?.frame.height ?? NSScreen.main?.frame.height ?? 0
-        let appKitX = anchorRectQuartz.maxX + 8
-        let appKitY = screenH - anchorRectQuartz.minY - total
-        panel.setFrame(
-            NSRect(x: max(0, appKitX), y: max(0, appKitY), width: Self.width, height: total),
-            display: true
-        )
+        // Ancré au bord GAUCHE du champ, juste AU-DESSUS de son bord haut → bien
+        // visible près du composer. Le bas du panneau est fixe (juste au-dessus du
+        // champ) et il grandit vers le HAUT au fil du streaming. Clampé à l'écran.
+        let screen = NSScreen.screens.first ?? NSScreen.main
+        let screenH = screen?.frame.height ?? 0
+        let screenW = screen?.frame.width ?? 0
+        var x = anchorRectQuartz.minX
+        var y = screenH - anchorRectQuartz.minY + 6   // bas du panneau, au-dessus du champ
+        x = min(max(8, x), max(8, screenW - Self.width - 8))
+        y = min(max(8, y), max(8, screenH - total - 8))
+        panel.setFrame(NSRect(x: x, y: y, width: Self.width, height: total), display: true)
     }
 }
