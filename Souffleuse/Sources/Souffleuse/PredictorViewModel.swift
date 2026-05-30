@@ -270,6 +270,23 @@ final class PredictorViewModel {
         }
     }
 
+    /// Vrai quand le moteur ghost est résident et prêt à générer. L'AppDelegate
+    /// s'en sert pour décider de réveiller le modèle quand l'utilisateur se met
+    /// à composer (cf. lifecycle warmth).
+    var isModelReady: Bool { runtime.canGenerate }
+
+    /// Décharge le moteur ghost pour rendre la RAM quand l'utilisateur ne
+    /// compose pas. Annule la génération en vol, libère le GGUF + le container
+    /// MLX, invalide le cache (le KV est parti avec le model) et REMET
+    /// `loadState` à `.idle` — sans ça le guard `.idle` de `loadModel()`
+    /// bloquerait le rechargement ultérieur.
+    func unloadModel() async {
+        cancel()
+        await runtime.unloadGhost()
+        cache.invalidateAll()
+        loadState = .idle
+    }
+
     /// Predict — Final façade form (04-07).
     ///
     /// Cascade :
