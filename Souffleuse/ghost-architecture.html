@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Souffleuse — Architecture Contexte → Ghost</title>
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#141a23; --panel2:#1b2330; --line:#2a3441; --line2:#3a4655;
+    --ink:#e6edf3; --dim:#8b98a8; --faint:#5b6675;
+    --ctx:#3fb950;      /* contexte */
+    --l0:#9aa6b4;       /* L0 word-complete */
+    --l1:#58a6ff;       /* L1 recall/historique */
+    --l2:#bc8cff;       /* L2 LLM */
+    --corpus:#e0a93a;   /* corpus */
+    --ghost:#7d8694;    /* ghost text */
+    --new:#f778ba;      /* nouveautés */
+    --radius:14px;
+    font-synthesis:none;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:radial-gradient(1200px 700px at 70% -10%,#16202e 0%,var(--bg) 55%);color:var(--ink);
+    font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  code,.mono{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace}
+  .wrap{max-width:1180px;margin:0 auto;padding:40px 28px 80px}
+  header{margin-bottom:36px}
+  h1{font-size:30px;letter-spacing:-.02em;margin:0 0 8px;font-weight:700}
+  h1 .sf{background:linear-gradient(92deg,var(--l1),var(--l2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{color:var(--dim);font-size:15px;max-width:760px;line-height:1.55}
+  .sub b{color:var(--ink);font-weight:600}
+
+  .legend{display:flex;flex-wrap:wrap;gap:14px;margin:22px 0 4px}
+  .lg{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--dim)}
+  .dot{width:11px;height:11px;border-radius:3px;box-shadow:0 0 0 1px rgba(255,255,255,.06) inset}
+
+  .stage{margin:30px 0}
+  .stage-h{display:flex;align-items:center;gap:12px;margin:0 0 14px}
+  .stage-h .n{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;font-size:13px;font-weight:700;
+    background:var(--panel2);color:var(--dim);box-shadow:0 0 0 1px var(--line) inset}
+  .stage-h h2{font-size:16.5px;margin:0;font-weight:650;letter-spacing:-.01em}
+  .stage-h .tag{margin-left:auto;font-size:11.5px;color:var(--faint)}
+
+  .card{background:linear-gradient(180deg,var(--panel),#11161e);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px}
+  .grid{display:grid;gap:14px}
+  .row{display:flex;gap:14px;flex-wrap:wrap}
+
+  .chip{display:inline-flex;align-items:center;gap:7px;background:var(--panel2);border:1px solid var(--line);
+    border-radius:999px;padding:5px 11px;font-size:12.5px;color:var(--ink)}
+  .chip .k{width:8px;height:8px;border-radius:50%}
+
+  /* trigger row */
+  .flowrow{display:flex;align-items:stretch;gap:0;flex-wrap:wrap}
+  .node{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:12px 14px;min-width:150px;flex:1}
+  .node .t{font-size:13.5px;font-weight:600;margin-bottom:3px}
+  .node .d{font-size:11.5px;color:var(--dim);line-height:1.4}
+  .arr{display:grid;place-items:center;color:var(--faint);font-size:20px;padding:0 10px;min-width:34px}
+
+  /* prompt stack */
+  .stack{display:flex;flex-direction:column;gap:7px}
+  .slot{display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-left:3px solid var(--ctx);
+    border-radius:10px;padding:10px 13px;background:var(--panel)}
+  .slot.new{border-left-color:var(--new)}
+  .slot .lab{font-weight:600;font-size:13px;min-width:160px}
+  .slot .ex{font-size:12px;color:var(--dim);font-family:"SF Mono",ui-monospace,monospace}
+  .slot .badge{margin-left:auto;font-size:10.5px;color:var(--new);border:1px solid color-mix(in srgb,var(--new) 40%,transparent);
+    padding:2px 8px;border-radius:999px;white-space:nowrap}
+  .slot.last{border-left-color:var(--l2);background:linear-gradient(90deg,#1a1530,var(--panel))}
+
+  /* case router */
+  .cases{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .case{background:linear-gradient(180deg,var(--panel),#10151d);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+  .case-h{padding:13px 15px;border-bottom:1px solid var(--line);background:var(--panel2)}
+  .case-h .pos{font-size:13px;color:var(--dim);margin-bottom:6px;letter-spacing:.02em;text-transform:uppercase;font-weight:600}
+  .case-h .ex{font-family:"SF Mono",ui-monospace,monospace;font-size:15px}
+  .case-h .ex .caret{display:inline-block;width:2px;height:1.05em;background:var(--l2);vertical-align:-2px;margin:0 1px;animation:blink 1.1s step-end infinite}
+  @keyframes blink{50%{opacity:0}}
+  .ladder{padding:13px 14px;display:flex;flex-direction:column;gap:9px}
+  .lyr{display:flex;gap:10px;align-items:flex-start;padding:9px 11px;border-radius:10px;background:var(--panel2);border:1px solid var(--line);position:relative}
+  .lyr .pill{font-size:10.5px;font-weight:800;letter-spacing:.04em;padding:3px 7px;border-radius:6px;color:#0b0e14;flex-shrink:0;margin-top:1px}
+  .lyr .body{font-size:12.3px;line-height:1.45;color:var(--ink)}
+  .lyr .body em{color:var(--dim);font-style:normal}
+  .lyr.win{box-shadow:0 0 0 1px currentColor inset, 0 6px 20px -12px currentColor}
+  .lyr.off{opacity:.5}
+  .lyr.off .body::after{content:" — OFF par défaut";color:var(--faint)}
+  .pill.p0{background:var(--l0)} .pill.p1{background:var(--l1)} .pill.p2{background:var(--l2)}
+  .lyr.l1{color:var(--l1)} .lyr.l2{color:var(--l2)} .lyr.l0{color:var(--l0)}
+  .verdict{margin-top:3px;padding:10px 12px;border-top:1px dashed var(--line);font-size:12px;color:var(--dim)}
+  .verdict b{color:var(--ink)}
+
+  /* engine */
+  .engine{display:grid;grid-template-columns:1.1fr 1fr;gap:14px}
+  .kv{font-family:"SF Mono",ui-monospace,monospace;font-size:12px;color:var(--dim);line-height:1.7}
+  .kv b{color:var(--l2)}
+  ul.clean{margin:6px 0 0;padding-left:18px}
+  ul.clean li{font-size:12.5px;color:var(--dim);line-height:1.6;margin:2px 0}
+  ul.clean li b{color:var(--ink);font-weight:600}
+
+  /* gate */
+  .gate{display:flex;flex-direction:column;gap:8px}
+  .test{display:flex;gap:11px;align-items:center;font-size:12.5px;padding:9px 12px;border:1px solid var(--line);border-radius:9px;background:var(--panel)}
+  .test .q{flex:1;color:var(--ink)}
+  .test .q em{color:var(--dim);font-style:normal}
+  .test .res{font-family:"SF Mono",monospace;font-size:11px;color:var(--faint)}
+  .test .num{width:22px;height:22px;border-radius:7px;display:grid;place-items:center;font-size:11px;font-weight:700;background:var(--panel2);color:var(--dim)}
+
+  /* loop */
+  .loop{display:flex;align-items:center;gap:0;flex-wrap:wrap}
+  .loopcard{flex:1;min-width:180px;border:1px solid var(--line);border-radius:12px;padding:13px 15px;background:var(--panel2)}
+  .loopcard.amber{border-color:color-mix(in srgb,var(--corpus) 45%,var(--line))}
+  .loopcard .t{font-weight:650;font-size:13.5px;margin-bottom:4px}
+  .loopcard .t .src{font-family:monospace;font-size:11px;padding:1px 6px;border-radius:5px;margin-left:6px}
+  .src.prose{background:color-mix(in srgb,var(--corpus) 22%,transparent);color:var(--corpus)}
+  .src.accept{background:#222b38;color:var(--dim)}
+  .loopcard .d{font-size:11.7px;color:var(--dim);line-height:1.45}
+
+  .keyfind{margin-top:14px;border:1px solid color-mix(in srgb,var(--l1) 30%,var(--line));border-radius:12px;
+    padding:14px 16px;background:linear-gradient(180deg,#10202f,var(--panel));font-size:13px;line-height:1.6;color:var(--dim)}
+  .keyfind b{color:var(--ink)}
+  .keyfind .hl{color:var(--l1);font-weight:600}
+
+  .ghostbar{display:flex;align-items:center;gap:0;font-family:"SF Mono",ui-monospace,monospace;font-size:17px;
+    border:1px solid var(--line);border-radius:11px;padding:15px 18px;background:#0e1219}
+  .ghostbar .typed{color:var(--ink)} .ghostbar .g{color:var(--ghost)} .ghostbar .cur{display:inline-block;width:2px;height:1.1em;background:var(--l2);vertical-align:-2px;animation:blink 1.1s step-end infinite}
+  .foot{margin-top:40px;color:var(--faint);font-size:12px;text-align:center}
+  .foot code{color:var(--dim)}
+  @media(max-width:880px){.cases{grid-template-columns:1fr}.engine{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1><span class="sf">Souffleuse</span> — du contexte au <span style="color:var(--ghost)">ghost</span></h1>
+    <p class="sub">Comment chaque frappe produit (ou non) un texte fantôme, <b>cas par cas</b> selon la position du caret.
+    100&nbsp;% on-device : llama.cpp + Gemma&nbsp;3&nbsp;1B base (GGUF) pour le LLM, NSSpellChecker + rappel de corpus pour l'instantané.
+    Les blocs <span style="color:var(--new)">roses</span> sont les changements récents (capture prose, override mid-word, injection few-shot).</p>
+
+    <div class="legend">
+      <div class="lg"><span class="dot" style="background:var(--ctx)"></span>Contexte / prompt</div>
+      <div class="lg"><span class="dot" style="background:var(--l0)"></span>L0 — WordCompleter (système)</div>
+      <div class="lg"><span class="dot" style="background:var(--l1)"></span>L1 — Rappel de corpus (instantané)</div>
+      <div class="lg"><span class="dot" style="background:var(--l2)"></span>L2 — LLM (llama.cpp)</div>
+      <div class="lg"><span class="dot" style="background:var(--corpus)"></span>Corpus (history.db)</div>
+      <div class="lg"><span class="dot" style="background:var(--new)"></span>Nouveau</div>
+    </div>
+  </header>
+
+  <!-- 1. TRIGGER -->
+  <section class="stage">
+    <div class="stage-h"><span class="n">1</span><h2>Déclenchement</h2><span class="tag">timer 80&nbsp;ms · debounce 50&nbsp;ms</span></div>
+    <div class="flowrow">
+      <div class="node"><div class="t">Frappe clavier</div><div class="d">L'utilisateur tape dans n'importe quelle app</div></div>
+      <div class="arr">→</div>
+      <div class="node"><div class="t">AX snapshot</div><div class="d">Élément focus, texte, <span class="mono">caretIndex</span>, rect, <span class="mono">bundleID</span>, titre fenêtre</div></div>
+      <div class="arr">→</div>
+      <div class="node"><div class="t" style="color:var(--l2)">userTail</div><div class="d">Le texte <b>avant le caret</b> (corrigé + fenêtré à 1024&nbsp;chars pour le LLM)</div></div>
+    </div>
+  </section>
+
+  <!-- 2. CONTEXT -->
+  <section class="stage">
+    <div class="stage-h"><span class="n">2</span><h2>Assemblage du contexte → le prompt LLM</h2><span class="tag">généré par predict, &lt;5&nbsp;ms</span></div>
+    <div class="card">
+      <div class="stack">
+        <div class="slot"><span class="lab" style="color:var(--ctx)">customInstr</span><span class="ex">"Contexte : Je m'appelle Gabriel… style amical, concis."</span></div>
+        <div class="slot new"><span class="lab" style="color:var(--new)">examplesBlock</span><span class="ex">3 de tes vraies réponses passées (corpus <span style="color:var(--corpus)">.prose</span>, rangées par similarité Jaccard)</span><span class="badge">★ injection few-shot</span></div>
+        <div class="slot"><span class="lab" style="color:var(--ctx)">ctxPrefix</span><span class="ex">"App Brave, fenêtre … Clipboard: … On screen: …"  (OCR/clip)</span></div>
+        <div class="slot"><span class="lab" style="color:var(--ctx)">fieldContext</span><span class="ex">"Champ : message. Placeholder : « Écrire… »."  (AX)</span></div>
+        <div class="slot"><span class="lab" style="color:var(--ctx)">afterCursor</span><span class="ex">"Suite du texte (à ne pas répéter) : « … »."</span></div>
+        <div class="slot last"><span class="lab" style="color:var(--l2)">beforeCursor</span><span class="ex">…ton texte, <b>toujours en dernier</b> — le modèle le prolonge</span><span class="badge" style="color:var(--l2);border-color:color-mix(in srgb,var(--l2) 40%,transparent)">continuation brute</span></div>
+      </div>
+      <div class="keyfind" style="border-color:color-mix(in srgb,var(--new) 30%,var(--line));background:linear-gradient(180deg,#241430,var(--panel))">
+        <span class="hl" style="color:var(--new)">★ Pourquoi l'injection.</span> Le modèle <b>base</b> n'a aucune mémoire de ton style. En lui montrant <b>3 de tes vraies phrases</b> avant le caret, sa génération reste dans <b>ton registre et ton domaine</b> au lieu d'halluciner du générique. Mesuré (<code>SouffleuseInjectionEval</code>) : sans injection « Certains frais mal… » → <i>article sur les automobilistes</i> ❌ ; avec → « frais à payer » ✅. <b>Jamais filtré par bundleID</b> (le corpus est tagué <code>com.intercom.conversations</code> mais le live est <code>com.brave.Browser</code> → un filtre dur n'injecterait rien). Compteur <code>ghost_examples_injected</code> loggé pour le vérifier en direct.
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. CASE ROUTER -->
+  <section class="stage">
+    <div class="stage-h"><span class="n">3</span><h2>Le routeur — quel cas, quelle couche gagne</h2><span class="tag">SuggestionPolicy.routeInstant + onLLMChunk</span></div>
+    <div class="cases">
+
+      <!-- mid word -->
+      <div class="case">
+        <div class="case-h">
+          <div class="pos">Caret MI-MOT</div>
+          <div class="ex">…le rapport fis<span class="caret"></span></div>
+          <div style="font-size:11px;color:var(--faint);margin-top:6px">dernier char = lettre · <b style="color:var(--dim)">~80 % de l'usage réel</b></div>
+        </div>
+        <div class="ladder">
+          <div class="lyr l1 win">
+            <span class="pill p1">L1</span>
+            <div class="body"><b>Rappel corpus</b> (strongCorpusMatch ≥8&nbsp;chars). Si ta prose contient déjà ce bout → ghost <em>« cal »</em> instantané, sans LLM. <em>Ne fire que sur du quasi-verbatim.</em></div>
+          </div>
+          <div class="lyr l0 off">
+            <span class="pill p0">L0</span>
+            <div class="body"><b>WordCompleter</b> (NSSpellChecker). Désactivé : il devinait le mauvais mot (« inv→invite » au lieu d'« investissement »)</div>
+          </div>
+          <div class="lyr l2">
+            <span class="pill p2">L2</span>
+            <div class="body"><b>LLM healed</b>. Bloqué <em>sauf</em> mot déjà complet (≥4&nbsp;ch.) ou <em>healing-admit</em> : re-dérive le mot entier depuis une frontière propre (« fis »→« cal »).
+            <span style="color:var(--new)"> ★ override : un L2 healed sûr écrase un L0 faux affiché.</span></div>
+          </div>
+          <div class="verdict">→ <b>L1 si rappel</b>, sinon <b>L2 healed</b>. L0 hors course.</div>
+        </div>
+      </div>
+
+      <!-- after space -->
+      <div class="case">
+        <div class="case-h">
+          <div class="pos">Caret APRÈS-ESPACE</div>
+          <div class="ex">Bonjour, merci <span class="caret"></span></div>
+          <div style="font-size:11px;color:var(--faint);margin-top:6px">dernier char = espace · ou champ vide</div>
+        </div>
+        <div class="ladder">
+          <div class="lyr l1 win">
+            <span class="pill p1">L1</span>
+            <div class="body"><b>Rappel exact</b> (historyExactSubstringMatch, score ≥0.4). Si tu as déjà écrit cette suite → ghost direct.</div>
+          </div>
+          <div class="lyr l2 win">
+            <span class="pill p2">L2</span>
+            <div class="body"><b>LLM mot-suivant / phrase</b>. C'est ici que <span style="color:var(--new)">l'injection style</span> agit le plus : prédire la suite <em>à ta voix</em> sur un message neuf.</div>
+          </div>
+          <div class="verdict">→ <b>L1 si rappel fort</b>, sinon <b>L2</b> (stylé par tes exemples).</div>
+        </div>
+      </div>
+
+      <!-- after punct -->
+      <div class="case">
+        <div class="case-h">
+          <div class="pos">Caret APRÈS PONCT.</div>
+          <div class="ex">…c'est noté.<span class="caret"></span></div>
+          <div style="font-size:11px;color:var(--faint);margin-top:6px">ponctuation non-espace</div>
+        </div>
+        <div class="ladder">
+          <div class="lyr l0 off"><span class="pill p0">L0</span><div class="body">Pas de complétion de mot</div></div>
+          <div class="lyr l1 off"><span class="pill p1">L1</span><div class="body">Pas de routing instant</div></div>
+          <div class="lyr l2 win"><span class="pill p2">L2</span><div class="body"><b>LLM seul</b> — nouvelle phrase, prédite par le modèle (+ contexte + exemples).</div></div>
+          <div class="verdict">→ <b>L2</b> uniquement.</div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- 4. ENGINE -->
+  <section class="stage">
+    <div class="stage-h"><span class="n">4</span><h2>Génération L2 — le moteur LLM</h2><span class="tag">generateLlama · llama.cpp + Metal</span></div>
+    <div class="engine">
+      <div class="card">
+        <div style="font-weight:650;font-size:13.5px;margin-bottom:8px;color:var(--l2)">Échantillonnage (parité Cotypist)</div>
+        <div class="kv">
+          modèle &nbsp;= <b>gemma-3-1b base (pt) · GGUF Q5_K_M</b><br>
+          temperature = <b>0</b> &nbsp;(greedy, déterministe)<br>
+          repeatPenalty = <b>1.3</b> · repeatLastN = 64<br>
+          ban = <b>markup · digits(1er tok) · emoji</b><br>
+          healPrefix = <b>mot partiel</b> (mi-mot)<br>
+          n-gram bias = <b>×perso</b> (ton corpus)<br>
+          KV-cache = <b>réutilisation LCP</b>
+        </div>
+      </div>
+      <div class="card">
+        <div style="font-weight:650;font-size:13.5px;margin-bottom:8px">Prompt final assemblé</div>
+        <ul class="clean">
+          <li><b>customInstr</b> + <b style="color:var(--new)">exemples</b> + <b>contexte</b> + <b>champ</b> + <b>suite</b></li>
+          <li>…puis <b>beforeCursor</b> en dernier (espace final retiré)</li>
+          <li>Le modèle <b>continue le texte</b> — pas de chat-template (modèle base)</li>
+          <li>Streaming token par token, <b>annulé à chaque frappe</b></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5. GATE -->
+  <section class="stage">
+    <div class="stage-h"><span class="n">5</span><h2>Filtre &amp; gate de sortie</h2><span class="tag">OutputFilter + onLLMChunk (Relevance Gate)</span></div>
+    <div class="card gate">
+      <div class="test"><span class="num">1</span><span class="q"><b>OutputFilter</b> — <em>strip préfixe, 1 ligne, coupe à la 1ʳᵉ ponctuation finale, cap mots, retire markup/emoji</em></span><span class="res">→ ghost candidat</span></div>
+      <div class="test"><span class="num">2</span><span class="q"><b>Blocage mi-mot</b> — <em>sauf mot complet ≥4 ou healing-admit valide</em></span><span class="res">sinon ∅</span></div>
+      <div class="test"><span class="num">3</span><span class="q"><b>Gate floor</b> — <em>score de pertinence ≥ 0.25</em></span><span class="res">passesGate</span></div>
+      <div class="test"><span class="num">4</span><span class="q"><b>Barre de remplacement</b> — <em>beatsBar · l2Upgrades · replacesMicroCorpus</em> <span style="color:var(--new)">· replacesMidWordWordComplete ★</span></span><span class="res">anti-churn</span></div>
+      <div class="test"><span class="num">5</span><span class="q"><b>Fenêtre parasite</b> — <em>remplacement &lt;0.8&nbsp;s classé pour les métriques</em></span><span class="res">classification</span></div>
+    </div>
+  </section>
+
+  <!-- 6. GHOST -->
+  <section class="stage">
+    <div class="stage-h"><span class="n">6</span><h2>Ghost affiché</h2><span class="tag">overlay NSPanel au caret · Tab = accepter · Esc = rejeter</span></div>
+    <div class="ghostbar"><span class="typed">Bonjour, merci pour votre message.</span><span class="g">&nbsp;Je reviens vers vous dans les meilleurs délais.</span><span class="cur"></span></div>
+  </section>
+
+  <!-- 7. LOOP -->
+  <section class="stage">
+    <div class="stage-h"><span class="n">7</span><h2>La boucle de personnalisation</h2><span class="tag">history.db (SQLCipher, chiffré)</span></div>
+    <div class="loop">
+      <div class="loopcard">
+        <div class="t">Tab — acceptation</div>
+        <div class="d">Le ghost accepté est enregistré <span class="src accept">.accept</span> — souvent un bout de mot. Sert au rappel verbatim, <b>pas</b> au style.</div>
+      </div>
+      <div class="arr">→</div>
+      <div class="loopcard amber">
+        <div class="t">Capture prose <span class="src prose">.prose</span> <span class="badge" style="color:var(--new);font-size:10px">★ nouveau</span></div>
+        <div class="d">Au changement de focus, le <b>contenu réel du champ</b> est stocké (équivalent Cotypist <code>storeInputsWithoutAccepted</code>). + import Intercom (<code>SouffleuseCorpusSeed</code>).</div>
+      </div>
+      <div class="arr">→</div>
+      <div class="loopcard">
+        <div class="t">Alimente L1 &amp; injection</div>
+        <div class="d">Le corpus <span style="color:var(--corpus)">.prose</span> nourrit le <span style="color:var(--l1)">rappel L1</span> <i>et</i> <span style="color:var(--new)">l'<b>examplesBlock</b></span> du prompt L2.</div>
+      </div>
+    </div>
+
+    <div class="keyfind">
+      <b class="hl">La distinction clé (mesurée cette session).</b>
+      Le <b>rappel L1</b> ne généralise <span class="hl">pas</span> : sur tes vraies phrases en held-out, il fire <b>0&nbsp;%</b> — il n'aide que si tu re-tapes du quasi-verbatim.
+      La pertinence « comme Cotypist » sur une phrase <b>neuve</b> ne peut donc venir que du <span style="color:var(--l2)">L2 LLM <b>stylé par l'injection</b></span> de ta prose.
+      → Plus de corpus aide la <b>couverture</b> ; mais c'est la <b>diversité de tes formulations</b>, pas le volume, qui compte.
+    </div>
+  </section>
+
+  <p class="foot">
+    Souffleuse · <code>SuggestionPolicy</code> · <code>LlamaPromptBuilder</code> · <code>SimilarHistoryRetrieval</code> · <code>ModelRuntime.generateLlama</code><br>
+    Schéma fidèle au code au 2026-05-30 (Solutions A/C + injection few-shot câblées).
+  </p>
+
+</div>
+</body>
+</html>

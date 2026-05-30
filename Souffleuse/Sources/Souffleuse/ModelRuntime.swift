@@ -334,7 +334,8 @@ final class ModelRuntime {
             ctxPrefix: request.ctxPrefix,
             fieldContext: request.fieldContextSlot,
             afterCursor: request.afterCursorSlot,
-            beforeCursor: llmTail
+            beforeCursor: llmTail,
+            examples: request.examplesBlock
         )
         // `buildLlamaPrompt` stripped the caret's trailing space before feeding
         // the model, so the model emits the next token WITH its own leading
@@ -516,7 +517,8 @@ final class ModelRuntime {
         ctxPrefix: String,
         fieldContext: String,
         afterCursor: String,
-        beforeCursor: String
+        beforeCursor: String,
+        examples: String = ""
     ) -> String {
         LlamaPromptBuilder.buildLlamaPrompt(
             system: system,
@@ -524,7 +526,8 @@ final class ModelRuntime {
             ctxPrefix: ctxPrefix,
             fieldContext: fieldContext,
             afterCursor: afterCursor,
-            beforeCursor: beforeCursor
+            beforeCursor: beforeCursor,
+            examples: examples
         )
     }
 

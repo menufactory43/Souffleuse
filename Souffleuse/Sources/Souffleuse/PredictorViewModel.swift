@@ -523,6 +523,11 @@ final class PredictorViewModel {
         // inside the runtime.generate closure.
         let personalizationStrength = self.personalizationStrength
         let ngramModel = self.ngramModel
+        // Hoisted on the @MainActor side (self is strong here) so the detached
+        // generation Task can use it without touching @MainActor state. Filtered
+        // to `.prose` now (never accept-fragments) — this is the few-shot
+        // injection pool (B-prompt).
+        let proseExamplesPool = self.historySnapshot.filter { $0.source == .prose }
 
         let baseSystem = baseSystemPrompt
         let customInstr = customInstructions
@@ -624,6 +629,34 @@ final class PredictorViewModel {
                 ? await ngramModel.snapshot()
                 : nil
 
+            // Few-shot prose injection (B-prompt, 2026-05-30). Retrieve the user's
+            // own past PROSE (never accept-fragments) most relevant to the current
+            // tail, topped up with recent prose so injection fires whenever the
+            // corpus holds prose. Deliberately NOT hard-filtered by bundleID: the
+            // corpus-import tags seeded Intercom prose `com.intercom.conversations`
+            // while the live browser is `com.brave.Browser`, so an exact-bundle
+            // filter would silently inject NOTHING despite a full corpus. The
+            // injected count is logged so that "full corpus / empty prompt" failure
+            // mode is visible. Synchronous in-memory scan over historySnapshot
+            // (≤200 entries, <5ms) — no TTFT impact.
+            var examplesBlock = ""
+            if personalizationStrength > 0 && SuggestionPolicy.Tuning.examplesInjectionEnabled {
+                let prose = proseExamplesPool
+                var examples = SimilarHistoryRetrieval.rank(
+                    entries: prose, userTail: userTail, limit: SimilarHistoryRetrieval.defaultK
+                )
+                if examples.count < SimilarHistoryRetrieval.defaultK {
+                    for e in prose where !examples.contains(e) {
+                        examples.append(e)
+                        if examples.count >= SimilarHistoryRetrieval.defaultK { break }
+                    }
+                }
+                examplesBlock = SimilarHistoryRetrieval.buildExamplesBlock(from: examples)
+                if !examples.isEmpty {
+                    Log.info(.predictor, "ghost_examples_injected", count: examples.count)
+                }
+            }
+
             if Task.isCancelled { return }
 
             let request = PredictRequest(
@@ -650,7 +683,7 @@ final class PredictorViewModel {
                 fieldContextSlot: fieldContextSlot,
                 afterCursorSlot: afterCursorSlot,
                 basePreamble: basePreamble,
-                examplesBlock: "",
+                examplesBlock: examplesBlock,
                 basePromptText: basePromptText,
                 ngramSnapshot: snapshot
             )

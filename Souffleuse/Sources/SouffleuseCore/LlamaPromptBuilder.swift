@@ -98,11 +98,24 @@ public enum LlamaPromptBuilder {
         ctxPrefix: String,
         fieldContext: String,
         afterCursor: String,
-        beforeCursor: String
+        beforeCursor: String,
+        examples: String = ""
     ) -> String {
         var prefix = ""
         let trimmedInstr = customInstr.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedInstr.isEmpty { prefix += "Contexte : " + trimmedInstr + "\n\n" }
+        // Few-shot prose injection (B-prompt, 2026-05-30). The retrieved block is
+        // the user's OWN past prose (SimilarHistoryRetrieval, `.prose` only). The
+        // injection-eval (SouffleuseInjectionEval) showed the RAW block anchors the
+        // base model to the user's register/domain and suppresses off-topic
+        // hallucination ("Certains frais mal" → A: news-article derail; B: "frais
+        // à payer"), with NO multi-greeting cross-pollution at this corpus size —
+        // the failure that motivated PVM:600-609's removal did not reproduce. Kept
+        // raw (no "Exemples:" label) per SimilarHistoryRetrieval's rationale: a PT
+        // base model imitates labels. Placed in the ctxPrefix position; beforeCursor
+        // stays strictly last so the continuation still extends the caret text.
+        let trimmedExamples = examples.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedExamples.isEmpty { prefix += trimmedExamples + "\n\n" }
         if !ctxPrefix.isEmpty { prefix += ctxPrefix + "\n\n" }
         if !fieldContext.isEmpty { prefix += fieldContext + "\n\n" }
         // Strip a TRAILING space/tab from the text the model continues. A
