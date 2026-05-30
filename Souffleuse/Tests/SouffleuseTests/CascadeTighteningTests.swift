@@ -96,7 +96,8 @@ struct CascadeTighteningTests {
                 timestamp: Date(),
                 contextBefore: "",
                 accepted: "Je reviens vers vous concernant ma version précédente",
-                bundleID: nil
+                bundleID: nil,
+                source: .prose
             )
         ]
         let r = engine.routeInstant(

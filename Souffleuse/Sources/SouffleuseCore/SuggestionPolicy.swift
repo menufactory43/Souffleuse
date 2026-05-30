@@ -473,6 +473,144 @@ public enum SuggestionPolicy {
             .filter { $0.isLetter || $0.isNumber }.count
         return committed >= 1 && committed < Tuning.corpusMicroCompletionMaxChars
     }
+
+    // MARK: - Anti-répétition de contenu (dédup du mot déjà tapé)
+
+    /// Retire la portion de tête du `ghost` qui ne fait que RÉPÉTER, à la casse
+    /// près, le mot que l'utilisateur vient de taper juste avant le caret — le
+    /// bug « redit bonjour » : tail « …bonjour », ghost « bonjour, comment… ».
+    ///
+    /// Distingue une RÉPÉTITION d'un mot d'une CONTINUATION légitime : on ne
+    /// retire que lorsque le premier mot du ghost est EXACTEMENT égal (casse
+    /// ignorée) au dernier mot de `userTail`. Une vraie continuation mid-mot
+    /// (« bonj » → « our ») a un premier mot différent (« our » ≠ « bonj ») et
+    /// passe donc intacte — le token-healing n'est jamais cassé.
+    ///
+    /// Gestion du séparateur, pour que `userTail + ghost` se lise naturellement :
+    ///   - caret collé au mot (aucun séparateur tapé) ⇒ on garde le séparateur
+    ///     propre au ghost (« , » de « bonjour, comment ») → « bonjour, comment ».
+    ///   - caret après un espace ⇒ on retire le séparateur de tête du ghost
+    ///     (l'utilisateur a déjà tapé l'espace) → « bonjour comment ».
+    ///   - caret après une ponctuation non-espace (« bonjour, ») ⇒ on réinsère
+    ///     un espace pour ne pas coller la suite (« bonjour, comment »).
+    ///
+    /// Pur : `(ghost, userTail) → String`. Sans état, sans log.
+    public nonisolated static func dedupLeadingRepeat(ghost: String, userTail: String) -> String {
+        guard !ghost.isEmpty, !userTail.isEmpty else { return ghost }
+
+        // Le dernier mot de `userTail` (en ignorant d'éventuels séparateurs de
+        // fin). Vide ⇒ rien à dédupliquer.
+        let typedWord = OutputFilter.trailingPartialWord(stripTrailingSeparators(userTail))
+        guard !typedWord.isEmpty else { return ghost }
+
+        // Le premier mot du ghost (en ignorant un espace de tête éventuel).
+        let ghostLead = ghost.drop(while: { $0 == " " })
+        let ghostWord = OutputFilter.leadingWordRun(String(ghostLead))
+        guard !ghostWord.isEmpty,
+              ghostWord.lowercased() == typedWord.lowercased() else { return ghost }
+
+        // Répétition confirmée → on retire le mot répété de la tête du ghost.
+        var rest = Substring(ghostLead.dropFirst(ghostWord.count))
+
+        let caretAfterSeparator = !(userTail.last.map(OutputFilter.isWordChar) ?? false)
+        if caretAfterSeparator {
+            // L'utilisateur a déjà tapé le séparateur. On retire UNIQUEMENT un
+            // espace de tête du ghost pour ne pas le doubler — on NE touche PAS à
+            // une ponctuation signifiante (guillemets/parenthèses ouvrants, tiret,
+            // points de suspension…) qui introduit du contenu et doit survivre.
+            if rest.first == " " { rest = rest.dropFirst() }
+            guard !rest.isEmpty else { return "" }
+            // Séparateur tapé = ponctuation collée (« bonjour, ») et reste qui
+            // démarre sur un mot ⇒ réinsère un espace pour ne pas coller la suite.
+            if !(userTail.last?.isWhitespace ?? false),
+               let f = rest.first, OutputFilter.isWordChar(f) {
+                return " " + String(rest)
+            }
+            return String(rest)
+        }
+
+        // Caret collé au mot : on garde le séparateur propre au ghost verbatim
+        // (« , comment » → « bonjour, comment »). Vide ⇒ le ghost n'était QUE la
+        // répétition → on rejette.
+        guard !rest.isEmpty else { return "" }
+        return String(rest)
+    }
+
+    /// Retire le run de séparateurs (non word-chars) en fin de chaîne, pour que
+    /// le mot complet qui précède puisse être récupéré. Pur.
+    private nonisolated static func stripTrailingSeparators(_ s: String) -> String {
+        var end = s.endIndex
+        while end > s.startIndex {
+            let prev = s.index(before: end)
+            if OutputFilter.isWordChar(s[prev]) { break }
+            end = prev
+        }
+        return String(s[..<end])
+    }
+
+    // MARK: - Filtre salutations (pool few-shot)
+
+    /// Détecte une entrée prose « essentiellement une salutation » — celles qui,
+    /// injectées comme démonstration few-shot dans le prompt du modèle PT base,
+    /// ré-amorcent la pollution multi-salutations (« Coucou… » → « Bonjour… »
+    /// par imitation in-context). On EXCLUT seulement les entrées DOMINÉES par
+    /// l'ouverture de politesse, pas tout message qui commence poliment : après
+    /// retrait d'une ouverture de tête (« bonjour », « salut », « cher madame »…)
+    /// si le reste est vide OU sous le plancher (≤ `maxResidualWords` mots ET
+    /// ≤ `maxResidualChars` chars), l'entrée est jugée greeting-like.
+    /// « Coucou », « Salut ! », « Bonjour Madame, », « Bonjour Gabriel » → exclus ;
+    /// « Bonjour Madame, je vous écris au sujet de… » → gardé.
+    ///
+    /// L'entrée reste dans l'historique COMPLET : le biais n-gram et
+    /// `strongCorpusMatch` peuvent toujours rappeler les salutations de
+    /// l'utilisateur — on ne les retire QUE comme démonstration imitable.
+    ///
+    /// Pur / sans état / sans log.
+    public nonisolated static func isGreetingLike(
+        _ text: String,
+        maxResidualWords: Int = 3,
+        maxResidualChars: Int = 24
+    ) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return true }
+
+        // Minuscule + suppression des accents pour comparer « Chère » à « chere ».
+        func fold(_ s: Substring) -> String {
+            String(s).folding(options: [.caseInsensitive, .diacriticInsensitive],
+                              locale: Locale(identifier: "fr_FR"))
+        }
+
+        // Tokenise en « mots » en gardant les joints intra-mot (' ’ -) — sinon
+        // « J'espère »/« vas-tu » explosent en plusieurs tokens et sur-comptent
+        // le résidu (les salutations bavardes fuiraient le filtre).
+        let words = trimmed.split { !OutputFilter.isWordChar($0) }.map(fold)
+        guard let first = words.first else { return true }
+
+        // Ouvertures de politesse FR/EN détectées en TÊTE uniquement. « re »
+        // est volontairement ABSENT : un objet d'e-mail « Re: … » n'est pas une
+        // salutation à exclure (et ses fragments restent disponibles via n-gram).
+        let openers: Set<String> = [
+            "bonjour", "bonsoir", "coucou", "salut", "salutations", "hello",
+            "hi", "hey", "cher", "chere", "madame", "monsieur", "mademoiselle",
+            "messieurs", "mesdames", "bjr", "slt", "yo",
+        ]
+        guard openers.contains(first) else { return false }
+
+        // Les titres qui suivent l'ouverture font encore partie de la formule
+        // de politesse (« cher monsieur », « bonjour madame »).
+        let titles: Set<String> = [
+            "madame", "monsieur", "mademoiselle", "messieurs", "mesdames",
+        ]
+        var consumed = 1
+        while consumed < words.count && titles.contains(words[consumed]) {
+            consumed += 1
+        }
+        let residual = words[consumed...]
+        if residual.isEmpty { return true }
+
+        let residualChars = residual.reduce(0) { $0 + $1.count }
+        return residual.count <= maxResidualWords && residualChars <= maxResidualChars
+    }
 }
 
 // MARK: - GhostUpdate + LifecycleEndReason (Plan 04-02)
@@ -568,6 +706,14 @@ public final class SuggestionPolicyEngine {
         historySnapshot: [TypingHistoryEntry],
         wordCompleter: WordCompleter
     ) -> GhostUpdate? {
+        // Recall verbatim (ghost sans LLM) ne considère QUE la prose de
+        // l'utilisateur. Les fragments `.accept` (mot/bout de phrase validé au
+        // Tab) restent dans le snapshot complet pour nourrir le biais n-gram,
+        // mais ne doivent jamais être rappelés tels quels : ils produisent des
+        // bouts tronqués que le prior strongCorpus — imbattable — épinglerait au
+        // détriment d'une meilleure génération LLM. Même pattern que
+        // `proseExamplesPool` (PVM).
+        let proseSnapshot = historySnapshot.filter { $0.source == .prose }
         // Cas mid-word — historique d'abord (parité Cotypist), puis L0 système.
         if let last = userTail.last, last.isLetter {
             // Rappel de phrase mid-mot : le fragment de mot en cours + son
@@ -598,7 +744,7 @@ public final class SuggestionPolicyEngine {
             // rejected and handed to the word completer.
             if let strong = SuggestionPolicy.strongCorpusMatch(
                 userTail: userTail,
-                snapshot: historySnapshot,
+                snapshot: proseSnapshot,
                 minChars: SuggestionPolicy.Tuning.midWordCorpusMatchMinChars
             ) {
                 let capped = SuggestionPolicy.capToWords(strong.continuation, max: maxWords)
@@ -652,7 +798,7 @@ public final class SuggestionPolicyEngine {
         // this ghost, never clobber it (replacement bar unreachable from [0,1]).
         if let strong = SuggestionPolicy.strongCorpusMatch(
             userTail: userTail,
-            snapshot: historySnapshot
+            snapshot: proseSnapshot
         ) {
             let capped = SuggestionPolicy.capToWords(strong.continuation, max: maxWords)
             if !capped.isEmpty {
@@ -679,7 +825,7 @@ public final class SuggestionPolicyEngine {
         if isAfterSpaceLike {
             if let raw = SuggestionPolicy.historyExactSubstringMatch(
                 userTail: userTail,
-                snapshot: historySnapshot
+                snapshot: proseSnapshot
             ) {
                 let capped = SuggestionPolicy.capToWords(raw, max: maxWords)
                 guard !capped.isEmpty else { return nil }

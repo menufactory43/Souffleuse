@@ -8,8 +8,8 @@ import SouffleuseCore
 @Suite("Instant Ghost Path — history exact-substring match")
 struct HistoryExactMatchTests {
 
-    private static func entry(_ context: String, _ accepted: String) -> TypingHistoryEntry {
-        TypingHistoryEntry(timestamp: Date(), contextBefore: context, accepted: accepted, bundleID: nil)
+    private static func entry(_ context: String, _ accepted: String, source: EntrySource = .prose) -> TypingHistoryEntry {
+        TypingHistoryEntry(timestamp: Date(), contextBefore: context, accepted: accepted, bundleID: nil, source: source)
     }
 
     @Test func exactPrefixHitReturnsContinuation() {
@@ -125,8 +125,8 @@ struct HistoryExactMatchTests {
 @MainActor
 @Suite("Phase 4 — history L1 re-enabled behind Relevance Gate (D-08)")
 struct HistoryL1GateTests {
-    static func entry(_ context: String, _ accepted: String) -> TypingHistoryEntry {
-        TypingHistoryEntry(timestamp: Date(), contextBefore: context, accepted: accepted, bundleID: nil)
+    static func entry(_ context: String, _ accepted: String, source: EntrySource = .prose) -> TypingHistoryEntry {
+        TypingHistoryEntry(timestamp: Date(), contextBefore: context, accepted: accepted, bundleID: nil, source: source)
     }
     static func engine() -> SuggestionPolicyEngine { SuggestionPolicyEngine(maxWords: 16) }
     static func emptyWordCompleter() -> WordCompleter { WordCompleter() }
