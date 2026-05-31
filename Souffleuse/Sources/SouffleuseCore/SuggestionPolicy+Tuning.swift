@@ -142,6 +142,46 @@ extension SuggestionPolicy {
         /// keeps the anti-churn bar. 3 ⇒ only 1–2 char completions are overridable.
         public static let corpusMicroCompletionMaxChars: Int = 3
 
+        // MARK: - Mid-word escalation (greedy+dico → branches) — Frame C, flag OFF
+        //
+        // Mesuré de bout en bout sur le chemin de prod exact via
+        // `SouffleuseMidwordEval` (greedy = passe de prod, mêmes bans + healing).
+        // Étage 1 (greedy + dico) tranche 10/23 cas sans branche ; les branches
+        // (étage 2) ne récupèrent que le milieu incertain. Tous les seuils ICI
+        // (Pitfall 6) ; flag maître OFF → le seam reste `midword_block`, comportement
+        // byte-identique à aujourd'hui.
+
+        /// Master switch. `false` ⇒ le mid-mot incomplet reste `midword_block`
+        /// (rien affiché) — exactement le comportement actuel. `true` ⇒ l'étage 1
+        /// (greedy + dico) décide ; les branches arrivent en F2 sous le même flag.
+        public static let midWordEscalationEnabled: Bool = false
+
+        /// Fast-accept : un mot greedy/healed valide ET prolongeant le partiel, à
+        /// confiance top-1 ≥ ce seuil ET sur un fragment ≥ `escMinFastLen`, est
+        /// montré DIRECT (0 branche). 0.85 = plancher mesuré : sous ce seuil un mot
+        /// valide-mais-faux (P1 haut, ex. "Pode" sur "Po") fuit en fast-accept (le
+        /// sweep `MW_FAST_P1=0.75` a montré 1 garbage affiché). À 0.85 : 0 garbage.
+        public static let escFastP1: Double = 0.85
+
+        /// Longueur min du fragment partiel pour un fast-accept. Un fragment court
+        /// reste trop ambigu même à P1 haut ("Po" 2 chars → "Pode" confiant mais
+        /// faux) → il doit passer par les branches. 4 ≈ assez de lettres pour que
+        /// la complétion soit peu ambiguë ("cacahu" → "cacahuète").
+        public static let escMinFastLen: Int = 4
+
+        /// (F2) Nombre MAX de branches stochastiques pour trancher la zone
+        /// incertaine (greedy valide mais P1 bas, ou fragment court). Early-exit
+        /// dès qu'un mot atteint la majorité → souvent 2 suffisent.
+        public static let escBranchK: Int = 3
+
+        /// (F2) Température des branches. Le texte MONTRÉ reste le greedy
+        /// déterministe ; les branches ne servent qu'à VOTER l'accord.
+        public static let escBranchTemp: Float = 0.7
+
+        /// (F2) Accord inter-branches minimal (mot modal / votes) pour montrer.
+        /// Sépare le mot clair (≥0.6) du fragment ambigu (`co`/`Po` mesurés à 0.40).
+        public static let escAgreeThresh: Double = 0.6
+
         // MARK: - LLM context window (coherence, 2026-05-29 measurement)
         ///
         /// Number of trailing characters of the (corrected) preceding text fed
