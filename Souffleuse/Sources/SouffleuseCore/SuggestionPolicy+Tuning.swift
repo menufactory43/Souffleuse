@@ -197,6 +197,24 @@ extension SuggestionPolicy {
         /// Si bas qu'aucun token réel ne tombe dessous → sortie greedy inchangée.
         public static let escFirstTokenProbEpsilon: Double = 0.0001
 
+        // Variantes runtime-overridables des knobs branches (A/B live sans rebuild,
+        // même pattern que `afterSpaceL1BarRuntime`). Env absente → la constante.
+        /// `MW_ESC_K` — nombre de branches.
+        public static var escBranchKRuntime: Int {
+            if let s = ProcessInfo.processInfo.environment["MW_ESC_K"], let v = Int(s) { return max(0, v) }
+            return escBranchK
+        }
+        /// `MW_ESC_TEMP` — température des branches (plus bas = plus serré/convergent).
+        public static var escBranchTempRuntime: Float {
+            if let s = ProcessInfo.processInfo.environment["MW_ESC_TEMP"], let v = Float(s) { return v }
+            return escBranchTemp
+        }
+        /// `MW_AGREE` — seuil d'accord pour montrer.
+        public static var escAgreeThreshRuntime: Double {
+            if let s = ProcessInfo.processInfo.environment["MW_AGREE"], let v = Double(s) { return v }
+            return escAgreeThresh
+        }
+
         // MARK: - LLM context window (coherence, 2026-05-29 measurement)
         ///
         /// Number of trailing characters of the (corrected) preceding text fed
