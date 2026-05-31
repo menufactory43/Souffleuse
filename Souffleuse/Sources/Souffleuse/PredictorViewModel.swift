@@ -769,9 +769,27 @@ final class PredictorViewModel {
                         Log.info(.predictor, "ghost_midword_escalation_shown", count: word.count)
                         GhostInspector.shared.record(tail: userTail, verdict: .shown,
                                                      reason: "escalade \(esc.reason)", content: word)
+                    } else if SuggestionPolicy.Tuning.midWordL0Fallback,
+                              let comp = self.wordCompleter.commonCompletion(
+                                  for: userTail, minLen: SuggestionPolicy.Tuning.escL0MinPartial),
+                              comp.count >= SuggestionPolicy.Tuning.escL0MinCompletion {
+                        // F3 — DERNIER RECOURS : le LLM a fumblé, le dico connaît le
+                        // mot (« pingou »→« pingouin »). Complétion COMMUNE nette →
+                        // on la montre comme L0 (aveugle au contexte mais sur un mot
+                        // quasi-déterminé, donc fiable).
+                        let word = ModelRuntime.OutputFilter.normalizeFrenchTypography(comp)
+                        let score = SuggestionPolicy.score(source: .wordComplete, ghost: comp, userTail: userTail)
+                        self.policy.applyGhost(comp, source: .wordComplete, score: score, userTail: userTail)
+                        self.suggestion = word
+                        self.predictedForPrefix = forPrefix
+                        self.suggestionSource = .wordComplete
+                        Log.info(.predictor, "ghost_midword_l0_fallback", count: comp.count)
+                        GhostInspector.shared.record(tail: userTail, verdict: .shown,
+                                                     reason: "L0 dico (esc \(esc?.reason ?? "hide"))", content: word)
                     } else {
-                        // Caché (fast-reject / branches divergentes) : retombe sur le
-                        // ghost instant, comme la branche `chunk.isEmpty` du streaming.
+                        // Caché (fast-reject / branches divergentes, et pas de
+                        // fallback dico) : retombe sur le ghost instant, comme la
+                        // branche `chunk.isEmpty` du streaming.
                         self.suggestion = instantGhost
                         self.predictedForPrefix = forPrefix
                         self.suggestionSource = instantSource
