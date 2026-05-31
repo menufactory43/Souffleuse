@@ -42,6 +42,57 @@ struct ConversationTargetStoreTests {
         #expect(mike != lena)
     }
 
+    // MARK: - Normalisation du titre (anti-dérive de compteurs/puces)
+
+    @Test("normalizedTitle retire un compteur de non-lus en queue (« Signal (1) »)")
+    func normalizeTrailingCounter() {
+        #expect(ConversationTargetStore.normalizedTitle("Signal (1)") == "Signal")
+        #expect(ConversationTargetStore.normalizedTitle("Signal (12)") == "Signal")
+    }
+
+    @Test("normalizedTitle retire un compteur de non-lus en tête (« (3) Sujet »)")
+    func normalizeLeadingCounter() {
+        #expect(ConversationTargetStore.normalizedTitle("(3) Mike — Conversation") == "Mike — Conversation")
+        #expect(ConversationTargetStore.normalizedTitle("[2] Inbox") == "Inbox")
+    }
+
+    @Test("normalizedTitle retire une puce de non-lu en tête, et les combine")
+    func normalizeBulletAndCombined() {
+        #expect(ConversationTargetStore.normalizedTitle("• Mike") == "Mike")
+        #expect(ConversationTargetStore.normalizedTitle("(3) • Mike") == "Mike")
+    }
+
+    @Test("normalizedTitle préserve un nombre qui fait partie du titre")
+    func normalizePreservesRealNumbers() {
+        #expect(ConversationTargetStore.normalizedTitle("Projet 2024 — Notes") == "Projet 2024 — Notes")
+    }
+
+    @Test("clé : le même thread avec/sans compteur produit UNE seule clé (anti-dérive)")
+    func keyCollapsesUnreadCounterDrift() {
+        let a = ConversationTargetStore.key(forBundle: "org.whispersystems.signal-desktop", windowTitle: "Signal")
+        let b = ConversationTargetStore.key(forBundle: "org.whispersystems.signal-desktop", windowTitle: "Signal (1)")
+        #expect(a == b)
+    }
+
+    @Test("clé : un changement de SUJET reste une conversation distincte")
+    func keyKeepsSubjectChangeDistinct() {
+        let mike = ConversationTargetStore.key(forBundle: "app.intercom", windowTitle: "(2) Mike — Conversation")
+        let lena = ConversationTargetStore.key(forBundle: "app.intercom", windowTitle: "(2) Lena — Conversation")
+        #expect(mike != lena)
+    }
+
+    @MainActor
+    @Test("la cible posée sous « Signal » survit au compteur « Signal (1) »")
+    func selectionSurvivesCounterDrift() {
+        let url = Self.tempURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        let store = ConversationTargetStore(fileURL: url)
+        store.setSelection(.fixed(.es), forBundle: "org.whispersystems.signal-desktop", windowTitle: "Signal")
+        // Un message arrive : le titre devient « Signal (1) » → on doit RETROUVER ES.
+        #expect(store.selection(forBundle: "org.whispersystems.signal-desktop", windowTitle: "Signal (1)") == .fixed(.es))
+    }
+
     // MARK: - Lookup pur
 
     @Test("lookup pur : clé inconnue → AUTO par défaut")
