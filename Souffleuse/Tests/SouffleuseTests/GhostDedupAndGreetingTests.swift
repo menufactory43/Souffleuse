@@ -75,6 +75,28 @@ struct DedupLeadingRepeatTests {
             ghost: "comment allez-vous", userTail: "bonjour") == "comment allez-vous")
     }
 
+    /// Répétition FRAGMENTÉE : le 1B re-tape le mot déjà tapé éclaté en espaces
+    /// (« demain » → « de ma in ») + garbage. Le 1ᵉʳ mot du ghost (« de ») ≠
+    /// « demain » donc l'égalité mot-à-mot ne l'attrape pas ; le collapse espaces
+    /// reproduit « demain » en 3 fragments ⇒ on rejette tout le ghost.
+    @Test func fragmentedSpacedRepeatIsRejected() {
+        #expect(SuggestionPolicy.dedupLeadingRepeat(
+            ghost: " de ma in-car.", userTail: "je prendrai le bus demain") == "")
+        // « bon jour » = « bonjour » (2 fragments) ⇒ rejet aussi.
+        #expect(SuggestionPolicy.dedupLeadingRepeat(
+            ghost: "bon jour à tous", userTail: "je dis bonjour") == "")
+    }
+
+    /// Le filet fragmenté ne déclenche PAS sur une vraie continuation : « de la
+    /// maison » après « la » n'est pas « la » fragmenté (et « la » < 3 lettres).
+    @Test func fragmentedGuardSparesRealContinuation() {
+        #expect(SuggestionPolicy.dedupLeadingRepeat(
+            ghost: " de la maison", userTail: "je peins la") == " de la maison")
+        // Mot ≥3 mais le ghost ne reproduit PAS le mot tapé ⇒ intact.
+        #expect(SuggestionPolicy.dedupLeadingRepeat(
+            ghost: " arrive demain", userTail: "le train") == " arrive demain")
+    }
+
     /// Répétition d'un nombre (« 2024 »).
     @Test func digitWordRepeatIsStripped() {
         #expect(SuggestionPolicy.dedupLeadingRepeat(
