@@ -750,6 +750,8 @@ final class PredictorViewModel {
                     emitTracker.emitted = true
                     Log.info(.predictor, "ghost_dropped_repeat")
                     PredictDebug.log("ghost_dropped_repeat", "fallback_to_instant=\(instantGhost.debugDescription)")
+                    GhostInspector.shared.record(tail: userTail, verdict: .dropped,
+                                                 reason: "repeat", content: instantGhost.isEmpty ? "(rien)" : instantGhost)
                     self.suggestion = instantGhost
                     self.predictedForPrefix = forPrefix
                     self.suggestionSource = instantSource
@@ -766,6 +768,8 @@ final class PredictorViewModel {
                 //      — ghost_classified_parasite
                 guard let update = self.policy.onLLMChunk(chunk, userTail: userTail) else {
                     PredictDebug.log("chunk_gated", "oneLine=\(chunk.debugDescription) current=\(self.suggestion.debugDescription) source=\(self.suggestionSource)")
+                    GhostInspector.shared.record(tail: userTail, verdict: .gated,
+                                                 reason: self.policy.lastGateReason, content: chunk)
                     return
                 }
                 // Anti-répétition de contenu : rogne un chunk LLM qui redonne le
@@ -802,6 +806,7 @@ final class PredictorViewModel {
                 if Self.isNextWordStub(userTail: userTail, ghost: ghostText)
                     || Self.isMidWordStub(userTail: userTail, ghost: ghostText) {
                     PredictDebug.log("chunk_stub_skip", "text=\(ghostText.debugDescription) userTail=\(userTail.debugDescription)")
+                    GhostInspector.shared.record(tail: userTail, verdict: .stub, reason: "stub_1char", content: ghostText)
                     return
                 }
                 let fromHigh = (self.suggestionSource == .history
@@ -811,6 +816,8 @@ final class PredictorViewModel {
                          fromHigh ? "ghost_swap_to_llm_from_high" : "ghost_apply_llm",
                          count: ghostText.count)
                 PredictDebug.log("chunk_applied", "oneLine=\(ghostText.debugDescription) prev_source=\(self.suggestionSource)")
+                GhostInspector.shared.record(tail: userTail, verdict: .shown,
+                                             reason: String(format: "score=%.2f", update.score.value), content: ghostText)
                 emitTracker.emitted = true
                 // Re-score quand la dédup a raccourci le texte : `update.score` a
                 // été calculé par onLLMChunk sur le chunk BRUT (avec la

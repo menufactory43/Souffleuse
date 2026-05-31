@@ -91,6 +91,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// Mini Phase 4 — moteur instruct paresseux + petit panneau de traduction.
     private let translationRuntime = TranslationRuntime()
     private let translationHUD = TranslationHUDWindow()
+    /// Fenêtre DEV d'inspection du ghost (live), créée seulement si activée.
+    private var ghostInspectorWindow: GhostInspectorWindow?
     /// Cible cyclée à la main (⌘⇧→), tenue VIVANTE pour qu'un choix EXPLICITE
     /// fasse autorité au commit sans dépendre du lookup disque par titre. Le titre
     /// de fenêtre dérive (compteurs de non-lus « (1) », sujet) entre le cycle et le
@@ -278,6 +280,16 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // still appears effectively immediately.
         overlay = OverlayWindow()
         presence = PresenceIndicatorWindow()
+        // Inspecteur de ghost (DEV) : moniteur live du chemin de décision —
+        // affiché/gaté/dropé + motif. Activé via SOUFFLEUSE_GHOST_INSPECTOR.
+        if GhostInspector.enabled {
+            let inspector = GhostInspectorWindow()
+            self.ghostInspectorWindow = inspector
+            GhostInspector.shared.onChange = { [weak inspector] in
+                inspector?.refresh(GhostInspector.shared.entries)
+            }
+            inspector.show()
+        }
         // Install the status item early so the user sees the app is alive even
         // if no permissions are granted yet.
         installStatusItem()

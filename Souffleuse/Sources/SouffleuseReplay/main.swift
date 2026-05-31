@@ -23,7 +23,10 @@ import SouffleuseTyping
 
 // MARK: - Configuration (mirrors PVM / generateLlama defaults)
 
-let kMaxWords = 8            // PVM default completion-length cap
+let kMaxWords: Int = {       // PVM default completion-length cap (env-overridable for A/B)
+    if let s = ProcessInfo.processInfo.environment["SOUFFLEUSE_MAXWORDS"], let n = Int(s) { return n }
+    return 6                 // aligné sur le défaut LIVE (PVM maxWords=6), pas 8
+}()
 let kMaxTokens = 48          // generation cap for the replay
 let kGGUFPath = ("~/Library/Application Support/app.cotypist.Cotypist/Models/gemma-3-1b.i1-Q5_K_M.gguf" as NSString)
     .expandingTildeInPath
