@@ -91,6 +91,19 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// Mini Phase 4 — moteur instruct paresseux + petit panneau de traduction.
     private let translationRuntime = TranslationRuntime()
     private let translationHUD = TranslationHUDWindow()
+    /// Cible cyclée à la main (⌘⇧→), tenue VIVANTE pour qu'un choix EXPLICITE
+    /// fasse autorité au commit sans dépendre du lookup disque par titre. Le titre
+    /// de fenêtre dérive (compteurs de non-lus « (1) », sujet) entre le cycle et le
+    /// commit : la clé `bundleID + titre` recalculée au commit rate alors le store
+    /// et on retombait silencieusement sur AUTO → EN, perdant la langue choisie.
+    /// Ici l'état vivant prime ; le store par conversation reste le repli de
+    /// persistance (cross-redémarrage / multi-thread).
+    private var liveTargetSelection: (bundleID: String, selection: TargetSelection, at: Date)?
+    /// Au-delà de ce délai après le dernier cycle, l'état vivant n'est plus
+    /// « courant » et on retombe sur le store par conversation. Couvre le temps de
+    /// composer une réponse support ; assez court pour ne pas fuiter sur une autre
+    /// conversation de la même app si l'utilisateur n'a pas re-cyclé.
+    private static let liveTargetSelectionTTL: TimeInterval = 300
     /// Le Carnet — apparition livret convoquée au clic sur l'icône (sparkline + stats).
     private let carnet = CarnetWindow()
     private var pollTimer: Timer?
@@ -1707,7 +1720,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             Log.info(.input, "translate_commit_start")
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                let selection = self.store.conversationTargets.selection(
+                let selection = self.currentTargetSelection(
                     forBundle: bundleID, windowTitle: windowTitle)
                 let context = self.lastEnrichedVisible ?? ""
                 let detected = TranslationTarget.detected(in: context)
@@ -1744,6 +1757,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 let selection = self.store.conversationTargets.cycle(
                     forBundle: bundleID, windowTitle: windowTitle)
+                // Un choix explicite devient la vérité COURANTE : il fera autorité
+                // au commit même si le titre de fenêtre a dérivé entre-temps.
+                self.liveTargetSelection = (bundleID ?? "?", selection, Date())
                 Log.info(.input, "translate_target_cycled")
                 self.flashTargetSelection(selection, fieldRect: rect, bundleID: bundleID)
             }
@@ -1756,6 +1772,21 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     private func hudSavedOffset(forBundle bundleID: String?) -> CGSize {
         guard let bid = bundleID, let a = store.hudAnchors.anchor(forBundle: bid) else { return .zero }
         return CGSize(width: a.offsetX, height: a.offsetY)
+    }
+
+    /// Sélection de traduction COURANTE au commit. Une cible cyclée à la main et
+    /// encore fraîche (état vivant, même `bundleID`, < `liveTargetSelectionTTL`)
+    /// fait AUTORITÉ — un choix explicite ne doit jamais être perdu parce que le
+    /// titre de fenêtre a dérivé entre le cycle et le commit (compteurs de non-lus,
+    /// sujet). À défaut, on retombe sur le store par conversation (persistance
+    /// cross-session / multi-thread), dont la clé est désormais normalisée.
+    private func currentTargetSelection(forBundle bundleID: String?, windowTitle: String?) -> TargetSelection {
+        if let live = liveTargetSelection,
+           live.bundleID == (bundleID ?? "?"),
+           Date().timeIntervalSince(live.at) < Self.liveTargetSelectionTTL {
+            return live.selection
+        }
+        return store.conversationTargets.selection(forBundle: bundleID, windowTitle: windowTitle)
     }
 
     /// Affiche la cible choisie dans le panneau de traduction, sans lancer de

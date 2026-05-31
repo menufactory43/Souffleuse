@@ -105,10 +105,32 @@ final class ConversationTargetStore {
     /// blancs superflus).
     nonisolated static func key(forBundle bundleID: String?, windowTitle: String?) -> String {
         let bid = bundleID ?? "?"
-        let raw = (windowTitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let collapsed = raw.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        let normalized = normalizedTitle(windowTitle ?? "")
+        let collapsed = normalized.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
         let title = String(collapsed.prefix(80))
         return bid + "\u{1}" + title
+    }
+
+    /// Retire les **décorations volatiles** d'un titre de fenêtre AVANT d'en faire
+    /// une clé : compteur de non-lus en tête (« (3) Sujet ») ou en queue
+    /// (« Signal (1) »), puce de non-lu (« • », « ● », « ▸ », « · »). Sans ça, le
+    /// MÊME thread produit une clé différente à chaque message reçu (le compteur
+    /// bouge), donc la cible mémorisée dérive et se perd au commit — d'où des
+    /// doublons observés type `Signal` vs `Signal (1)`. Appliqué en boucle pour
+    /// gérer les décorations combinées (« (3) • Sujet »). Pur, testable, sans
+    /// réseau. Un changement de SUJET reste une clé différente (= nouvelle
+    /// conversation, comportement voulu) ; on ne neutralise que les compteurs/puces.
+    nonisolated static func normalizedTitle(_ raw: String) -> String {
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        var previous: String
+        repeat {
+            previous = s
+            s = s.replacing(/^[•●▸·*]\s*/, with: "")          // puce de non-lu en tête
+            s = s.replacing(/^[(\[]\d+[)\]]\s*/, with: "")      // compteur « (3) » / « [3] » en tête
+            s = s.replacing(/\s*[(\[]\d+[)\]]$/, with: "")      // compteur « (1) » en queue
+            s = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        } while s != previous
+        return s
     }
 
     /// Lookup pur, testable sans disque ni MainActor. `.auto` si la clé est
