@@ -506,8 +506,16 @@ public enum SuggestionPolicy {
         // Le premier mot du ghost (en ignorant un espace de tête éventuel).
         let ghostLead = ghost.drop(while: { $0 == " " })
         let ghostWord = OutputFilter.leadingWordRun(String(ghostLead))
-        guard !ghostWord.isEmpty,
-              ghostWord.lowercased() == typedWord.lowercased() else { return ghost }
+        guard !ghostWord.isEmpty else { return ghost }
+        if ghostWord.lowercased() != typedWord.lowercased() {
+            // Pas une répétition mot-à-mot. Mais le 1B re-tape parfois le mot déjà
+            // tapé ÉCLATÉ en espaces (« demain » → « de ma in ») suivi de garbage
+            // (« -car. ») : `ghostWord` vaut alors « de » ≠ « demain » et le passe
+            // entre les mailles. On rejette tout le ghost si sa tête (espaces
+            // collapsés) reproduit EXACTEMENT le mot tapé en ≥2 fragments.
+            if Self.isSpacedWordRepeat(ghost: ghostLead, typedWord: typedWord) { return "" }
+            return ghost
+        }
 
         // Répétition confirmée → on retire le mot répété de la tête du ghost.
         var rest = Substring(ghostLead.dropFirst(ghostWord.count))
@@ -534,6 +542,30 @@ public enum SuggestionPolicy {
         // répétition → on rejette.
         guard !rest.isEmpty else { return "" }
         return String(rest)
+    }
+
+    /// Détecte une répétition FRAGMENTÉE : le ghost re-tape le mot déjà tapé
+    /// éclaté en espaces (« demain » → « de ma in »). On accumule les lettres du
+    /// ghost en sautant les espaces ; si elles reproduisent EXACTEMENT `typedWord`
+    /// en ≥ 2 fragments (au moins une espace interne), c'est une répétition
+    /// pathologique. Plancher 3 lettres pour ne pas faussement matcher des mots
+    /// courts (« et », « la »). S'arrête au 1ᵉʳ caractère non-mot (ponctuation /
+    /// tiret) ou dès que l'accumulation diverge du mot tapé. Pur.
+    private nonisolated static func isSpacedWordRepeat(ghost: Substring, typedWord: String) -> Bool {
+        let target = typedWord.lowercased()
+        guard target.count >= 3 else { return false }
+        var acc = ""
+        var fragments = 1
+        var sawSpace = false
+        for ch in ghost {
+            if ch == " " { sawSpace = true; continue }
+            guard OutputFilter.isWordChar(ch) else { break }   // ponctuation → fin du run
+            if sawSpace { fragments += 1; sawSpace = false }
+            acc += ch.lowercased()
+            if acc.count > target.count || !target.hasPrefix(acc) { return false }
+            if acc == target { return fragments >= 2 }
+        }
+        return false
     }
 
     /// Retire le run de séparateurs (non word-chars) en fin de chaîne, pour que
@@ -667,10 +699,26 @@ public final class SuggestionPolicyEngine {
     public private(set) var currentScore: Score = Score(sourcePrior: 0, prefixFit: 0, lengthFit: 0)
     public private(set) var shownAt: Date? = nil
     public private(set) var lastReplacedSource: SuggestionSource = .none
+    /// DEV observabilité : motif de la dernière décision d'`onLLMChunk`
+    /// (`shown` / `midword_block` / `gate_block` / `keep_under_bar`). Pur debug,
+    /// lu par l'inspecteur de ghost. Ne contient AUCUN texte utilisateur.
+    public private(set) var lastGateReason: String = ""
     private var maxWords: Int
 
     public init(maxWords: Int) {
         self.maxWords = maxWords
+    }
+
+    /// Étiquette courte de source pour le motif de gate (DEV/inspecteur).
+    private static func srcTag(_ s: SuggestionSource) -> String {
+        switch s {
+        case .none: return "vide"
+        case .wordComplete: return "wordComplete"
+        case .history: return "corpus"
+        case .cache: return "cache"
+        case .undoCache: return "undo"
+        case .llm: return "llm"
+        }
     }
 
     /// Sync le cap de longueur depuis PreferencesStore.
@@ -905,8 +953,21 @@ public final class SuggestionPolicyEngine {
             let healingAdmit = SuggestionPolicy.Tuning.midWordHealingEnabled
                 && SuggestionPolicy.healingMidWordAdmits(partial: partial, chunk: chunk)
 
-            if !(completeWordAllow || healingAdmit) {
+            // « Mot-suivant après mot court » : une suite SPACE-LED (« et »→« je
+            // reviens vers ») n'est PAS une complétion de fragment — c'est un saut
+            // au mot suivant, fiable quand le mot courant est COMPLET, même court
+            // (et/va/la). Le seuil 4-chars la bloquait à tort (mesuré : excellentes
+            // suites cachées « va »→« commencer par un », « la »→« maison »).
+            // `defaultPartialWordIsComplete` garde le filet contre les vrais
+            // fragments incomplets (« v », « pr ») ; et comme la suite est SPACE-LED
+            // (saut de mot, pas complétion), elle ne peut pas mal-compléter le mot.
+            let chunkIsNextWord = chunk.first.map { $0 == " " || $0 == "\t" } ?? false
+            let nextWordAfterComplete = chunkIsNextWord
+                && SuggestionPolicy.defaultPartialWordIsComplete(userTail)
+
+            if !(completeWordAllow || healingAdmit || nextWordAfterComplete) {
                 Log.info(.predictor, "ghost_midword_llm_block", count: chunk.count)
+                lastGateReason = "midword_block"
                 return nil
             }
             if healingAdmit && !completeWordAllow {
@@ -929,6 +990,7 @@ public final class SuggestionPolicyEngine {
         // Gate floor.
         guard score.passesGate else {
             Log.info(.predictor, "ghost_gate_block", count: Int(score.value * 100))
+            lastGateReason = "gate_block \(String(format: "%.2f", score.value))"
             return nil
         }
 
@@ -962,8 +1024,22 @@ public final class SuggestionPolicyEngine {
             // `.wordComplete`: history/cache/after-space ghosts are untouched.
             let replacesMidWordWordComplete = SuggestionPolicy.Tuning.midWordL2OverridesWordComplete
                 && currentSource == .wordComplete
-            if !(beatsBar || l2Upgrades || replacesMicroCorpus || replacesMidWordWordComplete) {
+            // « Ghost qui grandit » : une EXTENSION pure du ghost LLM courant (le
+            // nouveau chunk commence par l'actuel et est plus long) n'est PAS du
+            // churn — c'est la même continuation cohérente qui s'allonge. La barre
+            // ×1,15 + la pénalité lengthFit la bloquaient (« le retard » figé,
+            // « le retard, je » gaté). On la laisse passer (mesuré : keep_under_bar
+            // chute drastiquement, aucun churn introduit, le ghost s'allonge).
+            let llmGrows = currentSource == .llm
+                && chunk.count > currentGhost.count
+                && chunk.hasPrefix(currentGhost)
+            if !(beatsBar || l2Upgrades || replacesMicroCorpus || replacesMidWordWordComplete || llmGrows) {
                 Log.info(.predictor, "ghost_keep_under_bar", count: currentGhost.count)
+                // DEV : on accole CE QUE la barre protège (source + score) — c'est
+                // le discriminateur clé. « ←corpus » = la barre a raison (protège
+                // ton intention apprise) ; « ←wordComplete/vide » = elle cache une
+                // bonne complétion LLM derrière un ghost aveugle.
+                lastGateReason = "keep_under_bar new=\(String(format: "%.2f", score.value)) held=\(String(format: "%.2f", currentScore.value))←\(Self.srcTag(currentSource))"
                 return nil
             }
             // Parasite detection : remplacement dans la fenêtre courte.
@@ -978,6 +1054,7 @@ public final class SuggestionPolicyEngine {
             }
         }
 
+        lastGateReason = "shown"
         return GhostUpdate(text: chunk, source: .llm, score: score)
     }
 
