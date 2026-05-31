@@ -231,6 +231,31 @@ struct SuggestionPolicyTests {
         #expect(!s2.beats(s1))  // 0.60 >= 0.60 * 1.15 = 0.69 false
     }
 
+    /// Ghost gardé PÉRIMÉ : « petite » affiché à « …trop », l'utilisateur tape
+    /// « bo » (nouveau mot, DIVERGE de « petite »). « ndée » (bondée) complète
+    /// « bo » au même score 0.36 — sans la garde de péremption, la barre ×1,15
+    /// l'aurait rejeté et la complétion correcte serait restée cachée (bug réel
+    /// « trop bondée » vu dans l'inspecteur). Le ghost périmé doit céder.
+    @Test func staleHeldGhostFromPreviousWordDoesNotBlockNewCompletion() {
+        let p = Self.engine()
+        let oneWord = Score(sourcePrior: 0.60, prefixFit: 1.0, lengthFit: 0.6)  // 0.36
+        p.applyGhost("petite", source: .llm, score: oneWord, userTail: "la salle était trop ")
+        let r = p.onLLMChunk("ndée", userTail: "la salle était trop bo")
+        #expect(r != nil)
+    }
+
+    /// Contrôle : un ghost que l'utilisateur CONSOMME (il tape une lettre qui
+    /// correspond au début du ghost) n'est PAS périmé — la barre tient
+    /// (anti-flicker), une variante à score égal ne le remplace pas.
+    @Test func consumedHeldGhostStaysProtectedByBar() {
+        let p = Self.engine()
+        let oneWord = Score(sourcePrior: 0.60, prefixFit: 1.0, lengthFit: 0.6)  // 0.36
+        p.applyGhost("our", source: .llm, score: oneWord, userTail: "bonj")
+        // « o » correspond au début de « our » → consommation, pas divergence.
+        let r = p.onLLMChunk("ur", userTail: "bonjo")
+        #expect(r == nil)
+    }
+
     @Test func replacementBarAcceptsAboveBar() {
         let a = Score(sourcePrior: 0.60, prefixFit: 1.0, lengthFit: 1.0)  // 0.60
         let b = Score(sourcePrior: 0.75, prefixFit: 1.0, lengthFit: 1.0)  // 0.75

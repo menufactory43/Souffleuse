@@ -699,6 +699,11 @@ public final class SuggestionPolicyEngine {
     public private(set) var currentScore: Score = Score(sourcePrior: 0, prefixFit: 0, lengthFit: 0)
     public private(set) var shownAt: Date? = nil
     public private(set) var lastReplacedSource: SuggestionSource = .none
+    /// `userTail` au moment où le ghost courant a été affiché. Sert à détecter
+    /// qu'il est PÉRIMÉ : si l'utilisateur a depuis tapé des caractères qui
+    /// DIVERGENT du ghost gardé (il a commencé un autre mot), ce ghost ne doit
+    /// plus bloquer une nouvelle complétion via la barre de remplacement.
+    private var currentGhostTail: String = ""
     /// DEV observabilité : motif de la dernière décision d'`onLLMChunk`
     /// (`shown` / `midword_block` / `gate_block` / `keep_under_bar`). Pur debug,
     /// lu par l'inspecteur de ghost. Ne contient AUCUN texte utilisateur.
@@ -1033,7 +1038,21 @@ public final class SuggestionPolicyEngine {
             let llmGrows = currentSource == .llm
                 && chunk.count > currentGhost.count
                 && chunk.hasPrefix(currentGhost)
-            if !(beatsBar || l2Upgrades || replacesMicroCorpus || replacesMidWordWordComplete || llmGrows) {
+            // Ghost gardé PÉRIMÉ : depuis son affichage l'utilisateur a tapé des
+            // caractères qui DIVERGENT de lui (il a commencé un autre mot). Un
+            // ghost 1-mot vaut toujours 0.36 ; à égalité la barre ×1,15 interdit
+            // tout remplacement → la complétion correcte du NOUVEAU mot était
+            // cachée derrière le ghost mort du mot précédent (« trop » → ghost
+            // « petite » bloquait « bondée »). On le laisse remplacer.
+            let heldGhostStale: Bool = {
+                guard !currentGhostTail.isEmpty,
+                      userTail.count > currentGhostTail.count,
+                      userTail.hasPrefix(currentGhostTail) else { return false }
+                let typedSince = userTail.dropFirst(currentGhostTail.count)
+                return !currentGhost.lowercased().hasPrefix(typedSince.lowercased())
+            }()
+            if !(beatsBar || l2Upgrades || replacesMicroCorpus || replacesMidWordWordComplete
+                 || llmGrows || heldGhostStale) {
                 Log.info(.predictor, "ghost_keep_under_bar", count: currentGhost.count)
                 // DEV : on accole CE QUE la barre protège (source + score) — c'est
                 // le discriminateur clé. « ←corpus » = la barre a raison (protège
@@ -1059,11 +1078,15 @@ public final class SuggestionPolicyEngine {
     }
 
     /// Set le ghost courant atomiquement. Track `lastReplacedSource` pour debug.
-    public func applyGhost(_ text: String, source: SuggestionSource, score: Score) {
+    /// `userTail` (le texte avant caret au moment de l'affichage) est mémorisé
+    /// pour détecter la péremption du ghost à la frappe suivante (cf.
+    /// `currentGhostTail` / la garde « held ghost stale » dans `onLLMChunk`).
+    public func applyGhost(_ text: String, source: SuggestionSource, score: Score, userTail: String = "") {
         lastReplacedSource = currentSource
         currentGhost = text
         currentSource = source
         currentScore = score
+        currentGhostTail = userTail
         shownAt = Date()
     }
 

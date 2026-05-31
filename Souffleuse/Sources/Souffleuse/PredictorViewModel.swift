@@ -389,7 +389,7 @@ final class PredictorViewModel {
                 // `instantGhost` (dédupliqué + singleLine) plutôt que `route.text`
                 // brut, pour que l'état policy (`currentGhost`, base du calcul de
                 // remplacement par `onLLMChunk`) corresponde à ce qui est affiché.
-                policy.applyGhost(instantGhost, source: route.source, score: route.score)
+                policy.applyGhost(instantGhost, source: route.source, score: route.score, userTail: userTail)
                 suggestion = ModelRuntime.OutputFilter.normalizeFrenchTypography(instantGhost)
                 suggestionSource = instantSource
             } else {
@@ -822,7 +822,7 @@ final class PredictorViewModel {
                 let appliedScore = ghostText == update.text
                     ? update.score
                     : SuggestionPolicy.score(source: .llm, ghost: ghostText, userTail: userTail)
-                self.policy.applyGhost(ghostText, source: .llm, score: appliedScore)
+                self.policy.applyGhost(ghostText, source: .llm, score: appliedScore, userTail: userTail)
                 self.suggestion = ModelRuntime.OutputFilter.normalizeFrenchTypography(ghostText)
                 self.predictedForPrefix = forPrefix
                 self.suggestionSource = .llm
