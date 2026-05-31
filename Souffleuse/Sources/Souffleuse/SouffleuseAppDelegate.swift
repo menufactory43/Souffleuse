@@ -937,6 +937,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         guard let bundleID = snap.bundleID,
               !bundleBlocklist.contains(bundleID),
               !snap.isSecureField,
+              !snap.isSearchField,
               let text = snap.text,
               let caretIndex = snap.caretIndex,
               snap.isTextElement else {
@@ -948,6 +949,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 if snap.bundleID == nil { reason = "no_bundleID" }
                 else if let b = snap.bundleID, bundleBlocklist.contains(b) { reason = "blocklisted=\(b)" }
                 else if snap.isSecureField { reason = "secure_field" }
+                else if snap.isSearchField { reason = "search_field" }
                 else if snap.text == nil { reason = "no_text" }
                 else if snap.caretIndex == nil { reason = "no_caret" }
                 else if !snap.isTextElement { reason = "not_text_element" }
@@ -1183,13 +1185,10 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         let prefix = String(text.prefix(caretIndex))
 
         // Ghost lifecycle ("warm while composing"): a fresh keystroke rearms the
-        // idle-unload timer; once enough has been typed (a real sentence, not a
-        // 2-char search) the model is woken if it dozed off. `typedSinceFocus`
-        // approximates the appended characters via the focus baseline length.
-        let draftBaselineChars = textAtFocusByBundle[bundleID]?.count ?? text.count
-        let typedSinceFocus = max(0, text.count - draftBaselineChars)
-        manageGhostWarmth(prefix: prefix, typedSinceFocus: typedSinceFocus,
-                          draftBaselineChars: draftBaselineChars)
+        // idle-unload timer and wakes the model on the FIRST keystroke if it
+        // dozed off. Short search boxes never reach here — they fail the text gate
+        // above via `isSearchField`, so no per-char warmup threshold is needed.
+        manageGhostWarmth(prefix: prefix)
 
         // Mid-text suppression: when the character immediately after the caret
         // is a non-whitespace glyph, the user is editing INSIDE existing text,
@@ -1984,32 +1983,19 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Seuil de caractères tapés (depuis le re-focus) avant de réveiller le moteur
-    /// ghost endormi. **1** (première frappe) quand le champ contient déjà un
-    /// brouillon réel (`draftBaselineChars >= ghostDraftResumeMinChars`) : on
-    /// reprend une composition, la ~1 s de reload recouvre le 1ᵉʳ mot. Sinon le
-    /// plancher `ghostWarmupMinChars`, pour ne pas charger sur une barre de
-    /// recherche courte / un champ vierge. Pur, testable.
-    nonisolated static func ghostWakeThreshold(draftBaselineChars: Int) -> Int {
-        draftBaselineChars >= SuggestionPolicy.Tuning.ghostDraftResumeMinChars
-            ? 1 : SuggestionPolicy.Tuning.ghostWarmupMinChars
-    }
-
     /// Garde le moteur ghost « chaud » uniquement pendant que l'utilisateur
-    /// compose. Appelé à chaque tick passé le gate de frappe. Une frappe fraîche
-    /// (prefix changé depuis le tick précédent) réarme le timer d'idle-unload ;
-    /// le réveil du modèle endormi est gaté par `ghostWakeThreshold` —
-    /// 1ʳᵉ frappe si on reprend un brouillon, sinon `ghostWarmupMinChars` pour
-    /// ignorer un champ de recherche court. `draftBaselineChars` = longueur du
-    /// texte déjà présent au (re)focus du champ.
+    /// compose. Appelé à chaque tick passé le gate de frappe (donc déjà un champ
+    /// texte NON-recherche : les zones de recherche échouent au gate en amont et
+    /// n'arrivent jamais ici). Une frappe fraîche (prefix changé depuis le tick
+    /// précédent) réarme le timer d'idle-unload et réveille le modèle endormi
+    /// **dès la 1ʳᵉ frappe** — la ~1 s de reload recouvre le premier mot.
     @MainActor
-    private func manageGhostWarmth(prefix: String, typedSinceFocus: Int, draftBaselineChars: Int) {
+    private func manageGhostWarmth(prefix: String) {
         let typingNow = (prefix != lastGhostActivityPrefix)
         lastGhostActivityPrefix = prefix
         guard typingNow else { return }
         scheduleGhostIdleUnload()
-        guard !predictor.isModelReady else { return }
-        if typedSinceFocus >= Self.ghostWakeThreshold(draftBaselineChars: draftBaselineChars) {
+        if !predictor.isModelReady {
             loadGhostIfNeeded()
         }
     }
