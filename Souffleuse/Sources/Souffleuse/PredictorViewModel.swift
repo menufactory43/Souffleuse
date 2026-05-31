@@ -750,8 +750,17 @@ final class PredictorViewModel {
                     emitTracker.emitted = true
                     Log.info(.predictor, "ghost_dropped_repeat")
                     PredictDebug.log("ghost_dropped_repeat", "fallback_to_instant=\(instantGhost.debugDescription)")
-                    GhostInspector.shared.record(tail: userTail, verdict: .dropped,
-                                                 reason: "repeat", content: instantGhost.isEmpty ? "(rien)" : instantGhost)
+                    // Le chunk LLM est dropé, MAIS on retombe sur le ghost INSTANT
+                    // (corpus / complétion système) : s'il est non-vide il EST
+                    // affiché → on le marque « affiché (instant) » et non « drop »,
+                    // sinon l'inspecteur ment (rien vs ghost réel à l'écran).
+                    if instantGhost.isEmpty {
+                        GhostInspector.shared.record(tail: userTail, verdict: .dropped,
+                                                     reason: "LLM dropé · rien à montrer", content: "(rien)")
+                    } else {
+                        GhostInspector.shared.record(tail: userTail, verdict: .shown,
+                                                     reason: "instant (LLM dropé)", content: instantGhost)
+                    }
                     self.suggestion = instantGhost
                     self.predictedForPrefix = forPrefix
                     self.suggestionSource = instantSource
