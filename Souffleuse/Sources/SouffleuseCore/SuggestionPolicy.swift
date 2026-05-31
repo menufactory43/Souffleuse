@@ -474,6 +474,51 @@ public enum SuggestionPolicy {
         return committed >= 1 && committed < Tuning.corpusMicroCompletionMaxChars
     }
 
+    // MARK: - Mid-word escalation (Frame C — décision pure, étage 1)
+    //
+    // Pure-functions du gate mid-mot incomplet (le cas qui fait aujourd'hui
+    // `midword_block`). Aucun effet de bord, aucun MLX : le caller (ModelRuntime
+    // en F1) fournit le mot greedy déjà extrait + sa confiance top-1, on rend la
+    // décision. Validé hors-ligne via `SouffleuseMidwordEval`.
+
+    /// Mot complet en tête d'une sortie greedy/healed : on dépose un éventuel
+    /// espace de tête (la sortie healed démarre souvent par " mot") puis on prend
+    /// le run de mot. Vide ⇒ la sortie saute au mot suivant (espace/ponctuation),
+    /// ce n'est donc pas une complétion du mot courant.
+    public nonisolated static func midWordLeadWord(_ rawGhost: String) -> String {
+        let trimmed = rawGhost.drop(while: { $0 == " " })
+        return OutputFilter.leadingWordRun(String(trimmed))
+    }
+
+    /// Le mot `modal` prolonge-t-il le partiel tapé ET est-il un vrai mot du dico ?
+    /// Attrape les échecs de healing : "a" ne prolonge pas "aspira", "pingo" ≠
+    /// "pingou", "i" ≠ "imposa" — tous rejetés avant affichage.
+    public nonisolated static func midWordValidExtends(partial: String, modal: String) -> Bool {
+        guard !modal.isEmpty, modal.lowercased().hasPrefix(partial.lowercased()) else { return false }
+        return defaultPartialWordIsComplete(modal)
+    }
+
+    /// Verdict de l'étage 1 (greedy + dico), sans branche.
+    /// - `.fastReject`  : mot fusionné invalide / ne prolonge pas → cacher (échec healing).
+    /// - `.fastAccept`  : valide + prolonge + confiant + fragment assez long → montrer le greedy.
+    /// - `.uncertain`   : valide mais peu confiant / fragment court → zone à brancher (F2).
+    ///   En F1, `.uncertain` retombe sur « rien » (= comportement `midword_block` actuel).
+    public enum MidWordFastDecision: Sendable, Equatable {
+        case fastAccept(word: String)
+        case fastReject
+        case uncertain
+    }
+
+    public nonisolated static func midWordFastDecision(
+        partial: String, greedyModal: String, firstTokenProb: Double?
+    ) -> MidWordFastDecision {
+        if !midWordValidExtends(partial: partial, modal: greedyModal) { return .fastReject }
+        if (firstTokenProb ?? 0) >= Tuning.escFastP1, partial.count >= Tuning.escMinFastLen {
+            return .fastAccept(word: greedyModal)
+        }
+        return .uncertain
+    }
+
     // MARK: - Anti-répétition de contenu (dédup du mot déjà tapé)
 
     /// Retire la portion de tête du `ghost` qui ne fait que RÉPÉTER, à la casse
