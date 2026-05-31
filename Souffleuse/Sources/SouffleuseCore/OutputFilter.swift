@@ -377,4 +377,85 @@ public enum OutputFilter {
         let g = ghost.lowercased()
         return instructionEchoMarkers.contains { g.contains($0) }
     }
+
+    /// Number of leading `Character`s shared by `a` and `b` (both expected to be
+    /// already `normalizeForRepeatCheck`-normalised). Used by the context-echo
+    /// frame-head branch.
+    private nonisolated static func commonPrefixCount(_ a: String, _ b: String) -> Int {
+        var ia = a.startIndex
+        var ib = b.startIndex
+        var n = 0
+        while ia < a.endIndex, ib < b.endIndex, a[ia] == b[ib] {
+            ia = a.index(after: ia)
+            ib = b.index(after: ib)
+            n += 1
+        }
+        return n
+    }
+
+    /// True when the ghost reproduces the injected CONTEXT PREAMBLE — the
+    /// app / window / clipboard / OCR framing prepended to the model prompt —
+    /// instead of continuing the user. The PT base model does this when it has
+    /// little or nothing to continue, most visibly on an empty field, where it
+    /// regurgitates the opening frame ("App Signal, window …") or dumps the
+    /// clipboard / OCR text. That both (1) shows generic meta-text AND (2) LEAKS
+    /// clipboard / OCR content on screen, so such a ghost must be dropped.
+    ///
+    /// `contextPreamble` is the ACTUAL injected context block (ctxPrefix +
+    /// fieldContext). It must NOT include the user's own text (customInstr /
+    /// few-shot examples / beforeCursor) — only the app-supplied framing whose
+    /// reproduction is meaningless and/or a leak.
+    ///
+    /// Two branches, both deliberately tight so a legitimate completion that
+    /// merely REUSES a clipboard / OCR word mid-text is NEVER dropped (validated
+    /// against the live overlay traces, 2026-05-31 — zero false positives):
+    ///
+    /// - **(A) Frame-head echo** (any field state): the ghost's normalised head
+    ///   shares ≥ `frameHeadMinChars` leading chars with the preamble's head —
+    ///   it reproduces the fixed opening frame. Self-anchored on the LIVE app
+    ///   name / role label, so a real continuation that only shares a word
+    ///   ("App Store est lent" → "app store…") diverges from the real header
+    ///   ("app signal…") before the floor and survives. This is the dominant
+    ///   production bug ("App Signal, window" shown 911×, "App Signal" 232×,
+    ///   "App Brave" 8× — all 9–17 normalised chars, which a generic length
+    ///   floor would miss entirely).
+    /// - **(B) Empty-field dump**: ONLY when the field is (essentially) empty
+    ///   (`userTail` trimmed < `emptyTailMaxChars`), the ghost's head reproduces
+    ///   a ≥ `dumpMinChars` run found ANYWHERE in the preamble — the clipboard /
+    ///   OCR leak. Gated on emptiness so a non-empty-field completion reusing a
+    ///   context span is structurally exempt; the high floor stops a short
+    ///   incidental word inside a 200-char clipboard blob from killing a legit
+    ///   empty-field ghost.
+    ///
+    /// Thresholds default to `SuggestionPolicy.Tuning.*` (single source of truth,
+    /// Pitfall 6) but are injectable so each branch is testable in isolation.
+    public nonisolated static func echoesContextPreamble(
+        ghost: String,
+        contextPreamble: String,
+        userTail: String,
+        frameHeadMinChars: Int = SuggestionPolicy.Tuning.contextEchoFrameHeadMinChars,
+        emptyTailMaxChars: Int = SuggestionPolicy.Tuning.contextEchoEmptyTailMaxChars,
+        dumpMinChars: Int = SuggestionPolicy.Tuning.contextEchoDumpMinChars
+    ) -> Bool {
+        guard !ghost.isEmpty, !contextPreamble.isEmpty else { return false }
+        let g = normalizeForRepeatCheck(ghost)
+        let p = normalizeForRepeatCheck(contextPreamble)
+        guard !g.isEmpty, !p.isEmpty else { return false }
+
+        // (A) Frame-head echo — the ghost reproduces the opening of the context
+        // block. `p` always starts with the fixed frame ("app <name> window …"
+        // / "champ <role> …"), so a leading-prefix match is self-anchored on the
+        // live app name and cannot collide with generic prose.
+        if commonPrefixCount(g, p) >= frameHeadMinChars { return true }
+
+        // (B) Empty-field preamble dump (clipboard / OCR leak). Containment of a
+        // ghost prefix in `p` is monotonic in length, so checking the shortest
+        // required prefix (`dumpMinChars`) suffices.
+        let trimmedTail = userTail.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedTail.count < emptyTailMaxChars, g.count >= dumpMinChars {
+            let needle = String(g.prefix(dumpMinChars))
+            if p.contains(needle) { return true }
+        }
+        return false
+    }
 }
