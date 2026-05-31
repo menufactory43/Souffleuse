@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import SouffleuseCore
+import SouffleuseTyping
 @testable import Souffleuse
 
 /// Frame C — mid-word escalation, étage 1 (greedy + dico), décision PURE.
@@ -92,8 +93,31 @@ struct MidWordEscalationTests {
     }
 
     @Test func flagOffByDefaultKeepsCurrentBehaviour() {
-        // Garde-fou de réversibilité : env absente ⇒ flag OFF ⇒ rien câblé.
+        // Garde-fou de réversibilité : env absente ⇒ flags OFF ⇒ rien câblé.
         #expect(SuggestionPolicy.Tuning.midWordEscalationEnabled == false)
+        #expect(SuggestionPolicy.Tuning.midWordL0Fallback == false)
+    }
+
+    // MARK: - F3 — préfixe commun des complétions dico (longestCommonPrefix)
+
+    @Test func commonPrefixUniqueCandidateFull() {
+        // Un seul candidat → le suffixe entier est « commun » : « pingou »→« in ».
+        #expect(WordCompleter.longestCommonPrefix(["in"]) == "in")
+    }
+
+    @Test func commonPrefixSharedStemKept() {
+        // Pluriel + singulier partagent la racine : « uète »/« uètes » → « uète ».
+        #expect(WordCompleter.longestCommonPrefix(["uète", "uètes"]) == "uète")
+    }
+
+    @Test func commonPrefixDivergentCollapsesToStub() {
+        // Candidats qui divergent tôt (« teur »/« tion ») → commun minuscule « t »,
+        // que le caller jette via escL0MinCompletion. C'est la garde anti-ambiguïté.
+        #expect(WordCompleter.longestCommonPrefix(["teur", "tion"]) == "t")
+    }
+
+    @Test func commonPrefixNoOverlapEmpty() {
+        #expect(WordCompleter.longestCommonPrefix(["uète", "ouète"]).isEmpty)
     }
 
     // MARK: - midWordBranchDecision (F2 — accord inter-branches)

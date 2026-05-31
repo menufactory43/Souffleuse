@@ -215,6 +215,28 @@ extension SuggestionPolicy {
             return escAgreeThresh
         }
 
+        // MARK: - F3 — Fallback L0 dico (mots fumblés par le 1B)
+        //
+        // Dernier recours QUAND l'escalade cache : le WordCompleter (NSSpellChecker)
+        // complète un vrai mot du dico que le LLM rate (« pingou »→« pingouin »).
+        // Borné fort pour neutraliser l'aveuglement au contexte qui l'avait fait
+        // couper : seulement sur fragment long ET si la complétion COMMUNE des
+        // candidats est nette (mot quasi-déterminé). Sinon → rien, comme aujourd'hui.
+
+        /// Master switch F3, env-overridable. OFF par défaut. Ne tire QUE dans la
+        /// branche escalade-cache → requiert aussi `midWordEscalationEnabled`.
+        public static var midWordL0Fallback: Bool {
+            ProcessInfo.processInfo.environment["MW_L0_FALLBACK"] != nil
+        }
+
+        /// Longueur min du fragment partiel pour tenter le fallback dico. ≥4 :
+        /// court = trop de candidats = complétion commune minuscule de toute façon.
+        public static let escL0MinPartial: Int = 4
+
+        /// Longueur min de la complétion COMMUNE pour la montrer. Sous ce seuil les
+        /// candidats divergent trop tôt (ambigu) → on ne montre rien.
+        public static let escL0MinCompletion: Int = 2
+
         // MARK: - LLM context window (coherence, 2026-05-29 measurement)
         ///
         /// Number of trailing characters of the (corrected) preceding text fed
