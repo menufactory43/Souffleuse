@@ -256,11 +256,18 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         installEditMenuShortcuts()
 
-        // Always install the status item first so the user can see the app is
-        // alive even if no permissions are granted yet.
-        installStatusItem()
+        // Create the overlay/presence windows BEFORE installing the status item:
+        // `installStatusItem()` calls `refreshLivingIcon()`, which reads
+        // `overlay.isVisible`. `overlay` is an implicitly-unwrapped optional, so
+        // it must already exist or the living-icon nil-unwraps and crashes at
+        // launch whenever the app starts ENABLED (the `.disabled` icon branch
+        // happens to dodge it). Two cheap NSPanel allocations — the status item
+        // still appears effectively immediately.
         overlay = OverlayWindow()
         presence = PresenceIndicatorWindow()
+        // Install the status item early so the user sees the app is alive even
+        // if no permissions are granted yet.
+        installStatusItem()
 
         // Prompt for AX once at launch (non-blocking). If denied, the user
         // can toggle the permission in Settings and the app picks it up on
@@ -306,8 +313,14 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // Load the persisted GGUF selection on launch (the real ghost engine).
         predictor.configureInitialGGUF(store.ggufModelID)
         Task { [weak self] in
-            await self?.predictor.loadModel()
-            // Rebuild the n-gram model from history once the tokenizer is ready.
+            // Démarrage à froid : on NE charge PAS le moteur ghost ici. Il se
+            // charge paresseusement à la première vraie frappe dans un champ
+            // texte (cf. `loadGhostIfNeeded` via `manageGhostWarmth`) — rien en
+            // RAM tant que l'utilisateur ne compose pas. On garde quand même le
+            // snapshot historique (Layer-1 recall instantané) : `rebuildPersonalization`
+            // le pose tout de suite et saute proprement la construction du n-gram
+            // tant qu'aucun container n'est chargé (setCorpus no-op sans handles,
+            // `guard container` sort) — corpus + n-gram seront bâtis au 1er load.
             guard let self else { return }
             let history = await MainActor.run { self.store.history }
             await history.load()
