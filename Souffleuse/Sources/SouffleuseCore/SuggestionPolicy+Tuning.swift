@@ -324,5 +324,47 @@ extension SuggestionPolicy {
         /// marteler le disque à chaque frappe mesurée. Les accepts/actes forcent
         /// une écriture immédiate (rares).
         public static let ledgerSaveThrottleSeconds: Double = 5
+
+        // MARK: - Garde anti-écho du préambule de contexte (privacy + qualité)
+        //
+        // Le modèle PT base, quand il n'a (presque) rien à continuer — champ
+        // vide typiquement — recrache le BLOC DE CONTEXTE injecté en tête de
+        // prompt (« App Signal, window … », ou un bout de presse-papier / OCR)
+        // au lieu de continuer l'utilisateur. C'est à la fois du méta-texte
+        // générique ET une FUITE à l'écran du presse-papier / OCR. La garde
+        // `OutputFilter.echoesContextPreamble` le supprime. Seuils ICI (Pitfall
+        // 6). Calibrés sur les traces overlay réelles (2026-05-31) : les ~1153
+        // échos affichés mesurés font 9–17 chars normalisés (« app signal
+        // window »=17 ×911, « app signal »=10 ×232, « app brave »=9 ×8), donc
+        // un simple plancher de longueur les raterait — la branche cadre
+        // s'ancre sur l'EN-TÊTE réel du préambule, pas sur une longueur.
+
+        /// Plancher (chars NORMALISÉS, cf. `normalizeForRepeatCheck`) de
+        /// préfixe COMMUN entre le ghost et l'en-tête du préambule au-delà
+        /// duquel le ghost est jugé « écho de cadre » (branche A). Auto-ancré
+        /// sur le nom d'app / le label de champ live : une vraie continuation
+        /// qui ne fait que partager un mot (« App Store est lent » → « app
+        /// store… ») diverge de l'en-tête réel (« app signal… ») avant ce
+        /// plancher et SURVIT. 8 ≈ « app » + le début d'un nom d'app court
+        /// (« app brave »=9, « app mail »=8) ; assez bas pour attraper toute la
+        /// distribution mesurée, assez haut pour ne jamais coller à du « app »
+        /// générique. (Faux positifs mesurés : 0.)
+        public static let contextEchoFrameHeadMinChars: Int = 8
+
+        /// Sous ce nombre de chars (userTail trimmé) le champ est considéré
+        /// VIDE : la branche B (dump presse-papier / OCR n'importe où dans le
+        /// préambule) s'arme alors. 2 → une élision (« j' ») ou un mot d'une
+        /// lettre (« Je ») commencé suffit à désarmer la branche B, donc dès que
+        /// l'utilisateur tape du vrai texte une complétion qui réutilise un
+        /// segment du contexte n'est jamais touchée.
+        public static let contextEchoEmptyTailMaxChars: Int = 2
+
+        /// Longueur minimale (chars normalisés) d'un run du préambule reproduit
+        /// par le ghost dans un champ VIDE pour valoir un dump (branche B).
+        /// Gardé HAUT (vs le plancher cadre) pour qu'un mot incident court
+        /// présent dans un blob presse-papier de 200 chars ne tue pas un ghost
+        /// légitime de champ vide. ~16 ≈ 3 mots verbatim — un vrai dump, pas une
+        /// coïncidence.
+        public static let contextEchoDumpMinChars: Int = 16
     }
 }

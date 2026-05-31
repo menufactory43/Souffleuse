@@ -356,6 +356,15 @@ final class ModelRuntime {
             beforeCursor: llmTail,
             examples: request.examplesBlock
         )
+        // Context-echo guard input : the ACTUAL injected context block (app/
+        // window/clipboard/OCR prose + the FR field annotation). NOT the user's
+        // own text (customInstr / examples / beforeCursor are excluded) — only
+        // the framing whose reproduction by the base model is meaningless and a
+        // clipboard/OCR leak. Empty when context is thin → guard is a no-op.
+        let contextPreamble = [request.ctxPrefix, request.fieldContextSlot]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+
         // `buildLlamaPrompt` stripped the caret's trailing space before feeding
         // the model, so the model emits the next token WITH its own leading
         // space (" arriver"). When the caret sits AFTER a space, that space is
@@ -461,7 +470,8 @@ final class ModelRuntime {
                 accumulated: acc.generated,
                 userTail: userTail,
                 caretAfterSpace: caretAfterSpace,
-                maxWords: maxWords
+                maxWords: maxWords,
+                contextPreamble: contextPreamble
             )
             switch verdict {
             case .reset:
@@ -472,6 +482,8 @@ final class ModelRuntime {
             case .dropKeepGenerating:
                 if dropReason == .instructionEcho {
                     Log.info(.predictor, "ghost_dropped_instruction_echo")
+                } else if dropReason == .contextEcho {
+                    Log.info(.predictor, "ghost_dropped_context_echo")
                 }
                 if !acc.lastEmitted.isEmpty {
                     acc.lastEmitted = ""

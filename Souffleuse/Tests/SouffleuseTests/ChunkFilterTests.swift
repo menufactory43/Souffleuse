@@ -196,3 +196,168 @@ struct ChunkFilterWordCapTests {
         #expect(r.verdict == .emit("un"))
     }
 }
+
+/// Context-preamble echo guard — the base PT model, with little/nothing to
+/// continue, regurgitates the injected app/window/clipboard/OCR framing as the
+/// ghost ("App Signal, window …"). That is generic meta-text AND a clipboard/OCR
+/// LEAK on screen. `OutputFilter.echoesContextPreamble` drops it. The two
+/// branches (frame-head echo / empty-field dump) are tuned against the live
+/// overlay traces (2026-05-31): every measured displayed echo (≈1153 events,
+/// 9–17 normalised chars) must drop, while every legitimate context-grounded
+/// completion — including one that reuses a clipboard/OCR word mid-text — must
+/// survive (the "le contexte quand j'en ai besoin" guarantee, zero false
+/// positives across the adversarial stress set).
+@Suite("OutputFilter — context-preamble echo guard")
+struct ContextEchoTests {
+    // Realistic injected preamble (ctxPrefix + "\n" + fieldContextSlot), per the
+    // measured model-input structure (ContextEnricher prose + the PVM field block).
+    let signal = """
+    App Signal, window "Signal". Clipboard: Tu peux me rappeler l'adresse du resto de samedi ?
+    Champ : zone de texte.
+    Placeholder : « Message ».
+    """
+    let signalOCR = """
+    App Signal, window "Signal". On screen: Marie: on se voit demain à 19h alors ? Hâte de te voir !
+    Champ : zone de texte.
+    Placeholder : « Message ».
+    """
+    let brave = """
+    App Brave, window "X".
+    Champ : champ texte.
+    """
+
+    // ── Recall: the real measured echoes must drop ──
+
+    @Test func frameHeadEchoesDropped() {
+        // 911× displayed — non-empty (placeholder) tail. 'app signal window' = 17
+        // normalised chars, which a generic length floor (20) would have MISSED.
+        #expect(OutputFilter.echoesContextPreamble(
+            ghost: "App Signal, window", contextPreamble: signal, userTail: "Saisissez un message"))
+        // 232× — unrelated non-empty tail. 'app signal' = 10 chars.
+        #expect(OutputFilter.echoesContextPreamble(
+            ghost: "App Signal", contextPreamble: signal, userTail: "Voici le site pour aller voir"))
+        // 8× Brave. 'app brave' = 9 chars (shortest measured echo).
+        #expect(OutputFilter.echoesContextPreamble(
+            ghost: "App Brave", contextPreamble: brave, userTail: "¡Cheque !"))
+        // Lowercase variant on a mid-word tail.
+        #expect(OutputFilter.echoesContextPreamble(
+            ghost: "app Signal", contextPreamble: signal, userTail: "L'"))
+        // Full frame with window title, empty field.
+        #expect(OutputFilter.echoesContextPreamble(
+            ghost: "App Signal, window \"Signal\".", contextPreamble: signal, userTail: ""))
+    }
+
+    @Test func nonEmptyFieldFrameEchoStillDropped() {
+        // Branch A is field-state-independent: reproducing the frame head is an
+        // echo even behind a long, legit-looking tail.
+        #expect(OutputFilter.echoesContextPreamble(
+            ghost: "App Signal, window \"Signal\"",
+            contextPreamble: signal,
+            userTail: "J'ai bien reçu ton message hier soir merci"))
+    }
+
+    @Test func emptyFieldClipboardDumpDropped() {
+        // Clipboard payload recrache verbatim into an empty field (privacy leak).
+        #expect(OutputFilter.echoesContextPreamble(
+            ghost: "Tu peux me rappeler l'adresse du resto", contextPreamble: signal, userTail: ""))
+    }
+
+    @Test func quasiEmptyFieldOCRDumpDropped() {
+        // 1-char tail + long OCR span reproduced → Branch B.
+        #expect(OutputFilter.echoesContextPreamble(
+            ghost: "Marie: on se voit demain à 19h", contextPreamble: signalOCR, userTail: "a"))
+    }
+
+    // ── Precision: legitimate context-grounded completions must NEVER drop ──
+
+    @Test func legitMidFieldOCRReuseKept() {
+        // Reuses "demain" from the OCR context as a genuine continuation — the
+        // feature working, not an echo. Mid-field (non-empty tail).
+        #expect(!OutputFilter.echoesContextPreamble(
+            ghost: "demain à 19h ça me va",
+            contextPreamble: signalOCR,
+            userTail: "Oui parfait, on se voit "))
+    }
+
+    @Test func legitMidFieldClipboardReuseKept() {
+        // Cites a clipboard segment mid-completion in a NON-empty field — Branch
+        // B is empty-field-only, so this is structurally exempt even though the
+        // segment appears in the clipboard span of the preamble.
+        #expect(!OutputFilter.echoesContextPreamble(
+            ghost: "l'adresse du resto, c'est noté",
+            contextPreamble: signal,
+            userTail: "Oui je t'envoie "))
+    }
+
+    @Test func legitSharesAppWordButNotHeaderKept() {
+        // A real ghost merely starting with "App " diverges from the live
+        // app-name header ("App Store" ≠ "App Signal") before the floor → kept.
+        #expect(!OutputFilter.echoesContextPreamble(
+            ghost: "App Store est plus rapide depuis la mise à jour",
+            contextPreamble: signal,
+            userTail: "Je trouve que l'"))
+    }
+
+    @Test func legitShortEmptyFieldReuseKept() {
+        // Slack cold-start: empty field, reuses a speaker name "Marie" — too
+        // short to be a dump, not a frame-head prefix → kept.
+        #expect(!OutputFilter.echoesContextPreamble(
+            ghost: " Marie: « Ok",
+            contextPreamble: "App Slack, window \"general\". On screen: Marie: on a une demande urgente de Carrefour.",
+            userTail: ""))
+    }
+
+    @Test func emptyPreambleIsNoOp() {
+        // Thin context / callers that pass nothing → guard never fires.
+        #expect(!OutputFilter.echoesContextPreamble(
+            ghost: "App Signal, window", contextPreamble: "", userTail: ""))
+    }
+}
+
+/// Context-echo wired through `ChunkFilter.filterChunk` — verifies the verdict
+/// and the `.contextEcho` drop reason the caller maps to `ghost_dropped_context_echo`.
+@Suite("ChunkFilter — context-preamble echo drop")
+struct ChunkFilterContextEchoTests {
+    let signal = """
+    App Signal, window "Signal". Clipboard: Tu peux me rappeler l'adresse du resto de samedi ?
+    Champ : zone de texte.
+    Placeholder : « Message ».
+    """
+
+    @Test func frameHeadEchoDropsViaChunkFilter() {
+        let r = ChunkFilter.filterChunk(
+            accumulated: "App Signal, window",
+            userTail: "Saisissez un message",
+            caretAfterSpace: false,
+            maxWords: 20,
+            contextPreamble: signal)
+        #expect(r.verdict == .dropKeepGenerating)
+        #expect(r.dropReason == .contextEcho)
+    }
+
+    @Test func legitContextReuseEmitsViaChunkFilter() {
+        // Mid-field completion reusing a clipboard word — NOT a context echo.
+        let r = ChunkFilter.filterChunk(
+            accumulated: " l'adresse du resto, c'est noté",
+            userTail: "Oui je t'envoie",
+            caretAfterSpace: false,
+            maxWords: 20,
+            contextPreamble: signal)
+        guard case .emit = r.verdict else {
+            Issue.record("expected .emit, got \(r.verdict)")
+            return
+        }
+        #expect(r.dropReason != .contextEcho)
+    }
+
+    @Test func noPreambleArgIsNoOp() {
+        // Default contextPreamble "" — a frame-looking ghost is NOT dropped as a
+        // context echo, so existing callers (incl. SouffleuseReplay) are unaffected.
+        let r = ChunkFilter.filterChunk(
+            accumulated: "App Signal, window",
+            userTail: "Saisissez un message",
+            caretAfterSpace: false,
+            maxWords: 20)
+        #expect(r.dropReason != .contextEcho)
+    }
+}

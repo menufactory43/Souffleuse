@@ -10,11 +10,13 @@ import Foundation
 /// - `.reset`       : the ghost repeats the prefix (`ghostIsRepeatingPrefix`).
 ///                    Caller logs `ghost_dropped_repeat`, calls `onChunk("")`,
 ///                    and STOPS this token (return true upstream).
-/// - `.dropKeepGenerating` : a degenerate ghost (bare enumerator) OR an
-///                    instruction echo. Caller resets `lastEmitted` to "" +
-///                    `onChunk("")` ONLY when `lastEmitted` was non-empty,
-///                    then keeps generating. The echo case additionally logs
-///                    `ghost_dropped_instruction_echo`.
+/// - `.dropKeepGenerating` : a degenerate ghost (bare enumerator), an
+///                    instruction echo, OR a context-preamble echo. Caller
+///                    resets `lastEmitted` to "" + `onChunk("")` ONLY when
+///                    `lastEmitted` was non-empty, then keeps generating. The
+///                    instruction-echo case additionally logs
+///                    `ghost_dropped_instruction_echo`; the context-echo case
+///                    logs `ghost_dropped_context_echo`.
 public enum ChunkVerdict: Sendable, Equatable {
     case emit(String)
     case reset
@@ -35,11 +37,12 @@ public enum ChunkVerdict: Sendable, Equatable {
 /// caller-side rules.
 public enum ChunkFilter {
 
-    /// Distinguishes the two `.dropKeepGenerating` sub-cases so the caller can
-    /// reproduce the (only) extra log event for the instruction-echo branch.
+    /// Distinguishes the `.dropKeepGenerating` sub-cases so the caller can
+    /// reproduce the extra log event per branch (instruction-echo, context-echo).
     public enum DropReason: Sendable, Equatable {
         case degenerate
         case instructionEcho
+        case contextEcho
     }
 
     /// Punctuation that closes a word (so the word before it counts as
@@ -71,7 +74,8 @@ public enum ChunkFilter {
         accumulated: String,
         userTail: String,
         caretAfterSpace: Bool,
-        maxWords: Int
+        maxWords: Int,
+        contextPreamble: String = ""
     ) -> (verdict: ChunkVerdict, dropReason: DropReason?, sentenceComplete: Bool, reachedWordCap: Bool) {
         // ── Filter pipeline (verbatim semantics of the generateLlama onChunk body) ──
         let snapshot = OutputFilter.stripPrefixOverlap(accumulated, prefix: userTail)
@@ -174,6 +178,21 @@ public enum ChunkFilter {
         // meta-text, never a real completion → drop and keep generating.
         if OutputFilter.echoesInstruction(oneLine) {
             return (.dropKeepGenerating, .instructionEcho, false, false)
+        }
+
+        // Context-preamble echo : when the field is (near-)empty the base model
+        // has nothing to continue and regurgitates the injected app/window/
+        // clipboard/OCR framing as the ghost ("App Signal, window …") — generic
+        // meta-text AND a clipboard/OCR LEAK on screen. Drop it. `echoesInstruction`
+        // only covers the static instruction framing, never this dynamic context
+        // block. An empty `contextPreamble` (thin context, or callers that don't
+        // pass one, e.g. SouffleuseReplay) makes this a no-op.
+        if OutputFilter.echoesContextPreamble(
+            ghost: oneLine,
+            contextPreamble: contextPreamble,
+            userTail: userTail
+        ) {
+            return (.dropKeepGenerating, .contextEcho, false, false)
         }
 
         // Dangling élision / open-compound trim (safety net). A trailing word
