@@ -768,16 +768,16 @@ final class PredictorViewModel {
                         self.suggestionSource = .llm
                         Log.info(.predictor, "ghost_midword_escalation_shown", count: word.count)
                         GhostInspector.shared.record(tail: userTail, verdict: .shown,
-                                                     reason: "escalade fast-accept", content: word)
+                                                     reason: "escalade \(esc.reason)", content: word)
                     } else {
-                        // Caché (fast-reject / uncertain) : retombe sur le ghost
-                        // instant, comme la branche `chunk.isEmpty` du streaming.
+                        // Caché (fast-reject / branches divergentes) : retombe sur le
+                        // ghost instant, comme la branche `chunk.isEmpty` du streaming.
                         self.suggestion = instantGhost
                         self.predictedForPrefix = forPrefix
                         self.suggestionSource = instantSource
                         Log.info(.predictor, "ghost_midword_escalation_hidden")
                         GhostInspector.shared.record(tail: userTail, verdict: .gated,
-                                                     reason: "escalade hide", content: esc?.word ?? "(rien)")
+                                                     reason: "escalade \(esc?.reason ?? "hide")", content: esc?.word ?? "(rien)")
                     }
                 }
                 return

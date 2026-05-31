@@ -92,7 +92,74 @@ struct MidWordEscalationTests {
     }
 
     @Test func flagOffByDefaultKeepsCurrentBehaviour() {
-        // Garde-fou de réversibilité : tant que le flag est OFF, F1 n'est pas câblé.
+        // Garde-fou de réversibilité : env absente ⇒ flag OFF ⇒ rien câblé.
         #expect(SuggestionPolicy.Tuning.midWordEscalationEnabled == false)
+    }
+
+    // MARK: - midWordBranchDecision (F2 — accord inter-branches)
+
+    @Test func branchConvergentShows() {
+        // Toutes les branches d'accord avec le greedy → accord 1.0 → montre.
+        let d = SuggestionPolicy.midWordBranchDecision(
+            partial: "cacahu", greedyModal: "cacahuète",
+            branchLeads: ["cacahuète", "cacahuète", "cacahuète"])
+        #expect(d.show)
+        #expect(d.word == "cacahuète")
+        #expect(d.agreement == 1.0)
+    }
+
+    @Test func branchPartialConvergenceShows() {
+        // 3 voix sur 4 pour "fiscal" (le greedy + 2 branches) → 0.75 ≥ 0.6 → montre.
+        let d = SuggestionPolicy.midWordBranchDecision(
+            partial: "fis", greedyModal: "fiscal",
+            branchLeads: ["fiscal", "fissa", "fiscal"])
+        #expect(d.show)
+        #expect(d.word == "fiscal")
+    }
+
+    @Test func branchDivergentHides() {
+        // Fragment ambigu : les branches partent dans tous les sens → accord bas → cache.
+        let d = SuggestionPolicy.midWordBranchDecision(
+            partial: "co", greedyModal: "comme",
+            branchLeads: ["cocus", "cormier", "comble"])
+        #expect(!d.show)
+        #expect(d.agreement < SuggestionPolicy.Tuning.escAgreeThresh)
+    }
+
+    // MARK: - midWordLeadWordDefrag (dé-fragmentation du mot éclaté)
+
+    @Test func defragMergesFragmentedWordWhenValid() {
+        // « caca huète » éclaté → collapsé en « cacahuète » (vrai mot, prolonge).
+        #expect(SuggestionPolicy.midWordLeadWordDefrag("caca huète, beurre", partial: "cacah") == "cacahuète")
+    }
+
+    @Test func defragLeavesCleanLeadUntouched() {
+        // Sortie non fragmentée : le run simple prolonge déjà → renvoyé tel quel.
+        #expect(SuggestionPolicy.midWordLeadWordDefrag(" cacahuète et", partial: "cacah") == "cacahuète")
+    }
+
+    @Test func defragRefusesToMergeTwoDistinctWords() {
+        // « je vais » → « jevais » invalide → on NE fusionne PAS, on retombe sur
+        // le run simple (« je ») que le gate aval rejettera s'il ne prolonge pas.
+        #expect(SuggestionPolicy.midWordLeadWordDefrag("je vais manger", partial: "jev") == "je")
+    }
+
+    @Test func defragKeepsHealingGarbageRejectable() {
+        // « pingo u is » : aucun collapse ne forme un mot valide prolongeant
+        // « pingou » (« pingou »/« pingouis » invalides) → run simple « pingo »,
+        // que `validExtends` rejette → garbage toujours caché.
+        let lead = SuggestionPolicy.midWordLeadWordDefrag("pingo u is", partial: "pingou")
+        #expect(!SuggestionPolicy.midWordValidExtends(partial: "pingou", modal: lead))
+    }
+
+    @Test func branchHealingFailureHiddenDespiteHighAgreement() {
+        // L'axe que l'accord SEUL manque : toutes les branches convergent sur le
+        // garbage "pingo" (accord 1.0) MAIS il ne prolonge pas "pingou" → la garde
+        // dico le cache quand même. C'est tout l'intérêt de la double garde.
+        let d = SuggestionPolicy.midWordBranchDecision(
+            partial: "pingou", greedyModal: "pingo",
+            branchLeads: ["pingo", "pingo", "pingo"])
+        #expect(d.agreement == 1.0)
+        #expect(!d.show)
     }
 }
