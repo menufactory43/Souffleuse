@@ -1186,8 +1186,10 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // idle-unload timer; once enough has been typed (a real sentence, not a
         // 2-char search) the model is woken if it dozed off. `typedSinceFocus`
         // approximates the appended characters via the focus baseline length.
-        let typedSinceFocus = max(0, text.count - (textAtFocusByBundle[bundleID]?.count ?? text.count))
-        manageGhostWarmth(prefix: prefix, typedSinceFocus: typedSinceFocus)
+        let draftBaselineChars = textAtFocusByBundle[bundleID]?.count ?? text.count
+        let typedSinceFocus = max(0, text.count - draftBaselineChars)
+        manageGhostWarmth(prefix: prefix, typedSinceFocus: typedSinceFocus,
+                          draftBaselineChars: draftBaselineChars)
 
         // Mid-text suppression: when the character immediately after the caret
         // is a non-whitespace glyph, the user is editing INSIDE existing text,
@@ -1982,19 +1984,32 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Seuil de caractères tapés (depuis le re-focus) avant de réveiller le moteur
+    /// ghost endormi. **1** (première frappe) quand le champ contient déjà un
+    /// brouillon réel (`draftBaselineChars >= ghostDraftResumeMinChars`) : on
+    /// reprend une composition, la ~1 s de reload recouvre le 1ᵉʳ mot. Sinon le
+    /// plancher `ghostWarmupMinChars`, pour ne pas charger sur une barre de
+    /// recherche courte / un champ vierge. Pur, testable.
+    nonisolated static func ghostWakeThreshold(draftBaselineChars: Int) -> Int {
+        draftBaselineChars >= SuggestionPolicy.Tuning.ghostDraftResumeMinChars
+            ? 1 : SuggestionPolicy.Tuning.ghostWarmupMinChars
+    }
+
     /// Garde le moteur ghost « chaud » uniquement pendant que l'utilisateur
     /// compose. Appelé à chaque tick passé le gate de frappe. Une frappe fraîche
     /// (prefix changé depuis le tick précédent) réarme le timer d'idle-unload ;
-    /// au-delà de `ghostWarmupMinChars` caractères tapés, réveille le modèle s'il
-    /// dort — assez tard pour ignorer un champ de recherche court.
+    /// le réveil du modèle endormi est gaté par `ghostWakeThreshold` —
+    /// 1ʳᵉ frappe si on reprend un brouillon, sinon `ghostWarmupMinChars` pour
+    /// ignorer un champ de recherche court. `draftBaselineChars` = longueur du
+    /// texte déjà présent au (re)focus du champ.
     @MainActor
-    private func manageGhostWarmth(prefix: String, typedSinceFocus: Int) {
+    private func manageGhostWarmth(prefix: String, typedSinceFocus: Int, draftBaselineChars: Int) {
         let typingNow = (prefix != lastGhostActivityPrefix)
         lastGhostActivityPrefix = prefix
         guard typingNow else { return }
         scheduleGhostIdleUnload()
-        if !predictor.isModelReady,
-           typedSinceFocus >= SuggestionPolicy.Tuning.ghostWarmupMinChars {
+        guard !predictor.isModelReady else { return }
+        if typedSinceFocus >= Self.ghostWakeThreshold(draftBaselineChars: draftBaselineChars) {
             loadGhostIfNeeded()
         }
     }
