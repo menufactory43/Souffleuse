@@ -290,6 +290,16 @@ extension SuggestionPolicy {
         /// l'utilisateur compose vraiment une phrase. ~6 ≈ un mot.
         public static let ghostWarmupMinChars: Int = 6
 
+        /// Si le champ contient DÉJÀ au moins ce nombre de caractères quand on
+        /// commence à y taper, on considère qu'on REPREND un brouillon réel (ex.
+        /// retour dans un message après un idle-unload + bascule d'app) et on
+        /// réveille le moteur dès la **1ʳᵉ frappe** — la ~1 s de reload recouvre
+        /// alors le premier mot au lieu de ne démarrer qu'au 6ᵉ char. En dessous
+        /// (champ vide/court : barre de recherche, nouvelle composition) on garde
+        /// le plancher `ghostWarmupMinChars` pour ne pas charger inutilement.
+        /// ~12 ≈ 2-3 mots : clairement un brouillon, pas une requête de recherche.
+        public static let ghostDraftResumeMinChars: Int = 12
+
         /// Durée (s) d'affichage du panneau de traduction APRÈS la fin de la
         /// traduction, avant l'auto-masquage en fondu — assez longue pour lire et
         /// pour saisir/déplacer le panneau. Le survol souris suspend ce compte.
