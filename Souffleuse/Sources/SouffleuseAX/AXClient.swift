@@ -75,6 +75,14 @@ public struct AXSnapshot: Sendable, Equatable {
     public var isSecureField: Bool {
         subrole == "AXSecureTextField"
     }
+
+    /// Vrai quand le champ focalisé est une ZONE DE RECHERCHE : subrole AX
+    /// `AXSearchField` — natif macOS (Finder/Mail/réglages…) et exposé aussi par
+    /// Chromium pour `input[type=search]` / ARIA `role=searchbox`. On ne propose
+    /// pas de ghost dans une recherche (et on ne réveille pas le modèle pour ça).
+    public var isSearchField: Bool {
+        subrole == "AXSearchField"
+    }
 }
 
 public final class AXClient: @unchecked Sendable {
