@@ -59,6 +59,12 @@ let phrases: [String] = [
 
 let targets = TranslationTarget.allCases   // en, de, es, it, ja
 
+// Modèle instruct DOGFOODÉ : par défaut gemma1b, override via SOUFFLEUSE_IT_MODEL
+// (« qwen1_5b ») pour tester l'AUTRE template (ChatML) avec le bon GGUF — sinon
+// le bench ne testait que le chemin Gemma alors que la prod tourne sur Qwen.
+let instructModel = ProcessInfo.processInfo.environment["SOUFFLEUSE_IT_MODEL"]
+    .flatMap(InstructModel.init(rawValue:)) ?? .gemma1b
+
 let sampling = LlamaSampling(temperature: 0, repeatPenalty: 1.1, repeatLastN: 64)
 
 print("════════════════════════════════════════════════════════════════════")
@@ -85,7 +91,7 @@ for (i, fr) in phrases.enumerated() {
     print("\n#\(i + 1)  FR  \(fr)")
     for t in targets {
         let sink = Sink()
-        let m = await action.generate(prompt: GemmaChatPrompt.translation(of: fr, into: t),
+        let m = await action.generate(prompt: GemmaChatPrompt.translation(of: fr, into: t, model: instructModel),
                                        maxTokens: 120, sampling: sampling) { tok in
             sink.s += tok; return true
         }
