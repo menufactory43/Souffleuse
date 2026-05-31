@@ -1058,7 +1058,8 @@ final class ModelRuntime {
                         // decide to fall back to its instant ghost — same
                         // semantic as PVM:755-766 but cleaner across the
                         // actor boundary.
-                        if OutputFilter.ghostIsRepeatingPrefix(oneLine, prefix: userTail) {
+                        if OutputFilter.ghostIsRepeatingPrefix(oneLine, prefix: userTail)
+                            || OutputFilter.ghostEchoesAdjacent(prefix: userTail, ghost: oneLine) {
                             Log.info(.predictor, "ghost_dropped_repeat")
                             let chunkOut = ""
                             Task { @MainActor in
