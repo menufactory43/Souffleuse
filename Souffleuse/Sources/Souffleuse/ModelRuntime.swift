@@ -334,6 +334,83 @@ final class ModelRuntime {
         return await generateLlama(request: request, onChunk: onChunk)
     }
 
+    /// Résultat d'une passe d'escalade mid-mot (Frame C — F1, étage 1 seul).
+    /// `show` ⇒ le caller affiche `word` (le mot greedy/healed) ; sinon il cache
+    /// (retombe sur le ghost instant). `word` est exposé même caché pour
+    /// l'inspecteur DEV.
+    struct MidWordEscalationResult: Sendable {
+        let show: Bool
+        let word: String
+    }
+
+    /// **Frame C — escalade mid-mot, étage 1 (greedy + dico).** Appelée par
+    /// `PredictorViewModel.predict` UNIQUEMENT quand le caret est mid-mot sur un
+    /// fragment INCOMPLET (le cas qui fait aujourd'hui `midword_block`) ET que le
+    /// flag `midWordEscalationEnabled` est ON. Hors flag, n'est jamais appelée →
+    /// comportement byte-identique.
+    ///
+    /// Une SEULE passe greedy (profil de prod : mêmes bans + repeatPenalty +
+    /// token healing), `minFirstTokenProb` à un epsilon pour capter la confiance
+    /// top-1 SANS aborter. On extrait le mot de tête et on applique la décision
+    /// pure `SuggestionPolicy.midWordFastDecision`. Pas de streaming, pas de
+    /// branches (F2) — l'incertain est caché (= comportement actuel) pour l'instant.
+    ///
+    /// Personnalisation n-gram DÉSACTIVÉE ici (`personalizationStrength: 0`) :
+    /// les seuils ont été calibrés sans biais sur `SouffleuseMidwordEval`, et le
+    /// biais changerait la sortie greedy mesurée. À réévaluer si F2 l'exige.
+    func midWordEscalate(request: PredictRequest) async -> MidWordEscalationResult? {
+        guard llamaReady else { return nil }
+        let partial = OutputFilter.trailingPartialWord(request.userTail)
+
+        let prompt = ModelRuntime.buildLlamaPrompt(
+            system: request.systemMessage,
+            customInstr: request.customInstr,
+            ctxPrefix: request.ctxPrefix,
+            fieldContext: request.fieldContextSlot,
+            afterCursor: request.afterCursorSlot,
+            beforeCursor: request.llmTail,
+            examples: request.examplesBlock
+        )
+
+        final class Acc: @unchecked Sendable { var text = "" }
+        let acc = Acc()
+        let cap = min(request.maxTokens, SuggestionPolicy.Tuning.escGreedyMaxTokens)
+
+        GpuGate.shared.ghostBegan()
+        let metrics = await llamaEngine.generate(
+            prompt: prompt,
+            maxTokens: cap,
+            sampling: LlamaSampling(
+                temperature: 0,
+                repeatPenalty: 1.3,
+                repeatLastN: 64,
+                personalizationStrength: 0,
+                banMarkup: true,
+                banDigitsLeading: true,
+                banEmoji: true,
+                minFirstTokenProb: Float(SuggestionPolicy.Tuning.escFirstTokenProbEpsilon),
+                healPrefix: partial.isEmpty ? nil : partial
+            )
+        ) { piece in
+            if Task.isCancelled { return false }
+            acc.text += piece
+            return true
+        }
+        GpuGate.shared.ghostEnded()
+
+        if Task.isCancelled { return nil }
+        let oneLine = acc.text.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? acc.text
+        let modal = SuggestionPolicy.midWordLeadWord(oneLine)
+        switch SuggestionPolicy.midWordFastDecision(
+            partial: partial, greedyModal: modal, firstTokenProb: metrics.firstTokenProb
+        ) {
+        case .fastAccept(let word):
+            return MidWordEscalationResult(show: true, word: word)
+        case .fastReject, .uncertain:
+            return MidWordEscalationResult(show: false, word: modal)
+        }
+    }
+
     /// Builds a Gemma-3 instruct prompt (FIM-style : pre + afterCursor) and
     /// streams the completion through `LlamaEngine`, running the existing
     /// `OutputFilter` pipeline on the cumulative output and pushing filtered

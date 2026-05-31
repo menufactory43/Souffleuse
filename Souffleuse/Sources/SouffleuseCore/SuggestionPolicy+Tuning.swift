@@ -151,10 +151,15 @@ extension SuggestionPolicy {
         // (Pitfall 6) ; flag maître OFF → le seam reste `midword_block`, comportement
         // byte-identique à aujourd'hui.
 
-        /// Master switch. `false` ⇒ le mid-mot incomplet reste `midword_block`
-        /// (rien affiché) — exactement le comportement actuel. `true` ⇒ l'étage 1
-        /// (greedy + dico) décide ; les branches arrivent en F2 sous le même flag.
-        public static let midWordEscalationEnabled: Bool = false
+        /// Master switch + kill-switch runtime. **OFF par défaut** (env absente) ⇒
+        /// le mid-mot incomplet reste `midword_block` (rien affiché), comportement
+        /// byte-identique à aujourd'hui. `SOUFFLEUSE_MIDWORD_ESCALATION=1` ⇒ l'étage 1
+        /// (greedy + dico) décide ; les branches (F2) arriveront sous le même flag.
+        /// Env-overridable (même pattern que `wordCompleterEnabledRuntime`) pour
+        /// l'A/B et le revert instantané sans recompiler.
+        public static var midWordEscalationEnabled: Bool {
+            ProcessInfo.processInfo.environment["SOUFFLEUSE_MIDWORD_ESCALATION"] != nil
+        }
 
         /// Fast-accept : un mot greedy/healed valide ET prolongeant le partiel, à
         /// confiance top-1 ≥ ce seuil ET sur un fragment ≥ `escMinFastLen`, est
@@ -181,6 +186,16 @@ extension SuggestionPolicy {
         /// (F2) Accord inter-branches minimal (mot modal / votes) pour montrer.
         /// Sépare le mot clair (≥0.6) du fragment ambigu (`co`/`Po` mesurés à 0.40).
         public static let escAgreeThresh: Double = 0.6
+
+        /// (F1) Plafond de tokens de la passe greedy d'escalade : on ne veut que le
+        /// mot courant + un poil. Court = latence bornée. Pris en `min()` avec le
+        /// `maxTokens` de la requête.
+        public static let escGreedyMaxTokens: Int = 8
+
+        /// (F1) Epsilon de `minFirstTokenProb` pour FORCER le calcul de la confiance
+        /// top-1 sans jamais aborter (le moteur ne calcule le softmax que si > 0).
+        /// Si bas qu'aucun token réel ne tombe dessous → sortie greedy inchangée.
+        public static let escFirstTokenProbEpsilon: Double = 0.0001
 
         // MARK: - LLM context window (coherence, 2026-05-29 measurement)
         ///
