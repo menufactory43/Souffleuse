@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-06-01T00:00:00Z",
+  "title": "Design System: Souffleuse",
+  "extensions": {
+    "colorMeta": {
+      "sang-de-boeuf": { "role": "primary", "displayName": "Sang-de-Bœuf", "canonical": "oklch(0.45 0.13 30)", "tonalRamp": ["oklch(0.18 0.07 30)", "oklch(0.27 0.10 30)", "oklch(0.36 0.12 30)", "oklch(0.45 0.13 30)", "oklch(0.56 0.13 30)", "oklch(0.67 0.11 30)", "oklch(0.80 0.07 30)", "oklch(0.93 0.03 30)"] },
+      "sang-de-boeuf-deep": { "role": "primary", "displayName": "Sang-de-Bœuf Deep", "canonical": "oklch(0.39 0.13 30)", "tonalRamp": ["oklch(0.16 0.07 30)", "oklch(0.25 0.10 30)", "oklch(0.33 0.12 30)", "oklch(0.39 0.13 30)", "oklch(0.50 0.13 30)", "oklch(0.63 0.11 30)", "oklch(0.78 0.07 30)", "oklch(0.92 0.03 30)"] },
+      "ink": { "role": "neutral", "displayName": "Ink", "canonical": "oklch(0.20 0.012 60)", "tonalRamp": ["oklch(0.15 0.012 60)", "oklch(0.20 0.012 60)", "oklch(0.32 0.014 60)", "oklch(0.43 0.014 60)", "oklch(0.55 0.013 60)", "oklch(0.68 0.012 60)", "oklch(0.81 0.012 60)", "oklch(0.94 0.010 60)"] },
+      "ink-soft": { "role": "neutral", "displayName": "Ink Soft", "canonical": "oklch(0.36 0.014 60)" },
+      "ink-faint": { "role": "neutral", "displayName": "Ink Faint", "canonical": "oklch(0.43 0.014 60)" },
+      "ghost": { "role": "neutral", "displayName": "Ghost", "canonical": "oklch(0.68 0.025 75)" },
+      "paper": { "role": "neutral", "displayName": "Paper", "canonical": "oklch(0.93 0.025 85)", "tonalRamp": ["oklch(0.20 0.020 85)", "oklch(0.32 0.025 85)", "oklch(0.45 0.030 85)", "oklch(0.58 0.030 85)", "oklch(0.70 0.030 85)", "oklch(0.80 0.030 85)", "oklch(0.88 0.028 85)", "oklch(0.95 0.022 85)"] },
+      "paper-deep": { "role": "neutral", "displayName": "Paper Deep", "canonical": "oklch(0.90 0.030 85)" },
+      "paper-edge": { "role": "neutral", "displayName": "Paper Edge", "canonical": "oklch(0.86 0.034 85)" },
+      "paper-card": { "role": "neutral", "displayName": "Paper Card", "canonical": "oklch(0.95 0.024 85)" }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display (Marquee)", "purpose": "Hero title only. Bodoni Moda 700, balanced wrap; nested italic sub-line in sang-de-bœuf." },
+      "headline": { "displayName": "Headline", "purpose": "Section titles." },
+      "title": { "displayName": "Title", "purpose": "Feature / step / vow headings (h3); FAQ questions at 500." },
+      "body": { "displayName": "Body", "purpose": "All prose, Spectral 400, 64ch measure; italic for stage directions." },
+      "label": { "displayName": "Label (Didascalie)", "purpose": "Tracked uppercase small-caps programme labels, app names, act markers." }
+    },
+    "shadows": [
+      { "name": "printed-sheet", "value": "0 1px 0 rgba(255,255,255,0.6) inset, 5px 7px 0 rgba(26,22,19,0.10)", "purpose": "The prompter's window: inset top highlight + hard offset cast, zero blur." },
+      { "name": "lifted-card", "value": "5px 6px 0 rgba(26,22,19,0.10)", "purpose": "Framed figures (pulse-card) sitting proud of the page." },
+      { "name": "pressed-keycap", "value": "1px 1px 0 rgba(26,22,19,0.25)", "purpose": "<kbd> keys; a tiny offset that reads as a physical key." }
+    ],
+    "motion": [
+      { "name": "ink-settle", "value": "cubic-bezier(0.22, 0.7, 0.2, 1)", "purpose": "Hero ink-rise: opacity + 10px translate + 4px blur resolving over 0.8s, staggered." },
+      { "name": "souffle-opacity", "value": "cubic-bezier(0.22, 0.68, 0.16, 1)", "purpose": "Whispered word condensing from 6px blur, 0.6s." },
+      { "name": "souffle-drift", "value": "cubic-bezier(0.16, 0.74, 0.12, 1)", "purpose": "Whispered word drifting in from bottom-left (côté jardin), 0.72s. Pure deceleration, no bounce." },
+      { "name": "state", "value": "ease", "purpose": "Button / link / tab state changes, 0.2–0.22s." }
+    ],
+    "breakpoints": [
+      { "name": "features", "value": "720px" },
+      { "name": "vows", "value": "760px" },
+      { "name": "nav", "value": "820px" },
+      { "name": "heroine", "value": "880px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The download CTA. Ink at rest, sang-de-bœuf on hover, deeper on press.",
+      "html": "<a href=\"#\" class=\"ds-btn-primary\"><svg width=\"15\" height=\"18\" viewBox=\"0 0 15 18\" aria-hidden=\"true\" fill=\"currentColor\"><path d=\"M10.4 0c.1 1-.3 2-1 2.8-.6.7-1.7 1.3-2.7 1.2-.1-1 .4-2 1-2.7C8.4.6 9.5.1 10.4 0Zm2.6 12.9c-.4 1-.6 1.4-1.1 2.3-.7 1.3-1.8 2.9-3 2.9-1.1 0-1.4-.7-2.9-.7-1.5 0-1.8.7-2.9.7-1.3 0-2.3-1.4-3-2.7C-.5 14.4-.7 10.3.9 8c.8-1.1 2.1-1.8 3.4-1.8 1.3 0 2.1.7 3.1.7 1 0 1.6-.7 3.1-.7 1.1 0 2.3.6 3.1 1.7-2.7 1.5-2.3 5.4.3 5Z\"/></svg>Télécharger pour Mac</a>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; gap: 0.55rem; font-family: 'Bodoni Moda', Georgia, serif; font-weight: 500; letter-spacing: 0.04em; text-decoration: none; padding: 0.72rem 1.4rem; border: 1px solid #1a1613; background: #1a1613; color: #f3ead9; border-radius: 1px; transition: background .22s ease, color .22s ease, border-color .22s ease; } .ds-btn-primary:hover { background: #8c2b21; border-color: #8c2b21; } .ds-btn-primary:active { background: #6f2018; } .ds-btn-primary:focus-visible { outline: 2px solid #8c2b21; outline-offset: 3px; }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Secondary action. No fill at rest; text and border flip to sang-de-bœuf on hover.",
+      "html": "<a href=\"#\" class=\"ds-btn-ghost\">Voir la démo</a>",
+      "css": ".ds-btn-ghost { display: inline-flex; align-items: center; font-family: 'Bodoni Moda', Georgia, serif; font-weight: 500; letter-spacing: 0.04em; text-decoration: none; padding: 0.72rem 1.4rem; border: 1px solid #1a1613; background: transparent; color: #1a1613; border-radius: 1px; transition: color .22s ease, border-color .22s ease; } .ds-btn-ghost:hover { color: #8c2b21; border-color: #8c2b21; } .ds-btn-ghost:focus-visible { outline: 2px solid #8c2b21; outline-offset: 3px; }"
+    },
+    {
+      "name": "Scene Tab",
+      "kind": "chip",
+      "refersTo": "tab",
+      "description": "Demo scene selector. Tracked uppercase; selected takes sang-de-bœuf text + border. The live variant carries a sang-de-bœuf dot.",
+      "html": "<div style=\"display:flex;gap:0.35rem\"><button class=\"ds-tab\" aria-selected=\"false\">Mail</button><button class=\"ds-tab\" aria-selected=\"true\">Messages</button><button class=\"ds-tab ds-tab--live\" aria-selected=\"false\">À vous</button></div>",
+      "css": ".ds-tab { appearance: none; border: 1px solid transparent; background: transparent; font-family: 'Bodoni Moda', Georgia, serif; font-size: 0.7rem; letter-spacing: 0.12em; text-transform: uppercase; color: #5e5446; padding: 0.2rem 0.55rem; cursor: pointer; border-radius: 1px; transition: color .2s, border-color .2s, background .2s; } .ds-tab:hover { color: #1a1613; } .ds-tab[aria-selected=\"true\"] { color: #8c2b21; border-color: #8c2b21; } .ds-tab--live::before { content: \"\"; display: inline-block; width: 5px; height: 5px; margin-right: 0.34em; border-radius: 50%; background: #8c2b21; vertical-align: middle; opacity: 0.55; } .ds-tab--live[aria-selected=\"true\"]::before { opacity: 1; }"
+    },
+    {
+      "name": "Keycap",
+      "kind": "custom",
+      "refersTo": "kbd",
+      "description": "Physical-feeling key for Tab / Esc hints, with a tiny offset shadow.",
+      "html": "<span class=\"ds-hint\"><kbd class=\"ds-kbd\">Tab</kbd> pour accepter</span>",
+      "css": ".ds-hint { display: inline-flex; align-items: center; gap: 0.45rem; font-family: 'Spectral', Georgia, serif; font-size: 0.84rem; color: #463d33; } .ds-kbd { font-family: 'Bodoni Moda', Georgia, serif; font-weight: 500; font-size: 0.78rem; border: 1px solid #1a1613; border-radius: 2px; padding: 0.08rem 0.45rem; background: #f3ead9; box-shadow: 1px 1px 0 rgba(26,22,19,0.25); color: #1a1613; }"
+    },
+    {
+      "name": "FAQ Disclosure",
+      "kind": "custom",
+      "refersTo": "faq-summary",
+      "description": "Open accordion divided by hairline filets. Sang-de-bœuf + marker rotates to × when open.",
+      "html": "<details class=\"ds-qa\" open><summary>Est-ce que mes textes quittent mon Mac ?</summary><div class=\"ds-qa__body\"><p>Jamais. Tout se passe en local, sur votre Mac. Rien n'est envoyé, rien n'est stocké ailleurs.</p></div></details>",
+      "css": ".ds-qa { border-top: 1px solid rgba(26,22,19,0.35); border-bottom: 1px solid rgba(26,22,19,0.35); } .ds-qa summary { cursor: pointer; list-style: none; padding: 1.25rem 2.4rem 1.25rem 0; position: relative; font-family: 'Bodoni Moda', Georgia, serif; font-weight: 500; font-size: 1.22rem; line-height: 1.25; color: #1a1613; transition: color .2s; } .ds-qa summary::-webkit-details-marker { display: none; } .ds-qa summary:hover { color: #8c2b21; } .ds-qa summary::after { content: \"+\"; position: absolute; right: 0.2rem; top: 1.15rem; font-family: 'Bodoni Moda', Georgia, serif; font-size: 1.5rem; color: #8c2b21; transition: transform .25s ease; } .ds-qa[open] summary::after { transform: rotate(45deg); } .ds-qa__body { padding: 0 0 1.4rem; color: #463d33; max-width: 64ch; font-family: 'Spectral', Georgia, serif; line-height: 1.66; } .ds-qa__body p { margin: 0; }"
+    },
+    {
+      "name": "Key Card (inverted)",
+      "kind": "card",
+      "refersTo": "feature-wide",
+      "description": "Full-width inverted ink card that breaks the two-column feature grid and carries the key message.",
+      "html": "<div class=\"ds-keycard\"><span class=\"ds-keycard__num\">iv</span><div><h3>Tout se passe sur votre Mac</h3><p>Aucun texte n'est envoyé. Pas de compte, pas de serveur, pas de réseau au travail.</p></div></div>",
+      "css": ".ds-keycard { background: #1a1613; color: #f3ead9; border: 1px solid #1a1613; border-radius: 2px; padding: 1.7rem 1.6rem; display: grid; grid-template-columns: auto 1fr; gap: 0.4rem 1.6rem; align-items: baseline; } .ds-keycard__num { font-family: 'Bodoni Moda', Georgia, serif; font-style: italic; color: #e3d5ba; font-size: 0.9rem; letter-spacing: 0.1em; } .ds-keycard h3 { font-family: 'Bodoni Moda', Georgia, serif; font-weight: 700; font-size: 1.45rem; line-height: 1.1; margin: 0 0 0.15rem; color: #f3ead9; } .ds-keycard p { margin: 0; font-family: 'Spectral', Georgia, serif; line-height: 1.6; color: #e3d5ba; font-size: 0.98rem; }"
+    },
+    {
+      "name": "Le Trou du Souffleur (demo window)",
+      "kind": "custom",
+      "refersTo": "souffleur",
+      "description": "Signature component. Programme-bar header, typed ink text and pale-ghost italic souffle on one baseline, breathing sang-de-bœuf caret between.",
+      "html": "<figure class=\"ds-souffleur\"><div class=\"ds-souffleur__bar\"><svg class=\"ds-seal\" width=\"14\" height=\"14\" viewBox=\"0 0 14 14\" fill=\"none\" stroke=\"#8c2b21\" stroke-width=\"1.1\" aria-hidden=\"true\"><path d=\"M7 1 C4 3.5 4 6 7 8 C10 6 10 3.5 7 1Z\"/></svg><span class=\"ds-souffleur__app\">Mail · réponse à un devis</span></div><div class=\"ds-souffleur__stage\"><p class=\"ds-souffleur__line\"><span class=\"ds-typed\">Je reviens vers vous</span><span class=\"ds-caret\"></span><span class=\"ds-souffle\"> avant la fin de la semaine.</span></p></div></figure>",
+      "css": ".ds-souffleur { margin: 0; max-width: 560px; border: 1px solid #1a1613; background: #fbf5ea; box-shadow: 0 1px 0 rgba(255,255,255,0.6) inset, 5px 7px 0 rgba(26,22,19,0.10); border-radius: 2px; overflow: hidden; } .ds-souffleur__bar { display: flex; align-items: center; gap: 0.9rem; padding: 0.5rem 0.95rem; border-bottom: 1px solid rgba(26,22,19,0.5); background: #ece0c9; } .ds-souffleur__app { font-family: 'Bodoni Moda', Georgia, serif; font-size: 0.66rem; letter-spacing: 0.18em; text-transform: uppercase; color: #5e5446; } .ds-souffleur__stage { padding: 1.7rem 1.6rem; } .ds-souffleur__line { margin: 0; font-family: 'Spectral', Georgia, serif; font-size: 1.25rem; line-height: 1.5; color: #1a1613; } .ds-typed { white-space: pre-wrap; } .ds-souffle { font-style: italic; color: #a99a82; white-space: pre-wrap; } .ds-caret { display: inline-block; width: 2px; height: 1.05em; margin: 0 1px -0.18em 0; background: #8c2b21; animation: ds-caret-breathe 1.7s cubic-bezier(0.4,0,0.4,1) infinite; } @keyframes ds-caret-breathe { 0%,100% { opacity: 1; transform: scaleY(1); } 50% { opacity: 0.16; transform: scaleY(0.9); } } @media (prefers-reduced-motion: reduce) { .ds-caret { animation: none; } }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Le Trou du Souffleur",
+    "overview": "The whole interface is the nook at the edge of a stage from which a forgotten line is whispered, then nothing. Souffleuse is a private, on-device writing assistant for the Mac; the site has to make one idea land before it sells anything: a quiet voice slips you the right word and disappears. So the system never behaves like software showing off. It behaves like a well-printed theatre programme you were handed in the dark, paper you can almost feel, set in lead type, with one drop of sang-de-bœuf ink reserved for the moments that matter: the live cue, the action, the breath.\n\nDensity is low and deliberate. One dominant idea per fold, generous fluid spacing, long calm scroll. Type does the heavy lifting (two serifs, no sans, no mono), and the only ornaments are theatrical ones: programme filets, a cul-de-lampe fleuron, small-caps didascalies, en trois actes. Depth is printed, not digital: sheets lift off the page on a hard, blurless offset shadow, the way a card sits proud of a poster, never the soft ambient glow of a SaaS dashboard.\n\nThis system explicitly rejects the cold/clinical AI tool, the loud/salesy landing page, and the cluttered feature-grid. It is intimate, not promotional; it whispers, it never pitches.",
+    "keyCharacteristics": [
+      "Printed-playbill aesthetic: paper grain, hairline filets, small-caps labels, theatrical didascalies.",
+      "Two serifs only (Bodoni Moda display + Spectral body). No sans, no mono.",
+      "Sang-de-bœuf used as a rare signal, never as decoration.",
+      "Letterpress depth: hard offset shadows, zero blur.",
+      "Cut-paper corners (1–2px), never pill-rounded.",
+      "Motion is the settling of ink: blur-to-sharp, decelerate, never bounce."
+    ],
+    "rules": [
+      { "name": "The One Voice Rule", "body": "Sang-de-bœuf is the only chromatic accent in the system and appears on a small fraction of any screen. Its rarity is the meaning: it is the whisper made visible. Never add a second hue to balance it.", "section": "colors" },
+      { "name": "The Warm-Ink, Not Warm-Wash Rule", "body": "Warmth comes from the ink ramp and the serifs, not from pushing the paper toward a brighter cream. The four paper steps are the whole background vocabulary; do not introduce new lighter tints.", "section": "colors" },
+      { "name": "The Two-Serif Rule", "body": "Exactly two families: Bodoni Moda for display and labels, Spectral for prose. Introducing a sans or a mono is prohibited; it would read as a tech costume the brand refuses.", "section": "typography" },
+      { "name": "The Didascalie Rule", "body": "Italic Spectral is the system's stage-direction voice (eyebrows, captions, codas, system requirements). Set asides in italic body, not in a tracked uppercase eyebrow.", "section": "typography" },
+      { "name": "The Letterpress Rule", "body": "Every shadow in the system is a hard offset (Xpx Ypx 0) with a blur radius of exactly 0. If a shadow has blur, it is wrong. Depth is the cast of a sheet on the page, not a glow.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do keep sang-de-bœuf (#8c2b21) rare and meaningful: action, the live cue, focus, the whisper. The One Voice Rule.",
+      "Do convey depth with hard offset shadows (Xpx Ypx 0, zero blur) and a faint inset top highlight. The Letterpress Rule.",
+      "Do set every heading and label in Bodoni Moda and all prose in Spectral. Italic Spectral for stage directions. The Two-Serif and Didascalie Rules.",
+      "Do divide content with hairline filets and open composition; reserve the 2px-cornered paper-card for figures that genuinely sit proud of the page.",
+      "Do keep prose to the 64ch measure, body text on ink-soft or darker, and hold ink-faint as the small-text AA floor (≥4.5:1).",
+      "Do animate as settling ink: blur-to-sharp with a decelerating cubic-bezier, and ship a prefers-reduced-motion: reduce fallback for every motion."
+    ],
+    "donts": [
+      "Don't build a cold/clinical AI tool look: no dark-terminal-neon, no powered-by-AI badge, no robotic chrome. The tech stays invisible.",
+      "Don't go loud or salesy: no pop-ups, urgency banners, exclamation-mark copy, or repeated aggressive CTAs. It whispers; it never pitches.",
+      "Don't clutter: no wall of identical icon-cards, no competing focal points. One dominant idea per fold.",
+      "Don't add a sans-serif or monospace, or a second accent hue. Two serifs, one voice.",
+      "Don't use soft blurred ambient shadows, glassmorphism, gradient text, or pill-rounded corners. If a shadow has blur, it is wrong.",
+      "Don't push the paper toward a brighter cream to feel warmer, or let ghost (#a99a82) carry real text. Warmth is in the ink and the type.",
+      "Don't write with em dashes; use commas, colons, or parentheses, matching the existing French copy."
+    ]
+  }
+}

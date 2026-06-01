@@ -3,8 +3,32 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Souffleuse — Le mot juste, soufflé à voix basse</title>
+<title>Souffleuse : le mot juste, soufflé à voix basse</title>
 <meta name="description" content="Une aide à l'écriture pour Mac, entièrement privée. Souffleuse glisse le mot juste sous votre curseur quand vous hésitez, puis s'efface. Vos textes ne quittent jamais votre Mac." />
+
+<link rel="canonical" href="https://website-two-bice-90.vercel.app/" />
+<meta name="theme-color" content="#f3ead9" />
+
+<!-- Icônes -->
+<link rel="icon" href="/favicon.ico" sizes="any" />
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+<!-- Carte de partage (Open Graph + Twitter) -->
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Souffleuse" />
+<meta property="og:locale" content="fr_FR" />
+<meta property="og:url" content="https://website-two-bice-90.vercel.app/" />
+<meta property="og:title" content="Souffleuse : le mot juste, soufflé à voix basse" />
+<meta property="og:description" content="Une aide à l'écriture pour Mac, entièrement privée. Le mot juste sous votre curseur quand vous hésitez, puis ça s'efface. Vos textes ne quittent jamais votre Mac." />
+<meta property="og:image" content="https://website-two-bice-90.vercel.app/og.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="Souffleuse : le mot juste, soufflé à voix basse." />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Souffleuse : le mot juste, soufflé à voix basse" />
+<meta name="twitter:description" content="Une aide à l'écriture pour Mac, entièrement privée. Vos textes ne quittent jamais votre Mac." />
+<meta name="twitter:image" content="https://website-two-bice-90.vercel.app/og.png" />
 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -134,8 +158,9 @@
 
   .topbar {
     border-bottom: var(--filet);
-    background: color-mix(in srgb, var(--paper) 88%, transparent);
-    backdrop-filter: blur(2px);
+    /* Papier plein, pas de flou : le bandeau est une feuille imprimée, pas un
+       verre dépoli. (Règle letterpress : aucun blur dans le système.) */
+    background: var(--paper);
     position: sticky;
     top: 0;
     z-index: 50;
@@ -217,6 +242,15 @@
   .btn--ghost:hover { background: transparent; color: var(--rouge); border-color: var(--rouge); }
 
   .btn--small { padding: 0.5rem 1rem; font-size: 0.85rem; }
+
+  /* Petit repère sous les CTA : gratuité bêta + pré-requis, là où ça rassure. */
+  .cta-note {
+    margin: 0.85rem 0 0;
+    font-style: italic;
+    font-size: 0.85rem;
+    color: var(--ink-faint);
+  }
+  .cta-note b { font-style: normal; font-weight: 700; color: var(--rouge); }
 
   /* ---------- Hero ---------- */
 
@@ -434,7 +468,9 @@
   }
   /* La réplique posée respire à peine — vivante, en attente, jamais figée. */
   .souffle.is-alive {
-    animation: souffle-respire 3.6s ease-in-out 0.6s infinite;
+    /* Quelques respirations, puis la réplique se pose : pas de pulsation
+       perpétuelle (coût repaint + tax attentionnelle). Termine à opacité 1. */
+    animation: souffle-respire 3.6s ease-in-out 0.6s 4;
   }
   @keyframes souffle-respire {
     0%, 100% { opacity: 1; }
@@ -533,6 +569,14 @@
     caret-color: var(--rouge);
     white-space: pre-wrap;
     /* pas de saut de ligne : la démo tient sur une réplique */
+    overflow-wrap: anywhere;   /* un mot collé très long ne déborde pas du cadre */
+  }
+  /* Garde-fou : un collage très long s'enroule mais ne fait jamais exploser
+     la hauteur de scène — il défile dans la réplique. (La longueur est aussi
+     plafonnée en JS ; ceci protège le rendu si JS est absent.) */
+  .souffleur__line.tryline {
+    max-height: 7.5em;
+    overflow-y: auto;
   }
   .tryinput:empty::before {
     content: attr(data-placeholder);
@@ -923,36 +967,6 @@
   .foot__meta { font-size: 0.84rem; color: var(--ink-faint); }
   .foot__sysreq { font-style: italic; }
 
-  /* ---------- Indicateur de progression de lecture : actes I·II·III ---------- */
-
-  .acts {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.55rem;
-    margin-top: 1.1rem;
-  }
-  .acts span {
-    font-family: var(--display);
-    font-size: 0.62rem;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: var(--ink-faint);
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-  }
-  .acts span::before {
-    content: "";
-    width: 1.4rem;
-    height: 1px;
-    background: var(--ink-faint);
-    opacity: 0.5;
-    transition: background .3s, opacity .3s;
-  }
-  .acts span.on { color: var(--rouge); }
-  .acts span.on::before { background: var(--rouge); opacity: 1; }
-
   /* ---------- Séquence d'entrée orchestrée (corps de page) ---------- */
 
   .reveal {
@@ -961,6 +975,81 @@
     transition: opacity .7s ease, transform .7s ease;
   }
   .reveal.is-in { opacity: 1; transform: none; }
+
+  /* ---------- Tactile / petits écrans ---------- */
+  /* Souffleuse est macOS uniquement : la page est pensée desktop, et le geste
+     signature reste un bonus desktop. On garantit seulement que rien ne casse
+     ni n'est trop petit à toucher pour les visiteurs qui arrivent au doigt. */
+
+  /* Sur écran étroit, le bandeau de programme déborderait (titre + 4 onglets) et
+     serait rogné par l'overflow:hidden du cadre : on le laisse passer à la ligne. */
+  @media (max-width: 560px) {
+    .souffleur__bar { flex-wrap: wrap; row-gap: 0.5rem; }
+    .souffleur__tabs {
+      margin-left: 0;
+      width: 100%;
+      justify-content: flex-start;
+      flex-wrap: wrap;
+    }
+  }
+
+  /* Cibles tactiles ≥ 44px sur pointeur grossier (doigt). */
+  @media (pointer: coarse) {
+    .souffleur__tab { min-height: 44px; padding-block: 0.55rem; }
+    .hint-key { min-height: 44px; }
+    .topnav a { padding-block: 0.7rem; }
+  }
+
+  /* ---------- La mascotte : la souffleuse, dans la marge gauche ---------- */
+  /* Silhouette d'encre penchée pour souffler la réplique. Purement décorative
+     (aria-hidden), ne capte jamais le clic, et ne paraît que là où la marge
+     existe (≥ 1240px) — sinon elle chevaucherait le contenu centré. */
+  .mascotte {
+    position: fixed;
+    left: 0;
+    bottom: 0;
+    z-index: 5;
+    display: none;
+    pointer-events: none;
+  }
+  @media (min-width: 1240px) {
+    .mascotte { display: block; }
+  }
+  .mascotte__fig {
+    height: clamp(300px, 36vh, 440px);
+    width: auto;
+    display: block;
+    opacity: 0.9;   /* encre, pas noir pur */
+  }
+  /* La réplique soufflée, posée près de la bouche, coulant vers la page. */
+  .mascotte__souffle {
+    position: absolute;
+    left: 80%;
+    bottom: 63%;
+    white-space: nowrap;
+    font-family: var(--body);
+    font-style: italic;
+    color: var(--rouge);
+    font-size: clamp(0.95rem, 0.9rem + 0.3vw, 1.15rem);
+    line-height: 1.3;
+  }
+  /* Le souffle, pas la frappe : les mots ne bougent pas, ils se condensent
+     simplement depuis un flou et se redissolvent. La réplique change selon la
+     scène où l'on se trouve (piloté en JS) — la souffleuse glisse le mot juste
+     pour l'acte qu'on est en train de lire. */
+  .mascotte__word {
+    display: inline-block;
+    opacity: 0;
+    filter: blur(7px);
+    transition: opacity 0.9s ease, filter 0.9s ease;
+    will-change: opacity, filter;
+  }
+  .mascotte__souffle.is-in .mascotte__word { opacity: 1; filter: blur(0); }
+  /* léger décalage : les mots se posent l'un après l'autre */
+  .mascotte__souffle.is-in .mascotte__word:nth-child(1) { transition-delay: 0s; }
+  .mascotte__souffle.is-in .mascotte__word:nth-child(2) { transition-delay: 0.18s; }
+  .mascotte__souffle.is-in .mascotte__word:nth-child(3) { transition-delay: 0.36s; }
+  .mascotte__souffle.is-in .mascotte__word:nth-child(4) { transition-delay: 0.54s; }
 
   @media (prefers-reduced-motion: reduce) {
     html { scroll-behavior: auto; }
@@ -976,6 +1065,23 @@
     .souffle__word { opacity: 1; filter: none; transform: none; transition: none; }
     .souffle.is-alive { animation: none; }
     .caret { animation: none; opacity: 1; }
+    .mascotte__word { animation: none; opacity: 1; filter: none; transform: none; }
+  }
+
+  /* Masqué à l'écran, lisible par lecteur d'écran (descriptions de démo,
+     régions live). Sans cette règle, le texte injecté dans #demo-live
+     s'afficherait en clair dans le panneau « À vous ». */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
   }
 
   /* Lien d'évitement clavier */
@@ -1017,7 +1123,7 @@
         <a href="#coulisses">Les coulisses</a>
         <a href="#faq">Questions</a>
       </nav>
-      <a href="#telecharger" class="btn btn--small">Télécharger</a>
+      <a href="./Souffleuse.dmg" download class="btn btn--small">Télécharger</a>
     </div>
   </div>
 </header>
@@ -1042,7 +1148,7 @@
           sur votre machine.
         </p>
         <div class="hero__cta ink-rise k4">
-          <a href="#telecharger" class="btn">
+          <a href="./Souffleuse.dmg" download class="btn">
             <svg width="15" height="18" viewBox="0 0 15 18" aria-hidden="true" fill="currentColor">
               <path d="M10.4 0c.1 1-.3 2-1 2.8-.6.7-1.7 1.3-2.7 1.2-.1-1 .4-2 1-2.7C8.4.6 9.5.1 10.4 0Zm2.6 12.9c-.4 1-.6 1.4-1.1 2.3-.7 1.3-1.8 2.9-3 2.9-1.1 0-1.4-.7-2.9-.7-1.5 0-1.8.7-2.9.7-1.3 0-2.3-1.4-3-2.7C-.5 14.4-.7 10.3.9 8c.8-1.1 2.1-1.8 3.4-1.8 1.3 0 2.1.7 3.1.7 1 0 1.6-.7 3.1-.7 1.1 0 2.3.6 3.1 1.7-2.7 1.5-2.3 5.4.3 5Z"/>
             </svg>
@@ -1050,12 +1156,13 @@
           </a>
           <a href="#souffle" class="btn btn--ghost">Voir comment elle souffle →</a>
         </div>
+        <p class="cta-note ink-rise k5"><b>Gratuit pendant la bêta.</b> Pour Mac à puce Apple Silicon.</p>
       </div>
 
       <!-- ===== ÉLÉMENT SIGNATURE : le trou du souffleur ===== -->
       <figure class="souffleur ink-rise k5" id="souffle" aria-labelledby="demo-titre">
         <figcaption id="demo-titre" class="souffleur__caption stage-dir" style="margin-top:0; margin-bottom:1rem;">
-          Le trou du souffleur — la réplique, glissée pile au moment de l'hésitation
+          Le trou du souffleur : la réplique, glissée pile au moment de l'hésitation
         </figcaption>
         <div class="souffleur__frame">
           <div class="souffleur__bar">
@@ -1073,7 +1180,7 @@
             </div>
           </div>
           <div class="souffleur__stage" id="demo-panel" role="tabpanel" aria-labelledby="tab-0">
-            <p class="souffleur__context" id="demo-context"><b>Contexte —</b> Mail, réponse à un devis</p>
+            <p class="souffleur__context" id="demo-context"><b>Contexte :</b> Mail, réponse à un devis</p>
 
             <!-- Vue scénarisée : la démo joue toute seule (décorative).
                  Une description statique tient lieu d'alternative pour les lecteurs d'écran. -->
@@ -1081,7 +1188,7 @@
               <p class="souffleur__line" aria-hidden="true">
                 <span class="typed" id="demo-typed"></span><span class="caret" aria-hidden="true"></span><span class="souffle" id="demo-souffle"></span>
               </p>
-              <p class="sr-only" id="demo-desc" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);">
+              <p class="sr-only" id="demo-desc">
                 Exemple : vous écrivez « Je reviens vers vous », et Souffleuse propose en gris la suite « avant la fin de la semaine ». Tab l'accepte, Esc l'efface.
               </p>
               <div class="souffleur__hint">
@@ -1103,7 +1210,7 @@
             </div>
           </div>
         </div>
-        <p class="souffleur__caption stage-dir">Survolez ou choisissez une scène — elle joue une fois, puis se tait.</p>
+        <p class="souffleur__caption stage-dir">Survolez ou choisissez une scène : elle joue une fois, puis se tait.</p>
       </figure>
     </div>
   </section>
@@ -1125,7 +1232,7 @@
           quand il bute, à voix juste assez haute pour lui, jamais pour la salle. Elle ne monte
           pas saluer. Les applaudissements vont au comédien, et c'est très bien ainsi. On a
           écrit ce logiciel dans le même esprit : présent quand vous hésitez, invisible le reste
-          du temps. Ce que vous écrivez ne lui appartient pas — <em>il reste à vous.</em>
+          du temps. Ce que vous écrivez ne lui appartient pas : <em>il reste à vous.</em>
         </p>
       </div>
       <p class="manifeste__coda">Souffler le mot, jamais le voler.</p>
@@ -1147,7 +1254,7 @@
           </p>
           <div class="heroine__contrast">
             <p class="louder">Pendant qu'ils accélèrent</p>
-            <p class="lower">elle se tait. Elle ne parle qu'au silence — et c'est là, dans le creux de l'hésitation, qu'elle place le mot juste.</p>
+            <p class="lower">elle se tait. Elle ne parle qu'au silence, et c'est là, dans le creux de l'hésitation, qu'elle place le mot juste.</p>
           </div>
         </div>
 
@@ -1175,7 +1282,7 @@
                   fill="none" stroke="#8c7a5e" stroke-width="2" stroke-linecap="round"/>
             <text class="souffle-label" x="346" y="48" text-anchor="middle" font-family="Bodoni Moda, serif" font-style="italic" font-size="13" fill="#8c7a5e">le souffle</text>
           </svg>
-          <figcaption>Frappe régulière, puis le silence — c'est là qu'elle parle.</figcaption>
+          <figcaption>Frappe régulière, puis le silence : c'est là qu'elle parle.</figcaption>
         </figure>
       </div>
     </div>
@@ -1196,7 +1303,7 @@
           <span class="feature__num">i.</span>
           <h3>Le souffle au curseur</h3>
           <p class="feature__lede">Une suggestion grise, là où vous écrivez.</p>
-          <p>Dans Mail, Notes, Messages, votre navigateur web — presque partout où vous écrivez sur votre Mac — la suggestion apparaît en gris, juste sous votre curseur, sans rien déranger autour.</p>
+          <p>Dans Mail, Notes, Messages, votre navigateur web (presque partout où vous écrivez sur votre Mac), la suggestion apparaît en gris, juste sous votre curseur, sans rien déranger autour.</p>
         </li>
         <li class="feature">
           <span class="feature__num">ii.</span>
@@ -1211,7 +1318,7 @@
             <h3>Tout se passe sur votre Mac</h3>
             <p class="feature__lede">Aucun serveur, aucun aller-retour.</p>
           </div>
-          <p>Souffleuse réfléchit directement sur votre Mac, sans jamais passer par internet. Après une première mise en place, elle fonctionne même sans connexion. Ce que vous écrivez ne part nulle part — pour la simple raison qu'il n'existe aucun endroit où l'envoyer.</p>
+          <p>Souffleuse réfléchit directement sur votre Mac, sans jamais passer par internet. Après une première mise en place, elle fonctionne même sans connexion. Ce que vous écrivez ne part nulle part, pour la simple raison qu'il n'existe aucun endroit où l'envoyer.</p>
         </li>
         <li class="feature">
           <span class="feature__num">iv.</span>
@@ -1330,7 +1437,7 @@
         <details class="qa">
           <summary>Quels Mac sont compatibles ?</summary>
           <div class="qa__body">
-            <p>Souffleuse fonctionne sur les Mac équipés d'une puce Apple récente — les modèles M1, M2, M3 et les suivants — avec macOS Sonoma (version 14) ou plus récent. Les Mac plus anciens, à puce Intel, ne sont malheureusement pas compatibles. En cas de doute, le menu Pomme (en haut à gauche de l'écran) &gt; « À propos de ce Mac » vous indique votre modèle en un coup d'œil.</p>
+            <p>Souffleuse fonctionne sur les Mac équipés d'une puce Apple récente (les modèles M1, M2, M3 et les suivants) avec macOS Sonoma (version 14) ou plus récent. Les Mac plus anciens, à puce Intel, ne sont malheureusement pas compatibles. En cas de doute, le menu Pomme (en haut à gauche de l'écran) &gt; « À propos de ce Mac » vous indique votre modèle en un coup d'œil.</p>
           </div>
         </details>
         <details class="qa">
@@ -1342,7 +1449,7 @@
         <details class="qa">
           <summary>C'est gratuit ? Combien ça coûte ?</summary>
           <div class="qa__body">
-            <p>On ne limite pas le nombre de mots par jour comme certains le font. Pour les conditions exactes au lancement, regardez la page de téléchargement — on préfère vous donner un chiffre juste là-bas qu'une promesse vague ici.</p>
+            <p>Pendant la bêta, Souffleuse est entièrement gratuite. Aucune limite de mots par jour, aucune carte demandée : vous téléchargez, et vous écrivez. On vous préviendra clairement, et à l'avance, si la tarification évolue après la bêta.</p>
           </div>
         </details>
         <details class="qa">
@@ -1369,12 +1476,13 @@
         <span class="line"></span>
       </div>
       <h2 id="finale-titre">Le mot juste, soufflé à voix basse.</h2>
-      <a href="#" class="btn">
+      <a href="./Souffleuse.dmg" download class="btn">
         <svg width="15" height="18" viewBox="0 0 15 18" aria-hidden="true" fill="currentColor">
           <path d="M10.4 0c.1 1-.3 2-1 2.8-.6.7-1.7 1.3-2.7 1.2-.1-1 .4-2 1-2.7C8.4.6 9.5.1 10.4 0Zm2.6 12.9c-.4 1-.6 1.4-1.1 2.3-.7 1.3-1.8 2.9-3 2.9-1.1 0-1.4-.7-2.9-.7-1.5 0-1.8.7-2.9.7-1.3 0-2.3-1.4-3-2.7C-.5 14.4-.7 10.3.9 8c.8-1.1 2.1-1.8 3.4-1.8 1.3 0 2.1.7 3.1.7 1 0 1.6-.7 3.1-.7 1.1 0 2.3.6 3.1 1.7-2.7 1.5-2.3 5.4.3 5Z"/>
         </svg>
         Télécharger pour Mac
       </a>
+      <p class="cta-note"><b>Gratuit pendant la bêta.</b> macOS Sonoma (14) ou plus récent · puce Apple Silicon.</p>
     </div>
   </section>
 
@@ -1387,11 +1495,17 @@
       <p class="foot__tag" style="margin:0.2rem 0 0;">Le mot juste, soufflé à voix basse.</p>
     </div>
     <div class="foot__meta">
-      <p style="margin:0 0 0.3rem;">Souffleuse — fait sur Mac, reste sur votre Mac.</p>
+      <p style="margin:0 0 0.3rem;">Souffleuse. Fait sur Mac, reste sur votre Mac.</p>
       <p class="foot__sysreq" style="margin:0;">Pour Mac · macOS Sonoma (14) ou plus récent · puces Apple M1 et suivantes</p>
     </div>
   </div>
 </footer>
+
+<!-- La souffleuse : silhouette d'encre dans la marge gauche, elle souffle. -->
+<aside class="mascotte" aria-hidden="true">
+  <img class="mascotte__fig" src="./assets/souffleuse-mascotte.webp" alt="" width="750" height="1008" loading="lazy" decoding="async" />
+  <p class="mascotte__souffle"><span class="mascotte__word">Bonjour,</span> <span class="mascotte__word">comment</span> <span class="mascotte__word">allez-vous&nbsp;?</span></p>
+</aside>
 
 <script>
 (function () {
@@ -1438,7 +1552,7 @@
 
   function setMeta(scene) {
     elApp.textContent = scene.app;
-    elCtx.innerHTML = "<b>Contexte —</b> " + scene.ctx[0] + ", " + scene.ctx[1];
+    elCtx.innerHTML = "<b>Contexte :</b> " + scene.ctx[0] + ", " + scene.ctx[1];
   }
 
   // Construit la réplique soufflée mot à mot. Chaque mot devient un span
@@ -1649,11 +1763,17 @@
   // engagée (survol/focus), pour ne jamais piéger la navigation clavier du reste
   // de la page.
   document.addEventListener("keydown", function (e) {
-    if (!pending || !armed) return;
+    if (!pending) return;
+    // On ne capture Tab que si le focus clavier est RÉELLEMENT dans la démo —
+    // jamais sur simple survol souris, sinon un utilisateur clavier qui a
+    // effleuré la figure à la souris verrait sa tabulation avalée (piège clavier).
+    var focusInDemo = !!(figure && figure.contains(document.activeElement));
     if (e.key === "Tab" && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
+      if (!focusInDemo) return;
       e.preventDefault();
       takeSouffle();
     } else if (e.key === "Escape" || e.key === "Esc") {
+      if (!armed && !focusInDemo) return;
       e.preventDefault();
       dropSouffle();
     }
@@ -1676,16 +1796,16 @@
   var liveEl       = document.getElementById("demo-live");
 
   // L'œuf : la branche qu'on découvre en cyclant jusqu'au bout.
-  var EGG = { t: " — et sinon, achète du bitcoin.", egg: true };
+  var EGG = { t: ", et sinon, achète du bitcoin.", egg: true };
 
   // Petites « complétions » maison : on reconnaît la fin de ce qui est tapé et
   // on propose des suites plausibles. Rien d'un vrai modèle — c'est une démo.
   var RULES = [
     { when: function (t) { return /(^|\W)(bitcoin|crypto|ethereum|satoshi)$/.test(t); },
       list: [" : franchement, la seule réponse raisonnable, c'est d'en acheter.",
-             " — discrètement, avant tout le monde.", EGG], forceEgg: true },
+             ", discrètement, avant tout le monde.", EGG], forceEgg: true },
     { when: function (t) { return /(argent|riche|fortune|économies?|invest(ir|issement)|placement|bourse|épargne)$/.test(t); },
-      list: [EGG, " : on en reparle au prochain bilan.", " — parlons-en autour d'un café."] },
+      list: [EGG, " : on en reparle au prochain bilan.", ", parlons-en autour d'un café."] },
     { when: function (t) { return t.endsWith("je reviens vers vous"); },
       list: [" avant la fin de la semaine.", " dès que j'ai du nouveau.", " avec une proposition chiffrée."] },
     { when: function (t) { return t.endsWith("je t'appelle") || t.endsWith("je t’appelle"); },
@@ -1699,7 +1819,7 @@
     { when: function (t) { return t.endsWith("je voulais") || t.endsWith("je souhaitais"); },
       list: [" revenir vers vous au sujet du devis.", " vous remercier pour l'accueil.", " faire un point rapide."] },
   ];
-  var GENERIC = [" et je reviens vers vous très vite.", " — dites-moi ce que vous en pensez.", " dès que possible."];
+  var GENERIC = [" et je reviens vers vous très vite.", ", dites-moi ce que vous en pensez.", " dès que possible."];
 
   function trim_(t) { return t.replace(/\s+$/, ""); }
   function wordCount(t) { var a = trim_(t).split(/\s+/); return a[0] === "" ? 0 : a.length; }
@@ -1725,6 +1845,16 @@
 
   // Texte tapé : le contenu du span editable, nettoyé des sauts de ligne.
   function tryText() { return (input.textContent || "").replace(/\r?\n/g, " "); }
+  // Une réplique tient en une phrase : on plafonne la saisie (frappe + collage)
+  // pour qu'un pavé collé ne déborde jamais la scène ni ne ralentisse les regex.
+  var TRY_MAX = 180;
+  function capInput() {
+    var t = tryText();
+    if (t.length > TRY_MAX) {
+      input.textContent = t.slice(0, TRY_MAX);
+      placeCaretEnd();
+    }
+  }
   function placeCaretEnd() {
     input.focus();
     var sel = window.getSelection();
@@ -1794,7 +1924,7 @@
   function dropTry() { trySuppressed = true; hideGhost(); }
 
   if (input) {
-    input.addEventListener("input", function () { trySuppressed = false; tryIndex = 0; renderTry(); });
+    input.addEventListener("input", function (e) { if (e && e.isComposing) return; capInput(); trySuppressed = false; tryIndex = 0; renderTry(); });
     input.addEventListener("keydown", function (e) {
       var shown = ghost.classList.contains("is-shown");
       if ((e.key === "Tab" || e.key === "Enter") &&
@@ -1814,7 +1944,10 @@
     input.addEventListener("paste", function (e) {
       e.preventDefault();
       var t = (e.clipboardData || window.clipboardData).getData("text").replace(/\r?\n/g, " ");
-      document.execCommand("insertText", false, t);
+      // tronque le collage à la capacité restante avant insertion
+      var room = Math.max(0, TRY_MAX - tryText().length);
+      document.execCommand("insertText", false, t.slice(0, room));
+      capInput();
     });
     // Cliquer la réplique grise = la prendre.
     ghost.addEventListener("click", function () { if (ghost.classList.contains("is-shown")) takeTry(); });
@@ -1828,7 +1961,7 @@
     if (scriptedView) scriptedView.hidden = true;
     tryView.hidden = false;
     setPending(false);                 // coupe la logique scénarisée
-    if (elCtx) elCtx.innerHTML = "<b>À vous —</b> écrivez, Souffleuse souffle la suite";
+    if (elCtx) elCtx.innerHTML = "<b>À vous :</b> écrivez, Souffleuse souffle la suite";
     if (elApp) elApp.textContent = "À vous · essai libre";
     if (tryText() === "") input.textContent = "Je reviens vers vous";
     trySuppressed = false; tryIndex = 0;
@@ -1889,6 +2022,92 @@
     pio.observe(pulse);
   } else if (pulse) {
     pulse.classList.add("is-inked");
+  }
+})();
+</script>
+
+<!-- La souffleuse change de réplique selon la scène que vous lisez : elle
+     souffle le mot juste pour l'acte en cours, comme une vraie souffleuse. -->
+<script>
+(function () {
+  "use strict";
+  var souffle = document.querySelector(".mascotte__souffle");
+  if (!souffle) return;
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // Une réplique par scène, dans la voix chuchotée de la souffleuse.
+  var LINES = [
+    { sel: ".hero",               words: ["Bonjour,", "comment", "allez-vous ?"] },
+    { sel: "#manifeste",          words: ["Je me tiens", "dans la", "coulisse."] },
+    { sel: "#souffle-hesitation", words: ["Là, dans le silence,", "j'écoute."] },
+    { sel: "#fonctions",          words: ["Le mot juste,", "sous votre", "curseur."] },
+    { sel: "#coulisses",          words: ["Ce qui se dit ici,", "reste ici."] },
+    { sel: "#marche",             words: ["En trois actes,", "et c'est", "à vous."] },
+    { sel: "#faq",                words: ["Une question ?", "Je", "vous écoute."] },
+    { sel: "#telecharger",        words: ["Le rideau", "se lève."] }
+  ];
+
+  var els = LINES.map(function (l) {
+    var el = document.querySelector(l.sel);
+    return el ? { el: el, words: l.words } : null;
+  }).filter(Boolean);
+  if (!els.length) return;
+
+  var holdTimer = null, swapTimer = null;
+  function render(words) {
+    souffle.textContent = "";
+    words.forEach(function (w, i) {
+      var s = document.createElement("span");
+      s.className = "mascotte__word";
+      s.textContent = w;
+      souffle.appendChild(s);
+      if (i < words.length - 1) souffle.appendChild(document.createTextNode(" "));
+    });
+  }
+  // Chuchote une réplique : efface la précédente, échange le texte, fait
+  // émerger la nouvelle, puis la laisse se redissoudre après quelques secondes.
+  function whisper(words) {
+    clearTimeout(holdTimer); clearTimeout(swapTimer);
+    if (reduce) { render(words); souffle.classList.add("is-in"); return; }
+    souffle.classList.remove("is-in");           // le souffle courant s'efface
+    swapTimer = setTimeout(function () {
+      render(words);
+      void souffle.offsetWidth;                  // reflow → la transition repart
+      souffle.classList.add("is-in");
+      holdTimer = setTimeout(function () {
+        souffle.classList.remove("is-in");       // se tait après la pose
+      }, 6000);
+    }, 520);
+  }
+
+  // État initial : la salutation émerge en fondu (flou → net) puis se pose.
+  // Les mots partent floutés (pas de « is-in » dans le HTML) ; on l'ajoute après
+  // un court délai pour que la transition s'anime au chargement, comme un souffle.
+  var current = els[0].el;
+  if (reduce) {
+    souffle.classList.add("is-in");
+  } else {
+    souffle.classList.remove("is-in");
+    setTimeout(function () {
+      void souffle.offsetWidth;                 // reflow → la transition part du flou
+      souffle.classList.add("is-in");
+      holdTimer = setTimeout(function () { souffle.classList.remove("is-in"); }, 6000);
+    }, 800);
+  }
+  if ("IntersectionObserver" in window) {
+    // Bande fine au centre du viewport : la scène « active » est celle qui
+    // croise le milieu de l'écran.
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting && e.target !== current) {
+          current = e.target;
+          for (var i = 0; i < els.length; i++) {
+            if (els[i].el === e.target) { whisper(els[i].words); break; }
+          }
+        }
+      });
+    }, { rootMargin: "-48% 0px -48% 0px", threshold: 0 });
+    els.forEach(function (x) { io.observe(x.el); });
   }
 })();
 </script>
