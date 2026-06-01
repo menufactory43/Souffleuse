@@ -334,6 +334,142 @@ final class ModelRuntime {
         return await generateLlama(request: request, onChunk: onChunk)
     }
 
+    /// Résultat d'une escalade mid-mot (Frame C). `show` ⇒ le caller affiche
+    /// `word` (le mot greedy/modal, déterministe) ; sinon il cache (retombe sur le
+    /// ghost instant). `word` + `reason` exposés même caché pour l'inspecteur DEV.
+    struct MidWordEscalationResult: Sendable {
+        let show: Bool
+        let word: String
+        let reason: String     // "fast-accept" / "fast-reject" / "branch agree=0.75"
+    }
+
+    /// **Frame C — escalade mid-mot.** Appelée par `PredictorViewModel.predict`
+    /// UNIQUEMENT quand le caret est mid-mot sur un fragment INCOMPLET (le cas qui
+    /// fait aujourd'hui `midword_block`) ET que `midWordEscalationEnabled` est ON.
+    /// Hors flag, jamais appelée → comportement byte-identique.
+    ///
+    /// **Étage 1 (greedy + dico)** : 1 passe greedy (profil prod : bans +
+    /// repeatPenalty + token healing), `minFirstTokenProb` à un epsilon pour capter
+    /// la confiance top-1. `midWordFastDecision` → fast-accept (montre) / fast-reject
+    /// (cache) / uncertain (→ étage 2).
+    ///
+    /// **Étage 2 (branches, F2)** : sur `uncertain`, K branches stochastiques
+    /// (même prompt healed, seeds distincts), early-exit dès la majorité, puis
+    /// `midWordBranchDecision`. L'accord récupère les bons mots à P1 bas (le 1B
+    /// est souvent juste mais peu confiant sous le prompt de prod), la garde dico
+    /// rejette les échecs de healing même convergents. Le texte MONTRÉ est le mot
+    /// MODAL (vote), jamais un échantillon brut → déterministe à l'affichage.
+    ///
+    /// Personnalisation n-gram DÉSACTIVÉE (`personalizationStrength: 0`) : seuils
+    /// calibrés sans biais sur `SouffleuseMidwordEval`.
+    func midWordEscalate(request: PredictRequest) async -> MidWordEscalationResult? {
+        guard llamaReady else { return nil }
+        let partial = OutputFilter.trailingPartialWord(request.userTail)
+        let prompt = ModelRuntime.buildLlamaPrompt(
+            system: request.systemMessage,
+            customInstr: request.customInstr,
+            ctxPrefix: request.ctxPrefix,
+            fieldContext: request.fieldContextSlot,
+            afterCursor: request.afterCursorSlot,
+            beforeCursor: request.llmTail,
+            examples: request.examplesBlock
+        )
+        let cap = min(request.maxTokens, SuggestionPolicy.Tuning.escGreedyMaxTokens)
+
+        // Le ghost affiché = ce qu'il RESTE à taper (le mot MODAL moins le partiel
+        // déjà tapé), jamais le mot entier : "cacahu" + ghost "ète", pas
+        // "cacahuète" (qui doublonnerait à l'écran). `midWordValidExtends` a déjà
+        // garanti que le mot prolonge le partiel, donc `dropFirst(partial.count)`
+        // est sûr et positionnel (insensible à la casse du préfixe tapé).
+        func remaining(_ word: String) -> String {
+            word.count > partial.count ? String(word.dropFirst(partial.count)) : ""
+        }
+
+        // GPU gate UNE fois autour de toute l'escalade (greedy + branches), pour que
+        // la traduction ne s'interleave pas au milieu (TRANSLATION-SPEC §2.9).
+        GpuGate.shared.ghostBegan()
+        defer { GpuGate.shared.ghostEnded() }
+
+        // ── Étage 1 — greedy (capte P1 via epsilon).
+        let greedy = await runEscalationPass(prompt: prompt, partial: partial, cap: cap,
+                                             temperature: 0, seed: 0, captureP1: true)
+        if Task.isCancelled { return nil }
+        switch SuggestionPolicy.midWordFastDecision(
+            partial: partial, greedyModal: greedy.lead, firstTokenProb: greedy.p1
+        ) {
+        case .fastAccept(let word):
+            let rest = remaining(word)
+            return MidWordEscalationResult(show: !rest.isEmpty, word: rest.isEmpty ? word : rest,
+                                           reason: "fast-accept")
+        case .fastReject:
+            return MidWordEscalationResult(show: false, word: greedy.lead, reason: "fast-reject")
+        case .uncertain:
+            break   // → étage 2
+        }
+
+        // ── Étage 2 — branches (F2). Le greedy compte comme 1 vote ; early-exit
+        // dès qu'un mot atteint la majorité requise.
+        let k = SuggestionPolicy.Tuning.escBranchKRuntime
+        guard k > 0 else {
+            return MidWordEscalationResult(show: false, word: greedy.lead, reason: "uncertain (k=0)")
+        }
+        var leads = [greedy.lead]
+        // Cap tokens des branches SÉPARÉ du greedy (mesuré : 3 suffit, −300 ms vs 8).
+        let branchCap = min(request.maxTokens, SuggestionPolicy.Tuning.escBranchMaxTokens)
+        let needed = Int((SuggestionPolicy.Tuning.escAgreeThreshRuntime * Double(k + 1)).rounded(.up))
+        for i in 0..<k {
+            if Task.isCancelled { return nil }
+            let b = await runEscalationPass(prompt: prompt, partial: partial, cap: branchCap,
+                                            temperature: SuggestionPolicy.Tuning.escBranchTempRuntime,
+                                            seed: UInt32(i + 1), captureP1: false)
+            leads.append(b.lead)
+            let counts = Dictionary(leads.map { ($0.lowercased(), 1) }, uniquingKeysWith: +)
+            if let top = counts.values.max(), top >= needed { break }   // early-exit
+        }
+        let d = SuggestionPolicy.midWordBranchDecision(
+            partial: partial, greedyModal: greedy.lead, branchLeads: Array(leads.dropFirst()))
+        let reason = "branch agree=\(String(format: "%.2f", d.agreement)) (\(leads.count - 1)br)"
+        let rest = remaining(d.word)
+        return MidWordEscalationResult(show: d.show && !rest.isEmpty,
+                                       word: d.show && !rest.isEmpty ? rest : d.word,
+                                       reason: reason)
+    }
+
+    /// Une passe d'escalade (greedy ou branche) : génère, renvoie le mot de tête +
+    /// la confiance top-1 si demandée. Pas de `GpuGate` ici — le bracketing est
+    /// fait UNE fois par `midWordEscalate`. `temperature 0` = greedy déterministe ;
+    /// `> 0` = branche stochastique seedée (`topP 0.9`).
+    private func runEscalationPass(
+        prompt: String, partial: String, cap: Int,
+        temperature: Float, seed: UInt32, captureP1: Bool
+    ) async -> (lead: String, p1: Double?) {
+        final class Acc: @unchecked Sendable { var text = "" }
+        let acc = Acc()
+        let metrics = await llamaEngine.generate(
+            prompt: prompt,
+            maxTokens: cap,
+            sampling: LlamaSampling(
+                temperature: temperature,
+                repeatPenalty: 1.3,
+                repeatLastN: 64,
+                seed: seed,
+                personalizationStrength: 0,
+                topP: temperature > 0 ? 0.9 : 0,
+                banMarkup: true,
+                banDigitsLeading: true,
+                banEmoji: true,
+                minFirstTokenProb: captureP1 ? Float(SuggestionPolicy.Tuning.escFirstTokenProbEpsilon) : 0,
+                healPrefix: partial.isEmpty ? nil : partial
+            )
+        ) { piece in
+            if Task.isCancelled { return false }
+            acc.text += piece
+            return true
+        }
+        let oneLine = acc.text.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? acc.text
+        return (SuggestionPolicy.midWordLeadWordDefrag(oneLine, partial: partial), metrics.firstTokenProb)
+    }
+
     /// Builds a Gemma-3 instruct prompt (FIM-style : pre + afterCursor) and
     /// streams the completion through `LlamaEngine`, running the existing
     /// `OutputFilter` pipeline on the cumulative output and pushing filtered
@@ -924,7 +1060,8 @@ final class ModelRuntime {
                         // decide to fall back to its instant ghost — same
                         // semantic as PVM:755-766 but cleaner across the
                         // actor boundary.
-                        if OutputFilter.ghostIsRepeatingPrefix(oneLine, prefix: userTail) {
+                        if OutputFilter.ghostIsRepeatingPrefix(oneLine, prefix: userTail)
+                            || OutputFilter.ghostEchoesAdjacent(prefix: userTail, ghost: oneLine) {
                             Log.info(.predictor, "ghost_dropped_repeat")
                             let chunkOut = ""
                             Task { @MainActor in

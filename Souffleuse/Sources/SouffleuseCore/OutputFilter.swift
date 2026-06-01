@@ -51,6 +51,46 @@ public enum OutputFilter {
         return false
     }
 
+    /// True quand le ghost, splicé après le préfixe, (quasi-)DUPLIQUE le ou les
+    /// mots adjacents au caret — l'écho que `ghostIsRepeatingPrefix` (qui strippe
+    /// le mot partiel) et `dedupLeadingRepeat` (égalité exacte) laissent passer :
+    ///   « …les fraise » + « , les fraises » → « les fraise, les fraises » (écho phrase)
+    ///   « …les fraises » + « fraise »        → « les fraises fraise »       (écho mot, pluriel)
+    ///
+    /// Précis par construction : les N derniers mots du préfixe et les N premiers
+    /// du ghost doivent être QUASI-ÉGAUX (égaux, ou l'un préfixe de l'autre à ≤2
+    /// chars près = le pluriel). Pour N=1 on n'attrape QUE le cas pluriel (préfixe
+    /// strict, mot ≥4 chars) — l'égalité exacte d'un seul mot est soit déjà gérée
+    /// par `dedupLeadingRepeat`, soit un doublon grammatical légitime (« vous vous
+    /// souvenez », « nous nous »). Pour N≥2 l'écho est sans ambiguïté.
+    public nonisolated static func ghostEchoesAdjacent(prefix: String, ghost: String) -> Bool {
+        let pWords = normalizeForRepeatCheck(String(prefix.suffix(80)))
+            .split(separator: " ").map(String.init)
+        let gWords = normalizeForRepeatCheck(String(ghost.prefix(60)))
+            .split(separator: " ").map(String.init)
+        guard !pWords.isEmpty, !gWords.isEmpty else { return false }
+        var n = min(3, pWords.count, gWords.count)
+        while n >= 1 {
+            let pTail = Array(pWords.suffix(n))
+            let gHead = Array(gWords.prefix(n))
+            if zip(pTail, gHead).allSatisfy({ Self.nearEqualWord($0, $1) }) {
+                if n >= 2 { return true }
+                let p = pTail[0], g = gHead[0]
+                if p != g, max(p.count, g.count) >= 4 { return true }
+            }
+            n -= 1
+        }
+        return false
+    }
+
+    /// Deux mots « quasi-égaux » : identiques, ou l'un préfixe strict de l'autre
+    /// à ≤2 caractères près (variation de pluriel « fraise »/« fraises »).
+    private nonisolated static func nearEqualWord(_ a: String, _ b: String) -> Bool {
+        if a == b { return true }
+        let (short, long) = a.count <= b.count ? (a, b) : (b, a)
+        return long.hasPrefix(short) && long.count - short.count <= 2
+    }
+
     /// True when the caret sits just after a COMPLETED sentence and the ghost
     /// merely RESTATES the opening of a recently-typed sentence — the pt base
     /// model's classic "open a new sentence by repeating the last one" echo

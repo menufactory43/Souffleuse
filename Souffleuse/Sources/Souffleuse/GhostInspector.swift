@@ -34,9 +34,19 @@ final class GhostInspector {
         guard Self.enabled else { return }
         let t = String(tail.suffix(28))
         let c = String(content.replacingOccurrences(of: "\n", with: "⏎").prefix(52))
-        // Le stream répète la même décision token par token : on dédup les
-        // entrées consécutives identiques pour garder la fenêtre lisible.
-        if let last = entries.last, last.verdict == verdict, last.content == c, last.tail == t {
+        // Le stream répète la même décision. Deux dédups :
+        // 1) AFFICHÉ : on collapse un ghost déjà à l'écran même si des entrées
+        //    GATÉ/DROP/STUB se sont intercalées (re-affirmation par cycle predict)
+        //    ou si le tail a avancé d'un caractère (frappe mid-mot). On compare au
+        //    DERNIER affiché, pas à l'entrée précédente, et sur le contenu seul.
+        // 2) Autres verdicts : dédup consécutif strict (token-par-token, tail inclus).
+        if verdict == .shown {
+            if let lastShown = entries.last(where: { $0.verdict == .shown }),
+               lastShown.content == c {
+                return
+            }
+        } else if let last = entries.last,
+                  last.verdict == verdict, last.content == c, last.tail == t {
             return
         }
         seq += 1

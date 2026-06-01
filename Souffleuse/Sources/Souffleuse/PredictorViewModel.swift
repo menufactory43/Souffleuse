@@ -402,6 +402,22 @@ final class PredictorViewModel {
             predictedForPrefix = forPrefix
         }
 
+        // ── Frame C (F1) : escalade mid-mot ─────────────────────────────────
+        // On emprunte l'escalade UNIQUEMENT quand : le caret est mid-mot sur un
+        // fragment INCOMPLET (le cas qui fait aujourd'hui `midword_block` = rien)
+        // ET L1 corpus n'a rien rappelé (`instantGhost` vide → l'escalade ne
+        // pré-empte JAMAIS un rappel appris). Hors flag, toujours `false` → le
+        // chemin streaming reste byte-identique.
+        let useMidWordEscalation: Bool = {
+            guard SuggestionPolicy.Tuning.midWordEscalationEnabled,
+                  instantGhost.isEmpty,
+                  let last = userTail.last, last.isLetter || last.isNumber else { return false }
+            let partial = ModelRuntime.OutputFilter.trailingPartialWord(userTail)
+            let complete = partial.count >= SuggestionPolicy.Tuning.midWordLLMMinCompleteWordChars
+                && SuggestionPolicy.defaultPartialWordIsComplete(userTail)
+            return !complete
+        }()
+
         // LLM gate : need at least 3 chars of trimmed userTail AND a
         // loaded runtime container.
         guard userTail.trimmingCharacters(in: .whitespaces).count >= 3,
@@ -732,6 +748,58 @@ final class PredictorViewModel {
                 basePromptText: basePromptText,
                 ngramSnapshot: snapshot
             )
+
+            // ── Frame C (F1) : escalade mid-mot — passe greedy + dico, HORS stream.
+            // Court-circuite le streaming `onChunk` (qui referait `midword_block`) :
+            // on décide ici, puis on applique nous-mêmes le ghost (fast-accept) ou
+            // on retombe sur l'instant (hide). Le flag OFF rend `useMidWordEscalation`
+            // toujours faux → ce bloc est mort et le streaming ci-dessous inchangé.
+            if useMidWordEscalation {
+                let esc = await runtime.midWordEscalate(request: request)
+                if Task.isCancelled { return }
+                await MainActor.run { [weak self] in
+                    guard let self, self.planner.isCurrent(myGeneration) else { return }
+                    if let esc, esc.show {
+                        let word = ModelRuntime.OutputFilter.normalizeFrenchTypography(esc.word)
+                        let score = SuggestionPolicy.score(source: .llm, ghost: esc.word, userTail: userTail)
+                        self.policy.applyGhost(esc.word, source: .llm, score: score, userTail: userTail)
+                        self.suggestion = word
+                        self.predictedForPrefix = forPrefix
+                        self.suggestionSource = .llm
+                        Log.info(.predictor, "ghost_midword_escalation_shown", count: word.count)
+                        GhostInspector.shared.record(tail: userTail, verdict: .shown,
+                                                     reason: "escalade \(esc.reason)", content: word)
+                    } else if SuggestionPolicy.Tuning.midWordL0Fallback,
+                              let comp = self.wordCompleter.commonCompletion(
+                                  for: userTail, minLen: SuggestionPolicy.Tuning.escL0MinPartial),
+                              comp.count >= SuggestionPolicy.Tuning.escL0MinCompletion {
+                        // F3 — DERNIER RECOURS : le LLM a fumblé, le dico connaît le
+                        // mot (« pingou »→« pingouin »). Complétion COMMUNE nette →
+                        // on la montre comme L0 (aveugle au contexte mais sur un mot
+                        // quasi-déterminé, donc fiable).
+                        let word = ModelRuntime.OutputFilter.normalizeFrenchTypography(comp)
+                        let score = SuggestionPolicy.score(source: .wordComplete, ghost: comp, userTail: userTail)
+                        self.policy.applyGhost(comp, source: .wordComplete, score: score, userTail: userTail)
+                        self.suggestion = word
+                        self.predictedForPrefix = forPrefix
+                        self.suggestionSource = .wordComplete
+                        Log.info(.predictor, "ghost_midword_l0_fallback", count: comp.count)
+                        GhostInspector.shared.record(tail: userTail, verdict: .shown,
+                                                     reason: "L0 dico (esc \(esc?.reason ?? "hide"))", content: word)
+                    } else {
+                        // Caché (fast-reject / branches divergentes, et pas de
+                        // fallback dico) : retombe sur le ghost instant, comme la
+                        // branche `chunk.isEmpty` du streaming.
+                        self.suggestion = instantGhost
+                        self.predictedForPrefix = forPrefix
+                        self.suggestionSource = instantSource
+                        Log.info(.predictor, "ghost_midword_escalation_hidden")
+                        GhostInspector.shared.record(tail: userTail, verdict: .gated,
+                                                     reason: "escalade \(esc?.reason ?? "hide")", content: esc?.word ?? "(rien)")
+                    }
+                }
+                return
+            }
 
             // Chunk callback : Relevance Gate apply + observable update.
             // Empty chunks are the anti-repeat drop signal — fall back to

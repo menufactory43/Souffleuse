@@ -474,6 +474,117 @@ public enum SuggestionPolicy {
         return committed >= 1 && committed < Tuning.corpusMicroCompletionMaxChars
     }
 
+    // MARK: - Mid-word escalation (Frame C — décision pure, étage 1)
+    //
+    // Pure-functions du gate mid-mot incomplet (le cas qui fait aujourd'hui
+    // `midword_block`). Aucun effet de bord, aucun MLX : le caller (ModelRuntime
+    // en F1) fournit le mot greedy déjà extrait + sa confiance top-1, on rend la
+    // décision. Validé hors-ligne via `SouffleuseMidwordEval`.
+
+    /// Mot complet en tête d'une sortie greedy/healed : on dépose un éventuel
+    /// espace de tête (la sortie healed démarre souvent par " mot") puis on prend
+    /// le run de mot. Vide ⇒ la sortie saute au mot suivant (espace/ponctuation),
+    /// ce n'est donc pas une complétion du mot courant.
+    public nonisolated static func midWordLeadWord(_ rawGhost: String) -> String {
+        let trimmed = rawGhost.drop(while: { $0 == " " })
+        return OutputFilter.leadingWordRun(String(trimmed))
+    }
+
+    /// Le mot `modal` prolonge-t-il le partiel tapé ET est-il un vrai mot du dico ?
+    /// Attrape les échecs de healing : "a" ne prolonge pas "aspira", "pingo" ≠
+    /// "pingou", "i" ≠ "imposa" — tous rejetés avant affichage.
+    public nonisolated static func midWordValidExtends(partial: String, modal: String) -> Bool {
+        guard !modal.isEmpty, modal.lowercased().hasPrefix(partial.lowercased()) else { return false }
+        return defaultPartialWordIsComplete(modal)
+    }
+
+    /// Mot de tête **dé-fragmenté**. Le 1B éclate parfois un mot par des espaces
+    /// (« caca huète », « pingo u is »). `midWordLeadWord` s'arrêterait au 1ᵉʳ
+    /// espace (« caca »), ratant le mot réel. Ici, si le run de tête simple ne
+    /// prolonge pas déjà le partiel, on collapse les morceaux-mots contigus
+    /// séparés par UN seul espace et on retient le PLUS PETIT collapse qui forme
+    /// un vrai mot du dico prolongeant le partiel.
+    ///
+    /// **Sûr par construction** : la garde dico empêche de fusionner deux mots
+    /// distincts — « je vais » → « jevais » invalide → on retombe sur le run
+    /// simple (rejeté en aval) ; « caca huète » → « cacahuète » valide → accepté ;
+    /// « pingo u is » → « pingou »/« pingouis » invalides → rejeté.
+    public nonisolated static func midWordLeadWordDefrag(_ rawGhost: String, partial: String) -> String {
+        let trimmed = rawGhost.drop(while: { $0 == " " })
+        let plain = OutputFilter.leadingWordRun(String(trimmed))
+        // Run simple suffisant (sortie non fragmentée) ⇒ rien à faire.
+        if midWordValidExtends(partial: partial, modal: plain) { return plain }
+        // Collecte des morceaux-mots contigus séparés par un seul espace (cap à 4).
+        var pieces: [String] = []
+        var rest = trimmed
+        while pieces.count < 4 {
+            let run = OutputFilter.leadingWordRun(String(rest))
+            guard !run.isEmpty else { break }
+            pieces.append(run)
+            rest = rest.dropFirst(run.count)
+            guard rest.first == " " else { break }
+            rest = rest.dropFirst()
+            guard rest.first?.isLetter == true else { break }
+        }
+        guard pieces.count >= 2 else { return plain }
+        for n in 2...pieces.count {
+            let merged = pieces[0..<n].joined()
+            if midWordValidExtends(partial: partial, modal: merged) { return merged }
+        }
+        return plain
+    }
+
+    /// Verdict de l'étage 1 (greedy + dico), sans branche.
+    /// - `.fastReject`  : mot fusionné invalide / ne prolonge pas → cacher (échec healing).
+    /// - `.fastAccept`  : valide + prolonge + confiant + fragment assez long → montrer le greedy.
+    /// - `.uncertain`   : valide mais peu confiant / fragment court → zone à brancher (F2).
+    ///   En F1, `.uncertain` retombe sur « rien » (= comportement `midword_block` actuel).
+    public enum MidWordFastDecision: Sendable, Equatable {
+        case fastAccept(word: String)
+        case fastReject
+        case uncertain
+    }
+
+    public nonisolated static func midWordFastDecision(
+        partial: String, greedyModal: String, firstTokenProb: Double?
+    ) -> MidWordFastDecision {
+        if !midWordValidExtends(partial: partial, modal: greedyModal) { return .fastReject }
+        if (firstTokenProb ?? 0) >= Tuning.escFastP1, partial.count >= Tuning.escMinFastLen {
+            return .fastAccept(word: greedyModal)
+        }
+        return .uncertain
+    }
+
+    /// **F2 — décision sur l'accord inter-branches.** Tranche la zone `.uncertain`
+    /// (mot valide mais P1 bas, ou fragment court) que l'étage 1 cache. Le
+    /// `greedyModal` compte comme 1 vote ; on y ajoute les runs de tête des
+    /// branches stochastiques. On rend le mot le plus voté, son accord [0,1], et
+    /// s'il faut le MONTRER : accord ≥ `escAgreeThresh` ET le mot prolonge le
+    /// partiel + est un vrai mot.
+    ///
+    /// Les DEUX axes de panne restent couverts (mesure `SouffleuseMidwordEval`) :
+    ///  - AMBIGUÏTÉ (`co`/`Po`) → branches divergent → accord bas → caché.
+    ///  - ÉCHEC DE HEALING (`pingo`) → branches CONVERGENT sur le garbage (accord
+    ///    haut) MAIS `midWordValidExtends` le rejette → caché quand même.
+    /// L'accord seul ne suffit pas ; la garde dico est indispensable — d'où la
+    /// re-vérification ici, indépendante du seuil d'accord.
+    public nonisolated static func midWordBranchDecision(
+        partial: String, greedyModal: String, branchLeads: [String]
+    ) -> (show: Bool, word: String, agreement: Double) {
+        var votes = branchLeads
+        votes.append(greedyModal)
+        guard !votes.isEmpty else { return (false, greedyModal, 0) }
+        var counts: [String: Int] = [:]
+        for v in votes { counts[v.lowercased(), default: 0] += 1 }
+        let top = counts.max { a, b in a.value < b.value }
+        let modalKey = top?.key ?? ""
+        let modal = votes.first { $0.lowercased() == modalKey } ?? greedyModal
+        let agreement = Double(top?.value ?? 0) / Double(votes.count)
+        let show = agreement >= Tuning.escAgreeThreshRuntime
+            && midWordValidExtends(partial: partial, modal: modal)
+        return (show, modal, agreement)
+    }
+
     // MARK: - Anti-répétition de contenu (dédup du mot déjà tapé)
 
     /// Retire la portion de tête du `ghost` qui ne fait que RÉPÉTER, à la casse
