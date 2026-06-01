@@ -92,10 +92,10 @@ struct MidWordEscalationTests {
         #expect(d == .uncertain)
     }
 
-    @Test func flagOffByDefaultKeepsCurrentBehaviour() {
-        // Garde-fou de réversibilité : env absente ⇒ flags OFF ⇒ rien câblé.
-        #expect(SuggestionPolicy.Tuning.midWordEscalationEnabled == false)
-        #expect(SuggestionPolicy.Tuning.midWordL0Fallback == false)
+    @Test func flagsOnByDefaultShipped() {
+        // Shippé ON par défaut (env absente) ; kill-switch DEV via *_OFF.
+        #expect(SuggestionPolicy.Tuning.midWordEscalationEnabled == true)
+        #expect(SuggestionPolicy.Tuning.midWordL0Fallback == true)
     }
 
     // MARK: - F3 — préfixe commun des complétions dico (longestCommonPrefix)
