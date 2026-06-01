@@ -142,6 +142,112 @@ extension SuggestionPolicy {
         /// keeps the anti-churn bar. 3 ⇒ only 1–2 char completions are overridable.
         public static let corpusMicroCompletionMaxChars: Int = 3
 
+        // MARK: - Mid-word escalation (greedy+dico → branches) — Frame C, flag OFF
+        //
+        // Mesuré de bout en bout sur le chemin de prod exact via
+        // `SouffleuseMidwordEval` (greedy = passe de prod, mêmes bans + healing).
+        // Étage 1 (greedy + dico) tranche 10/23 cas sans branche ; les branches
+        // (étage 2) ne récupèrent que le milieu incertain. Tous les seuils ICI
+        // (Pitfall 6) ; flag maître OFF → le seam reste `midword_block`, comportement
+        // byte-identique à aujourd'hui.
+
+        /// Master switch + kill-switch runtime. **OFF par défaut** (env absente) ⇒
+        /// le mid-mot incomplet reste `midword_block` (rien affiché), comportement
+        /// byte-identique à aujourd'hui. `SOUFFLEUSE_MIDWORD_ESCALATION=1` ⇒ l'étage 1
+        /// (greedy + dico) décide ; les branches (F2) arriveront sous le même flag.
+        /// Env-overridable (même pattern que `wordCompleterEnabledRuntime`) pour
+        /// l'A/B et le revert instantané sans recompiler.
+        public static var midWordEscalationEnabled: Bool {
+            // ON par défaut (shippé). Kill-switch DEV : SOUFFLEUSE_MIDWORD_ESCALATION_OFF.
+            ProcessInfo.processInfo.environment["SOUFFLEUSE_MIDWORD_ESCALATION_OFF"] == nil
+        }
+
+        /// Fast-accept : un mot greedy/healed valide ET prolongeant le partiel, à
+        /// confiance top-1 ≥ ce seuil ET sur un fragment ≥ `escMinFastLen`, est
+        /// montré DIRECT (0 branche). 0.85 = plancher mesuré : sous ce seuil un mot
+        /// valide-mais-faux (P1 haut, ex. "Pode" sur "Po") fuit en fast-accept (le
+        /// sweep `MW_FAST_P1=0.75` a montré 1 garbage affiché). À 0.85 : 0 garbage.
+        public static let escFastP1: Double = 0.85
+
+        /// Longueur min du fragment partiel pour un fast-accept. Un fragment court
+        /// reste trop ambigu même à P1 haut ("Po" 2 chars → "Pode" confiant mais
+        /// faux) → il doit passer par les branches. 4 ≈ assez de lettres pour que
+        /// la complétion soit peu ambiguë ("cacahu" → "cacahuète").
+        public static let escMinFastLen: Int = 4
+
+        /// (F2) Nombre MAX de branches stochastiques pour trancher la zone
+        /// incertaine (greedy valide mais P1 bas, ou fragment court). Early-exit
+        /// dès qu'un mot atteint la majorité → souvent 2 suffisent.
+        public static let escBranchK: Int = 3
+
+        /// (F2) Température des branches. Le texte MONTRÉ reste le greedy
+        /// déterministe ; les branches ne servent qu'à VOTER l'accord.
+        public static let escBranchTemp: Float = 0.7
+
+        /// (F2) Accord inter-branches minimal (mot modal / votes) pour montrer.
+        /// Sépare le mot clair (≥0.6) du fragment ambigu (`co`/`Po` mesurés à 0.40).
+        public static let escAgreeThresh: Double = 0.6
+
+        /// (F1) Plafond de tokens de la passe greedy d'escalade : on ne veut que le
+        /// mot courant + un poil. Court = latence bornée. Pris en `min()` avec le
+        /// `maxTokens` de la requête. Mesuré sur `SouffleuseMidwordEval` : justesse
+        /// du mot de tête IDENTIQUE de cap 3 à 8 (14/18) — les 5 tokens en plus
+        /// n'apportent rien (on ne lit que le mot de tête, le P1 est sur le 1ᵉʳ
+        /// token). 4 = −68 ms vs 8, avec 1 token de marge defrag sur la passe affichée.
+        public static let escGreedyMaxTokens: Int = 4
+
+        /// (F2) Plafond de tokens d'une BRANCHE — séparé du greedy. Mesuré sur
+        /// `SouffleuseMidwordEval` : 8→3 tokens fait chuter le coût de 220→121 ms/
+        /// branche (−99 ms, soit ~−300 ms sur K=3) pour −1/23 de justesse seulement.
+        /// La branche n'a besoin que du mot de tête (1-3 tokens), pas d'une suite.
+        public static let escBranchMaxTokens: Int = 3
+
+        /// (F1) Epsilon de `minFirstTokenProb` pour FORCER le calcul de la confiance
+        /// top-1 sans jamais aborter (le moteur ne calcule le softmax que si > 0).
+        /// Si bas qu'aucun token réel ne tombe dessous → sortie greedy inchangée.
+        public static let escFirstTokenProbEpsilon: Double = 0.0001
+
+        // Variantes runtime-overridables des knobs branches (A/B live sans rebuild,
+        // même pattern que `afterSpaceL1BarRuntime`). Env absente → la constante.
+        /// `MW_ESC_K` — nombre de branches.
+        public static var escBranchKRuntime: Int {
+            if let s = ProcessInfo.processInfo.environment["MW_ESC_K"], let v = Int(s) { return max(0, v) }
+            return escBranchK
+        }
+        /// `MW_ESC_TEMP` — température des branches (plus bas = plus serré/convergent).
+        public static var escBranchTempRuntime: Float {
+            if let s = ProcessInfo.processInfo.environment["MW_ESC_TEMP"], let v = Float(s) { return v }
+            return escBranchTemp
+        }
+        /// `MW_AGREE` — seuil d'accord pour montrer.
+        public static var escAgreeThreshRuntime: Double {
+            if let s = ProcessInfo.processInfo.environment["MW_AGREE"], let v = Double(s) { return v }
+            return escAgreeThresh
+        }
+
+        // MARK: - F3 — Fallback L0 dico (mots fumblés par le 1B)
+        //
+        // Dernier recours QUAND l'escalade cache : le WordCompleter (NSSpellChecker)
+        // complète un vrai mot du dico que le LLM rate (« pingou »→« pingouin »).
+        // Borné fort pour neutraliser l'aveuglement au contexte qui l'avait fait
+        // couper : seulement sur fragment long ET si la complétion COMMUNE des
+        // candidats est nette (mot quasi-déterminé). Sinon → rien, comme aujourd'hui.
+
+        /// Master switch F3, env-overridable. OFF par défaut. Ne tire QUE dans la
+        /// branche escalade-cache → requiert aussi `midWordEscalationEnabled`.
+        public static var midWordL0Fallback: Bool {
+            // ON par défaut (shippé). Kill-switch DEV : MW_L0_OFF.
+            ProcessInfo.processInfo.environment["MW_L0_OFF"] == nil
+        }
+
+        /// Longueur min du fragment partiel pour tenter le fallback dico. ≥4 :
+        /// court = trop de candidats = complétion commune minuscule de toute façon.
+        public static let escL0MinPartial: Int = 4
+
+        /// Longueur min de la complétion COMMUNE pour la montrer. Sous ce seuil les
+        /// candidats divergent trop tôt (ambigu) → on ne montre rien.
+        public static let escL0MinCompletion: Int = 2
+
         // MARK: - LLM context window (coherence, 2026-05-29 measurement)
         ///
         /// Number of trailing characters of the (corrected) preceding text fed

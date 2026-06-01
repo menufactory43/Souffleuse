@@ -57,6 +57,60 @@ public final class WordCompleter: @unchecked Sendable {
         return nil
     }
 
+    /// **F3 — complétion dico « confiante ».** Au lieu du 1ᵉʳ candidat (aveugle
+    /// au contexte, source du bug historique « inv→invite »), on renvoie le plus
+    /// long préfixe COMMUN aux suffixes de TOUTES les complétions qui prolongent
+    /// le mot. Un mot quasi-déterminé donne un commun long et fiable ; un fragment
+    /// ambigu donne un commun minuscule (les candidats divergent tôt) que le
+    /// caller jette via `minCompletion`. Sûr par construction.
+    ///
+    ///   « pingou »  → [« pingouin »]                 → « in »   (montré)
+    ///   « cacah »   → [« cacahuète », « cacahuètes »] → « uète » (commun → montré)
+    ///   « aspira »  → [« aspirateur », « aspiration »] → « t »    (divergent → jeté)
+    ///
+    /// Nil si le mot est trop court (`minLen`) ou si aucune complétion ne prolonge.
+    public func commonCompletion(for prefix: String, minLen: Int) -> String? {
+        guard let word = Self.trailingPartialWord(prefix), word.count >= minLen else { return nil }
+        let lowered = word.lowercased()
+        for lang in ["fr", "en"] {
+            let nsRange = NSRange(location: 0, length: (word as NSString).length)
+            guard let completions = checker.completions(
+                forPartialWordRange: nsRange,
+                in: word,
+                language: lang,
+                inSpellDocumentWithTag: 0
+            ), !completions.isEmpty else { continue }
+            let suffixes = completions
+                .filter { $0.count > word.count && $0.lowercased().hasPrefix(lowered) }
+                .map { String($0.dropFirst(word.count)) }
+            guard !suffixes.isEmpty else { continue }
+            let common = Self.longestCommonPrefix(suffixes)
+            if !common.isEmpty { return common }
+        }
+        return nil
+    }
+
+    /// Plus long préfixe commun (insensible à la casse) d'un ensemble de chaînes.
+    /// La casse retournée est celle de la PREMIÈRE chaîne. Pur, testable.
+    public static func longestCommonPrefix(_ strings: [String]) -> String {
+        guard let first = strings.first else { return "" }
+        var length = first.count
+        for s in strings.dropFirst() {
+            var n = 0
+            var i = first.startIndex
+            var j = s.startIndex
+            while n < length, i < first.endIndex, j < s.endIndex,
+                  first[i].lowercased() == s[j].lowercased() {
+                first.formIndex(after: &i)
+                s.formIndex(after: &j)
+                n += 1
+            }
+            length = n
+            if length == 0 { break }
+        }
+        return String(first.prefix(length))
+    }
+
     /// Returns the partial word the prefix ends with, or nil when the
     /// caret is at a boundary (after whitespace/punctuation).
     private static func trailingPartialWord(_ s: String) -> String? {
