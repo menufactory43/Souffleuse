@@ -423,12 +423,36 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
 
     private func shouldShowOnboarding() -> Bool {
         let onboarded = UserDefaults.standard.bool(forKey: "onboardingDone")
-        if onboarded && AXClient.isTrusted { return false }
+        // On ré-affiche tant que le souffle ne peut pas générer : permission AX
+        // manquante OU GGUF du souffle introuvable (l'utilisateur a pu quitter
+        // avant la fin du téléchargement). `isResolvable` couvre aussi le dossier
+        // Cotypist legacy → pas de ré-onboarding pour qui a déjà le modèle.
+        let ghostReady = GGUFModelOption.option(forID: store.ggufModelID).isResolvable
+        if onboarded && AXClient.isTrusted && ghostReady { return false }
         return true
     }
 
+    /// Construit la fenêtre d'onboarding câblée sur le `store` : gestionnaire de
+    /// téléchargement partagé, modèle de souffle sélectionné (avec repli sur le
+    /// défaut), modèle de traduction courant.
+    private func makeOnboardingWindow() -> OnboardingWindow {
+        let ghost = GGUFModelOption.option(forID: store.ggufModelID).downloadable
+            ?? GGUFModelOption.option(forID: GGUFModelOption.defaultID).downloadable
+        return OnboardingWindow(
+            modelDownloads: store.modelDownloads,
+            ghost: ghost,
+            ghostReady: { [store] in GGUFModelOption.option(forID: store.ggufModelID).isResolvable },
+            translation: store.translationModel.downloadable,
+            onGhostInstalled: { [weak self] in
+                // Le GGUF du souffle vient d'arriver sur disque : recharge le
+                // moteur pour que le ghost marche sans relancer l'app.
+                Task { await self?.predictor.reloadAfterDownload() }
+            }
+        )
+    }
+
     private func showOnboarding() {
-        let win = OnboardingWindow()
+        let win = makeOnboardingWindow()
         self.onboarding = win
         win.show()
         UserDefaults.standard.set(true, forKey: "onboardingDone")
@@ -807,7 +831,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openOnboarding() {
-        if onboarding == nil { onboarding = OnboardingWindow() }
+        if onboarding == nil { onboarding = makeOnboardingWindow() }
         onboarding?.show()
     }
 

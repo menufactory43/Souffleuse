@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import QuartzCore
 
 /// Vue de fond du panneau. Curseur « main » d'affordance de déplacement. Le
 /// survol n'est PAS suivi via `NSTrackingArea` (peu fiable sur un panneau
@@ -49,6 +50,12 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
     private static let hoverRecheckSeconds: Double = 1.0
 
     public static let width: CGFloat = 320
+
+    /// Vrai quand « Réduire les animations » est actif (Réglages › Accessibilité).
+    /// Le panneau apparaît/disparaît alors d'un coup, sans fondu.
+    private static var reduceMotion: Bool {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
 
     // MARK: - Palette, sensible à l'apparence système
     // Charte partagée des apparitions : `LivretPalette` (source de vérité unique).
@@ -161,11 +168,17 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
         applyColors()        // (ré)applique l'apparence courante + construit l'en-tête
         relayout()
         if !panel.isVisible {
-            panel.alphaValue = 0
-            panel.orderFrontRegardless()
-            NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.18
-                panel.animator().alphaValue = 1
+            if Self.reduceMotion {
+                panel.alphaValue = 1
+                panel.orderFrontRegardless()
+            } else {
+                panel.alphaValue = 0
+                panel.orderFrontRegardless()
+                NSAnimationContext.runAnimationGroup { ctx in
+                    ctx.duration = 0.18
+                    ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                    panel.animator().alphaValue = 1
+                }
             }
         } else {
             panel.alphaValue = 1
@@ -208,8 +221,14 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
         autoHideTask?.cancel()
         hideGeneration &+= 1
         let g = hideGeneration
+        if Self.reduceMotion {
+            panel.orderOut(nil)
+            panel.alphaValue = 1
+            return
+        }
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.24
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
             panel.animator().alphaValue = 0
         }
         Task { @MainActor [weak self] in
