@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import QuartzCore
 
 /// Données d'affichage du carnet — déjà formatées par l'app (toute la copie
 /// française vit côté app, source unique), plus la série brute pour la sparkline.
@@ -141,7 +142,14 @@ public final class CarnetWindow: NSObject, NSWindowDelegate {
 
     // MARK: - API
 
-    /// Affiche le carnet centré sur l'écran principal, en fondu.
+    /// Vrai quand l'utilisateur a coché « Réduire les animations » (Réglages ›
+    /// Accessibilité). Toute apparition/disparition se fait alors d'un coup.
+    private static var reduceMotion: Bool {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
+    /// Affiche le carnet centré sur l'écran principal. L'encre qui se pose :
+    /// fondu + légère montée, décéléré (ease-out, jamais de rebond).
     public func show(_ data: CarnetData) {
         self.data = data
         render()
@@ -150,25 +158,47 @@ public final class CarnetWindow: NSObject, NSWindowDelegate {
         let h = container.frame.height
         let x = vis.midX - Self.width / 2
         let y = vis.midY - h / 2 + vis.height * 0.08   // un peu au-dessus du centre
-        panel.setFrame(NSRect(x: x, y: y, width: Self.width, height: h), display: true)
-        if !panel.isVisible {
-            panel.alphaValue = 0
-            panel.makeKeyAndOrderFront(nil)
-            panel.makeFirstResponder(container)
-            NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.18
-                panel.animator().alphaValue = 1
-            }
-        } else {
+        let finalFrame = NSRect(x: x, y: y, width: Self.width, height: h)
+
+        // Déjà visible (rafraîchissement) : on repositionne sans animer.
+        if panel.isVisible {
+            panel.setFrame(finalFrame, display: true)
             panel.alphaValue = 1
             panel.makeKeyAndOrderFront(nil)
+            return
+        }
+
+        // Réduire les animations : pose instantanée, ni fondu ni déplacement.
+        if Self.reduceMotion {
+            panel.setFrame(finalFrame, display: true)
+            panel.alphaValue = 1
+            panel.makeKeyAndOrderFront(nil)
+            panel.makeFirstResponder(container)
+            return
+        }
+
+        // Part 8 px plus bas, à plat → remonte et se révèle en décélérant.
+        panel.setFrame(finalFrame.offsetBy(dx: 0, dy: -8), display: true)
+        panel.alphaValue = 0
+        panel.makeKeyAndOrderFront(nil)
+        panel.makeFirstResponder(container)
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.22
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.animator().alphaValue = 1
+            panel.animator().setFrame(finalFrame, display: true)
         }
     }
 
     public func hide() {
         guard panel.isVisible else { return }
+        if Self.reduceMotion {
+            panel.orderOut(nil)
+            return
+        }
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = 0.16
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
             panel.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
             self?.panel.orderOut(nil)

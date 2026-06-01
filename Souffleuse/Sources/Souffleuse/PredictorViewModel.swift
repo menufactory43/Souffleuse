@@ -275,6 +275,19 @@ final class PredictorViewModel {
     /// à composer (cf. lifecycle warmth).
     var isModelReady: Bool { runtime.canGenerate }
 
+    /// Recharge le moteur ghost pour la voix COURANTE quand son GGUF vient
+    /// d'arriver sur disque (fin de téléchargement à l'onboarding). Au lancement,
+    /// si le fichier manquait, `loadModel()` a échoué → `loadState == .failed`,
+    /// que le guard `.idle` de `loadModel()` ne franchit plus : il faut d'abord
+    /// `unloadModel()` (remet `.idle`) puis recharger. No-op si le moteur génère
+    /// déjà (modèle présent dès le départ, ex. dossier Cotypist legacy) → pas de
+    /// reload destructeur du KV-cache chaud.
+    func reloadAfterDownload() async {
+        guard !runtime.canGenerate else { return }
+        await unloadModel()
+        await loadModel()
+    }
+
     /// Décharge le moteur ghost pour rendre la RAM quand l'utilisateur ne
     /// compose pas. Annule la génération en vol, libère le GGUF + le container
     /// MLX, invalide le cache (le KV est parti avec le model) et REMET

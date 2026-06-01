@@ -6,6 +6,22 @@ import SouffleuseInput
 import SouffleusePersonalization
 import SwiftUI
 
+private extension Color {
+    /// Sang-de-bœuf (#8c2b21, `--rouge` du site) — la voix unique de la marque,
+    /// posée en `.tint` sur toute la fenêtre Préférences pour remplacer le bleu
+    /// système. Éclairci en dark mode pour rester lisible (le site vit toujours
+    /// sur paper clair ; l'app, non). C'est le whisper sanctionné de cette
+    /// surface : l'accent, pas une refonte — la structure reste native.
+    static var sangDeBoeuf: Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            return dark
+                ? NSColor(srgbRed: 0xd0 / 255, green: 0x6a / 255, blue: 0x5d / 255, alpha: 1)
+                : NSColor(srgbRed: 0x8c / 255, green: 0x2b / 255, blue: 0x21 / 255, alpha: 1)
+        })
+    }
+}
+
 @MainActor
 final class PreferencesWindow {
     private var window: NSWindow?
@@ -92,6 +108,9 @@ private struct PreferencesRoot: View {
         }
         .padding(20)
         .frame(width: 620, height: 460)
+        // La voix unique : un seul accent sang-de-bœuf irrigue toggles, sliders,
+        // radios et boutons de toute la fenêtre, à la place du bleu système.
+        .tint(.sangDeBoeuf)
     }
 }
 
@@ -382,7 +401,7 @@ private struct ModelDownloadBadge: View {
                 .controlSize(.small)
         case .failed:
             HStack(spacing: 6) {
-                Text("échec").foregroundStyle(.red).font(.caption)
+                Text("échec").foregroundStyle(Color.sangDeBoeuf).font(.caption)
                 Button("Réessayer") { manager.download(model) }
                     .controlSize(.small)
             }
