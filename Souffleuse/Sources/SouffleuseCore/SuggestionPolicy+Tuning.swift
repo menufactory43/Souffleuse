@@ -158,7 +158,8 @@ extension SuggestionPolicy {
         /// Env-overridable (même pattern que `wordCompleterEnabledRuntime`) pour
         /// l'A/B et le revert instantané sans recompiler.
         public static var midWordEscalationEnabled: Bool {
-            ProcessInfo.processInfo.environment["SOUFFLEUSE_MIDWORD_ESCALATION"] != nil
+            // ON par défaut (shippé). Kill-switch DEV : SOUFFLEUSE_MIDWORD_ESCALATION_OFF.
+            ProcessInfo.processInfo.environment["SOUFFLEUSE_MIDWORD_ESCALATION_OFF"] == nil
         }
 
         /// Fast-accept : un mot greedy/healed valide ET prolongeant le partiel, à
@@ -235,7 +236,8 @@ extension SuggestionPolicy {
         /// Master switch F3, env-overridable. OFF par défaut. Ne tire QUE dans la
         /// branche escalade-cache → requiert aussi `midWordEscalationEnabled`.
         public static var midWordL0Fallback: Bool {
-            ProcessInfo.processInfo.environment["MW_L0_FALLBACK"] != nil
+            // ON par défaut (shippé). Kill-switch DEV : MW_L0_OFF.
+            ProcessInfo.processInfo.environment["MW_L0_OFF"] == nil
         }
 
         /// Longueur min du fragment partiel pour tenter le fallback dico. ≥4 :
