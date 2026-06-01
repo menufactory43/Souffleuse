@@ -414,10 +414,12 @@ final class ModelRuntime {
             return MidWordEscalationResult(show: false, word: greedy.lead, reason: "uncertain (k=0)")
         }
         var leads = [greedy.lead]
+        // Cap tokens des branches SÉPARÉ du greedy (mesuré : 3 suffit, −300 ms vs 8).
+        let branchCap = min(request.maxTokens, SuggestionPolicy.Tuning.escBranchMaxTokens)
         let needed = Int((SuggestionPolicy.Tuning.escAgreeThreshRuntime * Double(k + 1)).rounded(.up))
         for i in 0..<k {
             if Task.isCancelled { return nil }
-            let b = await runEscalationPass(prompt: prompt, partial: partial, cap: cap,
+            let b = await runEscalationPass(prompt: prompt, partial: partial, cap: branchCap,
                                             temperature: SuggestionPolicy.Tuning.escBranchTempRuntime,
                                             seed: UInt32(i + 1), captureP1: false)
             leads.append(b.lead)
