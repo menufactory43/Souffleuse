@@ -106,22 +106,32 @@ if [ -z "$RELEASE" ]; then
   exit 0
 fi
 
-# ── RELEASE : notarisation + staple + DMG ──────────────────────────────────
-# Pré-requis (une fois) : un profil notarytool enregistré dans le trousseau —
+# ── RELEASE : (notarisation +) staple + DMG ─────────────────────────────────
+# Pré-requis notarisation (une fois) : un profil notarytool dans le trousseau —
 #   xcrun notarytool store-credentials "$NOTARY_PROFILE" \
 #     --apple-id TON_EMAIL --team-id AKMNXGVVGX --password MOT-DE-PASSE-APP
+#
+# NOTARIZE=0 : saute la notarisation (et le staple, qui en dépend). L'app reste
+# signée Developer ID avec timestamp + runtime durci → Gatekeeper la laisse
+# s'ouvrir via « Ouvrir quand même » (clic-droit Ouvrir / Réglages → Confiance),
+# sans aller-retour réseau chez Apple. Utile pour un partage rapide hors site.
+NOTARIZE="${NOTARIZE:-1}"
 NOTARY_PROFILE="${NOTARY_PROFILE:-souffleuse}"
 DMG_PATH="build/$APP_NAME.dmg"
 ZIP_PATH="build/$APP_NAME-notarize.zip"
 
-echo "==> Notarisation de l'app (peut prendre quelques minutes)..."
-rm -f "$ZIP_PATH"
-/usr/bin/ditto -c -k --keepParent "$APP_BUNDLE" "$ZIP_PATH"
-xcrun notarytool submit "$ZIP_PATH" --keychain-profile "$NOTARY_PROFILE" --wait
-rm -f "$ZIP_PATH"
+if [ "$NOTARIZE" = "1" ]; then
+  echo "==> Notarisation de l'app (peut prendre quelques minutes)..."
+  rm -f "$ZIP_PATH"
+  /usr/bin/ditto -c -k --keepParent "$APP_BUNDLE" "$ZIP_PATH"
+  xcrun notarytool submit "$ZIP_PATH" --keychain-profile "$NOTARY_PROFILE" --wait
+  rm -f "$ZIP_PATH"
 
-echo "==> Staple du ticket sur l'app..."
-xcrun stapler staple "$APP_BUNDLE"
+  echo "==> Staple du ticket sur l'app..."
+  xcrun stapler staple "$APP_BUNDLE"
+else
+  echo "==> NOTARIZE=0 : notarisation sautée (app signée Developer ID, non staplée)."
+fi
 
 echo "==> Fabrication du DMG (avec lien /Applications pour le glisser-déposer)..."
 STAGING="build/dmg-staging"
@@ -132,11 +142,19 @@ rm -f "$DMG_PATH"
 hdiutil create -volname "$APP_NAME" -srcfolder "$STAGING" -ov -format UDZO "$DMG_PATH"
 rm -rf "$STAGING"
 
-echo "==> Signature + notarisation du DMG..."
+echo "==> Signature du DMG..."
 codesign --force --sign "$SIGN_IDENTITY" --timestamp "$DMG_PATH"
-xcrun notarytool submit "$DMG_PATH" --keychain-profile "$NOTARY_PROFILE" --wait
-xcrun stapler staple "$DMG_PATH"
 
-echo ""
-echo "==> ✅ Prêt pour le site : $DMG_PATH (notarisé + staplé, s'ouvre sans avertissement)"
-echo "==> Vérifie : spctl -a -vvv -t install '$DMG_PATH'  (doit dire 'accepted source=Notarized Developer ID')"
+if [ "$NOTARIZE" = "1" ]; then
+  echo "==> Notarisation + staple du DMG..."
+  xcrun notarytool submit "$DMG_PATH" --keychain-profile "$NOTARY_PROFILE" --wait
+  xcrun stapler staple "$DMG_PATH"
+  echo ""
+  echo "==> ✅ Prêt pour le site : $DMG_PATH (notarisé + staplé, s'ouvre sans avertissement)"
+  echo "==> Vérifie : spctl -a -vvv -t install '$DMG_PATH'  (doit dire 'accepted source=Notarized Developer ID')"
+else
+  echo ""
+  echo "==> ✅ DMG signé Developer ID (non notarisé) : $DMG_PATH"
+  echo "==> À la 1ʳᵉ ouverture sur une autre machine : clic-droit → Ouvrir, ou"
+  echo "    Réglages Système → Confidentialité et sécurité → « Ouvrir quand même »."
+fi
