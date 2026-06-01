@@ -86,13 +86,27 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     private let axClient = AXClient()
     private var overlay: OverlayWindow!
     private var presence: PresenceIndicatorWindow!
+    /// Anti-blink de l'indicateur de présence. Le snapshot AX renvoie parfois un
+    /// `caretIndex`/`elementRect` transitoirement nil (typiquement aux frontières
+    /// de mot dans certaines apps) : sans amortissement, le badge clignote à
+    /// 80 ms et donne l'impression que la souffleuse « ne travaille pas ». On
+    /// retient le dernier rect valide et on garde le badge ancré pendant une
+    /// courte grâce sur ces disparitions transitoires ; au-delà (focus réellement
+    /// parti), on cache pour de bon.
+    private var lastPresenceFieldRect: CGRect?
+    private var presenceMissTicks = 0
+    /// ~480 ms à 80 ms de poll — couvre un trou AX de quelques ticks sans laisser
+    /// traîner le badge après une vraie perte de focus.
+    private static let presenceGraceTicks = 6
     private var interceptor: KeyInterceptor!
     private let predictor = PredictorViewModel()
     /// Mini Phase 4 — moteur instruct paresseux + petit panneau de traduction.
     private let translationRuntime = TranslationRuntime()
     private let translationHUD = TranslationHUDWindow()
-    /// Fenêtre DEV d'inspection du ghost (live), créée seulement si activée.
+    /// Fenêtre DEV d'inspection du ghost (live), créée paresseusement au clic.
     private var ghostInspectorWindow: GhostInspectorWindow?
+    /// Item de menu DEV pilotant la fenêtre d'inspection (état coché = visible).
+    private var ghostInspectorItem: NSMenuItem?
     /// Cible cyclée à la main (⌘⇧→), tenue VIVANTE pour qu'un choix EXPLICITE
     /// fasse autorité au commit sans dépendre du lookup disque par titre. Le titre
     /// de fenêtre dérive (compteurs de non-lus « (1) », sujet) entre le cycle et le
@@ -281,15 +295,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         overlay = OverlayWindow()
         presence = PresenceIndicatorWindow()
         // Inspecteur de ghost (DEV) : moniteur live du chemin de décision —
-        // affiché/gaté/dropé + motif. Activé via SOUFFLEUSE_GHOST_INSPECTOR.
-        if GhostInspector.enabled {
-            let inspector = GhostInspectorWindow()
-            self.ghostInspectorWindow = inspector
-            GhostInspector.shared.onChange = { [weak inspector] in
-                inspector?.refresh(GhostInspector.shared.entries)
-            }
-            inspector.show()
-        }
+        // affiché/gaté/dropé + motif. Créé paresseusement et basculé via le menu
+        // (item présent uniquement en build Debug, cf. `toggleGhostInspector`).
         // Install the status item early so the user sees the app is alive even
         // if no permissions are granted yet.
         installStatusItem()
@@ -616,6 +623,17 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         let onboardingItem = NSMenuItem(title: "Permissions…", action: #selector(openOnboarding), keyEquivalent: "")
         onboardingItem.target = self
         menu.addItem(onboardingItem)
+        #if DEBUG
+        menu.addItem(NSMenuItem.separator())
+        let inspectorItem = NSMenuItem(
+            title: "Inspecteur ghost (DEV)",
+            action: #selector(toggleGhostInspector),
+            keyEquivalent: ""
+        )
+        inspectorItem.target = self
+        ghostInspectorItem = inspectorItem
+        menu.addItem(inspectorItem)
+        #endif
         menu.addItem(NSMenuItem.separator())
         let quitItem = NSMenuItem(title: "Quitter", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
@@ -793,6 +811,28 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         onboarding?.show()
     }
 
+    #if DEBUG
+    /// Affiche/masque l'inspecteur ghost (DEV). Crée la fenêtre au premier clic,
+    /// branche le rafraîchissement live, et n'arme l'enregistrement (`isActive`)
+    /// que tant qu'elle est visible — zéro overhead une fois masquée.
+    @objc private func toggleGhostInspector() {
+        let inspector: GhostInspectorWindow
+        if let existing = ghostInspectorWindow {
+            inspector = existing
+        } else {
+            inspector = GhostInspectorWindow()
+            ghostInspectorWindow = inspector
+            GhostInspector.shared.onChange = { [weak inspector] in
+                inspector?.refresh(GhostInspector.shared.entries)
+            }
+        }
+        let visible = inspector.toggle()
+        GhostInspector.shared.isActive = visible
+        if visible { inspector.refresh(GhostInspector.shared.entries) }
+        ghostInspectorItem?.state = visible ? .on : .off
+    }
+    #endif
+
     @objc private func openPreferences() {
         if preferences == nil {
             preferences = PreferencesWindow(
@@ -915,7 +955,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // and avoids racing AX reads against our own SwiftUI text fields.
         if NSApp.isActive {
             overlay.hide()
-            presence.hide()
+            presenceHideNow()
             interceptor.setActive(false)
             return
         }
@@ -923,7 +963,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // status item stays visible so the user can see we're waiting.
         guard AXClient.isTrusted else {
             overlay.hide()
-            presence.hide()
+            presenceHideNow()
             interceptor.setActive(false)
             return
         }
@@ -977,7 +1017,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
             overlay.hide()
-            presence.hide()
+            // Échec AX transitoire (caret/elementRect nil ce tick) : on TIENT le
+            // badge ancré pendant la grâce plutôt que de le faire clignoter.
+            presenceHoldOrHide()
             interceptor.setActive(false)
             return
         }
@@ -991,7 +1033,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         let allowMode = store.allowlist.mode(forBundle: bundleID, windowTitle: snap.windowTitle)
         if allowMode == .disabled {
             overlay.hide()
-            presence.hide()
+            presenceHideNow()
             interceptor.setActive(false)
             return
         }
@@ -1096,20 +1138,22 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // on Cmd+Tab drive-bys.
         if hasTypedSinceFocus {
             if let fieldRect = snap.elementRect {
-                presence.show(at: fieldRect)
+                presenceShow(at: fieldRect)
             } else if let rect = rectForGhost {
-                presence.show(at: rect)
+                presenceShow(at: rect)
             } else {
-                presence.hide()
+                // Aucun rect ce tick alors qu'on est en train de taper : trou AX
+                // transitoire (fin de mot) → on tient le badge au dernier rect.
+                presenceHoldOrHide()
             }
         } else {
-            presence.hide()
+            presenceHideNow()
         }
 
         // Dismissed by Esc until text changes.
         if let dismissed = dismissedForText, dismissed == text {
             overlay.hide()
-            presence.hide()
+            presenceHideNow()
             interceptor.setActive(false)
             return
         }
@@ -1208,7 +1252,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // the wrong continuation. Hide immediately and bail.
         if Self.shouldSuppressForCaretContext(text: text, caretIndex: caretIndex) {
             overlay.hide()
-            presence.hide()
+            presenceHideNow()
             interceptor.setActive(false)
             return
         }
@@ -2017,6 +2061,32 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// précédent, donc on ne décharge qu'après une vraie pause — ce qui survit
     /// aux pauses de réflexion en milieu de phrase mais rend la RAM dès qu'on
     /// passe à autre chose (lecture, app non-texte, idle).
+    /// Affiche le badge et réarme l'anti-blink (rect valide ce tick).
+    private func presenceShow(at rect: CGRect) {
+        lastPresenceFieldRect = rect
+        presenceMissTicks = 0
+        presence.show(at: rect)
+    }
+
+    /// Disparition TRANSITOIRE (snapshot AX vide ce tick) : on garde le badge
+    /// ancré au dernier rect connu pendant la fenêtre de grâce, puis on cache.
+    private func presenceHoldOrHide() {
+        if let last = lastPresenceFieldRect, presenceMissTicks < Self.presenceGraceTicks {
+            presenceMissTicks += 1
+            presence.show(at: last)
+        } else {
+            presenceHideNow()
+        }
+    }
+
+    /// Disparition LÉGITIME (notre UI au premier plan, app désactivée, Esc,
+    /// idle-unload) : cache immédiatement et oublie le dernier rect.
+    private func presenceHideNow() {
+        lastPresenceFieldRect = nil
+        presenceMissTicks = 0
+        presence.hide()
+    }
+
     @MainActor
     private func scheduleGhostIdleUnload() {
         ghostIdleUnloadTask?.cancel()
@@ -2028,7 +2098,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             guard self.predictor.isModelReady else { return }
             await self.predictor.unloadModel()
             self.overlay.hide()
-            self.presence.hide()
+            self.presenceHideNow()
             self.interceptor.setActive(false)
             Log.info(.predictor, "ghost_idle_unload")
         }
