@@ -4,7 +4,9 @@ import Foundation
 /// Sonde d'**observabilité DEV** du chemin ghost. À chaque décision du pipeline
 /// (affiché / gaté / dropé / stub), on enregistre ce que le modèle voulait
 /// montrer + le verdict + le motif de gate. Rendu en direct par
-/// `GhostInspectorWindow`. Activé UNIQUEMENT via `SOUFFLEUSE_GHOST_INSPECTOR`.
+/// `GhostInspectorWindow`. Outil DEV : piloté depuis le menu (build Debug
+/// uniquement), `isActive` ne passe à `true` que quand la fenêtre est ouverte —
+/// aucun enregistrement (ni tee disque) tant qu'on n'inspecte pas.
 ///
 /// **Privacy / trust :** affiche du texte ghost à l'écran (même niveau de
 /// confiance que l'overlay), mais n'est JAMAIS routé par `Log.*` (qui interdit
@@ -12,7 +14,9 @@ import Foundation
 @MainActor
 final class GhostInspector {
     static let shared = GhostInspector()
-    static let enabled = ProcessInfo.processInfo.environment["SOUFFLEUSE_GHOST_INSPECTOR"] != nil
+    /// Activé seulement pendant que la fenêtre d'inspection est affichée
+    /// (basculé par l'AppDelegate en build Debug). Inerte en Release.
+    var isActive = false
 
     enum Verdict: String { case shown = "AFFICHÉ", gated = "GATÉ", dropped = "DROP", stub = "STUB" }
 
@@ -31,7 +35,7 @@ final class GhostInspector {
     var onChange: (@MainActor () -> Void)?
 
     func record(tail: String, verdict: Verdict, reason: String, content: String) {
-        guard Self.enabled else { return }
+        guard isActive else { return }
         let t = String(tail.suffix(28))
         let c = String(content.replacingOccurrences(of: "\n", with: "⏎").prefix(52))
         // Le stream répète la même décision. Deux dédups :

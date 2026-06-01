@@ -38,9 +38,27 @@ final class GhostInspectorWindow {
         panel.contentView = scroll
     }
 
+    /// Visible à l'écran ? Tenu à jour par `show`/`hide` pour piloter le toggle
+    /// du menu (et n'enregistrer les traces que fenêtre ouverte).
+    private(set) var isVisible = false
+
     func show() {
         positionTopRight()
         panel.orderFrontRegardless()
+        isVisible = true
+    }
+
+    func hide() {
+        panel.orderOut(nil)
+        isVisible = false
+    }
+
+    /// Bascule la visibilité et renvoie le nouvel état (pour synchroniser le
+    /// menu et l'activation de l'enregistrement).
+    @discardableResult
+    func toggle() -> Bool {
+        if isVisible { hide() } else { show() }
+        return isVisible
     }
 
     private func positionTopRight() {
