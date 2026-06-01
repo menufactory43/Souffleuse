@@ -1,1 +1,5 @@
 .vercel
+
+# Binaire de l'app servi en statique (déployé depuis le disque via la CLI Vercel,
+# pas besoin de le versionner ; build non notarisé, remplacé au fil des releases).
+*.dmg
