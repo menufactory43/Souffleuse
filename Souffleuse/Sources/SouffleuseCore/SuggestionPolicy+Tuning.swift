@@ -189,8 +189,17 @@ extension SuggestionPolicy {
 
         /// (F1) Plafond de tokens de la passe greedy d'escalade : on ne veut que le
         /// mot courant + un poil. Court = latence bornée. Pris en `min()` avec le
-        /// `maxTokens` de la requête.
-        public static let escGreedyMaxTokens: Int = 8
+        /// `maxTokens` de la requête. Mesuré sur `SouffleuseMidwordEval` : justesse
+        /// du mot de tête IDENTIQUE de cap 3 à 8 (14/18) — les 5 tokens en plus
+        /// n'apportent rien (on ne lit que le mot de tête, le P1 est sur le 1ᵉʳ
+        /// token). 4 = −68 ms vs 8, avec 1 token de marge defrag sur la passe affichée.
+        public static let escGreedyMaxTokens: Int = 4
+
+        /// (F2) Plafond de tokens d'une BRANCHE — séparé du greedy. Mesuré sur
+        /// `SouffleuseMidwordEval` : 8→3 tokens fait chuter le coût de 220→121 ms/
+        /// branche (−99 ms, soit ~−300 ms sur K=3) pour −1/23 de justesse seulement.
+        /// La branche n'a besoin que du mot de tête (1-3 tokens), pas d'une suite.
+        public static let escBranchMaxTokens: Int = 3
 
         /// (F1) Epsilon de `minFirstTokenProb` pour FORCER le calcul de la confiance
         /// top-1 sans jamais aborter (le moteur ne calcule le softmax que si > 0).

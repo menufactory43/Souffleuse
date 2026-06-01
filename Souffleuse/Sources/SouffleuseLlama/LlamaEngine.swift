@@ -885,6 +885,17 @@ public actor LlamaEngine {
         // KV now holds exactly promptTokens[0..<lcp]. We will decode the rest.
         kvTokens = Array(promptTokens[0..<lcp])
 
+        // Observabilité KV cache (audit-safe : event StaticString littéral +
+        // count Int, aucun champ user). `kv_prefill_reuse` = tokens de prompt
+        // déjà présents dans le KV (préfixe commun → prefill évité, `lcp` est
+        // final ici) ; `kv_prefill_decode` = tokens du prompt réellement
+        // re-décodés ce predict. Le ratio reuse / (reuse + decode) mesure le
+        // gain effectif du KV cache au runtime. Émis seulement sur le chemin
+        // réel de génération (les fastpaths cache_hit/corpus n'entrent jamais
+        // dans `generate`). Purement observabilité : aucun effet sur la sortie.
+        Log.info(.predictor, "kv_prefill_reuse", count: lcp)
+        Log.info(.predictor, "kv_prefill_decode", count: promptTokens.count - lcp)
+
         // Build the sampler chain : penalties → temp/greedy.
         let chainParams = llama_sampler_chain_default_params()
         guard let sampler = llama_sampler_chain_init(chainParams) else {
