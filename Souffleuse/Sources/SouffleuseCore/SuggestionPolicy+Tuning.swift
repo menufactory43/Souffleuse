@@ -349,10 +349,14 @@ extension SuggestionPolicy {
         public static let cacheFloor: Float = 0.55
 
         /// `undoCacheFloor` gates `cache.longestExtendingKey(...)` hits (undo
-        /// as ghost — "user just backspaced, propose to restore"). Slightly
-        /// more permissive than `cacheFloor` because the semantic signal is
-        /// strong (the suffix was literally typed before backspacing).
-        public static let undoCacheFloor: Float = 0.45
+        /// as ghost — "user just backspaced, propose to restore"). Signal très
+        /// fort (le suffixe a été LITTÉRALEMENT tapé) → barre basse. Abaissée
+        /// 0.45 → 0.30 : un undo d'1 mot (« Monsieur ») scorait 0.39 (0.65×1×0.6)
+        /// et était recalé. Env-réglable `MW_UNDO_FLOOR` pour l'A/B.
+        public static var undoCacheFloor: Float {
+            if let s = ProcessInfo.processInfo.environment["MW_UNDO_FLOOR"], let v = Float(s) { return v }
+            return 0.30
+        }
 
         // MARK: - D-09 Classification windows (assumptions A2-A4 in RESEARCH)
         public static let parasiteWindow: TimeInterval = 0.8

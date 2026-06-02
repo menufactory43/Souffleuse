@@ -256,6 +256,22 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// Bundle ID at the first partial accept — gates personalization recording
     /// at end-of-run with the same blocklist as the full-accept branch.
     private var partialAcceptedAtBundleID: String? = nil
+    // ── ANCRE DE FENÊTRE GLISSANTE BIDIRECTIONNELLE (flag `midWordGhostRollingEnabled`) ──
+    // Modélise une fenêtre ghost à BORNE GAUCHE : taper en avant CONSOMME le ghost,
+    // effacer en arrière le RE-GÉNÈRE (restaure ce qu'on a effacé) — mais seulement
+    // jusqu'au point où le LLM a ancré sa prédiction (la « borne gauche »). Effacer
+    // EN-DEÇÀ régénère. Tout est en minuscules pour le matching (la casse tapée gagne
+    // dans le texte hôte, comme `isLiveConsumeMatch`). Hors flag : ces trois vars
+    // restent vides et n'influencent rien (chemin byte-identique).
+    /// Préfixe committé AU MOMENT où le LLM a produit ce ghost. C'est la BORNE GAUCHE :
+    /// effacer en-deçà de `count` caractères régénère.
+    private var ghostAnchorBase: String = ""
+    /// Texte complet prédit = `ghostAnchorBase` + le ghost à l'instant de l'ancrage
+    /// (étendu à droite par les refills, et par un accept Tab). La fenêtre vit dans
+    /// `[ghostAnchorBase.count, ghostAnchorFull.count)`.
+    private var ghostAnchorFull: String = ""
+    /// Bundle focus à l'ancrage — l'ancre est réinitialisée au changement de focus.
+    private var ghostAnchorBundle: String = ""
     /// Rolling-refill (mode sliding-window, flag `midWordGhostRollingEnabled`) :
     /// vrai tant qu'une passe `extendGhost` est en vol. Empêche le tick à 20 Hz
     /// d'empiler une tempête de refills. Remis à `false` à la fin de la Task.
@@ -263,6 +279,12 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// Task de refill en vol — trackée pour pouvoir l'annuler sur changement
     /// d'app / divergence / blur (mêmes points que le cancel du predict).
     private var ghostRefillTask: Task<Void, Never>?
+    /// Préfixe vu au tick PRÉCÉDENT — sert UNIQUEMENT à détecter un backspace
+    /// in-place (le préfixe rétrécit ET reste un préfixe de l'ancien) pour le mode
+    /// rolling (flag `midWordGhostRollingEnabled`). Écrit à chaque tick éligible
+    /// mais ne change AUCUN comportement hors flag (la branche de suppression qui
+    /// le lit est gardée par le flag) ⇒ chemin byte-identique flag-OFF.
+    private var lastTickPrefixForDelete: String = ""
     /// Bundle ID we last kicked off enrichment for; used to detect focus changes.
     private var lastEnrichedBundleID: String?
     /// Last window title we kicked off enrichment for; used to detect *intra-app*
@@ -1112,6 +1134,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             }
             // Refill rolling en vol → l'annuler : il ciblerait l'ancien champ.
             cancelRollingRefill()
+            // Ancre liée au bundle précédent → la jeter (réancrage au prochain ghost).
+            clearGhostAnchor()
         } else if textAtFocusByBundle[bundleID] == nil {
             // Defensive: same bundle but state missing (first run, prefs reset).
             textAtFocusByBundle[bundleID] = text
@@ -1304,6 +1328,98 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             presenceHideNow()
             interceptor.setActive(false)
             return
+        }
+
+        // ── FENÊTRE GLISSANTE BIDIRECTIONNELLE (flag `midWordGhostRollingEnabled`) ──
+        // SUPERSÈDE la live-consume forward-only ci-dessous quand une ancre est active
+        // (même bundle, `ghostAnchorFull` non vide). Une SEULE règle de slice gère à la
+        // fois la consommation avant (le préfixe grandit) ET la restauration arrière sur
+        // backspace (le préfixe rétrécit), tant qu'on reste dans `[base, full)` :
+        //
+        //   • caret DANS la fenêtre  → ghost = suffixe de `ghostAnchorFull` après le
+        //     préfixe courant. Rendu via la machinerie partialRemainder. SKIP predict.
+        //   • effacé SOUS la borne gauche, fenêtre entièrement consommée, ou divergence
+        //     (texte hors-chemin) → on jette l'ancre et on tombe dans le predict normal.
+        //
+        // Hors flag (default-OFF), ce bloc est entièrement court-circuité : le `guard`
+        // sur le flag rend le chemin byte-identique à l'historique.
+        if SuggestionPolicy.Tuning.midWordGhostRollingEnabled,
+           !ghostAnchorFull.isEmpty,
+           ghostAnchorBundle == bundleID {
+            let lowerPrefix = prefix.lowercased()
+            let lowerFull = ghostAnchorFull.lowercased()
+            if lowerFull.hasPrefix(lowerPrefix),
+               prefix.count >= ghostAnchorBase.count,
+               prefix.count < ghostAnchorFull.count {
+                // Caret À L'INTÉRIEUR de la fenêtre — slice le suffixe et l'affiche.
+                // On reconstruit l'état partialRemainder de façon cohérente pour que le
+                // refill rolling et l'accept Tab/word-by-word repartent du bon endroit.
+                let ghost = String(ghostAnchorFull.dropFirst(prefix.count))
+                predictor.cancel()
+                partialAcceptedAtPrefix = ghostAnchorBase
+                partialAcceptedSoFar = String(ghostAnchorFull.prefix(prefix.count).dropFirst(ghostAnchorBase.count))
+                partialAcceptedAtBundleID = bundleID
+                partialRemainder = ghost
+                if let rect = rectForGhost {
+                    overlay.show(text: ghost, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFontForOverlay)
+                    interceptor.setActive(true)
+                    maybeSpawnRollingRefill(committedText: prefix, bundleID: bundleID)
+                } else {
+                    overlay.hide()
+                    interceptor.setActive(false)
+                }
+                return
+            } else {
+                // Sous la borne gauche, tout consommé, ou divergence hors-chemin → on
+                // jette l'ancre + tout reste de partial, et on tombe dans le predict
+                // normal. La prochaine génération fraîche reposera une ancre.
+                clearGhostAnchor()
+                if !partialRemainder.isEmpty {
+                    partialRemainder = ""
+                    partialAcceptedSoFar = ""
+                    partialAcceptedAtPrefix = ""
+                    partialAcceptedAtBundleID = nil
+                }
+                cancelRollingRefill()
+                Log.info(.predictor, "ghost_anchor_cleared")
+                // Pas de hide ici (anti-blank-frame) : le predict gate plus bas
+                // repeindra, ou un fresh ghost réancrera.
+            }
+        }
+
+        // ── SUPPRESSION MID-MOT EN BACKSPACE (flag `midWordGhostRollingEnabled`) ──
+        // « Compléter ce qu'on TAPE, pas ce qu'on EFFACE. » Quand l'utilisateur
+        // recule à travers un mot ("je suis"→"je sui"→"je su"), le fragment de
+        // queue est mid-mot : le long-ghost le « guérirait » et re-taperait le mot
+        // qu'on est en train de supprimer (perçu comme la fenêtre qui glisse à
+        // gauche). On SUPPRIME alors le ghost pour ce tick (hide + interceptor off,
+        // pas de predict). Conditions cumulées :
+        //   • on RECULE in-place (préfixe rétrécit ET reste préfixe de l'ancien —
+        //     exclut un switch d'app/contexte) ;
+        //   • le mot de queue est un run de lettres NON VIDE (caret mid-mot, pas à
+        //     une frontière) ET n'est PAS un mot complet.
+        // On NE supprime PAS à une frontière (espace/ponctuation, ou mot complet) :
+        // là un next-word ghost ("je " → autre chose) est légitime. Ce bloc passe
+        // APRÈS l'anchor-slice (un restore d'ancre actif gagne donc : effacer
+        // "enceinte" dans la fenêtre restaure toujours) et AVANT le predict gate.
+        // Hors flag, la garde court-circuite tout ⇒ byte-identique (seule la var
+        // `lastTickPrefixForDelete` est écrite, sans effet observable).
+        if SuggestionPolicy.Tuning.midWordGhostRollingEnabled {
+            let isBackspacing = !lastTickPrefixForDelete.isEmpty
+                && prefix.count < lastTickPrefixForDelete.count
+                && lastTickPrefixForDelete.hasPrefix(prefix)
+            lastTickPrefixForDelete = prefix
+            let trailingFragment = OutputFilter.trailingPartialWord(prefix)
+            let isIncompleteFragment = !trailingFragment.isEmpty
+                && !SuggestionPolicy.defaultPartialWordIsComplete(prefix)
+            if isBackspacing, isIncompleteFragment {
+                overlay.hide()
+                interceptor.setActive(false)
+                predictor.cancel()
+                lastPredictedPrefix = nil
+                Log.info(.predictor, "ghost_backspace_suppress")
+                return
+            }
         }
 
         // Live-consume promotion: if there's an active LLM suggestion and the
@@ -1612,6 +1728,23 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
 
         overlay.show(text: suggestion, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFontForOverlay)
         interceptor.setActive(true)
+
+        // ── ANCRAGE D'UNE GÉNÉRATION FRAÎCHE (flag `midWordGhostRollingEnabled`) ──
+        // On vient de peindre une suggestion produite POUR le préfixe courant
+        // (`predictedForPrefix == prefix`, garanti par `shouldRenderSuggestion`). Si le
+        // mode rolling est ON et que ce n'est pas déjà l'ancre courante, on pose la
+        // borne gauche ici : base = préfixe qui a produit le ghost, full = base + ghost.
+        // Tout backspace ultérieur jusqu'à `base` restaurera le ghost via le slice.
+        if SuggestionPolicy.Tuning.midWordGhostRollingEnabled {
+            let freshBase = predictor.predictedForPrefix
+            let freshFull = freshBase + suggestion
+            if ghostAnchorFull != freshFull || ghostAnchorBase != freshBase || ghostAnchorBundle != bundleID {
+                ghostAnchorBase = freshBase
+                ghostAnchorFull = freshFull
+                ghostAnchorBundle = bundleID
+                Log.info(.predictor, "ghost_anchor_set")
+            }
+        }
     }
 
     /// Paint a typo suggestion in place, Cotypist-style: a red strike over the
@@ -1742,6 +1875,14 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                             self.partialAcceptedSoFar = chunk
                         }
                         if isLast {
+                            // Dernier chunk = ligne entièrement acceptée. Garde la
+                            // borne gauche, étend `ghostAnchorFull` au texte committé
+                            // (préfixe d'ancrage + tout l'accepté) pour qu'un
+                            // effacement restaure encore la ligne. NE PAS effacer
+                            // l'ancre ici.
+                            self.extendGhostAnchorOnAccept(
+                                committedFullText: self.partialAcceptedAtPrefix + self.partialAcceptedSoFar,
+                                bundleID: self.partialAcceptedAtBundleID)
                             self.recordPartialAcceptanceToHistoryIfAllowed()
                             self.partialRemainder = ""
                             self.partialAcceptedSoFar = ""
@@ -1826,6 +1967,10 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.ledger.recordAccepted(charsSaved: suggestion.count - 1)
+                // Accept Tab plein : garde la borne gauche, étend `ghostAnchorFull`
+                // au texte committé (`prePrefix + suggestion`) pour qu'un effacement
+                // restaure encore la ligne. Ne PAS avancer la base sur Tab.
+                self.extendGhostAnchorOnAccept(committedFullText: prePrefix + suggestion, bundleID: bundleID)
                 self.predictor.cancel()
                 self.lastPredictedPrefix = nil
                 self.overlay.hide()
@@ -1862,6 +2007,10 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                     // re-type of the same prefix doesn't restore the ghost
                     // they just refused.
                     self.predictor.clearPredictCache()
+                    // Rejet explicite → jeter l'ancre : on ne veut pas qu'un
+                    // backspace restaure le ghost que l'utilisateur vient de refuser.
+                    self.clearGhostAnchor()
+                    self.cancelRollingRefill()
                     self.lastPredictedPrefix = nil
                     self.overlay.hide()
                     self.interceptor.setActive(false)
@@ -2048,6 +2197,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.ledger.recordAccepted(charsSaved: suggestion.count - 1)
+            // acceptAll = ligne entière acceptée. Garde la borne gauche, étend
+            // `ghostAnchorFull` au texte committé pour qu'un effacement la restaure.
+            self.extendGhostAnchorOnAccept(committedFullText: prePrefix + suggestion, bundleID: bundleID)
             self.predictor.cancel()
             self.lastPredictedPrefix = nil
             self.overlay.hide()
@@ -2343,6 +2495,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     private func clearStaleGhostOnDivergence() {
         predictor.cancel()
         cancelRollingRefill()
+        // Divergence du chemin prédit → l'ancre n'est plus valide. La prochaine
+        // génération fraîche en reposera une. No-op hors flag (ancre toujours vide).
+        clearGhostAnchor()
         // ── ROLLING REFILL (point 4) : pas de blank frame sur divergence ──
         // Quand le mode rolling est ON, on NE cache PAS l'overlay immédiatement :
         // on garde la dernière frame visible et on laisse la fresh prediction la
@@ -2359,6 +2514,30 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// par la logique de refill rolling pour décider quand recharger.
     private static func wholeWordCount(_ s: String) -> Int {
         s.split(whereSeparator: { $0.isWhitespace }).count
+    }
+
+    /// Réinitialise l'ancre de fenêtre glissante. Appelé quand l'utilisateur efface
+    /// EN-DEÇÀ de la borne gauche, diverge du chemin prédit, consomme tout, ou change
+    /// de focus. La prochaine génération fraîche reposera une ancre.
+    private func clearGhostAnchor() {
+        ghostAnchorBase = ""
+        ghostAnchorFull = ""
+        ghostAnchorBundle = ""
+    }
+
+    /// Sur ACCEPT (Tab plein / acceptAll / dernier chunk), on GARDE la borne gauche
+    /// `ghostAnchorBase` et on étend `ghostAnchorFull` au texte committé complet, pour
+    /// qu'un effacement ultérieur restaure encore la ligne acceptée. No-op hors flag
+    /// ou si l'ancre est inactive / le bundle a changé / la borne gauche n'est plus un
+    /// préfixe du texte committé. `committedFullText` = `prePrefix + suggestion`.
+    @MainActor
+    private func extendGhostAnchorOnAccept(committedFullText: String, bundleID: String?) {
+        guard SuggestionPolicy.Tuning.midWordGhostRollingEnabled,
+              !ghostAnchorFull.isEmpty,
+              let bid = bundleID, bid == ghostAnchorBundle,
+              committedFullText.lowercased().hasPrefix(ghostAnchorBase.lowercased()),
+              committedFullText.count >= ghostAnchorBase.count else { return }
+        ghostAnchorFull = committedFullText
     }
 
     /// Annule la Task de refill rolling en vol (changement d'app / divergence /
@@ -2418,10 +2597,18 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             // APPEND (le reste reste affiché ; l'extension le prolonge au prochain
             // tick render). On préserve l'espacement : `extension_` porte déjà un
             // espace de tête unique, donc on dé-doublonne une éventuelle jointure.
+            let appended: String
             if self.partialRemainder.hasSuffix(" ") && extension_.hasPrefix(" ") {
-                self.partialRemainder += String(extension_.dropFirst())
+                appended = String(extension_.dropFirst())
             } else {
-                self.partialRemainder += extension_
+                appended = extension_
+            }
+            self.partialRemainder += appended
+            // Fenêtre glissante : le bord DROIT grandit avec le refill. On garde la
+            // borne gauche et on prolonge `ghostAnchorFull` du même texte, pour qu'un
+            // effacement ultérieur restaure aussi les mots refillés.
+            if !self.ghostAnchorFull.isEmpty {
+                self.ghostAnchorFull += appended
             }
         }
     }
