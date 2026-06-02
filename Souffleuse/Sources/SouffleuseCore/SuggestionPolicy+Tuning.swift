@@ -98,9 +98,21 @@ extension SuggestionPolicy {
         /// Minimum matched-context length (in characters) for a corpus
         /// continuation to be shown DIRECTLY as the ghost with zero LLM
         /// inference. Below this we treat the match as too weak and let the
-        /// L1/L2 cascade decide. ~16 chars ≈ several words — long enough that
-        /// the user has clearly re-entered a known context.
-        public static let strongCorpusMatchMinChars: Int = 16
+        /// L1/L2 cascade decide. ~12 chars ≈ a short opener phrase — long
+        /// enough to signal a clearly re-entered context while still recalling
+        /// after-space openers like "Bonjour, " (~9 chars). Lowered from 16
+        /// to 12 to reactivate recall of short sentence starters, matching
+        /// Cotypist behaviour on greetings and salutations.
+        public static let strongCorpusMatchMinChars: Int = 12
+
+        /// `MW_STRONG_MINCHARS` — seuil after-space du strong-corpus, override live
+        /// (A/B sans rebuild, même pattern que `afterSpaceL1BarRuntime` /
+        /// `escBranchKRuntime`). Env absente ⇒ la constante (12). Clampé ≥ 1 pour
+        /// qu'une valeur dégénérée ne désactive pas la garde de longueur min.
+        public static var strongCorpusMatchMinCharsRuntime: Int {
+            if let s = ProcessInfo.processInfo.environment["MW_STRONG_MINCHARS"], let v = Int(s) { return max(1, v) }
+            return strongCorpusMatchMinChars
+        }
 
         /// Mid-word variant of the threshold above. When the caret sits INSIDE a
         /// word, the in-progress fragment plus its preceding context recalls a
