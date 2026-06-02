@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import NaturalLanguage
 import SouffleuseCore
 import SouffleuseTyping
 @testable import Souffleuse
@@ -185,5 +186,95 @@ struct MidWordEscalationTests {
             branchLeads: ["pingo", "pingo", "pingo"])
         #expect(d.agreement == 1.0)
         #expect(!d.show)
+    }
+}
+
+/// C1 — gardes de sortie de la CONTINUATION mid-mot (mot + suite en greedy).
+/// Verrouille les deux helpers purs (`echoScore`, `languageMismatch`) ainsi que
+/// la dérivation de la langue attendue. La continuation N'est montrée QUE si le
+/// segment APRÈS le mot passe les gardes ; sinon on retombe sur le mot seul (C0).
+@Suite("C1 — continuation exit guards (echo / language)")
+struct MidWordContinuationGuardTests {
+
+    // MARK: - echoScore
+
+    @Test func echoScoreHighWhenContinuationCopiesLastSentence() {
+        // Le segment recopie intégralement la dernière phrase du tail → score 1.0.
+        let s = OutputFilter.echoScore(ghost: "la vérité est belle",
+                                       tail: "Bonjour. la vérité est belle")
+        #expect(s >= OutputFilter.continuationEchoThreshold)
+        #expect(s == 1.0)
+    }
+
+    @Test func echoScoreLowWhenContinuationIsFresh() {
+        // Suite distincte → quasi aucun mot commun → sous le seuil.
+        let s = OutputFilter.echoScore(ghost: ", la vérité est première",
+                                       tail: "Dans la philo on cherche")
+        #expect(s < OutputFilter.continuationEchoThreshold)
+    }
+
+    @Test func echoScoreZeroForEmptyGhost() {
+        #expect(OutputFilter.echoScore(ghost: "", tail: "quoi que ce soit") == 0)
+    }
+
+    @Test func echoScoreUsesOnlyLastSentence() {
+        // Le recouvrement ne porte que sur la DERNIÈRE phrase : un mot répété dans
+        // une phrase ANTÉRIEURE ne compte pas.
+        let s = OutputFilter.echoScore(ghost: "fraises rouges",
+                                       tail: "Les fraises sont mûres. on mange")
+        #expect(s < OutputFilter.continuationEchoThreshold)
+    }
+
+    // MARK: - languageMismatch
+
+    @Test func languageMismatchFalseWhenFrenchGhostFrenchExpected() {
+        #expect(!OutputFilter.languageMismatch(ghost: ", la vérité est première", expected: "fr"))
+    }
+
+    @Test func languageMismatchTrueWhenEnglishGhostFrenchExpected() {
+        #expect(OutputFilter.languageMismatch(ghost: ", the truth is always first", expected: "fr"))
+    }
+
+    @Test func languageMismatchFailOpenOnShortFragment() {
+        // Trop court (< languageGuardMinChars) → fail-open, jamais de mismatch.
+        #expect(!OutputFilter.languageMismatch(ghost: "is", expected: "fr"))
+    }
+
+    @Test func languageMismatchFailOpenWhenExpectedNil() {
+        #expect(!OutputFilter.languageMismatch(ghost: "the truth is first", expected: nil))
+    }
+
+    // MARK: - expectedLanguage (dérivation pour la garde)
+
+    @Test func expectedLanguagePrefersRequestField() {
+        let req = Self.request(detected: "en", userTail: "Dans la philosophie")
+        #expect(ModelRuntime.expectedLanguage(for: req) == "en")
+    }
+
+    @Test func expectedLanguageDerivesFromTailWhenFieldNil() {
+        let req = Self.request(detected: nil, userTail: "Dans la philosophie, la vérité")
+        #expect(ModelRuntime.expectedLanguage(for: req) == NLLanguage.french.rawValue)
+    }
+
+    @Test func expectedLanguageNilOnTooShortTail() {
+        let req = Self.request(detected: nil, userTail: "ph")
+        #expect(ModelRuntime.expectedLanguage(for: req) == nil)
+    }
+
+    // MARK: - test seam
+
+    /// Requête minimale pour exercer `expectedLanguage` (seuls `detectedLanguage`
+    /// / `userTail` / `llmTail` comptent ; le reste est inerte).
+    static func request(detected: String?, userTail: String) -> PredictRequest {
+        PredictRequest(
+            prefix: userTail, contextPrefix: "", customInstructions: "",
+            axSnapshotPlaceholder: nil, axSnapshotHelp: nil, axSnapshotRole: nil,
+            axSnapshotSubrole: nil, axTextAfterCaret: nil, personalizationStrength: 0,
+            maxTokens: 12, maxWords: 8, detectedLanguage: detected,
+            token: GenerationToken(value: 0),
+            userTail: userTail, llmTail: userTail, isInstructModel: false,
+            systemMessage: "", baseSystem: "", customInstr: "", ctxPrefix: "",
+            fieldContextSlot: "", afterCursorSlot: "", basePreamble: "",
+            examplesBlock: "", basePromptText: userTail, ngramSnapshot: nil)
     }
 }

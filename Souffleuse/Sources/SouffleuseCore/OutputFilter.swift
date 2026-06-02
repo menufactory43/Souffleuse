@@ -1,4 +1,5 @@
 import Foundation
+import NaturalLanguage
 
 // MARK: - OutputFilter (pure-function namespace)
 
@@ -497,5 +498,62 @@ public enum OutputFilter {
             if p.contains(needle) { return true }
         }
         return false
+    }
+
+    // MARK: - Continuation exit guards (mid-word C1)
+    //
+    // Gardes LOCALES appliquées à la CONTINUATION mid-mot (le segment APRÈS le
+    // mot confirmé par le vote d'agreement), JAMAIS au mot lui-même. Si une garde
+    // échoue, l'appelant retombe sur le mot seul (C0) — on ne perd jamais le mot.
+    // Helpers purs `nonisolated static`, indépendants du chemin streaming.
+
+    /// Seuil de recouvrement écho au-dessus duquel la continuation est jugée
+    /// comme un ÉCHO de ce qui vient d'être tapé (le base model recopie la
+    /// dernière phrase au lieu de continuer). Coverage des mots du ghost trouvés
+    /// dans la dernière phrase du tail.
+    public nonisolated static let continuationEchoThreshold: Double = 0.5
+
+    /// Confiance min de `NLLanguageRecognizer` pour qu'un verdict de langue soit
+    /// pris en compte (sinon fail-open). Aligné sur `detectLanguage` (0.5).
+    public nonisolated static let languageGuardMinConfidence: Double = 0.5
+
+    /// Longueur min (chars utiles) sous laquelle la détection de langue est trop
+    /// peu fiable → fail-open (pas de mismatch). Aligné sur le périmètre V1.
+    public nonisolated static let languageGuardMinChars: Int = 4
+
+    /// Recouvrement [0,1] entre le `ghost` (la continuation) et la DERNIÈRE phrase
+    /// du `tail` : fraction des mots distincts du ghost qui apparaissent déjà dans
+    /// cette phrase (coverage). 1.0 = le ghost recopie intégralement ce qui vient
+    /// d'être tapé ; 0.0 = aucun mot commun. Normalisation partagée avec les autres
+    /// gardes d'écho (`normalizeForRepeatCheck`). Renvoie 0 si l'un des deux est vide.
+    public nonisolated static func echoScore(ghost: String, tail: String) -> Double {
+        let gWords = Set(normalizeForRepeatCheck(ghost).split(separator: " ").map(String.init))
+        guard !gWords.isEmpty else { return 0 }
+        // Dernière phrase du tail : on coupe sur la ponctuation terminale.
+        let lastSentence = tail.split(whereSeparator: { $0 == "." || $0 == "?" || $0 == "!" || $0 == "…" })
+            .last.map(String.init) ?? tail
+        let tWords = Set(normalizeForRepeatCheck(lastSentence).split(separator: " ").map(String.init))
+        guard !tWords.isEmpty else { return 0 }
+        let overlap = gWords.intersection(tWords).count
+        return Double(overlap) / Double(gWords.count)
+    }
+
+    /// True quand la langue détectée du `ghost` DIFFÈRE de `expected` (le base
+    /// model a dérapé dans une autre langue). Fail-open (false) si le ghost est
+    /// trop court (`< languageGuardMinChars`), si la confiance est sous le seuil,
+    /// ou si `expected` est vide/inconnu — on ne bloque que sur un mismatch CLAIR.
+    /// `expected` est un code `NaturalLanguage` (`"fr"`, `"en"`, …). Pur, on-device.
+    public nonisolated static func languageMismatch(ghost: String, expected: String?) -> Bool {
+        guard let expected, !expected.isEmpty else { return false }
+        let trimmed = ghost.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= languageGuardMinChars else { return false }   // fail-open
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(trimmed)
+        guard let lang = recognizer.dominantLanguage else { return false }
+        if let confidence = recognizer.languageHypotheses(withMaximum: 1)[lang],
+           confidence < languageGuardMinConfidence {
+            return false   // pas assez sûr → fail-open
+        }
+        return lang.rawValue != expected
     }
 }
