@@ -362,6 +362,25 @@ final class ModelRuntime {
     ///
     /// Personnalisation n-gram DÉSACTIVÉE (`personalizationStrength: 0`) : seuils
     /// calibrés sans biais sur `SouffleuseMidwordEval`.
+    /// Langue attendue pour la garde `languageMismatch` de la continuation C1 :
+    /// le `detectedLanguage` de la requête s'il est présent, sinon dérivée du texte
+    /// déjà tapé (`userTail`, fallback `llmTail`) via `NLLanguageRecognizer` aux
+    /// mêmes seuils que les autres gardes de langue. `nil` ⇒ garde fail-open.
+    nonisolated static func expectedLanguage(for request: PredictRequest) -> String? {
+        if let lang = request.detectedLanguage, !lang.isEmpty { return lang }
+        let source = request.userTail.isEmpty ? request.llmTail : request.userTail
+        let trimmed = String(source.suffix(512)).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= OutputFilter.languageGuardMinChars else { return nil }
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(trimmed)
+        guard let lang = recognizer.dominantLanguage else { return nil }
+        if let confidence = recognizer.languageHypotheses(withMaximum: 1)[lang],
+           confidence < OutputFilter.languageGuardMinConfidence {
+            return nil
+        }
+        return lang.rawValue
+    }
+
     func midWordEscalate(request: PredictRequest) async -> MidWordEscalationResult? {
         guard llamaReady else { return nil }
         let partial = OutputFilter.trailingPartialWord(request.userTail)
@@ -374,7 +393,11 @@ final class ModelRuntime {
             beforeCursor: request.llmTail,
             examples: request.examplesBlock
         )
-        let cap = min(request.maxTokens, SuggestionPolicy.Tuning.escGreedyMaxTokens)
+        // C1 : la passe GREEDY tourne sur le budget NORMAL (≈ maxTokens, ~12) pour
+        // capturer la CONTINUATION mot+suite ("losophie, la vérité est"), pas juste
+        // le mot. Les BRANCHES gardent leur cap court (`escBranchMaxTokens`) — elles
+        // ne servent qu'à VOTER le mot de tête, pas à produire de la suite.
+        let cap = max(request.maxTokens, SuggestionPolicy.Tuning.escGreedyMaxTokens)
 
         // Le ghost affiché = ce qu'il RESTE à taper (le mot MODAL moins le partiel
         // déjà tapé), jamais le mot entier : "cacahu" + ghost "ète", pas
@@ -383,6 +406,35 @@ final class ModelRuntime {
         // est sûr et positionnel (insensible à la casse du préfixe tapé).
         func remaining(_ word: String) -> String {
             word.count > partial.count ? String(word.dropFirst(partial.count)) : ""
+        }
+
+        // Langue attendue pour la garde de mismatch : le champ `detectedLanguage` de
+        // la requête s'il existe, sinon dérivée du texte tapé (tail) en taguant avec
+        // NLLanguageRecognizer (même seuils que les autres gardes de langue).
+        let expectedLang = ModelRuntime.expectedLanguage(for: request)
+
+        // C1 — depuis le mot CONFIRMÉ + la ligne greedy complète, calcule le ghost à
+        // montrer : la continuation mot+suite MOINS le partiel déjà tapé, gardée par
+        // les exit-guards. Si une garde échoue (écho fort / mauvaise langue), retombe
+        // sur `remaining(word)` = le MOT SEUL (C0, prouvé bon). On ne perd jamais le mot.
+        func continuation(confirmedWord word: String, fullLine: String) -> String {
+            let wordRest = remaining(word)
+            // Defrag du mot puis splice sur la ligne complète : on retire de `fullLine`
+            // le partiel déjà tapé via le même chevauchement de préfixe que le stream.
+            let stripped = OutputFilter.stripPrefixOverlap(
+                OutputFilter.singleLine(fullLine), prefix: partial)
+            let cont = OutputFilter.singleLine(stripped)
+            // La continuation doit au moins contenir le reste du mot ; sinon le greedy
+            // a produit autre chose que le mot confirmé → mot seul (sûr).
+            guard !cont.isEmpty, cont.lowercased().hasPrefix(wordRest.lowercased()) else { return wordRest }
+            // Le SEGMENT après le mot (ce que C1 ajoute) : c'est lui qu'on garde.
+            let segment = String(cont.dropFirst(wordRest.count))
+            guard !segment.isEmpty else { return wordRest }
+            // Exit-guards SUR LA CONTINUATION (le segment), pas sur le mot.
+            if OutputFilter.echoScore(ghost: segment, tail: request.userTail)
+                >= OutputFilter.continuationEchoThreshold { return wordRest }
+            if OutputFilter.languageMismatch(ghost: segment, expected: expectedLang) { return wordRest }
+            return cont
         }
 
         // GPU gate UNE fois autour de toute l'escalade (greedy + branches), pour que
@@ -398,8 +450,9 @@ final class ModelRuntime {
             partial: partial, greedyModal: greedy.lead, firstTokenProb: greedy.p1
         ) {
         case .fastAccept(let word):
-            let rest = remaining(word)
-            return MidWordEscalationResult(show: !rest.isEmpty, word: rest.isEmpty ? word : rest,
+            // C1 : mot confirmé → montre mot+continuation (gardée), pas que le mot.
+            let shown = continuation(confirmedWord: word, fullLine: greedy.fullLine)
+            return MidWordEscalationResult(show: !shown.isEmpty, word: shown.isEmpty ? word : shown,
                                            reason: "fast-accept")
         case .fastReject:
             return MidWordEscalationResult(show: false, word: greedy.lead, reason: "fast-reject")
@@ -429,9 +482,15 @@ final class ModelRuntime {
         let d = SuggestionPolicy.midWordBranchDecision(
             partial: partial, greedyModal: greedy.lead, branchLeads: Array(leads.dropFirst()))
         let reason = "branch agree=\(String(format: "%.2f", d.agreement)) (\(leads.count - 1)br)"
-        let rest = remaining(d.word)
-        return MidWordEscalationResult(show: d.show && !rest.isEmpty,
-                                       word: d.show && !rest.isEmpty ? rest : d.word,
+        // C1 : mot CONFIRMÉ par le vote (`d.show`) → mot+continuation (gardée). On
+        // ne CONTINUE que si `d.show==true` ; sinon comportement caché inchangé.
+        // La continuation part de la ligne greedy COMPLÈTE (pas du lead-word defrag).
+        guard d.show else {
+            return MidWordEscalationResult(show: false, word: d.word, reason: reason)
+        }
+        let shown = continuation(confirmedWord: d.word, fullLine: greedy.fullLine)
+        return MidWordEscalationResult(show: !shown.isEmpty,
+                                       word: shown.isEmpty ? d.word : shown,
                                        reason: reason)
     }
 
@@ -442,7 +501,7 @@ final class ModelRuntime {
     private func runEscalationPass(
         prompt: String, partial: String, cap: Int,
         temperature: Float, seed: UInt32, captureP1: Bool
-    ) async -> (lead: String, p1: Double?) {
+    ) async -> (lead: String, p1: Double?, fullLine: String) {
         final class Acc: @unchecked Sendable { var text = "" }
         let acc = Acc()
         let metrics = await llamaEngine.generate(
@@ -467,7 +526,11 @@ final class ModelRuntime {
             return true
         }
         let oneLine = acc.text.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? acc.text
-        return (SuggestionPolicy.midWordLeadWordDefrag(oneLine, partial: partial), metrics.firstTokenProb)
+        // `lead` = mot de tête dé-fragmenté (gardien du vote, inchangé) ; `fullLine`
+        // = le texte greedy complet d'une ligne (C1 : sert la CONTINUATION mot+suite
+        // quand le mot est confirmé). Les branches ne lisent que `lead` pour voter.
+        return (SuggestionPolicy.midWordLeadWordDefrag(oneLine, partial: partial),
+                metrics.firstTokenProb, oneLine)
     }
 
     /// Builds a Gemma-3 instruct prompt (FIM-style : pre + afterCursor) and
