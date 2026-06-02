@@ -223,6 +223,13 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// misspelled word with `suggestion.suggestion` instead of appending an
     /// LLM continuation.
     private var currentTypo: TypoSuggestion? = nil
+    /// Separators (usually "" or a single space) between the misspelled word's end
+    /// and the caret, captured when `currentTypo` is set. On accept we delete the
+    /// word AND these trailing chars and re-insert `suggestion + trailing`, so a
+    /// typo flagged after a trailing space (caret past the word) corrects cleanly
+    /// instead of eating the space and corrupting the word into a new "typo" that
+    /// then suppresses the ghost until focus changes.
+    private var currentTypoTrailing: String = ""
     /// What's left of the LLM suggestion after one or more partial (Tab-by-Tab)
     /// acceptances. Non-empty value takes precedence over `predictor.suggestion`
     /// for both the overlay and `handleKey(.tab)`. Tick() bails before
@@ -1469,6 +1476,10 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         if let typo = typoCandidate {
             let isNewSuggestion = currentTypo != typo
             currentTypo = typo
+            // Chars between the word's end and the caret (the typo can fire after
+            // a trailing space). Deleted + re-inserted on accept so the fix lands
+            // flush. `prefix` ends at the caret, so this is exactly that gap.
+            currentTypoTrailing = String(prefix[typo.range.upperBound...])
             predictor.cancel()
             lastPredictedPrefix = nil
             if let rect = rectForGhost {
@@ -1611,19 +1622,22 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // `partialRemainder` wins over `predictor.suggestion` because we cancel
         // the predictor between chunks — its `suggestion` is empty during a
         // partial run.
-        let pending: (typo: TypoSuggestion?, llm: String, isPartial: Bool) = MainActor.assumeIsolated {
+        let pending: (typo: TypoSuggestion?, trailing: String, llm: String, isPartial: Bool) = MainActor.assumeIsolated {
             if !partialRemainder.isEmpty {
-                return (currentTypo, partialRemainder, true)
+                return (currentTypo, currentTypoTrailing, partialRemainder, true)
             }
-            return (currentTypo, predictor.suggestion, false)
+            return (currentTypo, currentTypoTrailing, predictor.suggestion, false)
         }
         if pending.typo == nil, pending.llm.isEmpty { return false }
 
         switch key {
         case .tab:
             if let typo = pending.typo {
-                let count = typo.original.count
-                let replacement = typo.suggestion
+                // Delete the word + any trailing separators between it and the
+                // caret, re-inserting `suggestion + trailing` so the fix lands
+                // flush even when the typo fired after a space.
+                let count = typo.original.count + pending.trailing.count
+                let replacement = typo.suggestion + pending.trailing
                 DispatchQueue.global(qos: .userInitiated).async { [axClient] in
                     axClient.replaceTrailing(deleteChars: count, with: replacement)
                 }
@@ -1814,8 +1828,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             // acceptAllKey). `pending.llm` is the partial remainder if a
             // partial accept is in flight, else the full streamed suggestion.
             if let typo = pending.typo {
-                let count = typo.original.count
-                let replacement = typo.suggestion
+                let count = typo.original.count + pending.trailing.count
+                let replacement = typo.suggestion + pending.trailing
                 DispatchQueue.global(qos: .userInitiated).async { [axClient] in
                     axClient.replaceTrailing(deleteChars: count, with: replacement)
                 }
