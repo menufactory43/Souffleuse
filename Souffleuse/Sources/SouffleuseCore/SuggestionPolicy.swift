@@ -370,7 +370,7 @@ public enum SuggestionPolicy {
     public nonisolated static func strongCorpusMatch(
         userTail: String,
         snapshot: [TypingHistoryEntry],
-        minChars: Int = Tuning.strongCorpusMatchMinChars
+        minChars: Int = Tuning.strongCorpusMatchMinCharsRuntime
     ) -> (continuation: String, matchedChars: Int)? {
         // Look back over a generous window; the longest suffix of userTail that
         // is also a substring of some entry (ending the entry's recorded text
