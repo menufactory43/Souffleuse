@@ -253,9 +253,21 @@ public enum SuggestionPolicy {
                 // After-space : on attend un mot nouveau ⇒ pas de whitespace/markdown.
                 return Self.isNaturalContinuationStart(g) ? 1.0 : 0.0
             }
-            // Ponctuation non-whitespace (`.`, `,`, `!`, etc.) — non spécifié par D-06,
-            // on traite comme un "after-space-like" : autoriser lettre/digit/quote.
-            return Self.isNaturalContinuationStart(g) ? 1.0 : 0.0
+            // Tail = chiffre OU ponctuation NON-whitespace (`.`, `,`, `!`, `(`, `%`…).
+            // Frontière CHIFFRE / PONCTUATION NON-TERMINALE ("…1933"→", il écrit",
+            // "…4500"→" euros", "…(2086)"→" merci") : le base model enchaîne
+            // naturellement par une espace ou une ponctuation de clause. On élargit
+            // donc la tolérance à `isNextWordContinuationStart` (espace + `, . ! ? ; :`),
+            // en plus du natural-start letter/digit/quote. Purement additif : ne peut
+            // que laisser passer PLUS à ces frontières, jamais bloquer davantage.
+            //
+            // EXCEPTION — terminateur de phrase (`.`, `!`, `?`, `…`) : on garde le
+            // comportement STRICT (natural-start seul). C'est une frontière de phrase
+            // délibérément reportée (débat veto/tailOnly) ; on ne l'ouvre pas ici.
+            if Self.sentenceTerminators.contains(tail) {
+                return Self.isNaturalContinuationStart(g) ? 1.0 : 0.0
+            }
+            return (Self.isNaturalContinuationStart(g) || Self.isNextWordContinuationStart(g)) ? 1.0 : 0.0
         }
         // userTail vide ⇒ comme after-space.
         return Self.isNaturalContinuationStart(g) ? 1.0 : 0.0
@@ -272,6 +284,12 @@ public enum SuggestionPolicy {
     }
 
     // MARK: - Private helpers
+
+    /// Terminateurs de phrase : à ces frontières (`.`, `!`, `?`, `…`) `prefixFit`
+    /// reste STRICT (natural-start letter/digit/quote seul) — la tolérance next-word
+    /// (espace + ponctuation de clause) n'y est PAS ouverte. Front frontière-de-phrase
+    /// délibérément reporté ; toute autre frontière chiffre/ponctuation l'obtient.
+    private static let sentenceTerminators: Set<Character> = [".", "!", "?", "…"]
 
     /// Un caractère est-il un démarrage "naturel" de continuation après espace ?
     /// Letter / digit / quote. Pas de whitespace, pas de markdown (`# * _ ~`),
