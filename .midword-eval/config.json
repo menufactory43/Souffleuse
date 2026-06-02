@@ -1,0 +1,8 @@
+{
+  "_doc": "Config de l'éval mid-word. Modèle = EXACTEMENT celui de la Voix active de Souffleuse, qui (faute de Q5 dans Souffleuse/Models) résout via fallback ModelRuntime.swift:132 sur le fichier de Cotypist. Même modèle/fichier/quant que Cotypist → comparaison à armes égales.",
+  "model_path": "~/Library/Application Support/app.cotypist.Cotypist/Models/gemma-3-1b.i1-Q5_K_M.gguf",
+  "model_id": "gemma-3-1b-q5",
+  "model_kind": "gemma-3-1b-pt (base/pretrained), Q5_K_M imatrix",
+  "success_bar": { "min_good_ghosts_per_phrase": 3, "phrase_word_count": 6, "min_phrase_pass_rate": 0.5 },
+  "dataset": ".midword-eval/phrases.json"
+}

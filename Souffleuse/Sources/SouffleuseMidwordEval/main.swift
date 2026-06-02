@@ -1,4 +1,5 @@
 import Foundation
+import NaturalLanguage
 import SouffleuseCore
 import SouffleuseLlama
 import SouffleuseLog
@@ -288,6 +289,287 @@ func escalate(c: MWCase, engine: LlamaEngine,
                      correct: judgeBranch(prefix: c.prefix, expected: c.expected, modal: modal))
 }
 
+// ── Shared text helpers for the INTENTION modes (MW_INTENT / MW_INTENT_REAL) ─
+// Factored out of the MW_INTENT block so the REAL-history variant reuses the
+// EXACT same scoring (fold / contentWords / targetVocab / stemMatch / hitTopic)
+// and the same mid-word cut logic (Cut / midWordCuts). Pure, file-scope.
+
+// NORMALIZE = lowercase + accent-fold + lettres seulement.
+func mwFold(_ s: String) -> String {
+    s.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "fr_FR")).lowercased()
+}
+let mwFrStop: Set<String> = ["le", "la", "les", "de", "des", "du", "un", "une", "et", "a", "à",
+                             "au", "aux", "en", "je", "tu", "il", "elle", "on", "nous", "vous",
+                             "ce", "cette", "ces", "que", "qui", "pas", "ne", "se", "sa", "son",
+                             "ses", "mes", "mon", "ma", "pour", "plus", "dans", "est", "sont",
+                             "avec", "mais", "ou", "si", "tout", "tous"]
+// Mots de contenu NORMALISÉS : fold → garder lettres → drop stoplist + <3 chars.
+func mwContentWords(_ s: String) -> [String] {
+    mwFold(s)
+        .split { !$0.isLetter }
+        .map(String.init)
+        .filter { $0.count >= 3 && !mwFrStop.contains($0) }
+}
+// Vocabulaire-cible normalisé : target ENTIER + steer_tokens (si présents).
+func mwTargetVocab(target: String, steerTokens: [String]) -> [String] {
+    var words = mwContentWords(target)
+    for tok in steerTokens { words.append(contentsOf: mwContentWords(tok)) }
+    var seen = Set<String>(); return words.filter { seen.insert($0).inserted }
+}
+// STEM-MATCH : préfixe commun ≥4 chars (« fraise »/« fraises »/« fraisier »).
+func mwStemMatch(_ a: String, _ b: String) -> Bool {
+    if a == b { return true }
+    let n = min(a.count, b.count)
+    guard n >= 4 else { return false }
+    return a.hasPrefix(String(b.prefix(n))) || b.hasPrefix(String(a.prefix(n)))
+}
+// hit_topic : un ghostWord stem-matche un mot du targetVocab. Retourne le mot
+// de vocabulaire-cible qui a matché (nil = aucun → STEP-FAIL).
+func mwHitTopic(ghost: String, vocab: [String]) -> String? {
+    let g = mwContentWords(ghost)
+    for gw in g {
+        for vw in vocab where mwStemMatch(gw, vw) { return vw }
+    }
+    return nil
+}
+
+// ── JUGE SÉMANTIQUE (embedding NaturalLanguage) ───────────────────────────
+// Le juge lexical SOUS-compte sur données réelles : il ne peut pas créditer un
+// « recadrage » sémantiquement correct (ghost « des fruits et légumes » après
+// « manger » alors que l'utilisateur a tapé « pommes de terre »). On ajoute donc
+// un juge embedding : cosinus entre la CONTINUATION RECOLLÉE (partiel + ghost) et
+// le VRAI RESTE de la cible. OR'd avec le juge lexical → STEP-PASS si l'un OU
+// l'autre tire.
+//
+// Stratégie de disponibilité (vérifiée À L'EXÉCUTION, pas de crash possible) :
+//   1. on ESSAIE d'abord `NLEmbedding.sentenceEmbedding(for: .french)` — vecteur
+//      de phrase natif, la voie idéale (capte l'ordre / la composition).
+//   2. fallback : `NLEmbedding.wordEmbedding(for: .french)` — on moyenne les
+//      vecteurs des mots de contenu (OOV ignorés) pour fabriquer un vecteur de
+//      phrase « sac de mots ».
+//   3. si LES DEUX sont nil sur cet OS : score sémantique = nil (NaN), un
+//      avertissement clair imprimé UNE fois, le juge retombe sur le lexical seul.
+//
+// NLEmbedding est synchrone et thread-safe pour la lecture (vector(for:) ne mute
+// rien), mais la classe n'est PAS marquée `Sendable` par le SDK. On l'isole donc
+// dans une boîte `@unchecked Sendable` : le bench est mono-thread sur ces appels
+// (lecture pure), la garantie est respectée.
+final class MWSemEmbedding: @unchecked Sendable {
+    let sentence: NLEmbedding?
+    let word: NLEmbedding?
+    /// Voie réellement empruntée, pour le rapport : "sentence" / "word" / "none".
+    let path: String
+
+    init() {
+        if let s = NLEmbedding.sentenceEmbedding(for: .french) {
+            sentence = s; word = nil; path = "sentence"
+        } else if let w = NLEmbedding.wordEmbedding(for: .french) {
+            sentence = nil; word = w; path = "word"
+        } else {
+            sentence = nil; word = nil; path = "none"
+        }
+    }
+
+    static let shared = MWSemEmbedding()
+}
+
+/// Indicateur « avertissement déjà imprimé » (une seule fois) — référence-classe
+/// pour rester mutable depuis une fonction non-mutating sans capture inout.
+final class MWSemWarned: @unchecked Sendable { var done = false }
+let mwSemWarned = MWSemWarned()
+
+/// Vecteur de phrase pour `s`, selon la voie disponible :
+///  - sentence embedding natif si présent ;
+///  - sinon moyenne des vecteurs des MOTS DE CONTENU (OOV sautés) ;
+///  - nil si aucune voie / aucun mot connu / chaîne vide.
+func mwSentenceVector(_ s: String, _ emb: MWSemEmbedding) -> [Double]? {
+    let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+    if let sentence = emb.sentence {
+        let v = sentence.vector(for: trimmed)
+        return (v?.isEmpty == false) ? v : nil
+    }
+    guard let word = emb.word else { return nil }
+    // Sac-de-mots : moyenne des vecteurs des mots de contenu connus du modèle.
+    let words = mwContentWords(trimmed)
+    guard !words.isEmpty else { return nil }
+    var sum: [Double] = []
+    var n = 0
+    for w in words {
+        guard let v = word.vector(for: w), !v.isEmpty else { continue }   // OOV → sauté
+        if sum.isEmpty { sum = v } else { for i in 0..<min(sum.count, v.count) { sum[i] += v[i] } }
+        n += 1
+    }
+    guard n > 0, !sum.isEmpty else { return nil }
+    return sum.map { $0 / Double(n) }
+}
+
+/// Cosinus entre deux vecteurs (1 = identiques, 0 = orthogonaux). nil si l'un est
+/// vide ou de norme nulle.
+func mwCosine(_ a: [Double], _ b: [Double]) -> Double? {
+    let n = min(a.count, b.count)
+    guard n > 0 else { return nil }
+    var dot = 0.0, na = 0.0, nb = 0.0
+    for i in 0..<n { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i] }
+    guard na > 0, nb > 0 else { return nil }
+    return dot / (na.squareRoot() * nb.squareRoot())
+}
+
+/// Similarité cosinus sémantique entre la continuation RECOLLÉE et le vrai reste.
+/// nil = embeddings indisponibles / vecteur introuvable (chaîne vide, tout OOV).
+func mwSemCos(gluedGhost: String, trueRemainder: String) -> Double? {
+    let emb = MWSemEmbedding.shared
+    guard emb.sentence != nil || emb.word != nil else {
+        if !mwSemWarned.done {
+            mwSemWarned.done = true
+            print("[mw-sem] ⚠️  AUCUN embedding FR (ni sentence ni word) sur cet OS → juge sémantique DÉSACTIVÉ (sem=-, via=topic seulement).")
+        }
+        return nil
+    }
+    guard let g = mwSentenceVector(gluedGhost, emb),
+          let t = mwSentenceVector(trueRemainder, emb) else { return nil }
+    return mwCosine(g, t)
+}
+
+/// JUGE PARTAGÉ (MW_INTENT + MW_INTENT_REAL). Un pas passe ssi le juge lexical OU
+/// le juge sémantique tire. Retourne :
+///  - pass     : `hit_topic || hit_sem`
+///  - topicWord: le mot de vocabulaire-cible qui a stem-matché (nil sinon)
+///  - semCos   : la similarité cosinus (nil = embedding indispo / introuvable)
+///  - via      : quel juge a tiré — "topic" | "sem" | "both" | "-"
+func mwJudgeStep(ghost: String, gluedGhost: String, vocab: [String],
+                 trueRemainder: String, semThresh: Double)
+    -> (pass: Bool, topicWord: String?, semCos: Double?, via: String) {
+    // Ghost vide → jamais de pas (cohérent avec le comportement existant).
+    guard !ghost.isEmpty else { return (false, nil, nil, "-") }
+    let topicWord = mwHitTopic(ghost: gluedGhost, vocab: vocab)
+    let hitTopic = topicWord != nil
+    let semCos = mwSemCos(gluedGhost: gluedGhost, trueRemainder: trueRemainder)
+    let hitSem = (semCos != nil) && (semCos! >= semThresh)
+    let via: String
+    switch (hitTopic, hitSem) {
+    case (true, true):  via = "both"
+    case (true, false): via = "topic"
+    case (false, true): via = "sem"
+    case (false, false): via = "-"
+    }
+    return (hitTopic || hitSem, topicWord, semCos, via)
+}
+
+// ── Points de coupe mid-mot dans les ~6 premiers mots ──
+struct MWCut { let beforeCursor: String; let trueRemainder: String }
+func mwMidWordCuts(_ target: String) -> [MWCut] {
+    let chars = Array(target)
+    func isWordChar(_ c: Character) -> Bool { c.isLetter || c.isNumber || c == "'" || c == "’" || c == "-" }
+    var cuts: [MWCut] = []
+    var i = 0
+    var wordsSeen = 0
+    while i < chars.count && wordsSeen < 6 {
+        guard isWordChar(chars[i]) else { i += 1; continue }
+        let wordStart = i
+        var j = i
+        while j < chars.count && isWordChar(chars[j]) { j += 1 }
+        let wordLen = j - wordStart
+        if wordLen >= 2 {
+            let cutAt = wordStart + min(3, wordLen - 1)   // mid-mot, jamais frontière ni stub 1-char
+            let before = String(chars[0..<cutAt])
+            let remainder = String(chars[cutAt..<chars.count])
+            cuts.append(MWCut(beforeCursor: before, trueRemainder: remainder))
+            wordsSeen += 1
+        }
+        i = j
+    }
+    return cuts
+}
+
+// Génération du ghost LONG (approche évaluée) — partagée par les deux modes
+// INTENTION. Greedy healed, cap tokens/mots, stop sur frontière de proposition,
+// écho du partiel tapé retiré. Identique à l'ancien `longGhost` nested.
+func mwLongGhost(beforeCursor: String, maxTokens: Int, maxWords: Int, stopSet: Set<Character>, nbest: Int = 1) async -> String {
+    let partial = OutputFilter.trailingPartialWord(beforeCursor)
+    let prompt = LlamaPromptBuilder.buildLlamaPrompt(
+        system: "", customInstr: "", ctxPrefix: "", fieldContext: "",
+        afterCursor: "", beforeCursor: beforeCursor
+    )
+    // Une passe = un `generate`. `temp == 0` (seed ignoré) = greedy ; `temp > 0`
+    // + seed distinct = branche stochastique reproductible (cf. runEscalationPass
+    // dans ModelRuntime.swift : seed 0 greedy, seed i+1 par branche, câblé sur
+    // `llama_sampler_init_dist(seed)` dans LlamaEngine). Le seed PAR APPEL existe
+    // donc bien → le N-best peut diversifier honnêtement.
+    func pass(temp: Float, seed: UInt32) async -> String {
+        final class Acc: @unchecked Sendable { var text = "" }
+        let acc = Acc()
+        _ = await engine.generate(
+            prompt: prompt,
+            maxTokens: maxTokens,
+            sampling: LlamaSampling(
+                temperature: temp,
+                repeatPenalty: 1.3,
+                repeatLastN: 64,
+                seed: seed,
+                personalizationStrength: 0,
+                topP: temp > 0 ? 0.9 : 0,
+                banMarkup: true,
+                banDigitsLeading: true,
+                banEmoji: true,
+                minFirstTokenProb: 0,       // ne JAMAIS aborter sur 1er token peu confiant
+                healPrefix: partial.isEmpty ? nil : partial
+            )
+        ) { tok in acc.text += tok; return true }
+        return acc.text
+    }
+    // Post-traitement identique à l'ancien comportement : 1 ligne, écho du partiel
+    // retiré, stop sur frontière de proposition, cap mots.
+    func postProcess(_ raw: String) -> String {
+        var line = raw.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? raw
+        if !partial.isEmpty {
+            let trimmed = line.drop { $0 == " " }
+            let lf = mwFold(String(trimmed)), pf = mwFold(partial)
+            if lf.hasPrefix(pf) {
+                line = String(trimmed.dropFirst(partial.count))
+            } else {
+                line = String(trimmed)
+            }
+        }
+        if let idx = line.firstIndex(where: { stopSet.contains($0) }) {
+            line = String(line[line.startIndex..<idx])
+        }
+        let words = line.split(separator: " ").prefix(maxWords)
+        return words.joined(separator: " ").trimmingCharacters(in: .whitespaces)
+    }
+
+    // Candidat greedy (temp 0) — comportement par défaut (NBEST == 1).
+    let greedy = postProcess(await pass(temp: 0, seed: 0))
+    guard nbest > 1 else { return greedy }
+
+    // SYNTHÈSE — fallback #1 : N-best re-rangé par logprob/token contre le VRAI
+    // contexte gauche français. Au-delà du greedy, on tire (NBEST−1) branches à
+    // basse température (0.3) avec des seeds distincts ; on re-classe TOUS les
+    // candidats par `sequenceLogProb(context: beforeCursor, continuation:).
+    // sumLogProb / tokenCount` (per-token, donc indépendant de la longueur ; cela
+    // démote aussi le charabia en langue étrangère). On garde le meilleur.
+    var candidates: [String] = [greedy]
+    for i in 1..<nbest {
+        let c = postProcess(await pass(temp: 0.3, seed: UInt32(i)))
+        if !c.isEmpty { candidates.append(c) }
+    }
+    // Dé-doublonnage (les branches convergent souvent vers la même continuation).
+    var seen = Set<String>()
+    let unique = candidates.filter { seen.insert($0).inserted }
+    guard unique.count > 1 else { return greedy }
+
+    var best = greedy
+    var bestScore = -Double.infinity
+    for cand in unique {
+        guard !cand.isEmpty,
+              let lp = await engine.sequenceLogProb(context: beforeCursor, continuation: cand),
+              lp.tokenCount > 0 else { continue }
+        let perToken = lp.sumLogProb / Double(lp.tokenCount)
+        if perToken > bestScore { bestScore = perToken; best = cand }
+    }
+    return best
+}
+
 // ── Boot the engine on the same GGUF as production / the OCR ablation. ────
 let ggufPath: String = {
     if let p = ProcessInfo.processInfo.environment["SOUFFLEUSE_GGUF"], !p.isEmpty {
@@ -453,6 +735,284 @@ if ProcessInfo.processInfo.environment["MW_MEASURE"] != nil {
             for d in detail { err(d) }
         }
     }
+    exit(0)
+}
+
+// ── Mode INTENTION (MW_INTENT=1) : un ghost mid-mot LONG porte-t-il la bonne
+// INTENTION sur des phrases FR génériques ? Approche SIMPLE évaluée : un seul
+// `generate` greedy healed (maxTokens MW_LG_MAXTOKENS), post-traité en
+// complétion-du-mot-courant + mots suivants (cap MW_LG_MAXWORDS, stop sur
+// frontière de proposition). On coupe MID-MOT dans les ~6 premiers mots de
+// chaque phrase, on génère le ghost, et on juge l'intention hors-ligne :
+//   hit_lex   = ≥1 mot de contenu partagé avec le vrai reste (accent-fold, stem ≥4)
+//   hit_steer = gNorm ≥ tNorm − marge (le ghost est aussi plausible que le vrai
+//               reste, donc un recadrage type « les pommes » pour « les fraises »
+//               passe même s'il diffère lexicalement).
+// Barre : ≥3 coupes bonnes/phrase ; harness PASS si ≥50% des phrases passent.
+// Bench hors `audit.sh` → print() autorisé. exit(0) en fin de bloc.
+if ProcessInfo.processInfo.environment["MW_INTENT"] != nil {
+    // ── Knobs ──
+    let lgMaxTokens = max(1, Int(ProcessInfo.processInfo.environment["MW_LG_MAXTOKENS"] ?? "14") ?? 14)
+    let lgMaxWords  = max(1, Int(ProcessInfo.processInfo.environment["MW_LG_MAXWORDS"] ?? "4") ?? 4)
+    let lgNBest     = max(1, Int(ProcessInfo.processInfo.environment["MW_LG_NBEST"] ?? "1") ?? 1)
+    let semThresh   = Double(ProcessInfo.processInfo.environment["MW_SEM_THRESH"] ?? "0.45") ?? 0.45
+    let intentMargin = Double(ProcessInfo.processInfo.environment["MW_INTENT_MARGIN"] ?? "1.0") ?? 1.0
+    // Stop set : MW_LG_STOP (chars collés ou séparés par virgule) + newline toujours.
+    let stopSet: Set<Character> = {
+        let raw = ProcessInfo.processInfo.environment["MW_LG_STOP"] ?? ".!?;:"
+        var s = Set(raw.split(separator: ",").joined())   // tolère "." ou ".,!,?"
+        s.formUnion(Set(raw.filter { $0 != "," }))         // ou collés ".!?;:"
+        s.insert("\n")
+        return s
+    }()
+    let phrasesPath = (ProcessInfo.processInfo.environment["MW_INTENT_PHRASES"]
+        ?? "\(FileManager.default.currentDirectoryPath)/../.midword-eval/phrases.json")
+
+    // ── Dataset ──
+    struct IntentPhrase: Sendable { let id: String; let target: String; let intendedIdea: String; let steerTokens: [String] }
+    func fallbackPhrases() -> [IntentPhrase] {
+        [
+            .init(id: "fruits", target: "J'aime les pommes, les fraises et surtout les cerises", intendedIdea: "fruits", steerTokens: ["pommes", "fraises", "cerises"]),
+            .init(id: "course-parc", target: "Ce week-end je vais courir au parc avec mon chien", intendedIdea: "sport", steerTokens: ["courir", "parc", "chien"]),
+            .init(id: "diner-pates", target: "Pour le dîner je pense préparer des pâtes à la tomate", intendedIdea: "repas", steerTokens: ["dîner", "pâtes", "tomate"]),
+            .init(id: "rapport", target: "Demain matin je dois envoyer le rapport à mon collègue", intendedIdea: "travail", steerTokens: ["envoyer", "rapport", "collègue"]),
+            .init(id: "cafe-the", target: "Je préfère le café le matin et le thé le soir", intendedIdea: "boissons", steerTokens: ["café", "thé", "soir"]),
+            .init(id: "courses", target: "Il faudrait acheter du pain, du lait et quelques légumes", intendedIdea: "courses", steerTokens: ["acheter", "pain", "lait"]),
+        ]
+    }
+    func loadPhrases() -> [IntentPhrase] {
+        guard let data = FileManager.default.contents(atPath: phrasesPath),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let arr = root["phrases"] as? [[String: Any]] else {
+            err("[mw-intent] phrases.json introuvable/illisible (\(phrasesPath)) → fallback intégré")
+            return fallbackPhrases()
+        }
+        let parsed: [IntentPhrase] = arr.compactMap { o in
+            guard let id = o["id"] as? String, let target = o["target"] as? String else { return nil }
+            return IntentPhrase(
+                id: id, target: target,
+                intendedIdea: (o["intended_idea"] as? String) ?? "",
+                steerTokens: (o["steer_tokens"] as? [String]) ?? []
+            )
+        }
+        return parsed.isEmpty ? fallbackPhrases() : parsed
+    }
+    let phrases = loadPhrases()
+    err("[mw-intent] phrases: \(phrases.count) (source: \(phrasesPath))")
+
+    // ── Helpers texte / cut / ghost : partagés au file-scope (mw*). ──
+    // (Voir mwFold / mwContentWords / mwTargetVocab / mwStemMatch / mwHitTopic /
+    //  mwMidWordCuts / mwLongGhost plus haut — réutilisés à l'identique ici.)
+
+    err("\n──────────── Mode INTENTION (mid-word long ghost) ────────────")
+    var passingPhrases = 0
+    for ph in phrases {
+        let cuts = mwMidWordCuts(ph.target)
+        // Vocabulaire-cible topic-aware : mots de contenu du target ENTIER + steer_tokens.
+        let vocab = mwTargetVocab(target: ph.target, steerTokens: ph.steerTokens)
+        var intentionSteps = 0
+        var ghosts: [String] = []
+        for (ci, cut) in cuts.enumerated() {
+            let ghost = await mwLongGhost(beforeCursor: cut.beforeCursor, maxTokens: lgMaxTokens, maxWords: lgMaxWords, stopSet: stopSet, nbest: lgNBest)
+            ghosts.append(ghost)
+
+            // Le ghost mid-mot est un FRAGMENT-SUFFIXE qui complète le mot en cours.
+            // On juge la CONTINUATION RECOLLÉE (partiel tapé + ghost) pour que le mot
+            // complété (« fra » + « ises… » = « fraises ») soit vu par contentWords —
+            // sinon le suffixe brut (« ises ») ne matche jamais le vocabulaire-cible.
+            let partial = OutputFilter.trailingPartialWord(cut.beforeCursor)
+            let gluedGhost = partial + ghost
+
+            // STEP-PASS honnête : lexical (topic) OR sémantique (embedding).
+            let j = mwJudgeStep(ghost: ghost, gluedGhost: gluedGhost, vocab: vocab,
+                                trueRemainder: cut.trueRemainder, semThresh: semThresh)
+            if j.pass { intentionSteps += 1 }
+
+            // INFORMATIONNEL UNIQUEMENT (plus dans la décision) : gNorm/tNorm.
+            var gNorm: Double? = nil, tNorm: Double? = nil
+            if !ghost.isEmpty,
+               let g = await engine.sequenceLogProb(context: cut.beforeCursor, continuation: ghost), g.tokenCount > 0 {
+                gNorm = g.sumLogProb / Double(g.tokenCount)
+            }
+            if !cut.trueRemainder.isEmpty,
+               let t = await engine.sequenceLogProb(context: cut.beforeCursor, continuation: cut.trueRemainder), t.tokenCount > 0 {
+                tNorm = t.sumLogProb / Double(t.tokenCount)
+            }
+
+            let tail = cut.beforeCursor.count > 20 ? String(cut.beforeCursor.suffix(20)) : cut.beforeCursor
+            let gStr = gNorm.map { String(format: "%.2f", $0) } ?? "?"
+            let tStr = tNorm.map { String(format: "%.2f", $0) } ?? "?"
+            let semStr = j.semCos.map { String(format: "%.2f", $0) } ?? "-"
+            print("\(pad(ph.id, 14)) cut\(ci)  …\(tail) | ghost=\"\(ghost)\" → \"\(gluedGhost)\" | topic=\(j.topicWord ?? "-") sem=\(semStr) via=\(j.via) g/t=\(gStr)/\(tStr) | \(j.pass ? "STEP-PASS" : "STEP-FAIL")")
+        }
+        let phrasePass = intentionSteps >= 3
+        if phrasePass { passingPhrases += 1 }
+        let ghostList = ghosts.map { $0.isEmpty ? "∅" : $0 }.joined(separator: " | ")
+        print("\(ph.id): intentionSteps \(intentionSteps)/\(cuts.count) → PHRASE \(phrasePass ? "PASS" : "FAIL")  (ghosts: [\(ghostList)])")
+    }
+
+    let total = phrases.count
+    let pct = total == 0 ? 0 : passingPhrases * 100 / total
+    let harnessPass = total > 0 && Double(passingPhrases) / Double(total) >= 0.50
+    let stopDisplay = String(stopSet.subtracting(["\n"]).sorted()) + "\\n"
+    print("\nKNOBS: MW_LG_MAXTOKENS=\(lgMaxTokens) MW_LG_MAXWORDS=\(lgMaxWords) MW_LG_NBEST=\(lgNBest) MW_SEM_THRESH=\(semThresh) (emb=\(MWSemEmbedding.shared.path)) stop=[\(stopDisplay)] MW_INTENT_MARGIN=\(intentMargin)")
+    print("passing \(passingPhrases)/\(total) = \(pct)% vs 50% bar → HARNESS \(harnessPass ? "PASS" : "FAIL")")
+    exit(0)
+}
+
+// ── Mode INTENTION RÉELLE (MW_INTENT_REAL=1) : MÊME pipeline ghost-long + MÊME
+// juge collé que MW_INTENT, mais sur des phrases ÉCHANTILLONNÉES DANS LE VRAI
+// HISTORIQUE DE FRAPPE de l'utilisateur (les ~1489 entrées déjà chargées au boot
+// → « history entries: N »). Pour chaque entrée, on RECONSTITUE sa prose avec le
+// MÊME join que le corpus n-gram (contextBefore + accepted), on filtre à de la
+// prose naturelle (≥6 mots, ≥20 chars, majorité de tokens alphabétiques — drop
+// code/URLs/ponctuation), puis on prend jusqu'à MW_REAL_N phrases de façon
+// DÉTERMINISTE (un pas régulier pour balayer tout l'historique, AUCUN aléa).
+//
+// Pas de steer_tokens ici → le vocabulaire-cible = les mots de contenu de la
+// phrase réelle elle-même : on teste « le ghost converge-t-il vers ce que
+// l'utilisateur a RÉELLEMENT tapé ? ».
+//
+// PRIVACY : bench dev local, hors `SHIPPING_DIRS` d'`audit.sh` → afficher les
+// phrases de l'utilisateur sur stdout est toléré ICI, derrière un en-tête clair.
+// On n'écrit JAMAIS ces phrases dans un fichier (rien de commité).
+if ProcessInfo.processInfo.environment["MW_INTENT_REAL"] != nil {
+    // ── Knobs (mêmes défauts que MW_INTENT) ──
+    let lgMaxTokens = max(1, Int(ProcessInfo.processInfo.environment["MW_LG_MAXTOKENS"] ?? "14") ?? 14)
+    let lgMaxWords  = max(1, Int(ProcessInfo.processInfo.environment["MW_LG_MAXWORDS"] ?? "4") ?? 4)
+    let lgNBest     = max(1, Int(ProcessInfo.processInfo.environment["MW_LG_NBEST"] ?? "1") ?? 1)
+    let semThresh   = Double(ProcessInfo.processInfo.environment["MW_SEM_THRESH"] ?? "0.45") ?? 0.45
+    let realN       = max(1, Int(ProcessInfo.processInfo.environment["MW_REAL_N"] ?? "15") ?? 15)
+    let stopSet: Set<Character> = {
+        let raw = ProcessInfo.processInfo.environment["MW_LG_STOP"] ?? ".!?;:"
+        var s = Set(raw.split(separator: ",").joined())
+        s.formUnion(Set(raw.filter { $0 != "," }))
+        s.insert("\n")
+        return s
+    }()
+
+    // ── Source des phrases : le VRAI historique déjà chargé (`history`). ──
+    // Reconstruction = MÊME join que le corpus (cf. engine.setCorpus au boot).
+    func reconstruct(_ e: TypingHistoryEntry) -> String {
+        e.contextBefore.isEmpty ? e.accepted : e.contextBefore + " " + e.accepted
+    }
+    // Prose naturelle : ≥20 chars, ≥6 mots, et MAJORITÉ de tokens alphabétiques
+    // (drop entrées surtout code/URLs/ponctuation/chiffres).
+    //
+    // RESSERRAGE : l'historique réel est pollué par les fragments de tests
+    // « torture typo » de l'utilisateur — espaces intra-mot et tokens cassés
+    // (« conj ugaison », « v ous », « p eux », « choc ol », « personnal isés »).
+    // Ces entrées dégénérées font dérailler le token-healing et ne représentent
+    // PAS la frappe normale. On veut juger sur de la PROSE PROPRE représentative.
+    // On rejette donc EN PLUS toute entrée présentant un artefact d'espace
+    // intra-mot ou une majorité de tokens-fragments. Les vraies phrases (« Binance,
+    // est une plateforme de trading en », « Il faut que l'image soit intégrable
+    // donc transparente ») continuent de passer.
+    func looksLikeProse(_ s: String) -> Bool {
+        guard s.count >= 20 else { return false }
+        let tokens = s.split { $0 == " " || $0 == "\n" || $0 == "\t" }.map(String.init)
+        guard tokens.count >= 6 else { return false }
+        let alpha = tokens.filter { tok in
+            let letters = tok.filter { $0.isLetter }.count
+            return letters >= 2 && letters * 2 >= tok.count   // majorité alphabétique, ≥2 lettres
+        }.count
+        guard alpha * 2 > tokens.count else { return false }
+
+        // (4) Lit comme une phrase : commence par une lettre.
+        guard let first = s.first(where: { !$0.isWhitespace }), first.isLetter else { return false }
+
+        // Seuls vrais mots français d'UNE lettre (accent-folded : « à » → « a »).
+        // Tout autre token d'une seule lettre entouré d'espaces = artefact de
+        // découpe mid-mot (« v ous » → token « v », « p eux » → « p »).
+        func isLegit1Letter(_ tok: String) -> Bool {
+            let f = tok.folding(options: .diacriticInsensitive, locale: Locale(identifier: "fr_FR")).lowercased()
+            return f == "a" || f == "y"
+        }
+        // Tokens purement alphabétiques d'UNE lettre (hors a/y/à).
+        let stray1 = tokens.filter { tok in
+            let letters = tok.filter { $0.isLetter }
+            return letters.count == 1 && letters.count == tok.count && !isLegit1Letter(tok)
+        }
+        // (1) Un token isolé d'une lettre non-{a,y,à} = artefact mid-mot → rejet.
+        // (2) De même ≥2 tokens d'une lettre (hors a/y/à), ou une consonne isolée.
+        if !stray1.isEmpty { return false }
+
+        // (3) ≥70% des tokens alphabétiques doivent faire ≥3 chars : sous ce seuil
+        // l'entrée est faite de fragments/charabia (« choc ol » → « choc », « ol »).
+        let alphaTokens = tokens.filter { tok in
+            let letters = tok.filter { $0.isLetter }.count
+            return letters >= 2 && letters * 2 >= tok.count
+        }
+        guard !alphaTokens.isEmpty else { return false }
+        let long = alphaTokens.filter { tok in
+            tok.filter { $0.isLetter }.count >= 3
+        }.count
+        guard Double(long) >= 0.70 * Double(alphaTokens.count) else { return false }
+
+        // (4) ≥6 mots alphabétiques (vrais mots, pas juste 6 tokens).
+        guard alphaTokens.count >= 6 else { return false }
+
+        return true
+    }
+
+    let candidates: [String] = history.map(reconstruct).filter(looksLikeProse)
+    // Sélection DÉTERMINISTE : un pas régulier pour balayer tout l'historique
+    // (pas d'aléa — Date/random indisponibles). Si moins de candidats que N,
+    // on prend tout dans l'ordre.
+    let phrases: [String]
+    if candidates.count <= realN {
+        phrases = candidates
+    } else {
+        let step = candidates.count / realN
+        var picked: [String] = []
+        var idx = 0
+        while picked.count < realN && idx < candidates.count {
+            picked.append(candidates[idx]); idx += step
+        }
+        phrases = picked
+    }
+
+    print("\n──────────── Mode INTENTION RÉELLE (mid-word long ghost sur HISTORIQUE) ────────────")
+    print("⚠️  PRIVACY : les phrases ci-dessous sont la PROSE RÉELLE de l'utilisateur (historique local).")
+    print("history entries: \(history.count) · candidats prose: \(candidates.count) · échantillon: \(phrases.count) (MW_REAL_N=\(realN))\n")
+
+    var passingPhrases = 0
+    for (pi, target) in phrases.enumerated() {
+        let id = "real\(pi)"
+        let cuts = mwMidWordCuts(target)
+        // Pas de steer_tokens : le vocabulaire-cible = mots de contenu de la phrase réelle.
+        let vocab = mwTargetVocab(target: target, steerTokens: [])
+        var intentionSteps = 0
+        var ghosts: [String] = []
+        let preview = target.count > 60 ? String(target.prefix(60)) + "…" : target
+        print("\(id): «\(preview)»")
+        for (ci, cut) in cuts.enumerated() {
+            let ghost = await mwLongGhost(beforeCursor: cut.beforeCursor, maxTokens: lgMaxTokens, maxWords: lgMaxWords, stopSet: stopSet, nbest: lgNBest)
+            ghosts.append(ghost)
+
+            // MÊME juge partagé que MW_INTENT : lexical (topic) OR sémantique.
+            let partial = OutputFilter.trailingPartialWord(cut.beforeCursor)
+            let gluedGhost = partial + ghost
+            let j = mwJudgeStep(ghost: ghost, gluedGhost: gluedGhost, vocab: vocab,
+                                trueRemainder: cut.trueRemainder, semThresh: semThresh)
+            if j.pass { intentionSteps += 1 }
+
+            let tail = cut.beforeCursor.count > 20 ? String(cut.beforeCursor.suffix(20)) : cut.beforeCursor
+            let semStr = j.semCos.map { String(format: "%.2f", $0) } ?? "-"
+            print("\(pad(id, 14)) cut\(ci)  …\(tail) | ghost=\"\(ghost)\" → \"\(gluedGhost)\" | topic=\(j.topicWord ?? "-") sem=\(semStr) via=\(j.via) | \(j.pass ? "STEP-PASS" : "STEP-FAIL")")
+        }
+        let phrasePass = intentionSteps >= 3
+        if phrasePass { passingPhrases += 1 }
+        let ghostList = ghosts.map { $0.isEmpty ? "∅" : $0 }.joined(separator: " | ")
+        print("\(id): intentionSteps \(intentionSteps)/\(cuts.count) → PHRASE \(phrasePass ? "PASS" : "FAIL")  (ghosts: [\(ghostList)])")
+    }
+
+    let total = phrases.count
+    let pct = total == 0 ? 0 : passingPhrases * 100 / total
+    let harnessPass = total > 0 && Double(passingPhrases) / Double(total) >= 0.50
+    let stopDisplay = String(stopSet.subtracting(["\n"]).sorted()) + "\\n"
+    print("\nKNOBS: MW_LG_MAXTOKENS=\(lgMaxTokens) MW_LG_MAXWORDS=\(lgMaxWords) MW_LG_NBEST=\(lgNBest) MW_SEM_THRESH=\(semThresh) (emb=\(MWSemEmbedding.shared.path)) MW_REAL_N=\(realN) stop=[\(stopDisplay)]")
+    print("passing \(passingPhrases)/\(total) = \(pct)% vs 50% bar → HARNESS \(harnessPass ? "PASS" : "FAIL")")
     exit(0)
 }
 

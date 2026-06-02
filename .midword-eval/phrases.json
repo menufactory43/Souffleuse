@@ -1,0 +1,17 @@
+{
+  "_doc": "Jeu d'éval générique pour ghosts mid-word longs et orientables. Chaque phrase cible a une INTENTION (idée vers laquelle elle converge). Un ghost mid-word est 'bon' s'il oriente vers cette intention ET reste recadrable (ex: 'les pommes' quand on voulait 'les cerises' = bon, car fruit recadrable). Barre de succès: >=3 ghosts à bonne intention sur une phrase de ~6 mots, atteint sur >=50% des phrases.",
+  "phrases": [
+    { "id": "fruits",      "target": "J'aime les pommes, les fraises et surtout les cerises",        "intended_idea": "énumérer des fruits que l'on aime (préférence gourmande)", "steer_tokens": ["pommes", "fraises", "cerises", "framboises", "abricots", "fruits"] },
+    { "id": "course-parc", "target": "Ce week-end je vais courir au parc avec mon chien",           "intended_idea": "activité sportive de plein air le week-end", "steer_tokens": ["courir", "parc", "chien", "marcher", "vélo", "dehors"] },
+    { "id": "diner-pates", "target": "Pour le dîner je pense préparer des pâtes à la tomate",        "intended_idea": "planifier un repas simple à cuisiner", "steer_tokens": ["dîner", "préparer", "pâtes", "tomate", "cuisiner", "recette"] },
+    { "id": "rapport",     "target": "Demain matin je dois envoyer le rapport à mon collègue",       "intended_idea": "tâche professionnelle à accomplir (envoi de document)", "steer_tokens": ["envoyer", "rapport", "collègue", "email", "document", "matin"] },
+    { "id": "bretagne",    "target": "Pendant les vacances nous irons visiter la côte en Bretagne",  "intended_idea": "projet de voyage / visite touristique régionale", "steer_tokens": ["vacances", "visiter", "côte", "Bretagne", "voyage", "mer"] },
+    { "id": "film",        "target": "Le film était long mais l'histoire restait vraiment passionnante", "intended_idea": "avis nuancé positif sur un film", "steer_tokens": ["film", "histoire", "long", "passionnante", "intéressante", "scénario"] },
+    { "id": "cafe-the",    "target": "Je préfère le café le matin et le thé le soir",                "intended_idea": "préférence de boissons selon le moment de la journée", "steer_tokens": ["café", "matin", "thé", "soir", "boisson", "préfère"] },
+    { "id": "guitare",     "target": "Mon frère apprend la guitare depuis presque deux ans maintenant", "intended_idea": "progrès d'un proche dans un loisir / instrument", "steer_tokens": ["frère", "apprend", "guitare", "piano", "musique", "ans"] },
+    { "id": "courses",     "target": "Il faudrait acheter du pain, du lait et quelques légumes",     "intended_idea": "liste de courses du quotidien", "steer_tokens": ["acheter", "pain", "lait", "légumes", "fruits", "courses"] },
+    { "id": "reunion",     "target": "Cette réunion pourrait durer plus longtemps que prévu malheureusement", "intended_idea": "anticipation contrariée d'un événement professionnel", "steer_tokens": ["réunion", "durer", "longtemps", "prévu", "retard", "temps"] },
+    { "id": "livre",       "target": "J'ai adoré ce livre, l'écriture est fluide et touchante",      "intended_idea": "éloge d'un livre (qualité de l'écriture)", "steer_tokens": ["livre", "adoré", "écriture", "fluide", "touchante", "roman"] },
+    { "id": "embouteillage","target": "Nous devrions partir tôt pour éviter les embouteillages habituels", "intended_idea": "planification logistique pour éviter le trafic", "steer_tokens": ["partir", "tôt", "éviter", "embouteillages", "trafic", "route"] }
+  ]
+}

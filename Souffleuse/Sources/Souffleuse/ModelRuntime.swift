@@ -494,6 +494,87 @@ final class ModelRuntime {
                                        reason: reason)
     }
 
+    /// **Long-ghost mid-mot SIMPLIFIÉ (A/B).** Version dépouillée de
+    /// `midWordEscalate` : UNE seule passe greedy healed, AUCUN vote de branches
+    /// (F2), AUCUN gating fast-accept/fast-reject (F1), AUCUN fallback dico (F3).
+    /// Réutilise le MÊME prompt, le MÊME splice de continuation (echo-strip +
+    /// exit-guard de langue) et la MÊME struct `MidWordEscalationResult` que
+    /// l'escalade, pour un call-site drop-in. Appelée à la place de
+    /// `midWordEscalate` quand `midWordLongGhostEnabled` est ON. Le bracketing
+    /// `GpuGate` est identique (la traduction ne s'interleave pas).
+    func midWordLongGhost(request: PredictRequest) async -> MidWordEscalationResult? {
+        guard llamaReady else { return nil }
+        let partial = OutputFilter.trailingPartialWord(request.userTail)
+        let prompt = ModelRuntime.buildLlamaPrompt(
+            system: request.systemMessage,
+            customInstr: request.customInstr,
+            ctxPrefix: request.ctxPrefix,
+            fieldContext: request.fieldContextSlot,
+            afterCursor: request.afterCursorSlot,
+            beforeCursor: request.llmTail,
+            examples: request.examplesBlock
+        )
+        let expectedLang = ModelRuntime.expectedLanguage(for: request)
+        let cap = min(request.maxTokens, SuggestionPolicy.Tuning.midWordLongGhostMaxTokens)
+
+        GpuGate.shared.ghostBegan()
+        defer { GpuGate.shared.ghostEnded() }
+
+        // ── UNE passe greedy healed (même profil de bans que l'escalade, mais
+        // SANS minFirstTokenProb : pas de gating de confiance, on montre la sortie).
+        final class Acc: @unchecked Sendable { var text = "" }
+        let acc = Acc()
+        _ = await llamaEngine.generate(
+            prompt: prompt,
+            maxTokens: cap,
+            sampling: LlamaSampling(
+                temperature: 0,
+                repeatPenalty: 1.3,
+                repeatLastN: 64,
+                seed: 0,
+                personalizationStrength: 0,
+                banMarkup: true,
+                banDigitsLeading: true,
+                banEmoji: true,
+                minFirstTokenProb: 0,
+                healPrefix: partial.isEmpty ? nil : partial
+            )
+        ) { piece in
+            if Task.isCancelled { return false }
+            acc.text += piece
+            return true
+        }
+        if Task.isCancelled { return nil }
+
+        // Splice : retire de la ligne greedy le partiel déjà tapé (même chevauchement
+        // de préfixe que le stream), garde la continuation MOINS le partiel.
+        let fullLine = OutputFilter.singleLine(acc.text)
+        let stripped = OutputFilter.singleLine(
+            OutputFilter.stripPrefixOverlap(fullLine, prefix: partial))
+        var result = stripped
+
+        // Exit-guards : écho fort / mauvaise langue → on n'affiche rien.
+        if OutputFilter.echoScore(ghost: result, tail: request.userTail)
+            >= OutputFilter.continuationEchoThreshold { result = "" }
+        if OutputFilter.languageMismatch(ghost: result, expected: expectedLang) { result = "" }
+
+        // Coupe à la première frontière de clause (newline . ! ? ; :), bornes incluses.
+        if let idx = result.firstIndex(where: { "\n.!?;:".contains($0) }) {
+            result = String(result[...idx])
+        }
+        // Cap à N mots entiers, en préservant l'éventuel espace de tête (séparateur).
+        let words = result.split(whereSeparator: { $0.isWhitespace })
+        if words.count > SuggestionPolicy.Tuning.midWordLongGhostMaxWords {
+            let hadLeadingSpace = result.first == " "
+            result = words.prefix(SuggestionPolicy.Tuning.midWordLongGhostMaxWords)
+                .joined(separator: " ")
+            if hadLeadingSpace, result.first != " ", !result.isEmpty { result = " " + result }
+        }
+        result = OutputFilter.singleLine(result)
+
+        return MidWordEscalationResult(show: !result.isEmpty, word: result, reason: "longghost")
+    }
+
     /// Une passe d'escalade (greedy ou branche) : génère, renvoie le mot de tête +
     /// la confiance top-1 si demandée. Pas de `GpuGate` ici — le bracketing est
     /// fait UNE fois par `midWordEscalate`. `temperature 0` = greedy déterministe ;
