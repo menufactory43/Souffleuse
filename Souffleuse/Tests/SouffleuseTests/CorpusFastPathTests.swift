@@ -46,6 +46,15 @@ struct CorpusFastPathTests {
         #expect(m == nil)
     }
 
+    @Test func afterSpaceOpenerMatchesAt12NotAt16() {
+        let snap = [Self.entry("", "Bonjour, je vous remercie de votre message")]
+        // Contexte after-space court (~12 chars) typique d'un opener : recall
+        // attendu à 12, refusé à 16 (l'ancien seuil ratait les openers courts).
+        let tail = "Bonjour, je "   // 12 chars verbatim
+        #expect(SuggestionPolicy.strongCorpusMatch(userTail: tail, snapshot: snap, minChars: 12) != nil)
+        #expect(SuggestionPolicy.strongCorpusMatch(userTail: tail, snapshot: snap, minChars: 16) == nil)
+    }
+
     @Test func noOverlapReturnsNil() {
         let snap = [Self.entry("", "Le rendez-vous est fixé à quatorze heures")]
         let m = SuggestionPolicy.strongCorpusMatch(
