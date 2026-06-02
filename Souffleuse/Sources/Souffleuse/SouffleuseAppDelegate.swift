@@ -256,6 +256,13 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// Bundle ID at the first partial accept — gates personalization recording
     /// at end-of-run with the same blocklist as the full-accept branch.
     private var partialAcceptedAtBundleID: String? = nil
+    /// Rolling-refill (mode sliding-window, flag `midWordGhostRollingEnabled`) :
+    /// vrai tant qu'une passe `extendGhost` est en vol. Empêche le tick à 20 Hz
+    /// d'empiler une tempête de refills. Remis à `false` à la fin de la Task.
+    private var ghostRefillInFlight = false
+    /// Task de refill en vol — trackée pour pouvoir l'annuler sur changement
+    /// d'app / divergence / blur (mêmes points que le cancel du predict).
+    private var ghostRefillTask: Task<Void, Never>?
     /// Bundle ID we last kicked off enrichment for; used to detect focus changes.
     private var lastEnrichedBundleID: String?
     /// Last window title we kicked off enrichment for; used to detect *intra-app*
@@ -1103,6 +1110,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 partialAcceptedAtPrefix = ""
                 partialAcceptedAtBundleID = nil
             }
+            // Refill rolling en vol → l'annuler : il ciblerait l'ancien champ.
+            cancelRollingRefill()
         } else if textAtFocusByBundle[bundleID] == nil {
             // Defensive: same bundle but state missing (first run, prefs reset).
             textAtFocusByBundle[bundleID] = text
@@ -1365,6 +1374,13 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 if let rect = rectForGhost {
                     overlay.show(text: partialRemainder, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFontForOverlay)
                     interceptor.setActive(true)
+                    // ── ROLLING REFILL (mode sliding-window, flag OFF par défaut) ──
+                    // Si le reste affiché descend SOUS le plancher de mots, on GÉNÈRE
+                    // les mots suivants à droite pendant que l'utilisateur consomme à
+                    // gauche → fenêtre glissante qui ne se vide jamais. Le reste
+                    // courant reste affiché ; les mots générés l'étendront au prochain
+                    // tick render. Jamais de hide pendant le refill.
+                    maybeSpawnRollingRefill(committedText: expected, bundleID: bundleID)
                 } else {
                     overlay.hide()
                     interceptor.setActive(false)
@@ -2326,9 +2342,94 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// final tick guard won't re-show the stale text.
     private func clearStaleGhostOnDivergence() {
         predictor.cancel()
-        overlay.hide()
-        interceptor.setActive(false)
+        cancelRollingRefill()
+        // ── ROLLING REFILL (point 4) : pas de blank frame sur divergence ──
+        // Quand le mode rolling est ON, on NE cache PAS l'overlay immédiatement :
+        // on garde la dernière frame visible et on laisse la fresh prediction la
+        // remplacer en place (swap sans trou blanc). On garde le cancel + le reset
+        // de `lastPredictedPrefix`. Hors flag, comportement byte-identique (hide).
+        if !SuggestionPolicy.Tuning.midWordGhostRollingEnabled {
+            overlay.hide()
+            interceptor.setActive(false)
+        }
         lastPredictedPrefix = nil
+    }
+
+    /// Nombre de mots ENTIERS dans `s` (séparateurs = whitespace). Pur, utilisé
+    /// par la logique de refill rolling pour décider quand recharger.
+    private static func wholeWordCount(_ s: String) -> Int {
+        s.split(whereSeparator: { $0.isWhitespace }).count
+    }
+
+    /// Annule la Task de refill rolling en vol (changement d'app / divergence /
+    /// blur) et libère le verrou anti-tempête.
+    private func cancelRollingRefill() {
+        ghostRefillTask?.cancel()
+        ghostRefillTask = nil
+        ghostRefillInFlight = false
+    }
+
+    /// **ROLLING REFILL** — recharge le ghost à droite quand il se vide à gauche
+    /// (parité Cotypist). Appelé depuis le bloc de rendu du reste synchronisé,
+    /// UNIQUEMENT quand `midWordGhostRollingEnabled`. Spawn une Task trackée qui
+    /// génère les mots suivants et les APPEND au `partialRemainder` — mais SEULEMENT
+    /// si l'état est resté cohérent (même bundle, `partialAcceptedAtPrefix`/
+    /// `partialAcceptedSoFar` inchangés, reste inchangé depuis le départ). Gardé
+    /// contre les tempêtes par `ghostRefillInFlight` + une re-vérification de l'état.
+    private func maybeSpawnRollingRefill(committedText: String, bundleID: String) {
+        guard SuggestionPolicy.Tuning.midWordGhostRollingEnabled else { return }
+        guard !ghostRefillInFlight else { return }
+        let remainder = partialRemainder
+        let remainderWords = Self.wholeWordCount(remainder)
+        // Recharge uniquement quand le reste passe SOUS le plancher de mots.
+        guard remainderWords < SuggestionPolicy.Tuning.ghostRollingMinWords else { return }
+        // Combien de mots demander pour revenir à la profondeur cible.
+        let wantWords = SuggestionPolicy.Tuning.ghostRollingTargetWords - remainderWords
+        guard wantWords >= 1 else { return }
+
+        // Snapshot de l'état pour re-valider à la complétion (anti-stale-append).
+        let snapPrefix = partialAcceptedAtPrefix
+        let snapSoFar = partialAcceptedSoFar
+        let snapBundle = partialAcceptedAtBundleID
+
+        ghostRefillInFlight = true
+        ghostRefillTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                self.ghostRefillInFlight = false
+                self.ghostRefillTask = nil
+            }
+            let extension_ = await self.predictor.extendGhost(
+                committedText: committedText,
+                currentRemainder: remainder,
+                maxWords: wantWords
+            )
+            if Task.isCancelled { return }
+            guard let extension_, !extension_.isEmpty else { return }
+            // Re-valide STRICTEMENT l'état : même bundle, mêmes ancres de partial-
+            // accept, et reste INCHANGÉ depuis le spawn. Toute divergence → on
+            // jette le refill (il s'appliquerait au mauvais endroit).
+            guard SuggestionPolicy.Tuning.midWordGhostRollingEnabled,
+                  bundleID == self.currentBundleIDForRefillCheck(),
+                  snapBundle == self.partialAcceptedAtBundleID,
+                  snapPrefix == self.partialAcceptedAtPrefix,
+                  snapSoFar == self.partialAcceptedSoFar,
+                  self.partialRemainder == remainder else { return }
+            // APPEND (le reste reste affiché ; l'extension le prolonge au prochain
+            // tick render). On préserve l'espacement : `extension_` porte déjà un
+            // espace de tête unique, donc on dé-doublonne une éventuelle jointure.
+            if self.partialRemainder.hasSuffix(" ") && extension_.hasPrefix(" ") {
+                self.partialRemainder += String(extension_.dropFirst())
+            } else {
+                self.partialRemainder += extension_
+            }
+        }
+    }
+
+    /// Bundle ID focus courant, lu pour re-valider un refill rolling à sa
+    /// complétion. Lecture AX légère et synchrone, sur le main (comme le tick).
+    private func currentBundleIDForRefillCheck() -> String? {
+        axClient.snapshot().bundleID
     }
 
     /// Pure decision: do the characters the user just typed (`typedSince`)
