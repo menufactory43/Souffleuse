@@ -431,6 +431,40 @@ final class PredictorViewModel {
             return !complete
         }()
 
+        // ── Long-ghost AFTER-SPACE / next-word (unified path, flag-gated) ───
+        // Quand `midWordLongGhostEnabled` est ON, on route AUSSI la génération
+        // après-espace / mot-suivant par la MÊME passe greedy long-ghost que le
+        // mid-mot, pour que le ghost soit produit uniformément et que le rolling
+        // refill s'applique partout (parité Cotypist : un seul chemin de
+        // génération, rolling continu). Conditions :
+        //   • flag ON (sinon byte-identique à aujourd'hui : ancien cascade) ;
+        //   • le caret est à une FRONTIÈRE de mot — `userTail` vide ou finissant
+        //     par un blanc/ponctuation (PAS mid-mot incomplet, déjà couvert par
+        //     `useMidWordEscalation`) ;
+        //   • `instantGhost` VIDE — un rappel corpus (L1) reste prioritaire et
+        //     instantané : on NE le clobber JAMAIS avec le LLM (le recall corpus
+        //     est haute-confiance ; seul un champ sans recall passe au long-ghost).
+        // `useMidWordEscalation` exclut déjà le mid-mot incomplet (dernier char
+        // lettre/chiffre + partiel incomplet) ; ici on prend le COMPLÉMENT à la
+        // frontière, donc les deux ne se chevauchent pas.
+        let useAfterSpaceLongGhost: Bool = {
+            guard SuggestionPolicy.Tuning.midWordLongGhostEnabled,
+                  instantGhost.isEmpty else { return false }
+            // Frontière de mot : tail vide, ou dernier char non lettre/chiffre
+            // (espace, ponctuation, apostrophe…). Un dernier char alphanumérique
+            // est traité comme frontière SI le mot courant est un mot complet du
+            // dictionnaire (« C'est une| » → « une » est complet → next-word) ;
+            // s'il est INCOMPLET (fragment « un| »), c'est du mid-mot → laissé à
+            // `useMidWordEscalation`. `defaultPartialWordIsComplete` renvoie déjà
+            // `false` pour un fragment incomplet, donc les deux gates restent
+            // mutuellement exclusifs sans double génération.
+            guard let last = userTail.last else { return true }
+            if last.isLetter || last.isNumber {
+                return SuggestionPolicy.defaultPartialWordIsComplete(userTail)
+            }
+            return true
+        }()
+
         // LLM gate : need at least 3 chars of trimmed userTail AND a
         // loaded runtime container.
         guard userTail.trimmingCharacters(in: .whitespaces).count >= 3,
@@ -766,11 +800,19 @@ final class PredictorViewModel {
             // Court-circuite le streaming `onChunk` (qui referait `midword_block`) :
             // on décide ici, puis on applique nous-mêmes le ghost (fast-accept) ou
             // on retombe sur l'instant (hide). Le flag OFF rend `useMidWordEscalation`
-            // toujours faux → ce bloc est mort et le streaming ci-dessous inchangé.
-            if useMidWordEscalation {
+            // ET `useAfterSpaceLongGhost` toujours faux → ce bloc est mort et le
+            // streaming ci-dessous inchangé (byte-identique).
+            //
+            // `useAfterSpaceLongGhost` (flag long-ghost ON, caret à la frontière,
+            // pas de recall corpus) emprunte le MÊME chemin long-ghost unifié : il
+            // implique `midWordLongGhostEnabled`, donc la sous-branche long-ghost
+            // ci-dessous tire (jamais l'escalade F1/F2/F3, réservée au mid-mot).
+            if useMidWordEscalation || useAfterSpaceLongGhost {
                 // A/B : chemin SIMPLIFIÉ (single greedy healed) vs escalade complète.
                 // Le long-ghost est affiché par les MÊMES lignes que l'escalade
                 // (self.suggestion = …, source, predictedForPrefix), HORS stream.
+                // `useAfterSpaceLongGhost ⇒ midWordLongGhostEnabled`, donc l'après-
+                // espace passe TOUJOURS par cette sous-branche (et jamais l'escalade).
                 if SuggestionPolicy.Tuning.midWordLongGhostEnabled {
                     let lg = await runtime.midWordLongGhost(request: request)
                     if Task.isCancelled { return }
@@ -783,6 +825,11 @@ final class PredictorViewModel {
                             self.suggestion = word
                             self.predictedForPrefix = forPrefix
                             self.suggestionSource = .llm
+                            // Alimente le CompletionCache (comme le fait le streaming en
+                            // ~1047) pour que `undo-as-ghost` (PVM:515) puisse restaurer
+                            // le ghost au backspace : « Madame, »→« Monsieur », efface
+                            // « , » → longestExtendingKey trouve « Madame, » → « , Monsieur ».
+                            self.cache.store(prefix: userTail, suggestion: word)
                             Log.info(.predictor, "ghost_midword_longghost_shown", count: word.count)
                             GhostInspector.shared.record(tail: userTail, verdict: .shown,
                                                          reason: "longghost", content: word)
@@ -792,7 +839,7 @@ final class PredictorViewModel {
                             self.suggestionSource = instantSource
                             Log.info(.predictor, "ghost_midword_longghost_hidden")
                             GhostInspector.shared.record(tail: userTail, verdict: .gated,
-                                                         reason: "longghost", content: lg?.word ?? "(rien)")
+                                                         reason: lg?.reason ?? "longghost-nil", content: lg?.word ?? "(rien)")
                         }
                     }
                     return
@@ -1007,6 +1054,84 @@ final class PredictorViewModel {
             }
         }
         planner.setCurrentTask(task)
+    }
+
+    /// **Rolling-refill : prolonge le ghost affiché** (mode sliding-window,
+    /// parité Cotypist, flag `midWordGhostRollingEnabled`). Génère le(s) mot(s)
+    /// SUIVANT(s) en continuant depuis le texte VISIBLE complet = ce que
+    /// l'utilisateur a tapé/validé (`committedText`) PLUS le reste encore non
+    /// consommé (`currentRemainder`). On enchaîne donc après une frontière
+    /// PROPRE (fin du reste) → pas de `healPrefix`.
+    ///
+    /// UNE passe greedy off-main (comme `predict`), post-traitée par les mêmes
+    /// helpers `OutputFilter`. Renvoie le texte à APPENDRE au reste (avec un
+    /// unique espace de tête pour la concaténation), ou `nil` si rien
+    /// d'exploitable. Les gardes de génération (`planner.isCurrent`) empêchent
+    /// un refill périmé d'aboutir si une vraie `predict()` a démarré entre-temps ;
+    /// le call-site (AppDelegate) re-valide en plus l'état avant d'appender.
+    func extendGhost(committedText: String, currentRemainder: String, maxWords: Int) async -> String? {
+        guard runtime.canGenerate, maxWords >= 1 else { return nil }
+
+        // Texte visible complet : ce qui pilote la continuation du modèle.
+        let fullVisible = committedText + currentRemainder
+        let userTail = String(fullVisible.suffix(2048))
+
+        // Steering de langue (même logique sticky que `predict`).
+        if let confident = ModelRuntime.detectLanguage(in: userTail) {
+            lastDetectedLanguage = confident
+        }
+        let detectedLanguage = lastDetectedLanguage
+        let correctedTail: String = prefixCorrectionEnabled
+            ? prefixCorrector.correctedPrefix(userTail, detectedLanguage: detectedLanguage)
+            : userTail
+        let baseSystemPrompt = ModelRuntime.buildSystemPrompt(detectedLanguage: detectedLanguage)
+        let systemMessage = baseSystemPrompt
+        let llmTail = String(correctedTail.suffix(SuggestionPolicy.Tuning.llmContextWindowChars))
+        let isInstructModel = modelId.range(of: "-it", options: .caseInsensitive) != nil
+            || modelId.range(of: "instruct", options: .caseInsensitive) != nil
+
+        // Capture la génération COURANTE sans la bumper : si une vraie predict()
+        // démarre pendant le refill, elle incrémente le compteur et notre token
+        // capturé devient non-courant → le refill est droppé (anti-stale-append).
+        let myGeneration = planner.currentGeneration
+        let maxTokens = self.maxTokens
+        let runtime = self.runtime
+
+        let request = PredictRequest(
+            prefix: fullVisible,
+            contextPrefix: "",
+            customInstructions: "",
+            axSnapshotPlaceholder: nil,
+            axSnapshotHelp: nil,
+            axSnapshotRole: nil,
+            axSnapshotSubrole: nil,
+            axTextAfterCaret: nil,
+            personalizationStrength: 0,
+            maxTokens: maxTokens,
+            maxWords: maxWords,
+            detectedLanguage: detectedLanguage,
+            token: myGeneration,
+            userTail: userTail,
+            llmTail: llmTail,
+            isInstructModel: isInstructModel,
+            systemMessage: systemMessage,
+            baseSystem: baseSystemPrompt,
+            customInstr: "",
+            ctxPrefix: "",
+            fieldContextSlot: "",
+            afterCursorSlot: "",
+            basePreamble: "",
+            examplesBlock: "",
+            basePromptText: llmTail,
+            ngramSnapshot: nil
+        )
+
+        let extension_ = await runtime.extendGhost(request: request, maxWords: maxWords)
+        // Re-check génération courante : une predict() concurrente l'aurait bumpée.
+        guard planner.isCurrent(myGeneration) else { return nil }
+        guard let extension_, !extension_.isEmpty else { return nil }
+        Log.info(.predictor, "ghost_rolling_refill", count: extension_.count)
+        return extension_
     }
 
     /// Rebuilds the in-memory n-gram model from a list of accepted entries.

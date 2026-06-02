@@ -505,6 +505,12 @@ final class ModelRuntime {
     func midWordLongGhost(request: PredictRequest) async -> MidWordEscalationResult? {
         guard llamaReady else { return nil }
         let partial = OutputFilter.trailingPartialWord(request.userTail)
+        // FRONTIÈRE de mot : tail vide/blanc/ponctuation, OU mot courant complet
+        // du dictionnaire (« C'est une| » → « une » complet → on génère le mot
+        // SUIVANT, pas une extension de « une »). Le mid-mot INCOMPLET (fragment
+        // « un| ») n'est PAS une frontière → on heale et on complète le fragment.
+        let isBoundary = partial.isEmpty
+            || SuggestionPolicy.defaultPartialWordIsComplete(request.userTail)
         let prompt = ModelRuntime.buildLlamaPrompt(
             system: request.systemMessage,
             customInstr: request.customInstr,
@@ -537,7 +543,9 @@ final class ModelRuntime {
                 banDigitsLeading: true,
                 banEmoji: true,
                 minFirstTokenProb: 0,
-                healPrefix: partial.isEmpty ? nil : partial
+                // À une frontière on NE heale PAS (on veut le mot SUIVANT, pas une
+                // extension du mot complet « une ») ; mid-mot incomplet → on heale le partiel.
+                healPrefix: isBoundary ? nil : (partial.isEmpty ? nil : partial)
             )
         ) { piece in
             if Task.isCancelled { return false }
@@ -547,16 +555,55 @@ final class ModelRuntime {
         if Task.isCancelled { return nil }
 
         // Splice : retire de la ligne greedy le partiel déjà tapé (même chevauchement
-        // de préfixe que le stream), garde la continuation MOINS le partiel.
+        // de préfixe que le stream), garde la continuation MOINS le partiel. À une
+        // FRONTIÈRE la continuation est un mot NEUF (pas une complétion) → on NE
+        // strip PAS le partiel, et on garantit un unique espace de tête pour séparer
+        // du mot achevé (« une » + «  bonne nouvelle » → « une bonne », jamais « unebonne »).
         let fullLine = OutputFilter.singleLine(acc.text)
-        let stripped = OutputFilter.singleLine(
-            OutputFilter.stripPrefixOverlap(fullLine, prefix: partial))
-        var result = stripped
+        var stripped = OutputFilter.singleLine(
+            OutputFilter.stripPrefixOverlap(fullLine, prefix: isBoundary ? "" : partial))
+        if isBoundary, !stripped.isEmpty {
+            let body = stripped.drop(while: { $0 == " " || $0 == "\t" })
+            stripped = body.isEmpty ? "" : " " + body
+        }
+        // Dédup d'un MOT entier répété en tête à une frontière de mot : le modèle
+        // re-émet le dernier mot déjà tapé (« de »/« le »/« des »…) → « …de de
+        // faire ». `stripPrefixOverlap` ne gère que le partiel mid-mot ;
+        // `dedupLeadingRepeat` (même garde que le stream) retire le mot complet.
+        var result = SuggestionPolicy.dedupLeadingRepeat(ghost: stripped, userTail: request.userTail)
+        // Anti-duplication MID-MOT : quand le modèle rate le healing, il saute en
+        // NEXT-WORD en RE-tapant le mot courant (« lo » → «  lors de la » → rendu
+        // « lo lors »). `stripPrefixOverlap` ne matche pas (le ghost commence par
+        // un espace) ni `dedupLeadingRepeat` (« lors » ≠ « lo »). Ici : si on est
+        // mid-mot ET le ghost démarre par un espace suivi d'un mot dont le partiel
+        // est préfixe, on retire l'espace + le partiel → vraie complétion (« rs de la »).
+        // `!isBoundary` : à une frontière (mot complet), un mot suivant qui débute
+        // par les mêmes lettres (« une » → «  unanime ») est LÉGITIME — ne pas le rogner.
+        if !isBoundary, !partial.isEmpty, let f = result.first, f == " " || f == "\t" {
+            let body = result.drop(while: { $0 == " " || $0 == "\t" })
+            let firstWord = body.prefix(while: { $0.isLetter || $0.isNumber })
+            if firstWord.count > partial.count,
+               firstWord.lowercased().hasPrefix(partial.lowercased()) {
+                result = String(body.dropFirst(partial.count))
+            }
+        }
+        // Raison granulaire du gate (visible dans l'inspecteur) : pourquoi rien affiché.
+        var why = result.isEmpty ? "emptygen" : "ok"
 
-        // Exit-guards : écho fort / mauvaise langue → on n'affiche rien.
-        if OutputFilter.echoScore(ghost: result, tail: request.userTail)
-            >= OutputFilter.continuationEchoThreshold { result = "" }
-        if OutputFilter.languageMismatch(ghost: result, expected: expectedLang) { result = "" }
+        // Exit-guard ÉCHO (gardé : le modèle ne doit pas répéter ce que tu tapes).
+        if !result.isEmpty,
+           OutputFilter.echoScore(ghost: result, tail: request.userTail)
+            >= OutputFilter.continuationEchoThreshold {
+            result = ""; why = "echo"
+        }
+        // Garde LANGUE : DÉSACTIVÉE par défaut sur le chemin simple. La détection
+        // de langue est peu fiable sur 2-3 mots et vidait la majorité des ghosts
+        // français légitimes (40/44 gated). Réactivable pour A/B via MW_LG_LANGGUARD=1.
+        if !result.isEmpty,
+           ProcessInfo.processInfo.environment["MW_LG_LANGGUARD"] != nil,
+           OutputFilter.languageMismatch(ghost: result, expected: expectedLang) {
+            result = ""; why = "lang"
+        }
 
         // Coupe à la première frontière de clause (newline . ! ? ; :), bornes incluses.
         if let idx = result.firstIndex(where: { "\n.!?;:".contains($0) }) {
@@ -571,8 +618,90 @@ final class ModelRuntime {
             if hadLeadingSpace, result.first != " ", !result.isEmpty { result = " " + result }
         }
         result = OutputFilter.singleLine(result)
+        if result.isEmpty, why == "ok" { why = "trim" }
 
-        return MidWordEscalationResult(show: !result.isEmpty, word: result, reason: "longghost")
+        return MidWordEscalationResult(show: !result.isEmpty, word: result,
+                                       reason: result.isEmpty ? "longghost-\(why)" : "longghost")
+    }
+
+    /// **Rolling-refill : prolonge le ghost affiché** (mode sliding-window,
+    /// parité Cotypist). Continue depuis une frontière PROPRE — la fin du texte
+    /// visible = ce que l'utilisateur a tapé/validé PLUS le reste encore non
+    /// consommé (`beforeCursor` est déjà le texte complet visible). Donc PAS de
+    /// `healPrefix` ici (on n'est pas mid-mot, on enchaîne après le reste).
+    ///
+    /// UNE passe greedy, post-traitée par les MÊMES helpers que `midWordLongGhost`
+    /// (singleLine, coupe à la 1ʳᵉ frontière de clause, cap à `maxWords` mots
+    /// entiers, espace de tête préservé pour se concaténer proprement sur le
+    /// reste). Renvoie `nil`/vide si rien d'exploitable.
+    func extendGhost(request: PredictRequest, maxWords: Int) async -> String? {
+        guard llamaReady else { return nil }
+        let prompt = ModelRuntime.buildLlamaPrompt(
+            system: request.systemMessage,
+            customInstr: request.customInstr,
+            ctxPrefix: request.ctxPrefix,
+            fieldContext: request.fieldContextSlot,
+            afterCursor: request.afterCursorSlot,
+            beforeCursor: request.llmTail,
+            examples: request.examplesBlock
+        )
+        // Assez de tokens pour ~maxWords mots, borné par le maxTokens de la requête.
+        let cap = min(request.maxTokens, max(1, maxWords) * 4 + 2)
+
+        GpuGate.shared.ghostBegan()
+        defer { GpuGate.shared.ghostEnded() }
+
+        final class Acc: @unchecked Sendable { var text = "" }
+        let acc = Acc()
+        _ = await llamaEngine.generate(
+            prompt: prompt,
+            maxTokens: cap,
+            sampling: LlamaSampling(
+                temperature: 0,
+                repeatPenalty: 1.3,
+                repeatLastN: 64,
+                seed: 0,
+                personalizationStrength: 0,
+                banMarkup: true,
+                banDigitsLeading: true,
+                banEmoji: true,
+                minFirstTokenProb: 0,
+                healPrefix: nil  // frontière propre après le reste : pas de healing.
+            )
+        ) { piece in
+            if Task.isCancelled { return false }
+            acc.text += piece
+            return true
+        }
+        if Task.isCancelled { return nil }
+
+        var result = OutputFilter.singleLine(acc.text)
+        if result.isEmpty { return nil }
+        // Dédup d'un mot répété en tête : le refill ne doit pas re-émettre le
+        // dernier mot déjà visible (« …de » + « de faire » → « de faire »).
+        result = SuggestionPolicy.dedupLeadingRepeat(ghost: result, userTail: request.userTail)
+        if result.isEmpty { return nil }
+
+        // Exit-guard ÉCHO : le refill ne doit pas répéter le texte déjà visible.
+        if OutputFilter.echoScore(ghost: result, tail: request.userTail)
+            >= OutputFilter.continuationEchoThreshold {
+            return nil
+        }
+        // Coupe à la première frontière de clause (newline . ! ? ; :), bornes incluses.
+        if let idx = result.firstIndex(where: { "\n.!?;:".contains($0) }) {
+            result = String(result[...idx])
+        }
+        // Cap à `maxWords` mots entiers, en préservant l'éventuel espace de tête.
+        let words = result.split(whereSeparator: { $0.isWhitespace })
+        if words.count > max(1, maxWords) {
+            let hadLeadingSpace = result.first == " "
+            result = words.prefix(max(1, maxWords)).joined(separator: " ")
+            if hadLeadingSpace, result.first != " ", !result.isEmpty { result = " " + result }
+        }
+        result = OutputFilter.singleLine(result)
+        // Garde un UNIQUE espace de tête pour se concaténer proprement sur le reste.
+        if !result.isEmpty, result.first != " " { result = " " + result }
+        return result.isEmpty ? nil : result
     }
 
     /// Une passe d'escalade (greedy ou branche) : génère, renvoie le mot de tête +

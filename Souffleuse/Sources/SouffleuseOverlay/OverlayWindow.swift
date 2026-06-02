@@ -97,7 +97,18 @@ public final class OverlayWindow {
             ?? label.font
             ?? .systemFont(ofSize: 15)
         let correctedRect = Self.correctCaretRect(caretRectQuartz, hostText: hostText, caretIndex: caretIndex, font: renderFont)
-        let frame = Self.appKitFrame(forGhostAfterCaret: correctedRect, text: text, font: renderFont)
+        var frame = Self.appKitFrame(forGhostAfterCaret: correctedRect, text: text, font: renderFont)
+
+        // A/B (gaté par env) : décale le ghost d'UNE LIGNE vers le haut, au lieu
+        // de l'afficher inline après le caret. Utile quand un ghost long (2-4
+        // mots) gêne la lecture sur la ligne courante — on le pose au-dessus.
+        // AppKit : "vers le haut" = +y. Une ligne ≈ hauteur du caret/ligne hôte
+        // (fallback sur la police si l'AX ne donne pas de hauteur fiable).
+        // RÉVERSIBLE : retirer ce bloc.
+        if ProcessInfo.processInfo.environment["SOUFFLEUSE_GHOST_LINE_UP"] != nil {
+            let lineH = correctedRect.height > 1 ? correctedRect.height : renderFont.pointSize * 1.3
+            frame.origin.y += lineH
+        }
 
         // Skip redundant repaints (revertable). The 80 ms poll re-calls show()
         // ~12x/s with identical content; re-running setFrame(display:) every tick

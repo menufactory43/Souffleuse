@@ -290,6 +290,36 @@ extension SuggestionPolicy {
             return 4
         }
 
+        // MARK: - Ghost ROLLING REFILL (sliding window, flag OFF) — parité Cotypist
+        //
+        // Au lieu d'un ghost fixe (3-4 mots) qui SE VIDE à mesure que l'utilisateur
+        // tape dedans (comportement actuel), on maintient le ghost affiché à une
+        // profondeur ~constante : on GÉNÈRE le(s) mot(s) suivant(s) à droite pendant
+        // que l'utilisateur consomme à gauche — une fenêtre glissante qui se recharge
+        // et ne disparaît jamais. Tous les seuils ICI (Pitfall 6). Flag maître OFF
+        // par défaut ⇒ chemin entièrement gaté, comportement byte-identique.
+
+        /// Master switch du mode rolling-refill. **OFF par défaut** : ne devient
+        /// `true` QUE si l'env `SOUFFLEUSE_GHOST_ROLLING` est présente. Hors flag,
+        /// le ghost se vide comme aujourd'hui (aucun refill émis).
+        public static var midWordGhostRollingEnabled: Bool {
+            ProcessInfo.processInfo.environment["SOUFFLEUSE_GHOST_ROLLING"] != nil
+        }
+
+        /// `MW_ROLL_DEPTH` — profondeur (mots entiers) qu'on essaie de garder
+        /// affichée DEVANT le caret. Défaut 4. Clampé ≥ 1.
+        public static var ghostRollingTargetWords: Int {
+            if let s = ProcessInfo.processInfo.environment["MW_ROLL_DEPTH"], let v = Int(s) { return max(1, v) }
+            return 4
+        }
+
+        /// `MW_ROLL_MIN` — on recharge dès que le reste affiché descend SOUS ce
+        /// nombre de mots entiers. Défaut 2. Clampé ≥ 1.
+        public static var ghostRollingMinWords: Int {
+            if let s = ProcessInfo.processInfo.environment["MW_ROLL_MIN"], let v = Int(s) { return max(1, v) }
+            return 2
+        }
+
         // MARK: - LLM context window (coherence, 2026-05-29 measurement)
         ///
         /// Number of trailing characters of the (corrected) preceding text fed
