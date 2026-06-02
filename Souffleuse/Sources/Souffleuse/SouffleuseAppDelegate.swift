@@ -230,6 +230,15 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// instead of eating the space and corrupting the word into a new "typo" that
     /// then suppresses the ghost until focus changes.
     private var currentTypoTrailing: String = ""
+    /// Debounce state for end-of-string typo candidates (caret right after the
+    /// word, where the user may still be mid-typing). `typoSettleKey` identifies
+    /// the candidate; `typoSettleSince` when it first appeared. We only show the
+    /// correction once it has been stable for `typoDebounce`, so an incomplete
+    /// word ("messa" on the way to "message") doesn't flash a correction. Words
+    /// already followed by a separator are "done" and bypass this entirely.
+    private var typoSettleKey: String?
+    private var typoSettleSince: Date?
+    private static let typoDebounce: TimeInterval = 0.35
     /// What's left of the LLM suggestion after one or more partial (Tab-by-Tab)
     /// acceptances. Non-empty value takes precedence over `predictor.suggestion`
     /// for both the overlay and `handleKey(.tab)`. Tick() bails before
@@ -1474,12 +1483,33 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if let typo = typoCandidate {
+            // Chars between the word's end and the caret (the typo can fire after
+            // a trailing space). `prefix` ends at the caret, so this is that gap.
+            let trailing = String(prefix[typo.range.upperBound...])
+            // A word followed by a separator is "done" → correct immediately. A
+            // word at end-of-string may still be in progress → debounce so we
+            // don't flash a correction for each incomplete prefix while typing.
+            if trailing.isEmpty {
+                let settleKey = typo.original + "\u{1}" + String(prefix.count)
+                if settleKey != typoSettleKey {
+                    typoSettleKey = settleKey
+                    typoSettleSince = Date()
+                }
+                let settled = typoSettleSince.map { Date().timeIntervalSince($0) >= Self.typoDebounce } ?? false
+                if !settled {
+                    // Still settling: suppress (no flash) and don't predict on a
+                    // suspected mid-word typo. Hide any prior typo ghost.
+                    if currentTypo != nil {
+                        overlay.hide()
+                        interceptor.setActive(false)
+                        currentTypo = nil
+                    }
+                    return
+                }
+            }
             let isNewSuggestion = currentTypo != typo
             currentTypo = typo
-            // Chars between the word's end and the caret (the typo can fire after
-            // a trailing space). Deleted + re-inserted on accept so the fix lands
-            // flush. `prefix` ends at the caret, so this is exactly that gap.
-            currentTypoTrailing = String(prefix[typo.range.upperBound...])
+            currentTypoTrailing = trailing
             predictor.cancel()
             lastPredictedPrefix = nil
             if let rect = rectForGhost {
@@ -1504,6 +1534,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         currentTypo = nil
+        typoSettleKey = nil
 
         if prefix != lastPredictedPrefix {
             // Debounce: every prefix change cancels the pending task and
