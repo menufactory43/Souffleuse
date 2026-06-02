@@ -768,6 +768,35 @@ final class PredictorViewModel {
             // on retombe sur l'instant (hide). Le flag OFF rend `useMidWordEscalation`
             // toujours faux → ce bloc est mort et le streaming ci-dessous inchangé.
             if useMidWordEscalation {
+                // A/B : chemin SIMPLIFIÉ (single greedy healed) vs escalade complète.
+                // Le long-ghost est affiché par les MÊMES lignes que l'escalade
+                // (self.suggestion = …, source, predictedForPrefix), HORS stream.
+                if SuggestionPolicy.Tuning.midWordLongGhostEnabled {
+                    let lg = await runtime.midWordLongGhost(request: request)
+                    if Task.isCancelled { return }
+                    await MainActor.run { [weak self] in
+                        guard let self, self.planner.isCurrent(myGeneration) else { return }
+                        if let lg, lg.show {
+                            let word = ModelRuntime.OutputFilter.normalizeFrenchTypography(lg.word)
+                            let score = SuggestionPolicy.score(source: .llm, ghost: lg.word, userTail: userTail)
+                            self.policy.applyGhost(lg.word, source: .llm, score: score, userTail: userTail)
+                            self.suggestion = word
+                            self.predictedForPrefix = forPrefix
+                            self.suggestionSource = .llm
+                            Log.info(.predictor, "ghost_midword_longghost_shown", count: word.count)
+                            GhostInspector.shared.record(tail: userTail, verdict: .shown,
+                                                         reason: "longghost", content: word)
+                        } else {
+                            self.suggestion = instantGhost
+                            self.predictedForPrefix = forPrefix
+                            self.suggestionSource = instantSource
+                            Log.info(.predictor, "ghost_midword_longghost_hidden")
+                            GhostInspector.shared.record(tail: userTail, verdict: .gated,
+                                                         reason: "longghost", content: lg?.word ?? "(rien)")
+                        }
+                    }
+                    return
+                }
                 let esc = await runtime.midWordEscalate(request: request)
                 if Task.isCancelled { return }
                 await MainActor.run { [weak self] in

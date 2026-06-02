@@ -260,6 +260,36 @@ extension SuggestionPolicy {
         /// candidats divergent trop tôt (ambigu) → on ne montre rien.
         public static let escL0MinCompletion: Int = 2
 
+        // MARK: - Long-ghost mid-mot SIMPLIFIÉ (A/B contre l'escalade)
+        //
+        // Chemin alternatif au mid-mot : UNE seule passe greedy healed, post-
+        // traitée par les MÊMES helpers `OutputFilter` que l'escalade, SANS vote
+        // de branches, SANS fast-accept/fast-reject, SANS fallback dico (F3).
+        // Sous le même seam `useMidWordEscalation` mais branché par le flag
+        // ci-dessous. OFF par défaut → comportement byte-identique à l'escalade.
+
+        /// Active le chemin mid-mot SIMPLIFIÉ (single greedy healed generate) à la
+        /// place de `midWordEscalate`. **OFF par défaut** : ne devient `true` QUE si
+        /// l'env `SOUFFLEUSE_MIDWORD_LONGGHOST_ON` est présente. Flag d'A/B : le
+        /// chemin escalade complet (F1/F2/F3) reste inchangé tant qu'il est absent.
+        public static var midWordLongGhostEnabled: Bool {
+            ProcessInfo.processInfo.environment["SOUFFLEUSE_MIDWORD_LONGGHOST_ON"] != nil
+        }
+
+        /// `MW_LG_MAXTOKENS` — plafond de tokens de l'unique passe greedy du long-
+        /// ghost. Pris en `min()` avec le `maxTokens` de la requête. Défaut 14.
+        public static var midWordLongGhostMaxTokens: Int {
+            if let s = ProcessInfo.processInfo.environment["MW_LG_MAXTOKENS"], let v = Int(s) { return max(1, v) }
+            return 14
+        }
+
+        /// `MW_LG_MAXWORDS` — nombre max de mots entiers conservés dans la
+        /// continuation montrée. Défaut 4.
+        public static var midWordLongGhostMaxWords: Int {
+            if let s = ProcessInfo.processInfo.environment["MW_LG_MAXWORDS"], let v = Int(s) { return max(1, v) }
+            return 4
+        }
+
         // MARK: - LLM context window (coherence, 2026-05-29 measurement)
         ///
         /// Number of trailing characters of the (corrected) preceding text fed
