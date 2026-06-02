@@ -67,9 +67,10 @@ public final class TypoDetector: @unchecked Sendable {
                 candidates.append(candidate)
             }
         }
-        // All languages flagged. Pick the closest candidate by Levenshtein.
-        // Tie between distinct candidates → ambiguous, skip.
-        let scored = candidates.map { ($0, Self.levenshtein($0, word)) }
+        // All languages flagged. Pick the closest candidate by the typo-aware
+        // distance (transposition-preferring). Tie between distinct candidates →
+        // ambiguous, skip.
+        let scored = candidates.map { ($0, Self.typoDistance($0, word)) }
             .sorted { $0.1 < $1.1 }
         guard let first = scored.first else { return nil }
         if scored.count > 1, scored[1].1 == first.1, scored[1].0 != first.0 {
@@ -98,10 +99,14 @@ public final class TypoDetector: @unchecked Sendable {
             return .some(nil)
         }
         let close = guesses.prefix(5).filter { Self.levenshtein($0, word) <= Self.maxLevenshtein }
-        guard let best = close.first else { return .some(nil) }
-        // Ambiguous (multiple candidates with identical distance) → skip.
-        if close.count > 1,
-           Self.levenshtein(close[0], word) == Self.levenshtein(close[1], word)
+        // Rank by the typo-aware distance (transposition-preferring) rather than
+        // the spell-checker's own order, so "sius" → "suis" beats "sous".
+        let ranked = close.sorted { Self.typoDistance($0, word) < Self.typoDistance($1, word) }
+        guard let best = ranked.first else { return .some(nil) }
+        // Ambiguous (top two candidates equidistant) → skip.
+        if ranked.count > 1,
+           Self.typoDistance(ranked[0], word) == Self.typoDistance(ranked[1], word),
+           ranked[0] != ranked[1]
         {
             return .some(nil)
         }
@@ -268,5 +273,37 @@ public final class TypoDetector: @unchecked Sendable {
             swap(&prev, &curr)
         }
         return prev[bc.count]
+    }
+
+    /// Cost of an adjacent transposition relative to an insert/delete/substitute
+    /// (all 1.0). Below 1 so a transposition-fix is preferred over a same-plain-
+    /// distance substitution: real typing errors are dominated by adjacent swaps,
+    /// so for "sius" the model should rank "suis" (one transposition) above "sous"
+    /// (one substitution). Context-blind by design — it always prefers the
+    /// transposition, which is the more-common-correct default ("je suis" ≫ "dort
+    /// sous"); true context disambiguation needs the (deferred) LM scorer.
+    static let transpositionCost = 0.85
+
+    /// Damerau–Levenshtein (Optimal String Alignment) with a weighted adjacent
+    /// transposition. Used to RANK spell-checker candidates (the ≤`maxLevenshtein`
+    /// filter still uses plain `levenshtein`). Fine for the ≤30-char words here.
+    static func typoDistance(_ a: String, _ b: String) -> Double {
+        let s = Array(a), t = Array(b)
+        let n = s.count, m = t.count
+        if n == 0 { return Double(m) }
+        if m == 0 { return Double(n) }
+        var d = Array(repeating: Array(repeating: 0.0, count: m + 1), count: n + 1)
+        for i in 0...n { d[i][0] = Double(i) }
+        for j in 0...m { d[0][j] = Double(j) }
+        for i in 1...n {
+            for j in 1...m {
+                let cost = s[i - 1] == t[j - 1] ? 0.0 : 1.0
+                d[i][j] = min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost)
+                if i > 1, j > 1, s[i - 1] == t[j - 2], s[i - 2] == t[j - 1] {
+                    d[i][j] = min(d[i][j], d[i - 2][j - 2] + transpositionCost)
+                }
+            }
+        }
+        return d[n][m]
     }
 }
