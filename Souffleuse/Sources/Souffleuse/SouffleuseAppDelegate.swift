@@ -1472,10 +1472,24 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             predictor.cancel()
             lastPredictedPrefix = nil
             if let rect = rectForGhost {
-                overlay.show(text: " → " + typo.suggestion, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFontForOverlay)
+                // Render once per new suggestion: the panel persists across the
+                // identical re-detections on subsequent ticks (currentTypo stays
+                // equal), so re-painting — and re-querying AX bounds — every tick
+                // is wasted. Any non-typo branch resets currentTypo, which makes
+                // the next typo tick "new" again and re-renders.
+                if isNewSuggestion {
+                    renderTypoSuggestion(
+                        typo,
+                        prefix: prefix,
+                        caretRect: rect,
+                        text: text,
+                        caretIndex: caretIndex,
+                        font: hostFontForOverlay
+                    )
+                    Log.info(.input, "typo_suggested")
+                }
                 interceptor.setActive(true)
             }
-            if isNewSuggestion { Log.info(.input, "typo_suggested") }
             return
         }
         currentTypo = nil
@@ -1540,6 +1554,52 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
 
         overlay.show(text: suggestion, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFontForOverlay)
         interceptor.setActive(true)
+    }
+
+    /// Paint a typo suggestion in place, Cotypist-style: a red strike over the
+    /// real misspelled word + the green suggestion after.
+    ///
+    /// Two ways to locate the word's screen rect:
+    /// - **AX `AXBoundsForRange`** — pixel-perfect, native AppKit hosts (Notes,
+    ///   TextEdit, Mail). Synchronous on main, consistent with the per-tick
+    ///   `axClient.snapshot()`, and fires only on a *new* suggestion.
+    /// - **Geometric estimate** — when AX gives no genuine word box (Chromium/
+    ///   WebKit refuse range bounds; their marker walk resolves whole-line boxes).
+    ///   We derive the word rect from the reliable caret rect minus the measured
+    ///   width of the word and the separators between it and the caret.
+    private func renderTypoSuggestion(
+        _ typo: TypoSuggestion,
+        prefix: String,
+        caretRect: CGRect,
+        text: String,
+        caretIndex: Int,
+        font: NSFont?
+    ) {
+        // AX text ranges are UTF-16; convert the word's range (indices into
+        // `prefix`, which is a prefix of the element's value) to UTF-16 offsets.
+        let utf16Loc = prefix.utf16.distance(from: prefix.utf16.startIndex, to: typo.range.lowerBound)
+        let utf16Len = typo.original.utf16.count
+        let wordRect = axClient.boundsForFocusedRange(location: utf16Loc, length: utf16Len)
+
+        if let wordRect, OverlayWindow.isUsableWordRect(wordRect) {
+            overlay.showCorrection(
+                original: typo.original,
+                suggestion: typo.suggestion,
+                atWordRectQuartz: wordRect,
+                font: font
+            )
+        } else {
+            // Separators between the word's end and the caret (usually "" or a
+            // single space) — measured so the estimated word rect lands flush.
+            let separator = String(prefix[typo.range.upperBound...])
+            overlay.showCorrectionEstimated(
+                original: typo.original,
+                suggestion: typo.suggestion,
+                separatorAfterWord: separator,
+                caretRectQuartz: caretRect,
+                font: font
+            )
+        }
     }
 
     // MARK: - Key handling (runs on the CGEventTap thread)

@@ -774,6 +774,15 @@ public final class AXClient: @unchecked Sendable {
         rect.width >= 0 && rect.height > 0 && rect.size != .zero
     }
 
+    /// Stricter gate for a multi-character WORD rect: it must have real width
+    /// (a caret-thin or zero rect means the host couldn't resolve the range and
+    /// we should try the marker path), finite, on-screen extent.
+    private func isPlausibleWordRect(_ rect: CGRect) -> Bool {
+        rect.width >= 2 && rect.height >= 2
+            && rect.origin.x.isFinite && rect.origin.y.isFinite
+            && rect.width < 4000 && rect.height < 400
+    }
+
     /// When a host returns a line-fragment rect for a zero-length range query
     /// (Notes, some browsers), collapse the width down to 1 px while keeping
     /// `origin.x` (which IS the caret X in the length=0 contract — even when
@@ -823,6 +832,39 @@ public final class AXClient: @unchecked Sendable {
         var rect = CGRect.zero
         guard AXValueGetValue(axBounds, .cgRect, &rect) else { return nil }
         return rect
+    }
+
+    /// Pixel-perfect screen-space (Quartz, top-left origin) bounds of the focused
+    /// element's text range `[location, location+length)`, in **UTF-16 units**.
+    /// Used to strike the misspelled word in place.
+    ///
+    /// This path is `AXBoundsForRange` (NSRange) only — it is exact on native
+    /// AppKit hosts (Notes, TextEdit, Mail). Chromium/WebKit (Brave, Slack,
+    /// Electron) refuse NSRange queries for ranges and their text-marker walk
+    /// proved unreliable (it resolves whole-line bounding boxes, not the word),
+    /// so the caller estimates the word rect geometrically from the caret rect
+    /// instead. Returns nil whenever the host can't give a genuine word box.
+    public func boundsForFocusedRange(location: Int, length: Int) -> CGRect? {
+        guard location >= 0, length > 0 else { return nil }
+        return queue.sync {
+            guard let appEl = focusedAppElement() else { return nil }
+            var focusedRef: AnyObject?
+            guard AXUIElementCopyAttributeValue(appEl, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
+                  let focused = focusedRef else {
+                return nil
+            }
+            let element = focused as! AXUIElement
+            // Accept only a rect with real WORD extent — Chromium answers
+            // .success with a zero/1px caret-like rect for a multi-char range,
+            // which `isPlausibleCaretRect` (built for thin carets) would wrongly
+            // accept. Requiring genuine width makes those return nil so the
+            // caller's geometric estimate takes over.
+            guard let r = boundsForRange(element, location: location, length: length),
+                  isPlausibleWordRect(r) else {
+                return nil
+            }
+            return r
+        }
     }
 
     /// Thin wrapper around `kAXBoundsForRangeParameterizedAttribute` that

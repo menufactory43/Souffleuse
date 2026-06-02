@@ -55,6 +55,19 @@ import Testing
     #expect((huge?.pointSize ?? 0) == 20)
 }
 
+@MainActor
+@Test func overlayUsableWordRectRejectsDegenerate() {
+    // A real word rect (some extent, finite, on-screen) is usable for the
+    // in-place strike. Zero/placeholder rects from web hosts and absurdly
+    // large/non-finite returns must fall back to the caret-anchored hint.
+    #expect(OverlayWindow.isUsableWordRect(CGRect(x: 100, y: 200, width: 48, height: 18)))
+    #expect(!OverlayWindow.isUsableWordRect(.zero))
+    #expect(!OverlayWindow.isUsableWordRect(CGRect(x: 0, y: 0, width: 1, height: 18)))
+    #expect(!OverlayWindow.isUsableWordRect(CGRect(x: 0, y: 0, width: 48, height: 1)))
+    #expect(!OverlayWindow.isUsableWordRect(CGRect(x: 0, y: 0, width: 9000, height: 18)))
+    #expect(!OverlayWindow.isUsableWordRect(CGRect(x: CGFloat.infinity, y: 0, width: 48, height: 18)))
+}
+
 // MARK: - SouffleuseAppDelegate mid-text suppression
 
 @MainActor
