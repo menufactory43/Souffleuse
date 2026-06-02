@@ -1351,9 +1351,16 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             if lowerFull.hasPrefix(lowerPrefix),
                prefix.count >= ghostAnchorBase.count,
                prefix.count < ghostAnchorFull.count {
-                // Caret À L'INTÉRIEUR de la fenêtre — slice le suffixe et l'affiche.
-                // On reconstruit l'état partialRemainder de façon cohérente pour que le
-                // refill rolling et l'accept Tab/word-by-word repartent du bon endroit.
+                // BACKSPACE / CONSO À L'INTÉRIEUR DE LA FENÊTRE (high-water).
+                // `ghostAnchorFull` porte le HIGH-WATER MARK : sa partie GAUCHE jusqu'au
+                // caret est le texte que l'UTILISATEUR a réellement tapé (capté en avant,
+                // cf. la branche d'extension ci-dessous), sa partie DROITE est le ghost.
+                // Reculer dans cette fenêtre restaure donc le texte de l'utilisateur lui-
+                // même, pas une prédiction du modèle. On slice le suffixe et l'affiche,
+                // SANS rétrécir `ghostAnchorFull` (le high-water tient). On reconstruit
+                // l'état partialRemainder pour que refill rolling et accept repartent bon.
+                // CE BLOC PASSE AVANT la suppression mid-mot backspace : un restore d'ancre
+                // actif gagne toujours (return ici).
                 let ghost = String(ghostAnchorFull.dropFirst(prefix.count))
                 predictor.cancel()
                 partialAcceptedAtPrefix = ghostAnchorBase
@@ -1369,9 +1376,25 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                     interceptor.setActive(false)
                 }
                 return
+            } else if lowerPrefix.hasPrefix(lowerFull),
+                      prefix.count >= ghostAnchorBase.count {
+                // FRAPPE EN AVANT QUI ÉTEND LE HIGH-WATER. Le préfixe a dépassé (ou égale)
+                // `ghostAnchorFull` tout en restant SUR LE CHEMIN (`prefix` commence par
+                // `ghostAnchorFull`). C'est exactement le cas où l'utilisateur tape un mot
+                // qui DIVERGE de la prédiction du modèle mais constitue son PROPRE texte :
+                // on capte ce texte dans le high-water. On met à jour
+                // `ghostAnchorFull = prefix + ghost-courant` (gauche = texte tapé réel),
+                // on GARDE `ghostAnchorBase` (borne gauche persistante), et on NE return
+                // PAS : on laisse le predict gate plus bas générer/peindre un ghost frais
+                // pour ce nouveau préfixe (qui ré-étendra le high-water via l'ancrage en
+                // bas de tick). Le ghost-courant n'est pris que s'il a été produit POUR ce
+                // préfixe exact ; sinon vide (la partie droite est rétablie au render).
+                let currentGhost = (predictor.predictedForPrefix == prefix) ? predictor.suggestion : ""
+                ghostAnchorFull = prefix + currentGhost
+                // pas de return : tombe dans la suppression / predict gate.
             } else {
-                // Sous la borne gauche, tout consommé, ou divergence hors-chemin → on
-                // jette l'ancre + tout reste de partial, et on tombe dans le predict
+                // DIVERGENCE (préfixe hors-chemin du high-water) ou SOUS LA BORNE GAUCHE →
+                // on jette l'ancre + tout reste de partial, et on tombe dans le predict
                 // normal. La prochaine génération fraîche reposera une ancre.
                 clearGhostAnchor()
                 if !partialRemainder.isEmpty {
@@ -1738,7 +1761,25 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         if SuggestionPolicy.Tuning.midWordGhostRollingEnabled {
             let freshBase = predictor.predictedForPrefix
             let freshFull = freshBase + suggestion
-            if ghostAnchorFull != freshFull || ghostAnchorBase != freshBase || ghostAnchorBundle != bundleID {
+            // HIGH-WATER : si une ancre est DÉJÀ active, sur le même bundle, et que la
+            // base de cette prédiction est SUR LE CHEMIN du high-water courant (la base
+            // étend `ghostAnchorFull` ou reste dans la fenêtre depuis `ghostAnchorBase`),
+            // on GARDE la borne gauche persistante `ghostAnchorBase` et on étend seulement
+            // `ghostAnchorFull` (la partie gauche jusqu'à `freshBase` reste le texte tapé
+            // par l'utilisateur, déjà capté). On ne repose une base NEUVE que si l'ancre
+            // est inactive, hors bundle, ou hors-chemin (vraie divergence/reset).
+            let lowerFresh = freshBase.lowercased()
+            let onPathOfHighWater = !ghostAnchorFull.isEmpty
+                && ghostAnchorBundle == bundleID
+                && freshBase.count >= ghostAnchorBase.count
+                && (ghostAnchorFull.lowercased().hasPrefix(lowerFresh)
+                    || lowerFresh.hasPrefix(ghostAnchorFull.lowercased()))
+            if onPathOfHighWater {
+                if ghostAnchorFull != freshFull {
+                    ghostAnchorFull = freshFull
+                    Log.info(.predictor, "ghost_anchor_set")
+                }
+            } else if ghostAnchorFull != freshFull || ghostAnchorBase != freshBase || ghostAnchorBundle != bundleID {
                 ghostAnchorBase = freshBase
                 ghostAnchorFull = freshFull
                 ghostAnchorBundle = bundleID

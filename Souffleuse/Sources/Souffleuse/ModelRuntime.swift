@@ -557,14 +557,39 @@ final class ModelRuntime {
         // Splice : retire de la ligne greedy le partiel déjà tapé (même chevauchement
         // de préfixe que le stream), garde la continuation MOINS le partiel. À une
         // FRONTIÈRE la continuation est un mot NEUF (pas une complétion) → on NE
-        // strip PAS le partiel, et on garantit un unique espace de tête pour séparer
-        // du mot achevé (« une » + «  bonne nouvelle » → « une bonne », jamais « unebonne »).
+        // strip PAS le partiel.
         let fullLine = OutputFilter.singleLine(acc.text)
         var stripped = OutputFilter.singleLine(
             OutputFilter.stripPrefixOverlap(fullLine, prefix: isBoundary ? "" : partial))
+        // Séparateur d'espace de tête. Un ghost ne doit JAMAIS coller deux mots
+        // (« une » + « bonne » → « unebonne ») NI casser un mot en cours
+        // (« dé » + « cevant » → « dé cevant »). On NE peut PAS se fier au verdict
+        // dico : « dé », « gal », « tap » sont des mots valides mais l'utilisateur
+        // tape « décevant », « galère », « tapais ». On décide d'après deux signaux
+        // FACTUELS plutôt qu'un verdict lexical :
+        //   1. la fin réelle de `userTail` (déjà un espace ? → ne pas en rajouter,
+        //      sinon « Donc ici  je » en double),
+        //   2. le CHOIX du modèle : sa sortie BRUTE commence-t-elle par un espace ?
+        //      Le modèle a vu « …dé » et a produit « cevant » (collé) = complétion ;
+        //      pour « …une » il produit «  bonne » (espacé) = mot neuf. On respecte
+        //      ce choix au lieu de forcer un espace.
         if isBoundary, !stripped.isEmpty {
-            let body = stripped.drop(while: { $0 == " " || $0 == "\t" })
-            stripped = body.isEmpty ? "" : " " + body
+            let body = String(stripped.drop(while: { $0 == " " || $0 == "\t" }))
+            let tailEndsWithSpace = request.userTail.last.map(\.isWhitespace) ?? true
+            let modelGlued = fullLine.first.map { !$0.isWhitespace } ?? false
+            if body.isEmpty {
+                stripped = ""
+            } else if tailEndsWithSpace {
+                // Le séparateur est déjà dans le tail → ghost collé (pas de double espace).
+                stripped = body
+            } else if partial.isEmpty {
+                // Frontière après ponctuation sans espace (« message.| ») → un séparateur.
+                stripped = " " + body
+            } else {
+                // Mot-fragment jugé « complet » par le dico : on suit le modèle.
+                // Collé → complétion de mot (« décevant ») ; espacé → mot neuf (« une bonne »).
+                stripped = modelGlued ? body : " " + body
+            }
         }
         // Dédup d'un MOT entier répété en tête à une frontière de mot : le modèle
         // re-émet le dernier mot déjà tapé (« de »/« le »/« des »…) → « …de de
