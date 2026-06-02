@@ -198,6 +198,58 @@ struct RelevanceGateTests {
         #expect(v == 1.0)
     }
 
+    // MARK: - prefixFit boundary CHIFFRE / PONCTUATION non-terminale (Cible #1)
+
+    @Test func prefixFitAfterDigitCommaContinuationReturnsOne() {
+        // "…février 1933" + ", il écrit" : virgule de clause après un chiffre.
+        let v = SuggestionPolicy.prefixFit(ghost: ", il écrit", userTail: "Le 28 février 1933")
+        #expect(v == 1.0)
+    }
+
+    @Test func prefixFitAfterDigitSpaceContinuationReturnsOne() {
+        // "…de 4500" + " euros est due…" : espace + mot neuf après un chiffre.
+        let v = SuggestionPolicy.prefixFit(ghost: " euros", userTail: "Une somme de 4500")
+        #expect(v == 1.0)
+    }
+
+    @Test func prefixFitAfterDigitSpaceWordContinuationReturnsOne() {
+        // "rendez-vous le 12" + " mai 2016 à…".
+        let v = SuggestionPolicy.prefixFit(ghost: " mai", userTail: "rendez-vous le 12")
+        #expect(v == 1.0)
+    }
+
+    @Test func prefixFitAfterNonTerminalPunctSpaceContinuationReturnsOne() {
+        // Ponctuation NON-terminale (parenthèse fermante) + espace ⇒ next-word OK.
+        let v = SuggestionPolicy.prefixFit(ghost: " merci", userTail: "réf. (2086)")
+        #expect(v == 1.0)
+    }
+
+    // MARK: - NON-RÉGRESSION : terminateurs de phrase restent STRICTS
+
+    @Test func prefixFitAfterPeriodSpaceStaysBlocked() {
+        // Tail finit par `.` (terminateur) : la tolérance next-word N'EST PAS ouverte ;
+        // un ghost commençant par une espace reste à 0 (comportement figé).
+        let v = SuggestionPolicy.prefixFit(ghost: " et puis", userTail: "C'est fini.")
+        #expect(v == 0.0)
+    }
+
+    @Test func prefixFitAfterExclamationSpaceStaysBlocked() {
+        let v = SuggestionPolicy.prefixFit(ghost: " bonjour", userTail: "Salut !")
+        #expect(v == 0.0)
+    }
+
+    @Test func prefixFitAfterEllipsisCommaStaysBlocked() {
+        // `…` (terminateur) + ghost ponctuation ⇒ strict ⇒ 0.
+        let v = SuggestionPolicy.prefixFit(ghost: ", suite", userTail: "Attendez…")
+        #expect(v == 0.0)
+    }
+
+    @Test func prefixFitAfterTerminatorLetterStillReturnsOne() {
+        // Le natural-start (lettre) après terminateur reste accepté — inchangé.
+        let v = SuggestionPolicy.prefixFit(ghost: "Et puis", userTail: "C'est fini.")
+        #expect(v == 1.0)
+    }
+
     // MARK: - lengthFit bell curve (D-06)
 
     @Test func lengthFitBellCurveByWordCount() {
