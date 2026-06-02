@@ -279,6 +279,21 @@ import Testing
     #expect(TypoDetector.levenshtein("abc", "abc") == 0)
 }
 
+@Test func typoDistancePrefersTransposition() {
+    // A transposition costs less than a substitution, so candidate ranking picks
+    // the transposition-fix: "sius" → "suis" (swap i,u) beats "sius" → "sous"
+    // (substitute i→o), even though plain Levenshtein has sous closer.
+    #expect(TypoDetector.typoDistance("suis", "sius") < TypoDetector.typoDistance("sous", "sius"))
+    #expect(TypoDetector.levenshtein("sous", "sius") < TypoDetector.levenshtein("suis", "sius")) // baseline was inverted
+    // "form" → "from" (transposition) beats "for" (deletion).
+    #expect(TypoDetector.typoDistance("from", "form") < TypoDetector.typoDistance("for", "form"))
+    // One adjacent transposition is exactly the weighted cost; identity is 0;
+    // a plain substitution is 1.
+    #expect(TypoDetector.typoDistance("ab", "ba") == TypoDetector.transpositionCost)
+    #expect(TypoDetector.typoDistance("abc", "abc") == 0)
+    #expect(TypoDetector.typoDistance("cat", "bat") == 1.0)
+}
+
 // MARK: - EmojiExpander
 
 @Test func emojiDetectsValidShortcodeWithSpace() {
