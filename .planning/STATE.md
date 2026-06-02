@@ -108,6 +108,7 @@ Aucun.
 |---|-------------|------|--------|--------|-----------|
 | 260527-v5a | Fix ghost overlay: font size on newlines + suppress ghost mid-word | 2026-05-27 | 6961ea5 |  | [260527-v5a-fix-ghost-overlay-font-size-on-newlines](./quick/260527-v5a-fix-ghost-overlay-font-size-on-newlines/) |
 | 260528-1hn | Fix ghost "vér ifi": word-boundary flag in history + legacy sanitation | 2026-05-28 | 2699e67 | Verified | [260528-1hn-fix-ghost-v-r-ifi-record-word-boundary-f](./quick/260528-1hn-fix-ghost-v-r-ifi-record-word-boundary-f/) |
+| 260602-oru | strongCorpusMatchMinChars 16→12 + override runtime MW_STRONG_MINCHARS (recall corpus début de phrase) | 2026-06-02 | 730c95f |  | [260602-oru-abaisser-strongcorpusmatchminchars-de-16](./quick/260602-oru-abaisser-strongcorpusmatchminchars-de-16/) |
 
 ### Notes
 
