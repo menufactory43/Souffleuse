@@ -8,6 +8,12 @@ import Foundation
 public final class OverlayWindow {
     private let panel: NSPanel
     private let label: NSTextField
+    /// Custom-drawn sibling used only for the in-place typo correction: a red
+    /// strikethrough over the misspelled word (the host's real glyphs show
+    /// through) + the green suggestion painted right after it. Hidden whenever a
+    /// normal ghost is shown; toggled instead of recreated so the single panel's
+    /// lifecycle (show/hide/accept/esc) stays untouched.
+    private let correctionView = CorrectionView()
 
     public init() {
         self.panel = NSPanel(
@@ -36,13 +42,21 @@ public final class OverlayWindow {
         label.lineBreakMode = .byTruncatingTail
         label.translatesAutoresizingMaskIntoConstraints = false
 
+        correctionView.translatesAutoresizingMaskIntoConstraints = false
+        correctionView.isHidden = true
+
         let content = NSView()
         content.addSubview(label)
+        content.addSubview(correctionView)
         NSLayoutConstraint.activate([
             label.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             label.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             label.topAnchor.constraint(equalTo: content.topAnchor),
             label.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            correctionView.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            correctionView.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            correctionView.topAnchor.constraint(equalTo: content.topAnchor),
+            correctionView.bottomAnchor.constraint(equalTo: content.bottomAnchor),
         ])
         panel.contentView = content
     }
@@ -94,6 +108,8 @@ public final class OverlayWindow {
             return
         }
 
+        correctionView.isHidden = true
+        label.isHidden = false
         label.font = renderFont
         label.stringValue = text
         panel.setFrame(frame, display: true)
@@ -104,9 +120,117 @@ public final class OverlayWindow {
         lastText = text
     }
 
+    /// Paint the in-place typo correction à la Cotypist from a **pixel-perfect
+    /// word rect** (AX `AXBoundsForRange`, native hosts). The strike lands exactly
+    /// on the user's glyphs. See `renderCorrection` for the drawing.
+    public func showCorrection(original: String, suggestion: String, atWordRectQuartz wordRect: CGRect, font: NSFont?) {
+        let renderFont = font
+            ?? Self.estimatedFont(forCaretRectHeight: wordRect.height)
+            ?? label.font
+            ?? .systemFont(ofSize: 15)
+        renderCorrection(
+            original: original,
+            suggestion: suggestion,
+            wordRectQuartz: wordRect,
+            renderFont: renderFont
+        )
+    }
+
+    /// Paint the in-place correction when AX can't give a word rect (Chromium/
+    /// WebKit): estimate it geometrically from the reliable caret rect. The word
+    /// ends `separatorAfterWord` glyphs before the caret and is `original` wide,
+    /// all on the caret's line — so we measure those widths in the render font and
+    /// subtract from the caret X. Robust everywhere the caret rect is known.
+    public func showCorrectionEstimated(
+        original: String,
+        suggestion: String,
+        separatorAfterWord: String,
+        caretRectQuartz caret: CGRect,
+        font: NSFont?
+    ) {
+        let renderFont = font
+            ?? Self.estimatedFont(forCaretRectHeight: caret.height)
+            ?? label.font
+            ?? .systemFont(ofSize: 15)
+        let sepWidth = (separatorAfterWord as NSString).size(withAttributes: [.font: renderFont]).width
+        let wordWidth = (original as NSString).size(withAttributes: [.font: renderFont]).width
+        let wordRect = CGRect(
+            x: caret.minX - sepWidth - wordWidth,
+            y: caret.origin.y,
+            width: wordWidth,
+            height: caret.height
+        )
+        renderCorrection(
+            original: original,
+            suggestion: suggestion,
+            wordRectQuartz: wordRect,
+            renderFont: renderFont
+        )
+    }
+
+    /// Shared drawing for both correction paths: a red strikethrough over the
+    /// word at `wordRectQuartz` (the host's real glyphs show through) and the
+    /// green `suggestion` right after. Reuses the single ghost panel — `hide()`
+    /// clears it like any other suggestion.
+    private func renderCorrection(original: String, suggestion: String, wordRectQuartz wordRect: CGRect, renderFont: NSFont) {
+        let gap = renderFont.pointSize * 0.3
+        let suggestionWidth = (suggestion as NSString).size(withAttributes: [.font: renderFont]).width
+        let wordWidth = ceil(wordRect.width)
+
+        let width = wordWidth + ceil(gap) + ceil(suggestionWidth) + 4
+        let height = max(wordRect.height, ceil(renderFont.boundingRectForFont.height))
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? NSScreen.main?.frame.height ?? 0
+        // Comparison seam: when the ghost is lifted one line (to run side-by-side
+        // with Cotypist on the same word), the correction must lift too — else it
+        // paints ON TOP of Cotypist's own render and neither is legible. On the
+        // lifted line there are no real glyphs, so we repaint the struck original;
+        // in production (offset off) the strike sits over the host's real letters.
+        let lifted = Self.ghostLineOffsetEnabled
+        let lineOffset = lifted ? wordRect.height : 0
+        // +Y is up in AppKit; the panel is anchored to the word's top-left so the
+        // strike (drawn at x:0..wordWidth in the view) overlays the real glyphs.
+        let frame = CGRect(
+            x: wordRect.origin.x,
+            y: primaryHeight - wordRect.maxY + lineOffset,
+            width: width,
+            height: height
+        )
+
+        label.isHidden = true
+        label.stringValue = ""
+        correctionView.isHidden = false
+        correctionView.configure(
+            original: lifted ? original : nil,
+            suggestion: suggestion,
+            wordWidth: wordWidth,
+            gap: gap,
+            font: renderFont
+        )
+        panel.setFrame(frame, display: true)
+        if !panel.isVisible {
+            panel.orderFrontRegardless()
+        }
+        // Force the next ghost to repaint — the redundant-paint guard compares
+        // against these, and a correction leaves them describing a stale ghost.
+        lastFrame = .zero
+        lastText = ""
+    }
+
+    /// A word rect is only usable for the in-place strike when it has real
+    /// extent. AX sometimes returns zero/degenerate rects (web placeholders);
+    /// those must fall back to the caret-anchored `→ suggestion` hint.
+    public static func isUsableWordRect(_ rect: CGRect) -> Bool {
+        rect.width >= 2 && rect.height >= 2
+            && rect.width < 4000 && rect.height < 400
+            && rect.origin.x.isFinite && rect.origin.y.isFinite
+    }
+
     public func hide() {
         label.stringValue = ""
+        label.isHidden = false
+        correctionView.isHidden = true
         lastText = ""
+        lastFrame = .zero
         if panel.isVisible {
             panel.orderOut(nil)
         }
@@ -194,5 +318,69 @@ public final class OverlayWindow {
         let appKitX = caret.origin.x
 
         return CGRect(x: appKitX, y: appKitY, width: width, height: height)
+    }
+}
+
+/// Custom-drawn content for the in-place typo correction. Draws nothing over the
+/// word except a red strikethrough line (the host's real glyphs provide the
+/// letters), then the green suggestion after a small gap. Non-flipped (AppKit
+/// default, origin bottom-left) so the math matches `showCorrection`'s frame.
+@MainActor
+private final class CorrectionView: NSView {
+    /// Non-nil only in the lifted comparison mode: the misspelled word is
+    /// repainted (dimmed) under the strike because the real glyphs are on the
+    /// line below. In production this is nil — the host's own letters show
+    /// through and we draw only the strike line.
+    private var original: String?
+    private var suggestion: String = ""
+    private var wordWidth: CGFloat = 0
+    private var gap: CGFloat = 0
+    private var font: NSFont = .systemFont(ofSize: 15)
+
+    override var isOpaque: Bool { false }
+    override var isFlipped: Bool { false }
+
+    func configure(original: String?, suggestion: String, wordWidth: CGFloat, gap: CGFloat, font: NSFont) {
+        self.original = original
+        self.suggestion = suggestion
+        self.wordWidth = wordWidth
+        self.gap = gap
+        self.font = font
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard !suggestion.isEmpty else { return }
+
+        // Repaint the struck word only when lifted off its real glyphs.
+        if let original {
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: NSColor.tertiaryLabelColor,
+            ]
+            let ns = original as NSString
+            let size = ns.size(withAttributes: attrs)
+            ns.draw(at: CGPoint(x: 0, y: (bounds.height - size.height) / 2), withAttributes: attrs)
+        }
+
+        // Strikethrough over the (real or repainted) word: a single line at the
+        // glyphs' visual mid-height.
+        let lineY = bounds.midY
+        let path = NSBezierPath()
+        path.lineWidth = max(1, font.pointSize * 0.08)
+        path.move(to: CGPoint(x: 0, y: lineY))
+        path.line(to: CGPoint(x: wordWidth, y: lineY))
+        NSColor.systemRed.setStroke()
+        path.stroke()
+
+        // Green suggestion right after the struck word.
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor.systemGreen,
+        ]
+        let text = suggestion as NSString
+        let size = text.size(withAttributes: attrs)
+        let textY = (bounds.height - size.height) / 2
+        text.draw(at: CGPoint(x: wordWidth + gap, y: textY), withAttributes: attrs)
     }
 }
