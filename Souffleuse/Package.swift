@@ -126,6 +126,10 @@ let package = Package(
             dependencies: ["SouffleuseLlama", "SouffleuseTyping"]
         ),
         .executableTarget(
+            name: "SouffleuseTypoQualityProbe",
+            dependencies: ["SouffleuseLlama"]
+        ),
+        .executableTarget(
             name: "SouffleuseAXProbe",
             dependencies: ["SouffleuseAX", "SouffleuseOverlay", "SouffleuseInput"]
         ),

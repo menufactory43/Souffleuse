@@ -775,6 +775,86 @@ public actor LlamaEngine {
         tokenize(text, addSpecial: true).count
     }
 
+    // MARK: - Sequence scoring
+
+    /// Log-likelihood the model assigns to `continuation` following `context` —
+    /// i.e. `Σ log P(tokenᵢ | context, token₁…ᵢ₋₁)` over the continuation tokens.
+    ///
+    /// This is the **language-model term of the noisy-channel corrector**: given
+    /// several spell-checker candidates for a typo, the one with the highest
+    /// context log-prob is the contextually-correct word ("je **suis**" ≫ "je
+    /// **sous**"). Returns the summed log-prob plus the token count so callers can
+    /// length-normalise (candidates may tokenise to different lengths).
+    ///
+    /// Tokenisation aligns by longest-common-prefix: both `context` and
+    /// `context+continuation` are tokenised with BOS, and only the diverging tail
+    /// is scored. Comparing candidates that share `context` is therefore
+    /// apples-to-apples even when the boundary token re-tokenises.
+    ///
+    /// Resets KV afterwards (it mutates seq 0 to walk the continuation), so a
+    /// following `generate` recomputes cleanly. Nil when no model is loaded or the
+    /// sequence would overflow the context window.
+    public func sequenceLogProb(context: String, continuation: String) -> (sumLogProb: Double, tokenCount: Int)? {
+        guard let h = handles else { return nil }
+        guard !continuation.isEmpty else { return (0, 0) }
+
+        let ctxTokens = tokenize(context, addSpecial: true)
+        let fullTokens = tokenize(context + continuation, addSpecial: true)
+        guard !fullTokens.isEmpty else { return nil }
+
+        // Longest common prefix → the context portion to prefill; the rest is the
+        // continuation region we score.
+        var lcp = 0
+        let bound = min(ctxTokens.count, fullTokens.count)
+        while lcp < bound && ctxTokens[lcp] == fullTokens[lcp] { lcp += 1 }
+        let prefixTokens = Array(fullTokens[0..<lcp])
+        let contTokens = Array(fullTokens[lcp...])
+        guard !contTokens.isEmpty else { return (0, 0) }
+        guard prefixTokens.count + contTokens.count <= Int(h.nCtx) else { return nil }
+
+        let nVocab = Int(llama_vocab_n_tokens(h.vocab))
+        let mem = llama_get_memory(h.context)
+        if let mem { llama_memory_seq_rm(mem, 0, -1, -1) }
+        kvTokens = []
+
+        // Prefill the context. When lcp == 0 (only BOS shared, never happens —
+        // BOS is identical), there is nothing to prefill; the first continuation
+        // token is then scored against the BOS-only logits, which is fine.
+        if !prefixTokens.isEmpty {
+            var pre = prefixTokens
+            let ok = pre.withUnsafeMutableBufferPointer { ptr -> Bool in
+                llama_decode(h.context, llama_batch_get_one(ptr.baseAddress, Int32(ptr.count))) == 0
+            }
+            guard ok else { return nil }
+        }
+
+        // Walk the continuation: at each step the last-position logits predict the
+        // current continuation token; accumulate its log-prob, then decode it to
+        // advance the KV so the next step's logits are conditioned on it.
+        var sum = 0.0
+        for tok in contTokens {
+            guard let logits = llama_get_logits_ith(h.context, -1) else {
+                kvTokens = []
+                return nil
+            }
+            var maxLogit = -Float.greatestFiniteMagnitude
+            for i in 0..<nVocab where logits[i] > maxLogit { maxLogit = logits[i] }
+            var sumExp: Float = 0
+            for i in 0..<nVocab { sumExp += expf(logits[i] - maxLogit) }
+            let logProb = Double(logits[Int(tok)] - maxLogit) - Double(log(sumExp))
+            sum += logProb
+
+            var one = [tok]
+            let ok = one.withUnsafeMutableBufferPointer { ptr -> Bool in
+                llama_decode(h.context, llama_batch_get_one(ptr.baseAddress, Int32(ptr.count))) == 0
+            }
+            guard ok else { kvTokens = []; return nil }
+        }
+
+        kvTokens = []  // KV now holds an ad-hoc sequence; force clean recompute next.
+        return (sum, contTokens.count)
+    }
+
     // MARK: - Generation
 
     /// Streams a completion for `prompt`. Calls `onToken` for each decoded
