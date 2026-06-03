@@ -521,7 +521,14 @@ final class ModelRuntime {
             examples: request.examplesBlock
         )
         let expectedLang = ModelRuntime.expectedLanguage(for: request)
-        let cap = min(request.maxTokens, SuggestionPolicy.Tuning.midWordLongGhostMaxTokens)
+        // Budget UNIFIÉ = la préférence « Longueur du souffle » (CompletionLength),
+        // portée par `request.maxTokens`/`request.maxWords`. PLUS de budget séparé
+        // hardcodé : Court/Moyen/Long dans les Préférences pilote le ghost partout
+        // (mid-mot, après-espace, refill). Les env MW_LG_* restent des overrides DEV
+        // optionnels pour l'A/B ; par défaut on suit la préférence utilisateur.
+        let lgEnv = ProcessInfo.processInfo.environment
+        let cap = lgEnv["MW_LG_MAXTOKENS"].flatMap { Int($0) }.map { max(1, $0) } ?? request.maxTokens
+        let ghostMaxWords = lgEnv["MW_LG_MAXWORDS"].flatMap { Int($0) }.map { max(1, $0) } ?? request.maxWords
 
         GpuGate.shared.ghostBegan()
         defer { GpuGate.shared.ghostEnded() }
@@ -636,9 +643,9 @@ final class ModelRuntime {
         }
         // Cap à N mots entiers, en préservant l'éventuel espace de tête (séparateur).
         let words = result.split(whereSeparator: { $0.isWhitespace })
-        if words.count > SuggestionPolicy.Tuning.midWordLongGhostMaxWords {
+        if words.count > ghostMaxWords {
             let hadLeadingSpace = result.first == " "
-            result = words.prefix(SuggestionPolicy.Tuning.midWordLongGhostMaxWords)
+            result = words.prefix(ghostMaxWords)
                 .joined(separator: " ")
             if hadLeadingSpace, result.first != " ", !result.isEmpty { result = " " + result }
         }
