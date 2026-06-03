@@ -502,7 +502,47 @@ final class ModelRuntime {
     /// l'escalade, pour un call-site drop-in. Appelée à la place de
     /// `midWordEscalate` quand `midWordLongGhostEnabled` est ON. Le bracketing
     /// `GpuGate` est identique (la traduction ne s'interleave pas).
-    func midWordLongGhost(request: PredictRequest) async -> MidWordEscalationResult? {
+    /// Nettoyage de TÊTE du ghost (splice partiel + séparateur d'espace v0.4 + dedup
+    /// de mot répété + anti-dup mid-mot). MIROIR de la première moitié du post-traitement
+    /// de finalisation ci-dessous (lignes « Splice » → anti-dup) ; gardé séparé pour
+    /// servir le STREAMING (partiel par token) sans payer les gates lourds (écho, clause,
+    /// word-cap) à chaque token. Si tu changes la logique d'espace ici, change-la aussi
+    /// dans la finalisation — les deux DOIVENT rester d'accord.
+    nonisolated static func leadingCleanLongGhost(
+        rawText: String, isBoundary: Bool, partial: String, userTail: String
+    ) -> String {
+        let fullLine = OutputFilter.singleLine(rawText)
+        var stripped = OutputFilter.singleLine(
+            OutputFilter.stripPrefixOverlap(fullLine, prefix: isBoundary ? "" : partial))
+        if isBoundary, !stripped.isEmpty {
+            let body = String(stripped.drop(while: { $0 == " " || $0 == "\t" }))
+            let tailEndsWithSpace = userTail.last.map(\.isWhitespace) ?? true
+            let modelGlued = fullLine.first.map { !$0.isWhitespace } ?? false
+            if body.isEmpty { stripped = "" }
+            else if tailEndsWithSpace { stripped = body }
+            else if partial.isEmpty { stripped = " " + body }
+            else { stripped = modelGlued ? body : " " + body }
+        }
+        var result = SuggestionPolicy.dedupLeadingRepeat(ghost: stripped, userTail: userTail)
+        if !isBoundary, !partial.isEmpty, let f = result.first, f == " " || f == "\t" {
+            let body = result.drop(while: { $0 == " " || $0 == "\t" })
+            let firstWord = body.prefix(while: { $0.isLetter || $0.isNumber })
+            if firstWord.count > partial.count,
+               firstWord.lowercased().hasPrefix(partial.lowercased()) {
+                result = String(body.dropFirst(partial.count))
+            }
+        }
+        return result
+    }
+
+    /// `onPartial` (flag `SOUFFLEUSE_GHOST_STREAM`) : appelé sur le thread du moteur à
+    /// CHAQUE token avec le ghost partiel nettoyé (tête seulement). Permet de peindre
+    /// au fil de l'eau (~TTFT 20 ms) au lieu d'attendre la génération complète (~300 ms),
+    /// que la frappe suivante annulerait. `nil` ⇒ comportement one-shot d'origine.
+    func midWordLongGhost(
+        request: PredictRequest,
+        onPartial: (@Sendable (String) -> Void)? = nil
+    ) async -> MidWordEscalationResult? {
         guard llamaReady else { return nil }
         let partial = OutputFilter.trailingPartialWord(request.userTail)
         // FRONTIÈRE de mot : tail vide/blanc/ponctuation, OU mot courant complet
@@ -529,13 +569,17 @@ final class ModelRuntime {
         let lgEnv = ProcessInfo.processInfo.environment
         let cap = lgEnv["MW_LG_MAXTOKENS"].flatMap { Int($0) }.map { max(1, $0) } ?? request.maxTokens
         let ghostMaxWords = lgEnv["MW_LG_MAXWORDS"].flatMap { Int($0) }.map { max(1, $0) } ?? request.maxWords
+        let streamMinTokens = SuggestionPolicy.Tuning.ghostStreamMinTokens
 
         GpuGate.shared.ghostBegan()
         defer { GpuGate.shared.ghostEnded() }
 
         // ── UNE passe greedy healed (même profil de bans que l'escalade, mais
         // SANS minFirstTokenProb : pas de gating de confiance, on montre la sortie).
-        final class Acc: @unchecked Sendable { var text = "" }
+        final class Acc: @unchecked Sendable {
+            var text = ""
+            var tokens = 0
+        }
         let acc = Acc()
         _ = await llamaEngine.generate(
             prompt: prompt,
@@ -556,7 +600,19 @@ final class ModelRuntime {
             )
         ) { piece in
             if Task.isCancelled { return false }
+            acc.tokens += 1
             acc.text += piece
+            // STREAMING : émet le ghost partiel (tête nettoyée) pour peindre dès ~TTFT
+            // au lieu d'attendre la fin. On attend `streamMinTokens` tokens avant le
+            // PREMIER partiel (chunk consistant, pas 1-2 tokens qui flashent), puis on
+            // stream chaque token. Gates lourds (écho, clause, word-cap) en finalisation.
+            // `onPartial == nil` ⇒ aucun surcoût.
+            if let onPartial, acc.tokens >= streamMinTokens {
+                let p = ModelRuntime.leadingCleanLongGhost(
+                    rawText: acc.text, isBoundary: isBoundary, partial: partial,
+                    userTail: request.userTail)
+                if !p.isEmpty { onPartial(p) }
+            }
             return true
         }
         if Task.isCancelled { return nil }

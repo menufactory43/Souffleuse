@@ -1611,6 +1611,12 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                         if let rect = rectForGhost {
                             overlay.show(text: partialRemainder, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFontForOverlay)
                             interceptor.setActive(true)
+                            // FLUX CONTINU : recharge le bord droit DÈS la conso active
+                            // (et pas seulement au tick synchronisé suivant), pour que la
+                            // fenêtre reste pleine pendant que tu tapes la suite du ghost.
+                            maybeSpawnRollingRefill(
+                                committedText: partialAcceptedAtPrefix + partialAcceptedSoFar,
+                                bundleID: bundleID)
                         }
                         return
                     }
@@ -2683,12 +2689,22 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             // Re-valide STRICTEMENT l'état : même bundle, mêmes ancres de partial-
             // accept, et reste INCHANGÉ depuis le spawn. Toute divergence → on
             // jette le refill (il s'appliquerait au mauvais endroit).
+            // Re-validation TOLÉRANTE à la conso-pendant-génération (le bug du « pas de
+            // refill »). L'extension s'attache au BORD DROIT du ghost — inchangé même si
+            // tu as consommé par la GAUCHE pendant les ~300 ms de génération. L'ancienne
+            // garde exigeait `snapSoFar == …` et `partialRemainder == remainder`, donc
+            // toute frappe pendant la génération jetait le refill (= ton cas en frappe
+            // active). On accepte désormais que tu aies consommé EN PLUS, du moment que
+            // c'est sur le même chemin : `partialAcceptedSoFar` a CRU depuis le snap
+            // (préfixe conservé) ET le reste actuel est un SUFFIXE de l'ancien (conso par
+            // la gauche, bord droit intact). On appende alors au reste COURANT.
             guard SuggestionPolicy.Tuning.midWordGhostRollingEnabled,
                   bundleID == self.currentBundleIDForRefillCheck(),
                   snapBundle == self.partialAcceptedAtBundleID,
                   snapPrefix == self.partialAcceptedAtPrefix,
-                  snapSoFar == self.partialAcceptedSoFar,
-                  self.partialRemainder == remainder else { return }
+                  self.partialAcceptedSoFar.hasPrefix(snapSoFar),
+                  !self.partialRemainder.isEmpty,
+                  remainder.hasSuffix(self.partialRemainder) else { return }
             // APPEND (le reste reste affiché ; l'extension le prolonge au prochain
             // tick render). On préserve l'espacement : `extension_` porte déjà un
             // espace de tête unique, donc on dé-doublonne une éventuelle jointure.
