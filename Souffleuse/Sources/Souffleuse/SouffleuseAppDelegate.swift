@@ -444,6 +444,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             Task { await ScreenCapturer.forcePermissionPrompt() }
         }
         observePreferences()
+        observeSuggestionForInstantPaint()
 
         // 50 ms tick → live-consume + overlay refresh feel near-instant.
         // Lowered from 80 ms (2026-05-26): at 80 ms a keystroke could wait up
@@ -540,6 +541,33 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
 
     /// Re-subscribes to @Observable changes after each fire. AppDelegate reacts to
     /// model swap, capture toggle, OCR language changes, and menu mirror updates.
+    /// **Instant-paint (flag `SOUFFLEUSE_INSTANT_PAINT`).** Sans ce flag, l'overlay
+    /// n'est peint que par le `tick()` du poll (50 ms) : une suggestion résolue
+    /// par `predict()` (cache/corpus) ou par la fin d'une génération LLM/refill
+    /// DORT jusqu'au prochain tick — jusqu'à +50 ms de latence d'affichage pure,
+    /// alors que le ghost est déjà calculé. On observe `predictor.suggestion` et,
+    /// dès qu'elle change (depuis N'IMPORTE quelle source : cache, LLM, refill),
+    /// on re-déclenche un `tick()` immédiat qui peint via la MÊME freshness-gate.
+    /// Pas de double-paint : le tick suivant verra le ghost déjà à l'écran et la
+    /// `shouldRenderSuggestion`/`overlay.show` est idempotente. `withObservationTracking`
+    /// est one-shot (sémantique willSet) → on re-arme à chaque `onChange`, et on
+    /// hop async pour lire la valeur APRÈS commit (même pattern qu'`observePreferences`).
+    /// Flag OFF → jamais armé → zéro overhead, comportement byte-identique.
+    private func observeSuggestionForInstantPaint() {
+        guard ProcessInfo.processInfo.environment["SOUFFLEUSE_INSTANT_PAINT"] != nil else { return }
+        withObservationTracking {
+            _ = predictor.suggestion
+        } onChange: { [weak self] in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.tickThrottled()                  // peint le ghost frais sans attendre le poll
+                    self.observeSuggestionForInstantPaint()  // re-arme (one-shot)
+                }
+            }
+        }
+    }
+
     private func observePreferences() {
         storeObservationTask?.cancel()
         let snapshot = (
