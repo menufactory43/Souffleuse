@@ -131,7 +131,7 @@ public final class AXClient: @unchecked Sendable {
     /// Flag maître du push AX, lu une fois. OFF → observer reste no-op.
     /// `fileprivate` pour que le callback C top-level (voir bas de fichier) le lise.
     fileprivate static let axPushEnabled =
-        ProcessInfo.processInfo.environment["SOUFFLEUSE_AX_PUSH"] != nil
+        ProcessInfo.processInfo.environment["SOUFFLEUSE_AX_PUSH_OFF"] == nil  // ON par défaut (endgame Phase A)
     /// Upper bound on activation attempts for a PID that has never been live —
     /// generous for Chromium's async tree build, bounded so non-Electron apps
     /// stop after a few seconds. NOTE: ticks where the AX app element returns

@@ -273,7 +273,10 @@ extension SuggestionPolicy {
         /// l'env `SOUFFLEUSE_MIDWORD_LONGGHOST_ON` est présente. Flag d'A/B : le
         /// chemin escalade complet (F1/F2/F3) reste inchangé tant qu'il est absent.
         public static var midWordLongGhostEnabled: Bool {
-            ProcessInfo.processInfo.environment["SOUFFLEUSE_MIDWORD_LONGGHOST_ON"] != nil
+            // ON PAR DÉFAUT (endgame Phase A). Kill-switch `SOUFFLEUSE_LONGGHOST_OFF`
+            // → revient à la cascade F1/F2/F3 sans rebuild (warm fallback). La cascade
+            // reste dans le code jusqu'à la Phase B (suppression après confiance).
+            ProcessInfo.processInfo.environment["SOUFFLEUSE_LONGGHOST_OFF"] == nil
         }
 
         /// `SOUFFLEUSE_GHOST_STREAM` — peint le longghost AU FIL des tokens (TTFT ~20 ms)
@@ -319,7 +322,12 @@ extension SuggestionPolicy {
         /// `true` QUE si l'env `SOUFFLEUSE_GHOST_ROLLING` est présente. Hors flag,
         /// le ghost se vide comme aujourd'hui (aucun refill émis).
         public static var midWordGhostRollingEnabled: Bool {
-            ProcessInfo.processInfo.environment["SOUFFLEUSE_GHOST_ROLLING"] != nil
+            // ON PAR DÉFAUT (endgame Phase A) : la fenêtre glissante + refill + ancre
+            // bidirectionnelle. Tuée par le kill-switch MAÎTRE (cascade, pas de ghost à
+            // rouler) OU par son propre `SOUFFLEUSE_ROLLING_OFF` (garder le longghost
+            // statique sans roulement).
+            let env = ProcessInfo.processInfo.environment
+            return env["SOUFFLEUSE_LONGGHOST_OFF"] == nil && env["SOUFFLEUSE_ROLLING_OFF"] == nil
         }
 
         /// `MW_ROLL_DEPTH` — profondeur (mots entiers) qu'on essaie de garder
