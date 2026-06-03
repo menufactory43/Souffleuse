@@ -119,6 +119,19 @@ public final class AXClient: @unchecked Sendable {
     /// long-standing misconception in this file): it only pumps extra run-loop
     /// turns while the tree builds and keeps a live AT signature.
     private var observersByPID: [pid_t: AXObserver] = [:]
+    /// **Détection PUSH (Fix 2, flag `SOUFFLEUSE_AX_PUSH`).** Signal émis sur le
+    /// MAIN run-loop quand le host notifie un changement de valeur / sélection /
+    /// focus via AX. Branché par l'AppDelegate sur `tickThrottled()` → détection
+    /// instantanée (parité Cotypist) au lieu d'attendre le poll 50 ms. Hors flag :
+    /// jamais appelé (le callback C retourne tôt) et jamais abonné aux notifs
+    /// valeur/sélection → comportement byte-identique (observer no-op d'origine).
+    /// Lu/écrit sur le main uniquement (set au démarrage, appelé depuis le callback
+    /// AX qui fire sur le main run-loop). `@unchecked Sendable` de la classe couvre.
+    public var onHostAXChanged: (@Sendable () -> Void)?
+    /// Flag maître du push AX, lu une fois. OFF → observer reste no-op.
+    /// `fileprivate` pour que le callback C top-level (voir bas de fichier) le lise.
+    fileprivate static let axPushEnabled =
+        ProcessInfo.processInfo.environment["SOUFFLEUSE_AX_PUSH"] != nil
     /// Upper bound on activation attempts for a PID that has never been live —
     /// generous for Chromium's async tree build, bounded so non-Electron apps
     /// stop after a few seconds. NOTE: ticks where the AX app element returns
@@ -186,14 +199,34 @@ public final class AXClient: @unchecked Sendable {
         var observerStatus: AXError = .success
         if observersByPID[pid] == nil {
             var observer: AXObserver?
-            let callback: AXObserverCallback = { _, _, _, _ in }
-            let create = AXObserverCreate(pid, callback, &observer)
+            // Callback C : NE PEUT PAS capturer (function pointer). On récupère
+            // l'AXClient via le `refcon`. Hors flag push → garde + return ⇒
+            // strictement no-op (identique à l'ancien `{ _,_,_,_ in }`). Fire sur
+            // le MAIN run-loop (la source est ajoutée à `CFRunLoopGetMain`), donc
+            // `onHostAXChanged` est invoqué côté main, sans hop. Référence une
+            // fonction TOP-LEVEL (et non un closure inline) pour éviter un crash
+            // du pass SIL `SendNonSendable` du compilateur sur cette méthode.
+            let create = AXObserverCreate(pid, souffleuseAXPushObserverCallback, &observer)
             if create == .success, let observer {
+                // `refcon` = pointeur NON retenu vers self. Sûr : self (AXClient)
+                // possède l'observer (`observersByPID`) et lui survit donc toujours.
+                let refcon = Unmanaged.passUnretained(self).toOpaque()
                 let add = AXObserverAddNotification(
                     observer, appEl,
                     kAXFocusedUIElementChangedNotification as CFString,
-                    nil
+                    refcon
                 )
+                // PUSH (Fix 2) : abonnements valeur + sélection en PLUS, uniquement
+                // sous flag. C'est ce qui transforme l'observer keep-alive en vrai
+                // déclencheur de détection (texte modifié / caret déplacé → tick).
+                // Posés sur l'élément application ; les apps qui ne propagent pas au
+                // niveau app retombent sur le poll 50 ms (aucune régression).
+                if Self.axPushEnabled {
+                    _ = AXObserverAddNotification(observer, appEl,
+                        kAXValueChangedNotification as CFString, refcon)
+                    _ = AXObserverAddNotification(observer, appEl,
+                        kAXSelectedTextChangedNotification as CFString, refcon)
+                }
                 if add == .success {
                     CFRunLoopAddSource(
                         CFRunLoopGetMain(),
@@ -934,4 +967,21 @@ public final class AXClient: @unchecked Sendable {
     private func copyStringAttr(_ element: AXUIElement, _ attribute: String) -> String? {
         copyAttr(element, attribute) as? String
     }
+}
+
+/// Callback C de l'observer AX push (Fix 2, flag `SOUFFLEUSE_AX_PUSH`). Volontairement
+/// au TOP-LEVEL (et non un closure dans `ensureAccessibilityActivated`) : le placer
+/// dans le corps de la méthode fait crasher le pass SIL `SendNonSendable` du
+/// compilateur. `@convention(c)` ⇒ aucune capture ; l'AXClient transite par `refcon`
+/// (pointeur non retenu, valide car l'AXClient possède l'observer et lui survit).
+/// Hors flag → garde + return ⇒ strictement no-op. Invoqué sur le MAIN run-loop.
+private func souffleuseAXPushObserverCallback(
+    _ observer: AXObserver,
+    _ element: AXUIElement,
+    _ notification: CFString,
+    _ refcon: UnsafeMutableRawPointer?
+) {
+    guard AXClient.axPushEnabled, let refcon else { return }
+    let client = Unmanaged<AXClient>.fromOpaque(refcon).takeUnretainedValue()
+    client.onHostAXChanged?()
 }

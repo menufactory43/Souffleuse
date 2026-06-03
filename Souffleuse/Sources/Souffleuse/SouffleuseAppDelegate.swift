@@ -445,6 +445,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
         observePreferences()
         observeSuggestionForInstantPaint()
+        wireAXPushDetection()
 
         // 50 ms tick → live-consume + overlay refresh feel near-instant.
         // Lowered from 80 ms (2026-05-26): at 80 ms a keystroke could wait up
@@ -553,6 +554,26 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// est one-shot (sémantique willSet) → on re-arme à chaque `onChange`, et on
     /// hop async pour lire la valeur APRÈS commit (même pattern qu'`observePreferences`).
     /// Flag OFF → jamais armé → zéro overhead, comportement byte-identique.
+    /// **Détection PUSH (Fix 2, flag `SOUFFLEUSE_AX_PUSH`).** Aujourd'hui la
+    /// détection d'un changement de texte/caret passe par le poll 50 ms → jusqu'à
+    /// +50 ms de latence avant même de lire l'AX. Cotypist, lui, s'abonne aux
+    /// notifications AX (`AXValueChanged`/`AXSelectedTextChanged`) et réagit en
+    /// push (~0 ms). Ici on branche le signal `onHostAXChanged` de l'AXClient
+    /// (déjà émis sur le main run-loop par l'observer rendu non-muet) sur un
+    /// `tickThrottled()` immédiat. Le poll 50 ms reste en FILET pour les apps qui
+    /// ne propagent pas de notifs (coller, certaines web-views). Flag OFF → handler
+    /// jamais posé + observer no-op ⇒ byte-identique.
+    private func wireAXPushDetection() {
+        guard ProcessInfo.processInfo.environment["SOUFFLEUSE_AX_PUSH"] != nil else { return }
+        axClient.onHostAXChanged = { [weak self] in
+            // Invoqué sur le main run-loop (source AX ajoutée à CFRunLoopGetMain),
+            // comme le pollTimer → même pattern `MainActor.assumeIsolated`.
+            MainActor.assumeIsolated {
+                self?.tickThrottled()
+            }
+        }
+    }
+
     private func observeSuggestionForInstantPaint() {
         guard ProcessInfo.processInfo.environment["SOUFFLEUSE_INSTANT_PAINT"] != nil else { return }
         withObservationTracking {
@@ -2631,8 +2652,13 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         let remainderWords = Self.wholeWordCount(remainder)
         // Recharge uniquement quand le reste passe SOUS le plancher de mots.
         guard remainderWords < SuggestionPolicy.Tuning.ghostRollingMinWords else { return }
-        // Combien de mots demander pour revenir à la profondeur cible.
-        let wantWords = SuggestionPolicy.Tuning.ghostRollingTargetWords - remainderWords
+        // Profondeur cible = la préférence « Longueur du souffle » (predictor.maxWords),
+        // pour que la fenêtre glissante maintienne la MÊME longueur que le ghost initial —
+        // un seul budget global, pas un réglage de refill séparé. Override DEV
+        // MW_ROLL_DEPTH optionnel (défaut = la préférence utilisateur).
+        let targetWords = ProcessInfo.processInfo.environment["MW_ROLL_DEPTH"]
+            .flatMap { Int($0) }.map { max(1, $0) } ?? predictor.maxWords
+        let wantWords = targetWords - remainderWords
         guard wantWords >= 1 else { return }
 
         // Snapshot de l'état pour re-valider à la complétion (anti-stale-append).
@@ -2678,6 +2704,16 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             // effacement ultérieur restaure aussi les mots refillés.
             if !self.ghostAnchorFull.isEmpty {
                 self.ghostAnchorFull += appended
+            }
+            // INSTANT-PAINT du bord DROIT (flag `SOUFFLEUSE_INSTANT_PAINT`). Le refill
+            // appende à `partialRemainder` (PAS à `predictor.suggestion`), donc
+            // l'observation instant-paint ne le couvre pas : sans ce kick, la
+            // croissance à droite attend le prochain poll (≤50 ms) — asymétrie vs le
+            // bord gauche (backspace) peint dans le tick courant. On repeint tout de
+            // suite via le tick (branche partial-remainder synchronisée). Hors flag →
+            // comportement d'origine (peint au prochain tick).
+            if ProcessInfo.processInfo.environment["SOUFFLEUSE_INSTANT_PAINT"] != nil {
+                self.tickThrottled()
             }
         }
     }
