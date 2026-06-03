@@ -564,7 +564,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// ne propagent pas de notifs (coller, certaines web-views). Flag OFF → handler
     /// jamais posé + observer no-op ⇒ byte-identique.
     private func wireAXPushDetection() {
-        guard ProcessInfo.processInfo.environment["SOUFFLEUSE_AX_PUSH"] != nil else { return }
+        guard ProcessInfo.processInfo.environment["SOUFFLEUSE_AX_PUSH_OFF"] == nil else { return }  // ON par défaut (endgame Phase A)
         axClient.onHostAXChanged = { [weak self] in
             // Invoqué sur le main run-loop (source AX ajoutée à CFRunLoopGetMain),
             // comme le pollTimer → même pattern `MainActor.assumeIsolated`.
@@ -575,7 +575,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func observeSuggestionForInstantPaint() {
-        guard ProcessInfo.processInfo.environment["SOUFFLEUSE_INSTANT_PAINT"] != nil else { return }
+        guard ProcessInfo.processInfo.environment["SOUFFLEUSE_INSTANT_PAINT_OFF"] == nil else { return }  // ON par défaut (endgame Phase A)
         withObservationTracking {
             _ = predictor.suggestion
         } onChange: { [weak self] in
@@ -2728,7 +2728,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             // bord gauche (backspace) peint dans le tick courant. On repeint tout de
             // suite via le tick (branche partial-remainder synchronisée). Hors flag →
             // comportement d'origine (peint au prochain tick).
-            if ProcessInfo.processInfo.environment["SOUFFLEUSE_INSTANT_PAINT"] != nil {
+            if ProcessInfo.processInfo.environment["SOUFFLEUSE_INSTANT_PAINT_OFF"] == nil {  // ON par défaut (endgame Phase A)
                 self.tickThrottled()
             }
         }
