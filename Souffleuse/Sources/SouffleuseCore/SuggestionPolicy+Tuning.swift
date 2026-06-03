@@ -276,6 +276,22 @@ extension SuggestionPolicy {
             ProcessInfo.processInfo.environment["SOUFFLEUSE_MIDWORD_LONGGHOST_ON"] != nil
         }
 
+        /// `SOUFFLEUSE_GHOST_STREAM` — peint le longghost AU FIL des tokens (TTFT ~20 ms)
+        /// au lieu d'attendre la génération complète (~300 ms, que la frappe suivante
+        /// annulerait). OFF par défaut ⇒ one-shot d'origine, byte-identique.
+        public static var ghostStreamEnabled: Bool {
+            ProcessInfo.processInfo.environment["SOUFFLEUSE_GHOST_STREAM"] != nil
+        }
+
+        /// `MW_STREAM_MIN` — nb de tokens minimum AVANT le premier partiel peint.
+        /// Évite de flasher 1-2 tokens (« il faut plus que 2-3 tokens mid-mot ») : on
+        /// attend un chunk consistant (~2-3 mots) puis on stream chaque token ensuite.
+        /// Trop haut = on retombe vers le one-shot lent ; ~5 est l'équilibre.
+        public static var ghostStreamMinTokens: Int {
+            if let s = ProcessInfo.processInfo.environment["MW_STREAM_MIN"], let v = Int(s) { return max(1, v) }
+            return 5
+        }
+
         /// `MW_LG_MAXTOKENS` — plafond de tokens de l'unique passe greedy du long-
         /// ghost. Pris en `min()` avec le `maxTokens` de la requête. Défaut 14.
         public static var midWordLongGhostMaxTokens: Int {

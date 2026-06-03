@@ -814,7 +814,24 @@ final class PredictorViewModel {
                 // `useAfterSpaceLongGhost ⇒ midWordLongGhostEnabled`, donc l'après-
                 // espace passe TOUJOURS par cette sous-branche (et jamais l'escalade).
                 if SuggestionPolicy.Tuning.midWordLongGhostEnabled {
-                    let lg = await runtime.midWordLongGhost(request: request)
+                    // STREAMING (flag) : peint chaque partiel dès qu'il sort, via
+                    // l'instant-paint (observation sur `suggestion`). Freshness =
+                    // `planner.isCurrent` + `predictedForPrefix == forPrefix`. La
+                    // finalisation ci-dessous remplace par le résultat pleinement gaté.
+                    let onPartial: (@Sendable (String) -> Void)?
+                    if SuggestionPolicy.Tuning.ghostStreamEnabled {
+                        onPartial = { [weak self] partial in
+                            Task { @MainActor in
+                                guard let self, self.planner.isCurrent(myGeneration) else { return }
+                                self.suggestion = ModelRuntime.OutputFilter.normalizeFrenchTypography(partial)
+                                self.predictedForPrefix = forPrefix
+                                self.suggestionSource = .llm
+                            }
+                        }
+                    } else {
+                        onPartial = nil
+                    }
+                    let lg = await runtime.midWordLongGhost(request: request, onPartial: onPartial)
                     if Task.isCancelled { return }
                     await MainActor.run { [weak self] in
                         guard let self, self.planner.isCurrent(myGeneration) else { return }
@@ -1127,8 +1144,12 @@ final class PredictorViewModel {
         )
 
         let extension_ = await runtime.extendGhost(request: request, maxWords: maxWords)
-        // Re-check génération courante : une predict() concurrente l'aurait bumpée.
-        guard planner.isCurrent(myGeneration) else { return nil }
+        // NOTE : on ne re-checke PLUS `planner.isCurrent(myGeneration)` ici. Ce garde
+        // jetait des refills VALIDES : dès que tu finis de consommer un mot, `predict()`
+        // bumpe le compteur de génération → l'extension (pourtant pour le bon bord droit)
+        // était nil-ée avant même d'atteindre l'AppDelegate. La cohérence est désormais
+        // assurée par la re-validation TOLÉRANTE du call-site (mêmes ancres, conso sur le
+        // même chemin, bord droit intact), qui est la garde autoritaire pour le refill.
         guard let extension_, !extension_.isEmpty else { return nil }
         Log.info(.predictor, "ghost_rolling_refill", count: extension_.count)
         return extension_
