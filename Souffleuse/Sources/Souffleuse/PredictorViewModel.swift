@@ -179,6 +179,14 @@ final class PredictorViewModel {
     /// ~16KB peak, well within budget for a linear scan in <1ms.
     private(set) var historySnapshot: [TypingHistoryEntry] = []
 
+    /// Personal lexicon of the user's DISTINCTIVE terms (proper nouns / brands /
+    /// jargon) for instant L0 word-completion the LLM can't do ("Bin"→"Binance").
+    /// Derived from `historySnapshot`; rebuilt in lockstep with it (rebuild + on
+    /// every accept) so it always reflects the same corpus. Queried by
+    /// `routeInstant`. `@ObservationIgnored` — a lexicon refresh must not redraw
+    /// any view.
+    @ObservationIgnored private var learnedLexicon = LearnedLexicon()
+
     /// Active GGUF model id (the real ghost engine). Mirrored from
     /// `PreferencesStore.ggufModelID` at startup ; changed via `swapGGUF(to:)`.
     private var ggufModelID: String = GGUFModelOption.defaultID
@@ -358,7 +366,7 @@ final class PredictorViewModel {
         switch suggestionSource {
         case .history, .cache, .undoCache:
             suggestionSource = .llm
-        case .wordComplete, .llm, .none:
+        case .wordComplete, .learnedWord, .llm, .none:
             break
         }
         let maxWords = self.maxWords
@@ -370,7 +378,8 @@ final class PredictorViewModel {
         let routeResult = policy.routeInstant(
             userTail: userTail,
             historySnapshot: historySnapshot,
-            wordCompleter: wordCompleter
+            wordCompleter: wordCompleter,
+            lexicon: learnedLexicon
         )
         // `singleLine` here is the single chokepoint for the instant path:
         // corpus / `.history` entries captured from prose can carry a trailing
@@ -405,6 +414,13 @@ final class PredictorViewModel {
                 policy.applyGhost(instantGhost, source: route.source, score: route.score, userTail: userTail)
                 suggestion = ModelRuntime.OutputFilter.normalizeFrenchTypography(instantGhost)
                 suggestionSource = instantSource
+                // Rends le chemin INSTANTANÉ (L0 lexique / L1 corpus) visible dans
+                // l'inspecteur — il n'enregistrait jusqu'ici que le chemin LLM. La
+                // source est mise en `reason` (« instant:learnedWord » pour un
+                // terme appris) pour distinguer lexique vs corpus vs dico.
+                GhostInspector.shared.record(
+                    tail: userTail, verdict: .shown,
+                    reason: "instant:\(instantSource)", content: instantGhost)
             } else {
                 Log.info(.predictor, "ghost_keep_stable", count: suggestion.count)
                 PredictDebug.log("ghost_keep_stable", "current=\(suggestion.debugDescription) candidate=\(instantGhost.debugDescription)")
@@ -1165,6 +1181,8 @@ final class PredictorViewModel {
         // linear scan in SuggestionPolicy's exact-substring helper hits
         // freshest first (matches ingestAccepted's insert-at-0 ordering).
         self.historySnapshot = Array(entries.reversed())
+        // Personal lexicon refresh, in lockstep with the snapshot (same corpus).
+        self.learnedLexicon = LearnedLexicon.build(from: self.historySnapshot)
 
         // Phase 1 personalization : rebuild the llama-token-id corpus n-gram
         // inside the engine. This is the path that biases the llama.cpp
@@ -1211,6 +1229,9 @@ final class PredictorViewModel {
         if self.historySnapshot.count > 200 {
             self.historySnapshot.removeLast(self.historySnapshot.count - 200)
         }
+        // Keep the personal lexicon current with the freshly-accepted term so a
+        // brand the user just typed is offerable on its next occurrence.
+        self.learnedLexicon = LearnedLexicon.build(from: self.historySnapshot)
 
         // Refresh the llama corpus n-gram so the just-accepted continuation is
         // immediately available to bias the decoder. The corpus is small, so a

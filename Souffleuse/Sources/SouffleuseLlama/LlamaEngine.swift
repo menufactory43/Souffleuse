@@ -92,6 +92,27 @@ public struct LlamaSampling: Sendable {
     /// but a polluted corpus leaks more). `0` falls back to the engine default.
     public var nucleusMargin: Float
 
+    /// PROMOTION (learned-term surfacing). The nucleus gate above can only
+    /// RE-RANK candidates the base model already finds plausible — it can never
+    /// surface a learned term the model ranks far down ("Binance", a person's
+    /// name, project jargon). Cotypist surfaces such terms because its corpus
+    /// model can *inject* them, not merely re-weight them. This tier does the
+    /// same, safely: when the matched corpus context is long (`promoteMatchLen`),
+    /// the candidate is well-attested (`promoteMinCount`) AND it dominates the
+    /// observed continuation distribution for that context (`promoteShare`), the
+    /// candidate is lifted to `topLogit + promoteOvershoot` — past the nucleus
+    /// gate — so greedy decoding picks it. The long deterministic context match
+    /// is the evidence that makes this safe: a one-off or low-share match never
+    /// promotes, so a polluted corpus cannot inject junk. `promoteStrongMatches`
+    /// is the master switch (default on); the numeric overrides fall back to the
+    /// engine defaults when `0`.
+    public var promoteStrongMatches: Bool
+    public var promoteMatchLen: Int32
+    public var promoteMinCount: Int32
+    public var promoteShare: Float
+    public var promoteOvershoot: Float
+    public var promoteMaxGap: Float
+
     /// Confidence gate (Cotypist `minBranchProbability` parity). When > 0, the
     /// decode is ABORTED with zero tokens if the FIRST sampled token's softmax
     /// probability is below this threshold — i.e. the model is guessing rather
@@ -126,6 +147,12 @@ public struct LlamaSampling: Sendable {
                 banDigitsLeading: Bool = false,
                 banEmoji: Bool = false,
                 nucleusMargin: Float = 0,
+                promoteStrongMatches: Bool = true,
+                promoteMatchLen: Int32 = 0,
+                promoteMinCount: Int32 = 0,
+                promoteShare: Float = 0,
+                promoteOvershoot: Float = 0,
+                promoteMaxGap: Float = 0,
                 minFirstTokenProb: Float = 0,
                 healPrefix: String? = nil) {
         self.temperature = temperature
@@ -141,6 +168,12 @@ public struct LlamaSampling: Sendable {
         self.banDigitsLeading = banDigitsLeading
         self.banEmoji = banEmoji
         self.nucleusMargin = nucleusMargin
+        self.promoteStrongMatches = promoteStrongMatches
+        self.promoteMatchLen = promoteMatchLen
+        self.promoteMinCount = promoteMinCount
+        self.promoteShare = promoteShare
+        self.promoteOvershoot = promoteOvershoot
+        self.promoteMaxGap = promoteMaxGap
         self.minFirstTokenProb = minFirstTokenProb
         self.healPrefix = healPrefix
     }
@@ -430,6 +463,33 @@ public actor LlamaEngine {
     static let minBiasCount: Int = 2
     static let maxBiasBoost: Float = 6.0
 
+    /// Promotion tier defaults (see `LlamaSampling.promoteStrongMatches`). A
+    /// candidate is promoted past the nucleus gate only when ALL hold:
+    /// `matchLen ≥ promoteMatchLen` (long deterministic context), `count ≥
+    /// promoteMinCount` (well-attested), and its share of the matched context's
+    /// continuation distribution `≥ promoteShare` (it dominates — not one of
+    /// several plausible follow-ups). When promoted, the token's logit is raised
+    /// to `topLogit + promoteOvershoot` so greedy decoding selects it. Tuned by
+    /// the personalization eval (synthetic learned-term corpus, lift over the
+    /// strength-0 baseline). `promoteMatchLen = 5` is precision-tuned: a 3–4
+    /// token trailing coincidence with a learned phrase ("…que je" → a wallet
+    /// brand, "…j'utilise" → a software name) would otherwise ride the learned
+    /// entry to its term and inject it into an unrelated sentence. Requiring 5
+    /// replayed context tokens drove adversarial over-injection to 0/33 while
+    /// keeping 25/25 learned-term recall in the eval. Shorter matches still get
+    /// the conservative nucleus-gated boost — graceful degradation, not silence.
+    public static let promoteMatchLen: Int = 5
+    public static let promoteMinCount: Int = 3
+    public static let promoteShare: Float = 0.6
+    public static let promoteOvershoot: Float = 0.5
+    /// Promotion safety ceiling: a candidate is only promoted when its model
+    /// logit is within this many units of the top logit. Much wider than
+    /// `nucleusMargin` (8) — so a moderately-implausible learned term still
+    /// surfaces — but finite, so a token the model ranks absurdly low is never
+    /// lifted to the top (which would also spoof the `minFirstTokenProb` gate).
+    /// Calibrated by the personalization eval gap sweep.
+    static let promoteMaxGap: Float = 35.0
+
     /// One-time global backend init, guarded so it runs at most once per
     /// process even across multiple engine instances.
     private static let backendOnce: Void = {
@@ -592,6 +652,47 @@ public actor LlamaEngine {
     /// callers can build context windows in token space.
     public func tokenizeForCorpus(_ text: String) -> [Int32] {
         tokenize(text, addSpecial: false)
+    }
+
+    /// Result of `probePromotion` : the STRUCTURAL promotion-arming decision for
+    /// a prefix, computed with the exact production tokenizer, suffix array and
+    /// thresholds. `wouldArm` is the necessary condition (long, well-attested,
+    /// dominant corpus context) ; actual surfacing additionally requires the
+    /// candidate to sit within `promoteMaxGap` of the top logit (measured only
+    /// by a real forward pass). Carries no user text — only counts/ratios.
+    public struct PromotionProbe: Sendable {
+        public let matchLen: Int
+        public let topCount: Int
+        public let total: Int
+        public let share: Float
+        public let wouldArm: Bool
+    }
+
+    /// Probes whether the promotion tier would ARM for `prefix` against the
+    /// current corpus, reusing the live thresholds. Lets an offline eval measure
+    /// how often real typed contexts replay a learned context strongly enough —
+    /// directly answering the "does deduped history ever reach count ≥ 3"
+    /// question — without running the model.
+    public func probePromotion(
+        prefix: String,
+        matchLen: Int = LlamaEngine.promoteMatchLen,
+        minCount: Int = LlamaEngine.promoteMinCount,
+        share: Float = LlamaEngine.promoteShare
+    ) -> PromotionProbe {
+        let ids = tokenize(prefix, addSpecial: false)
+        let window = Array(ids.suffix(LlamaCorpusSuffixArray.maxMatchLen))
+        guard !window.isEmpty else { return PromotionProbe(matchLen: 0, topCount: 0, total: 0, share: 0, wouldArm: false) }
+        let m = corpusSuffixArray.longestMatch(after: window[window.startIndex...])
+        guard !m.candidates.isEmpty else {
+            return PromotionProbe(matchLen: m.matchLength, topCount: 0, total: 0, share: 0, wouldArm: false)
+        }
+        let total = m.candidates.values.reduce(0, +)
+        let top = m.candidates.values.max() ?? 0
+        let shareVal = total > 0 ? Float(top) / Float(total) : 0
+        let arm = m.matchLength >= matchLen
+            && top >= minCount
+            && Float(top) >= share * Float(max(1, total))
+        return PromotionProbe(matchLen: m.matchLength, topCount: top, total: total, share: shareVal, wouldArm: arm)
     }
 
     // MARK: - Tokenization
@@ -1058,6 +1159,12 @@ public actor LlamaEngine {
         // n-gram fallback only ever reads the last two.
         let windowLen = LlamaCorpusSuffixArray.maxMatchLen
         var recentIds: [Int32] = biasActive ? Array(promptTokens.suffix(windowLen)) : []
+        // Tokens this call has ALREADY emitted. A promoted candidate that has
+        // already been emitted is not promoted again — otherwise a learned entry
+        // with a repeated/cyclic token could re-arm promotion on its own output
+        // and loop, since the promotion target (topLogit + overshoot) ignores
+        // the repeatPenalty stage. Distinct-token learned phrases are unaffected.
+        var emittedIds = Set<Int32>()
 
         // Token-healing piece cache (built once per load, reused across calls).
         // Empty unless healing is active for THIS generation — `remainingHeal`
@@ -1155,9 +1262,62 @@ public actor LlamaEngine {
                     let margin = sampling.nucleusMargin > 0 ? sampling.nucleusMargin : Self.nucleusMargin
                     let floor = topLogit - margin
                     let sharpen = 1.0 + 0.5 * Float(max(0, matchLen - 1))
+
+                    // ── PROMOTION tier ───────────────────────────────────────
+                    // Resolve the promotion knobs (sampling override → engine
+                    // default). Promotion only fires for a long, well-attested,
+                    // DOMINANT corpus continuation — the evidence that makes
+                    // surfacing a model-implausible learned term ("Binance", a
+                    // name) safe. `total` is the denominator for the dominance
+                    // share over THIS context's observed continuations.
+                    let pMatchLen = sampling.promoteMatchLen > 0
+                        ? Int(sampling.promoteMatchLen) : Self.promoteMatchLen
+                    let pMinCount = sampling.promoteMinCount > 0
+                        ? Int(sampling.promoteMinCount) : Self.promoteMinCount
+                    let pShare = sampling.promoteShare > 0
+                        ? sampling.promoteShare : Self.promoteShare
+                    let pOvershoot = sampling.promoteOvershoot > 0
+                        ? sampling.promoteOvershoot : Self.promoteOvershoot
+                    let pMaxGap = sampling.promoteMaxGap > 0
+                        ? sampling.promoteMaxGap : Self.promoteMaxGap
+                    let promotionArmed = sampling.promoteStrongMatches
+                        && matchLen >= pMatchLen
+                    let total = promotionArmed ? candidates.values.reduce(0, +) : 0
+                    // Promotion lifts a candidate ABOVE the nucleus gate, but only
+                    // within a FINITE, much wider band (`promoteMaxGap` ≫
+                    // nucleusMargin). This is the safety ceiling: we surface a
+                    // learned term the model ranks moderately low ("Binance"), but
+                    // never resurrect one it finds absurd (hundreds of logits
+                    // down) — which would also defeat the `minFirstTokenProb`
+                    // confidence gate that reads these in-place-edited logits.
+                    let promoteFloor = topLogit - pMaxGap
+
                     for (id, count) in candidates
                         where id >= 0 && id < nVocab && count >= Self.minBiasCount {
                         let i = Int(id)
+                        // Promote a dominant learned continuation past the nucleus
+                        // gate so greedy decoding picks it — but only when it is
+                        // within the promotion band, not banned/healing-masked
+                        // (-inf), and not already emitted this call (anti-loop).
+                        // Promotion only earns its keep when the model would
+                        // MISS the term on its own — i.e. it sits BELOW the
+                        // nucleus floor. A corpus continuation the model already
+                        // ranks inside the nucleus needs no promotion: greedy (or
+                        // the gentle boost below) will pick it, and promoting it
+                        // would only risk overriding a correct base prediction on
+                        // a common recurrent phrase. Real-data eval showed those
+                        // in-nucleus promotions caused small regressions with zero
+                        // recall gain — so we skip them and reserve promotion for
+                        // the genuinely model-implausible learned term.
+                        if promotionArmed && count >= pMinCount
+                            && Float(count) >= pShare * Float(max(1, total))
+                            && logits[i] < floor
+                            && logits[i] >= promoteFloor
+                            && !emittedIds.contains(id) {
+                            let target = topLogit + pOvershoot
+                            if logits[i] < target { logits[i] = target }
+                            continue
+                        }
                         guard logits[i] >= floor else { continue }   // implausible → skip
                         let boost = min(Self.maxBiasBoost,
                                         strength * sharpen * logf(Float(count)))
@@ -1217,6 +1377,7 @@ public actor LlamaEngine {
                 if recentIds.count > windowLen {
                     recentIds.removeFirst(recentIds.count - windowLen)
                 }
+                emittedIds.insert(tokenId)
             }
 
             if firstTokenAt == nil { firstTokenAt = Date() }

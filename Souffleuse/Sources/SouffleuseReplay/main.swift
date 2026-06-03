@@ -471,6 +471,7 @@ func sourceLabel(_ s: SuggestionSource) -> String {
     switch s {
     case .none: return "none"
     case .wordComplete: return "wordComplete"
+    case .learnedWord: return "learnedWord"
     case .history: return "history"
     case .cache: return "cache"
     case .undoCache: return "undoCache"
