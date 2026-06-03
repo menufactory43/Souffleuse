@@ -587,13 +587,22 @@ guard await engine.load(modelPath: ggufPath, contextTokens: 4096) else {
 }
 
 // Real typing history → L1 corpus recall + engine n-gram (matches production).
-let store = TypingHistoryStore()
-let history = await store.allEntries()
-err("[midword] history entries: \(history.count)")
-if !history.isEmpty {
-    await engine.setCorpus(history.map { e in
-        e.contextBefore.isEmpty ? e.accepted : e.contextBefore + " " + e.accepted
-    })
+// MW_NO_HISTORY=1 → skip the encrypted-store load entirely (no Keychain prompt,
+// no SQLCipher lock contention with a concurrent run). L1/corpus then stays
+// empty — fine for the L0-dico vs L2-longghost comparison, which needs neither.
+let history: [TypingHistoryEntry]
+if ProcessInfo.processInfo.environment["MW_NO_HISTORY"] != nil {
+    history = []
+    err("[midword] MW_NO_HISTORY: store load skipped (L1/corpus disabled)")
+} else {
+    let store = TypingHistoryStore()
+    history = await store.allEntries()
+    err("[midword] history entries: \(history.count)")
+    if !history.isEmpty {
+        await engine.setCorpus(history.map { e in
+            e.contextBefore.isEmpty ? e.accepted : e.contextBefore + " " + e.accepted
+        })
+    }
 }
 
 let wordCompleter = WordCompleter()

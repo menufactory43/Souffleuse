@@ -390,6 +390,7 @@ extension SuggestionPolicy {
         // MARK: - D-06 Source priors
         public static let sourcePrior: [SuggestionSource: Float] = [
             .wordComplete: 0.55,
+            .learnedWord:  0.80,   // terme distinctif appris (gates freq/dominance déjà appliqués)
             .history:      0.75,
             .llm:          0.60,
             .cache:        0.70,

@@ -40,6 +40,7 @@ import SouffleuseTyping
 public enum SuggestionSource: Sendable {
     case none           // suggestion is "" or stale
     case wordComplete   // Layer 0 — NSSpellChecker
+    case learnedWord    // Layer 0 — LearnedLexicon (user's distinctive terms)
     case history        // Layer 1 — TypingHistoryStore match
     case cache          // predictCache hit (previous LLM result)
     case undoCache      // undo-as-ghost restoration
@@ -848,6 +849,7 @@ public final class SuggestionPolicyEngine {
         switch s {
         case .none: return "vide"
         case .wordComplete: return "wordComplete"
+        case .learnedWord: return "learnedWord"
         case .history: return "corpus"
         case .cache: return "cache"
         case .undoCache: return "undo"
@@ -868,7 +870,7 @@ public final class SuggestionPolicyEngine {
         switch currentSource {
         case .history, .cache, .undoCache:
             currentSource = .llm
-        case .wordComplete, .llm, .none:
+        case .wordComplete, .learnedWord, .llm, .none:
             break
         }
     }
@@ -886,7 +888,8 @@ public final class SuggestionPolicyEngine {
     public func routeInstant(
         userTail: String,
         historySnapshot: [TypingHistoryEntry],
-        wordCompleter: WordCompleter
+        wordCompleter: WordCompleter,
+        lexicon: LearnedLexicon? = nil
     ) -> GhostUpdate? {
         // Recall verbatim (ghost sans LLM) ne considère QUE la prose de
         // l'utilisateur. Les fragments `.accept` (mot/bout de phrase validé au
@@ -954,6 +957,25 @@ public final class SuggestionPolicyEngine {
             // word ("Bonj" → "our"). Never extend an already-complete word — that
             // is the "vais" → "vaisselle" hijack; let the next-word path own it.
             if partialIsComplete { return nil }
+            // ── L0 (learned lexicon) — the user's DISTINCTIVE terms (Binance,
+            // Fiscalio, a client's name) that the base model cannot produce and the
+            // system dictionary does not know. Capitalized-prefix-gated +
+            // freq/dominance gates inside the lexicon (measured 90% precision on
+            // real history). Pre-empts the long-ghost (instant, no inference) —
+            // this is the on-device "personal lexicon ∥ neural" pattern (SwiftKey/
+            // Gboard). Tried AFTER phrase-level corpus recall (L1 above) but
+            // BEFORE the (paused) system completer.
+            if let lexicon,
+               let suffix = lexicon.completion(for: midWordPartial),
+               !suffix.isEmpty {
+                let score = SuggestionPolicy.score(
+                    source: .learnedWord, ghost: suffix, userTail: userTail
+                )
+                if score.passesGate {
+                    Log.info(.predictor, "ghost_learned_word", count: suffix.count)
+                    return GhostUpdate(text: suffix, source: .learnedWord, score: score)
+                }
+            }
             // L0 system completer is PAUSED (off) by default — see
             // Tuning.wordCompleterEnabledRuntime. Mid-word is owned by the
             // context-aware LLM; re-enable for A/B via SOUFFLEUSE_WORDCOMPLETER=1.

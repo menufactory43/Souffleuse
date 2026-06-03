@@ -18,6 +18,7 @@ let package = Package(
         .executable(name: "SouffleuseAXProbe", targets: ["SouffleuseAXProbe"]),
         .executable(name: "SouffleuseContextProbe", targets: ["SouffleuseContextProbe"]),
         .executable(name: "SouffleuseReplay", targets: ["SouffleuseReplay"]),
+        .executable(name: "SouffleuseBoundaryAblation", targets: ["SouffleuseBoundaryAblation"]),
         .executable(name: "SouffleuseCorpusSeed", targets: ["SouffleuseCorpusSeed"]),
         .executable(name: "SouffleuseTranslateBench", targets: ["SouffleuseTranslateBench"]),
         .library(name: "SouffleuseAX", targets: ["SouffleuseAX"]),
@@ -130,6 +131,19 @@ let package = Package(
             dependencies: ["SouffleuseLlama"]
         ),
         .executableTarget(
+            name: "SouffleuseTTFTBench",
+            dependencies: ["SouffleuseLlama"]
+        ),
+        .executableTarget(
+            name: "SouffleuseBoundaryAblation",
+            dependencies: [
+                "SouffleuseLlama",
+                "SouffleuseCore",
+                "SouffleusePersonalization",
+                "SouffleuseTyping",
+            ]
+        ),
+        .executableTarget(
             name: "SouffleuseAXProbe",
             dependencies: ["SouffleuseAX", "SouffleuseOverlay", "SouffleuseInput"]
         ),
@@ -209,6 +223,48 @@ let package = Package(
         ),
         .executableTarget(
             name: "SouffleuseRecallEval",
+            dependencies: [
+                "SouffleuseCore",
+                "SouffleusePersonalization",
+                "SouffleuseTyping",
+            ]
+        ),
+        .executableTarget(
+            name: "SouffleusePersonalizationEval",
+            dependencies: [
+                "SouffleuseCore",
+                "SouffleuseLlama",
+                "SouffleuseLog",
+                "SouffleusePersonalization",
+                "SouffleuseTyping",
+            ]
+        ),
+        .executableTarget(
+            name: "SouffleuseRealPersoEval",
+            dependencies: [
+                "SouffleuseCore",
+                "SouffleuseLlama",
+                "SouffleuseLog",
+                "SouffleusePersonalization",
+                "SouffleuseTyping",
+            ]
+        ),
+        .executableTarget(
+            name: "SouffleuseVocabCompleteEval",
+            dependencies: [
+                "SouffleusePersonalization",
+            ]
+        ),
+        .executableTarget(
+            name: "SouffleuseContextCopyEval",
+            dependencies: [
+                "SouffleuseCore",
+                "SouffleuseLlama",
+                "SouffleuseLog",
+            ]
+        ),
+        .executableTarget(
+            name: "SouffleuseLexiconRouteEval",
             dependencies: [
                 "SouffleuseCore",
                 "SouffleusePersonalization",
