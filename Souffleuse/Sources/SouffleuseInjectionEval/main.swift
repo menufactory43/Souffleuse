@@ -2,6 +2,7 @@ import Foundation
 import SouffleuseCore
 import SouffleuseLlama
 import SouffleuseLog
+import SouffleuseCorpus
 import SouffleusePersonalization
 
 // Souffleuse Injection A/B/C Eval — does injecting the user's own prose into the

@@ -12,8 +12,10 @@ SHIPPING_DIRS=(
   "Sources/SouffleuseInput"
   "Sources/SouffleuseLog"
   "Sources/SouffleuseOverlay"
+  "Sources/SouffleuseCorpus"
   "Sources/SouffleusePersonalization"
   "Sources/SouffleusePrompt"
+  "Sources/SouffleuseTyping"
 )
 
 red() { printf '\033[31m%s\033[0m\n' "$1"; }

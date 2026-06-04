@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import SouffleuseCorpus
 import SouffleusePersonalization
 
 /// Couvre le lexique personnel L0 : un terme distinctif appris (« Binance ») doit

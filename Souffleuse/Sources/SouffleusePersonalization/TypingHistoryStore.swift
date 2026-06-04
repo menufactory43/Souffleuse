@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import SouffleuseCorpus
 import SouffleuseLog
 import SouffleuseTyping
 import CSQLCipher

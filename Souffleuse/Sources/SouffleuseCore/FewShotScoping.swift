@@ -1,5 +1,5 @@
 import Foundation
-import SouffleusePersonalization
+import SouffleuseCorpus
 
 /// Sélection de la prose de démonstration few-shot, **scopée par registre**
 /// (P1.2 / P1.3).

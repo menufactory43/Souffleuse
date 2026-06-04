@@ -1,6 +1,6 @@
 import Foundation
 import SouffleuseLog
-import SouffleusePersonalization
+import SouffleuseCorpus
 import SouffleuseTyping
 
 /// Phase 4 — Cascade Quality + Architecture.
