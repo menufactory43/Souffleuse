@@ -1395,6 +1395,23 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // not appending — the ghost would land in the wrong position and suggest
         // the wrong continuation. Hide immediately and bail.
         if Self.shouldSuppressForCaretContext(text: text, caretIndex: caretIndex) {
+            // Mid-line (opt-in): rather than suppress, float the suggestion as a
+            // pill BELOW the caret line (Cotypist "Mid-line completion"). Fires
+            // wherever the caret is — including INSIDE a word ("couc|ou" →
+            // "couche…"), which is exactly Cotypist's behaviour. Same
+            // prefix-continuation; only the render differs (an inline ghost would
+            // overlap the glyphs that follow the caret). Off by default.
+            if store.midLineGhostEnabled, let rect = rectForGhost {
+                runMidLineGhost(
+                    prefix: prefix,
+                    rect: rect,
+                    text: text,
+                    caretIndex: caretIndex,
+                    snap: snap,
+                    font: hostFontForOverlay
+                )
+                return
+            }
             overlay.hide()
             presenceHideNow()
             interceptor.setActive(false)
@@ -1960,7 +1977,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             let bundleID = preSnap.bundleID
 
             // Partial accept enabled → split the suggestion, inject just the
-            // next chunk, and keep the rest as a ghost remainder.
+            // next chunk, and keep the rest as a ghost remainder. Mid-line walks
+            // word-by-word too: the remainder is re-rendered in the pill (which
+            // visibly shrinks) by `runMidLineGhost`, not as an inline ghost.
             let partialConfig: (enabled: Bool, trailingSpace: Bool) = MainActor.assumeIsolated {
                 (store.partialAcceptEnabled, store.trailingSpaceOnPartial)
             }
@@ -2789,6 +2808,100 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                                        predictedForPrefix: String,
                                        currentPrefix: String) -> Bool {
         !suggestion.isEmpty && predictedForPrefix == currentPrefix
+    }
+
+    /// Mid-line ghost (opt-in, `midLineGhostEnabled`): the caret sits inside a
+    /// line, where the standard inline ghost is suppressed. We run the SAME
+    /// prefix-continuation prediction as the end-of-line path and float the
+    /// suggestion as a pill BELOW the caret line. Word-by-word accept works here
+    /// too: after a Tab partial accept the owed `partialRemainder` is re-rendered
+    /// in the pill (which visibly shrinks) instead of as an inline ghost — the
+    /// inline partial-remainder block in `tick()` is unreachable behind the
+    /// mid-line gate, so the sync check is mirrored here. Deliberately bypasses
+    /// the typo and mid-word-rolling machinery — mid-line is a plain continuation
+    /// à la Cotypist. The debounce/predict block mirrors the end-of-line path so
+    /// cancel-on-keystroke still holds.
+    @MainActor
+    private func runMidLineGhost(prefix: String, rect: CGRect, text: String, caretIndex: Int, snap: AXSnapshot, font: NSFont?) {
+        // Mid-line never shows a typo strike or a rolling mid-word ghost: clear
+        // any lingering typo state so a stale strike can't survive here.
+        currentTypo = nil
+        typoSettleKey = nil
+
+        // Word-by-word: while a Tab-accept remainder is owed AND the AX text still
+        // matches exactly what we injected, render the SHRINKING remainder in the
+        // pill and skip prediction. Each subsequent Tab consumes the next word
+        // (handleKey's partial-accept path), and this re-renders the smaller
+        // remainder on the next tick.
+        if !partialRemainder.isEmpty {
+            let expected = partialAcceptedAtPrefix + partialAcceptedSoFar
+            // Synced — or the async chunk inject hasn't fully landed yet, so the
+            // AX prefix is still a prefix of what we expect. Either way keep the
+            // remainder painted and skip predict; a real keystroke that diverges
+            // falls through below.
+            // STRICT equality only. A `partialRemainder` is the tail of a walk
+            // anchored at one exact caret position; it must render ONLY when the
+            // AX prefix is exactly where the walk left it. The earlier
+            // `expected.hasPrefix(prefix)` tolerance leaked: navigating to ANY
+            // earlier caret whose prefix is a prefix of `expected` (e.g. clicking
+            // back into already-typed text while an end-of-line walk was live)
+            // matched, and the stale remainder re-appeared in the pill. The
+            // async-inject window is shorter than one 80 ms poll, so strict
+            // equality holds across a normal Tab walk; anything else is a real
+            // move and must regenerate.
+            if prefix == expected {
+                overlay.showPill(text: partialRemainder, at: rect, hostText: text, caretIndex: caretIndex, hostFont: font)
+                interceptor.setActive(true)
+                return
+            }
+            // Moved off the walk (navigation or divergent typing): drop the stale
+            // remainder and fall through to a fresh prediction for THIS position.
+            partialRemainder = ""
+            partialAcceptedSoFar = ""
+            partialAcceptedAtPrefix = ""
+            partialAcceptedAtBundleID = nil
+        }
+
+        if prefix != lastPredictedPrefix {
+            // Clean slate per mid-line position. A suggestion generated for a
+            // DIFFERENT caret (e.g. the end-of-line ghost) must NOT bleed into the
+            // pill: the instant path (L0/L1) can keep the old `suggestion` while
+            // stamping the new `predictedForPrefix`, so the stale ghost would pass
+            // the freshness gate and render here. Wiping it makes the "a ghost was
+            // already showing" case behave exactly like the "nothing was showing"
+            // case — only a completion generated FOR this position can appear.
+            predictor.cancel()
+            predictDebounceTask?.cancel()
+            let capturedPrefix = prefix
+            let capturedContext = cachedEnrichmentPrefix
+            let capturedCustom = CustomInstructionsWindow.current()
+            let capturedSnap = snap
+            predictDebounceTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: Self.predictDebounceNanos)
+                guard !Task.isCancelled, let self else { return }
+                guard self.lastPredictedPrefix != capturedPrefix else { return }
+                self.lastPredictedPrefix = capturedPrefix
+                self.predictor.predict(
+                    prefix: capturedPrefix,
+                    contextPrefix: capturedContext,
+                    customInstructions: capturedCustom,
+                    axSnapshot: capturedSnap
+                )
+            }
+        }
+
+        let suggestion = predictor.suggestion
+        guard Self.shouldRenderSuggestion(suggestion: suggestion,
+                                          predictedForPrefix: predictor.predictedForPrefix,
+                                          currentPrefix: prefix) else {
+            overlay.hide()
+            interceptor.setActive(false)
+            return
+        }
+        // First paint of a fresh suggestion. Tab will inject its first word and
+        // arm `partialRemainder`, which the block above then walks word-by-word.
+        overlay.showPill(text: suggestion, at: rect, hostText: text, caretIndex: caretIndex, hostFont: font)
+        interceptor.setActive(true)
     }
 
     /// Suppress the ghost when non-whitespace text remains on the CURRENT line
