@@ -38,9 +38,9 @@
   <string>https://souffleuse.app/appcast.xml</string>
   <key>SUEnableAutomaticChecks</key>
   <false/>
-  <!-- TODO: remplacer par la cle publique base64 produite par generate_keys -->
-  <!-- (cf. SPARKLE-RELEASE.md). NE JAMAIS committer de cle PRIVEE. -->
+  <!-- Cle publique EdDSA (generate_keys, 2026-06-04). La cle PRIVEE vit dans le -->
+  <!-- trousseau de session du dev (cf. SPARKLE-RELEASE.md) — JAMAIS dans le repo. -->
   <key>SUPublicEDKey</key>
-  <string>PLACEHOLDER_REMPLACER_PAR_LA_CLE_PUBLIQUE_EDDSA</string>
+  <string>vUuhm8w0CZyB1qeW6M+ctrqWcGmNcmHGc9rwVY4HTWQ=</string>
 </dict>
 </plist>
