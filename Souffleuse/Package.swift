@@ -229,6 +229,15 @@ let package = Package(
                 "SouffleuseTyping",
             ]
         ),
+        // JETABLE (dev-only) — harnais d'eval perso consolidé, à supprimer après usage.
+        .executableTarget(
+            name: "SouffleuseCorpusEval",
+            dependencies: [
+                "SouffleuseCore",
+                "SouffleusePersonalization",
+                "SouffleuseTyping",
+            ]
+        ),
         .executableTarget(
             name: "SouffleusePersonalizationEval",
             dependencies: [
