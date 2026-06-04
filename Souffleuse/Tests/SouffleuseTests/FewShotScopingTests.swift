@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import SouffleuseCore
+import SouffleuseCorpus
 import SouffleusePersonalization
 
 /// Couvre le scoping few-shot par registre (P1.2 / P1.3) : la prose injectée

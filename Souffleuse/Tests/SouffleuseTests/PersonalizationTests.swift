@@ -2,6 +2,7 @@ import CryptoKit
 import Foundation
 import Testing
 import SouffleuseTyping
+import SouffleuseCorpus
 @testable import SouffleusePersonalization
 
 // MARK: - Helpers

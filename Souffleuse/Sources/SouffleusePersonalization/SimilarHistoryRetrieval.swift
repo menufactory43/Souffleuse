@@ -1,4 +1,5 @@
 import Foundation
+import SouffleuseCorpus
 
 /// Few-shot dynamique : retrouve les entrées d'historique les plus similaires
 /// au texte que l'utilisateur est en train de taper, pour les injecter comme

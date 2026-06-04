@@ -1,4 +1,5 @@
 import AppKit
+import SouffleuseCorpus
 import SouffleusePersonalization
 import SwiftUI
 

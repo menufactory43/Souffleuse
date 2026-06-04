@@ -1,5 +1,5 @@
 import Foundation
-import SouffleusePersonalization
+import SouffleuseCorpus
 
 /// Cluster de **registre générique** déduit du bundleID de l'app focus.
 ///
