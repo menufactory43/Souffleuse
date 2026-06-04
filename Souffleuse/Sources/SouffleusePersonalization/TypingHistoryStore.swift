@@ -278,7 +278,7 @@ public actor TypingHistoryStore {
             let rowID = sqlite3_column_int64(stmt, 0)
             let ctx = columnText(stmt, 1)
             let acc = columnText(stmt, 2)
-            if isTruncatedFragment(contextBefore: ctx, accepted: acc) {
+            if Self.isTruncatedFragment(contextBefore: ctx, accepted: acc, typoDetector: typoDetector) {
                 corruptIDs.append(rowID)
             }
         }
@@ -299,34 +299,69 @@ public actor TypingHistoryStore {
 
     // MARK: - Mutations
 
-    /// Appends one entry, applying the secret heuristic and FIFO purge.
-    public func append(_ entry: TypingHistoryEntry) {
-        load()
-        guard db != nil else { return }
+    /// Décision d'admission **unique** d'une entrée dans le corpus de
+    /// personnalisation, consultée à la fois par le disque (`append`) ET par
+    /// l'ingestion EN MÉMOIRE (`PredictorViewModel.ingestAccepted`).
+    ///
+    /// Avant, `append` appliquait 4 gardes (longueur, secret, fragment, mot
+    /// tronqué) mais l'ingestion mémoire n'en appliquait qu'UNE (secret, P1.5) :
+    /// un fragment / mot tronqué / payload <3 char accepté au Tab entrait dans le
+    /// snapshot mémoire (lexique appris + biais n-gram de la session) alors que le
+    /// disque le rejetait, puis « disparaissait » silencieusement au redémarrage.
+    /// Les deux chemins partagent désormais cette fonction : un seul endroit
+    /// définit ce qu'est une entrée corpus admissible (plus de divergence possible).
+    ///
+    /// `nonisolated static` + `typoDetector` injecté → appelable hors de l'acteur
+    /// (le hot-path d'accept reste synchrone côté PVM).
+    public enum AdmissionRejection: String, Sendable {
+        case tooShort         // payload trimmé < 3 caractères
+        case secretLike       // SecretHeuristic.looksLikeSecret
+        case fragment         // résidu live-consume ("s de", "t es")
+        case truncatedFragment // mot tronqué mid-glue ("vér"+"ifi")
+    }
+
+    public nonisolated static func admissionRejection(
+        contextBefore: String,
+        accepted: String,
+        typoDetector: TypoDetector
+    ) -> AdmissionRejection? {
         // Measure the TRIMMED length: a space-padded one-letter payload ("  f")
         // would otherwise satisfy a raw count>=3 while looksLikeFragment and
         // isTruncatedFragment (which trim first) miss it. Gate the real payload.
-        guard entry.accepted.trimmingCharacters(in: .whitespacesAndNewlines).count >= 3 else { return }
-        if SecretHeuristic.looksLikeSecret(entry.accepted) {
-            Log.info(.context, "history_skipped_secretlike")
-            return
-        }
+        if accepted.trimmingCharacters(in: .whitespacesAndNewlines).count < 3 { return .tooShort }
+        if SecretHeuristic.looksLikeSecret(accepted) { return .secretLike }
         // Structural junk gate : reject the live-consume residue that polluted
         // the corpus during debugging ("s de", "t es" — a lone leading letter
         // then a space). Deliberately NOT a dictionary check: that would reject
         // the user's own uncommon vocabulary (proper nouns, jargon), which is
         // exactly what personalization must learn. Only obvious fragments go.
-        if Self.looksLikeFragment(entry.accepted) {
-            Log.info(.context, "history_skipped_fragment")
-            return
-        }
+        if looksLikeFragment(accepted) { return .fragment }
         // Dictionary-aware truncated sub-word gate: if both contextBefore and
         // accepted share a word boundary (mid-word glue) AND the merged boundary
         // word is NOT valid AND accepted has no further segment, this is a
         // truncated fragment — never record it (it would corrupt joinHistory
         // reconstruction as "vér ifi" later).
-        if isTruncatedFragment(contextBefore: entry.contextBefore, accepted: entry.accepted) {
-            Log.info(.context, "history_skipped_truncated_fragment")
+        if isTruncatedFragment(contextBefore: contextBefore, accepted: accepted, typoDetector: typoDetector) {
+            return .truncatedFragment
+        }
+        return nil
+    }
+
+    /// Appends one entry, applying the shared admission gate and FIFO purge.
+    public func append(_ entry: TypingHistoryEntry) {
+        load()
+        guard db != nil else { return }
+        if let reason = Self.admissionRejection(
+            contextBefore: entry.contextBefore,
+            accepted: entry.accepted,
+            typoDetector: typoDetector
+        ) {
+            switch reason {
+            case .tooShort: break   // silent (unchanged: the length guard never logged)
+            case .secretLike: Log.info(.context, "history_skipped_secretlike")
+            case .fragment: Log.info(.context, "history_skipped_fragment")
+            case .truncatedFragment: Log.info(.context, "history_skipped_truncated_fragment")
+            }
             return
         }
         // Dedup: collapse exact repeats of the same accepted text (same source)
@@ -371,7 +406,7 @@ public actor TypingHistoryStore {
     ///     This guards against next-word accepts where both sides happen to be
     ///     word-chars ("premiere"+"entrée"): "entrée" IS valid on its own, so it
     ///     is a complete next-word continuation, not a sub-word fragment.
-    private func isTruncatedFragment(contextBefore: String, accepted: String) -> Bool {
+    private static func isTruncatedFragment(contextBefore: String, accepted: String, typoDetector: TypoDetector) -> Bool {
         guard let cbLast = contextBefore.last, isWordChar(cbLast),
               let accFirst = accepted.first, isWordChar(accFirst) else {
             return false  // not a word-char boundary → not a mid-word glue
@@ -395,13 +430,13 @@ public actor TypingHistoryStore {
     }
 
     /// Whether a character is a word character (mirrors OutputFilter.isWordChar).
-    private func isWordChar(_ c: Character) -> Bool {
+    private static func isWordChar(_ c: Character) -> Bool {
         c.isLetter || c.isNumber || c == "'" || c == "'" || c == "-"
     }
 
     /// Returns the trailing run of word-chars from `s` (mirrors
     /// OutputFilter.trailingPartialWord without the SouffleuseCore import).
-    private func trailingPartialWord(_ s: String) -> String {
+    private static func trailingPartialWord(_ s: String) -> String {
         var end = s.endIndex
         while end > s.startIndex {
             let prev = s.index(before: end)
@@ -412,7 +447,7 @@ public actor TypingHistoryStore {
     }
 
     /// Returns the leading run of word-chars from `s` (mirrors OutputFilter.leadingWordRun).
-    private func leadingWordRun(_ s: String) -> String {
+    private static func leadingWordRun(_ s: String) -> String {
         var out = ""
         for c in s {
             if isWordChar(c) { out.append(c) } else { break }
