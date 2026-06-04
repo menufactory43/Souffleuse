@@ -905,9 +905,9 @@ public final class SuggestionPolicyEngine {
         // dans un autre cluster, et la précision monte (corpus homogène). Pas de
         // fallback cross-cluster : un cluster connu mais sans prose ne rappelle
         // rien (le LLM gère) — privacy + précision d'abord.
-        let proseSnapshot = historySnapshot.filter {
-            $0.source == .prose && (activeDomain == .other || DomainCluster.cluster(for: $0.bundleID) == activeDomain)
-        }
+        // Scope partagé avec le few-shot L2 (`FewShotScoping`) : même prédicat
+        // `.prose` + cluster, défini une seule fois dans `DomainCluster.scopedProse`.
+        let proseSnapshot = DomainCluster.scopedProse(historySnapshot, to: activeDomain)
         // Cas mid-word — historique d'abord (parité Cotypist), puis L0 système.
         if let last = userTail.last, last.isLetter {
             // Rappel de phrase mid-mot : le fragment de mot en cours + son
