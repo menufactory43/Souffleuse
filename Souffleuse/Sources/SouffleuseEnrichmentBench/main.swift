@@ -2,7 +2,6 @@ import Foundation
 import MLX
 import MLXLLM
 import MLXLMCommon
-import SouffleusePersonalization
 
 // Souffleuse Enrichment A/B Bench (Phase 2.5.D)
 //
@@ -272,9 +271,6 @@ func divergence(_ a: String, _ b: String) -> Double {
 setbuf(stdout, nil)
 setbuf(stderr, nil)
 
-let args = CommandLine.arguments
-let personalizationMode = args.contains("--personalization-ab")
-
 let modelId = "mlx-community/gemma-3-1b-pt-4bit"
 let configuration = ModelConfiguration(id: modelId, defaultPrompt: "")
 MLX.GPU.set(cacheLimit: 20 * 1024 * 1024)
@@ -288,124 +284,6 @@ do {
     exit(1)
 }
 FileHandle.standardError.write(Data("[A/B bench] model ready, running \(cases.count) cases × 2…\n".utf8))
-
-// MARK: - Personalization A/B
-//
-// `--personalization-ab` flag : alternative bench that compares stock generation
-// vs generation biased by an n-gram model prepopulated with a synthetic FR
-// corpus. The corpus is intentionally aligned with the bench cases so the
-// bias has something to vote for (otherwise the n-gram model is empty and
-// the bias is a no-op).
-
-let synthFRCorpus: [String] = [
-    "Bonjour Marie, désolé pour ce retard, je te confirme la réception du document.",
-    "Bonjour Marie, je te confirme notre rendez-vous de demain 14h.",
-    "Bonjour Marie, je te renvoie la facture dès que possible.",
-    "Action items : Marc envoie le funnel, Léa relit le brief, Karim chiffre l'option B.",
-    "À voir : Vision Pro pourrait être pertinent pour le prototype de prévisualisation.",
-    "Pour jeudi 22 je propose un créneau de 14h à 15h dans mon agenda.",
-    "Cette levée confirme que l'écosystème IA français est en accélération nette.",
-    "ok parfait je te rejoins vers 19h30 au bar habituel.",
-    "Le principal risque c'est de sous-estimer la complexité du portage Windows.",
-    "Ajouter aussi : tomates cerises, basilic frais, mozzarella di bufala.",
-    "Cette section précise que les sources sont strictement opt-in et locales.",
-    "Yo, j'ai bench le 1B chez moi, j'ai eu environ 22 tokens par seconde sur M2.",
-]
-
-func runWithBias(prompt: String, bias: NgramLogitBias, on container: ModelContainer) async -> RunResult? {
-    let start = Date()
-    do {
-        return try await container.perform { context -> RunResult in
-            let input = try await context.processor.prepare(input: .init(prompt: .text(prompt)))
-            let params = GenerateParameters(maxTokens: 16, temperature: 0.4, topP: 0.9)
-            let iterator = try TokenIterator(
-                input: input,
-                model: context.model,
-                processor: bias,
-                sampler: params.sampler(),
-                maxTokens: 16
-            )
-            let stream = MLXLMCommon.generate(input: input, context: context, iterator: iterator)
-            var firstTokenAt: Date?
-            var generated = ""
-            var tokenCount = 0
-            for await event in stream {
-                if case .chunk(let text) = event {
-                    if firstTokenAt == nil { firstTokenAt = Date() }
-                    tokenCount += 1
-                    generated += text
-                }
-            }
-            let now = Date()
-            let ttft = firstTokenAt.map { Int($0.timeIntervalSince(start) * 1000) } ?? -1
-            let total = Int(now.timeIntervalSince(start) * 1000)
-            let oneLine = generated.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? generated
-            return RunResult(output: oneLine, ttftMs: ttft, totalMs: total, tokens: tokenCount)
-        }
-    } catch {
-        FileHandle.standardError.write(Data("error: \(error)\n".utf8))
-        return nil
-    }
-}
-
-if personalizationMode {
-    FileHandle.standardError.write(Data("[A/B bench] personalization mode: priming n-gram with \(synthFRCorpus.count) synthetic FR sentences…\n".utf8))
-    let model = NgramModel()
-    await container.perform { context in
-        await model.setTokenizerTag(modelId)
-        for s in synthFRCorpus {
-            let tokens = context.tokenizer.encode(text: s)
-            await model.ingest(tokens: tokens)
-        }
-    }
-    let snapshot = await model.snapshot()
-    FileHandle.standardError.write(Data("[A/B bench] running \(cases.count) cases × 2 (without bias / with bias strength=1.5)…\n".utf8))
-
-    var divergenceSum = 0.0
-    var biasChanged = 0
-    for (idx, c) in cases.enumerated() {
-        let withoutPrompt = c.userText
-        guard let a = await runOne(prompt: withoutPrompt, on: container) else { continue }
-        let bias = NgramLogitBias(snapshot: snapshot, strength: 1.5)
-        guard let b = await runWithBias(prompt: withoutPrompt, bias: bias, on: container) else { continue }
-        let div = divergence(a.output, b.output)
-        divergenceSum += div
-        if div > 0.05 { biasChanged += 1 }
-        let json: [String: Any] = [
-            "label": c.label,
-            "user_text": c.userText,
-            "without_bias": [
-                "output": a.output, "ttft_ms": a.ttftMs, "total_ms": a.totalMs, "tokens": a.tokens,
-            ],
-            "with_bias": [
-                "output": b.output, "ttft_ms": b.ttftMs, "total_ms": b.totalMs, "tokens": b.tokens,
-            ],
-            "divergence": div,
-            "latency_delta_ms": b.totalMs - a.totalMs,
-        ]
-        if let data = try? JSONSerialization.data(withJSONObject: json, options: []),
-           let line = String(data: data, encoding: .utf8) {
-            writeLine(line)
-        }
-        FileHandle.standardError.write(Data(
-            "  [\(idx + 1)/\(cases.count)] \(c.label): div=\(String(format: "%.2f", div)) Δlat=\(b.totalMs - a.totalMs)ms\n".utf8
-        ))
-    }
-
-    let n = Double(cases.count)
-    let pctChanged = Double(biasChanged) / n * 100
-    let summary = """
-    ──────── Personalization Summary ────────
-    cases:                  \(cases.count)
-    mean divergence:        \(String(format: "%.2f", divergenceSum / n))
-    cases where bias moved: \(biasChanged) / \(cases.count) (\(String(format: "%.0f", pctChanged))%)
-
-    Validation criterion (PLAN.md): ≥5pp delta acceptation.
-    Proxy used here: % of cases where the biased output diverges by >5% chars.
-    """
-    FileHandle.standardError.write(Data((summary + "\n").utf8))
-    exit(0)
-}
 
 var divergenceSum = 0.0
 var latencyDeltaSum = 0

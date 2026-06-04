@@ -124,7 +124,7 @@ private func makeEntry(_ accepted: String, ctx: String = "") -> TypingHistoryEnt
     let (store, _) = makeStore("ctx")
     // L'overlap est dans `contextBefore`, pas dans `accepted`. Le retrieval
     // doit quand même retrouver l'entrée parce qu'on tokenize (contextBefore
-    // + accepted) ensemble (cf. NgramBuilder.rebuild).
+    // + accepted) ensemble.
     await store.append(makeEntry("rapidement", ctx: "autocomplétage application développement"))
     await store.append(makeEntry("nuage", ctx: "recette pomme tarte"))
 

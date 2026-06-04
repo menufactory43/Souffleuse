@@ -1,6 +1,4 @@
 import Foundation
-import MLXLLM
-import MLXLMCommon
 import SouffleuseAX
 import SouffleuseCore
 import SouffleuseLog
@@ -49,7 +47,7 @@ private final class GhostEmissionTracker {
 /// Phase 4 D-03 (plan 04-07) — Final façade form of the predictor view model.
 ///
 /// PVM is now a thin observable surface over `ModelRuntime` (which owns the
-/// MLX container + the verbatim `container.perform` body) and the four
+/// llama.cpp generation engine + the MLX tokenizer container) and the four
 /// extracted modules : `SuggestionPolicyEngine`, `GenerationPlanner`,
 /// `CompletionCache`. The cascade (L0 word completion + L1 history exact-
 /// substring + L2 LLM stream) lives directly in `predict(...)` below.
@@ -136,9 +134,9 @@ final class PredictorViewModel {
     var maxWords: Int = 6 {
         didSet { policy.updateMaxWords(maxWords) }
     }
-    /// Personalization knob. 0 disables the n-gram bias entirely (fast path,
-    /// existing behaviour). When > 0 we route generation through a custom
-    /// `TokenIterator` that chains the repetition penalty with `NgramLogitBias`.
+    /// Personalization knob. 0 disables the personalization bias entirely (fast
+    /// path, existing behaviour). When > 0, the llama engine sharpens its logits
+    /// from the accepted-text corpus n-gram (`runtime.setCorpus`).
     var personalizationStrength: Float = 0
     /// When true, completed-word typos in the prefix are corrected *only in the
     /// model input* (Volet 1). The user's displayed text and `userTail`
@@ -148,17 +146,16 @@ final class PredictorViewModel {
     /// Silent prefix typo corrector (pure wrapper over NSSpellChecker). Only
     /// rewrites the `llmTail` fed into the llama prompt's `beforeCursor`.
     private let prefixCorrector = PrefixCorrector()
-    /// Historique chiffré on-device. Source de l'apprentissage n-gram (via
-    /// `rebuildPersonalization` / `ingestAccepted`). Wiré depuis
-    /// `SouffleuseAppDelegate` au démarrage. Quand nil, le n-gram bias reste
-    /// inactif (cas tests / startup).
+    /// Historique chiffré on-device. Source du corpus de personnalisation (via
+    /// `rebuildPersonalization` / `ingestAccepted`, alimenté dans le n-gram
+    /// llama par `runtime.setCorpus`). Wiré depuis `SouffleuseAppDelegate` au
+    /// démarrage. Quand nil, la personnalisation reste inactive (cas tests /
+    /// startup).
     ///
-    /// Note (2026-05-26): la propriété est conservée car `ingestAccepted` et
-    /// `rebuildPersonalization` continuent d'alimenter l'historique pour le
-    /// n-gram. Le retrieval few-shot a été dropé (cf. drop fewshot commit) —
-    /// la personnalisation passe désormais exclusivement par le logit bias.
+    /// Note (2026-05-26): le retrieval few-shot a été dropé (cf. drop fewshot
+    /// commit) — la personnalisation passe désormais exclusivement par le logit
+    /// bias n-gram côté llama.cpp.
     var history: TypingHistoryStore?
-    private let ngramModel = NgramModel()
     /// System-API word completion. Runs synchronously on the main actor so
     /// the ghost can show up before the LLM has even started — matches the
     /// instant-feedback feel of Cotypist on partial words.
@@ -633,11 +630,10 @@ final class PredictorViewModel {
         let (myGeneration, previousTask) = planner.beginGenerationDetachingPrevious()
 
         // Snapshot personalisation inputs to satisfy the Sendable closure
-        // boundary. Strength + history + ngramModel are read here so the
-        // detached Task can `await` them without touching @MainActor state
-        // inside the runtime.generate closure.
+        // boundary. Strength + history are read here so the detached Task can
+        // `await` them without touching @MainActor state inside the
+        // runtime.generate closure.
         let personalizationStrength = self.personalizationStrength
-        let ngramModel = self.ngramModel
         // Hoisted on the @MainActor side (self is strong here) so the detached
         // generation Task can use it without touching @MainActor state. Filtered
         // to `.prose` (never accept-fragments) AND débarrassé des entrées qui ne
@@ -686,7 +682,6 @@ final class PredictorViewModel {
         }()
 
         let runtime = self.runtime
-        let completionCache = self.cache
 
         // If a previous LLM Task was running, its cancellation may have left
         // the KV cache in a state inconsistent with what the holder records
@@ -731,10 +726,11 @@ final class PredictorViewModel {
             // pattern.
             //
             // The right architectural place for user personalization is the
-            // sampler — `NgramLogitBias` + `ChainLogitProcessor` apply user-
-            // typed token frequencies as per-token bias during generation,
-            // without ever injecting demonstration text into the prompt.
-            // This eliminates cross-pollination by construction.
+            // sampler — the llama engine applies user-typed token frequencies
+            // (the accepted-text corpus n-gram, fed via `runtime.setCorpus`) as
+            // per-token logit bias during generation, without ever injecting
+            // demonstration text into the prompt. This eliminates cross-
+            // pollination by construction.
             //
             // LLM input window : feed the last `llmContextWindowChars` of the
             // CORRECTED prefix to the model as `beforeCursor`. The full 2048-char
@@ -748,9 +744,6 @@ final class PredictorViewModel {
             // measured and refuted.
             let llmTail = String(correctedTail.suffix(SuggestionPolicy.Tuning.llmContextWindowChars))
             let basePromptText = basePreamble + llmTail
-            let snapshot: NgramSnapshot? = personalizationStrength > 0
-                ? await ngramModel.snapshot()
-                : nil
 
             // Few-shot prose injection (B-prompt, 2026-05-30). Retrieve the user's
             // own past PROSE (never accept-fragments) most relevant to the current
@@ -808,8 +801,7 @@ final class PredictorViewModel {
                 afterCursorSlot: afterCursorSlot,
                 basePreamble: basePreamble,
                 examplesBlock: examplesBlock,
-                basePromptText: basePromptText,
-                ngramSnapshot: snapshot
+                basePromptText: basePromptText
             )
 
             // ── Frame C (F1) : escalade mid-mot — passe greedy + dico, HORS stream.
@@ -927,7 +919,7 @@ final class PredictorViewModel {
             // Empty chunks are the anti-repeat drop signal — fall back to
             // whichever instant-path ghost was set (history hit beats word
             // completion, both beat empty).
-            let metrics = await runtime.generate(request: request, cache: completionCache) { @MainActor chunk in
+            let metrics = await runtime.generate(request: request) { @MainActor chunk in
                 guard let self else { return }
                 guard self.planner.isCurrent(myGeneration) else { return }
                 if chunk.isEmpty {
@@ -1155,8 +1147,7 @@ final class PredictorViewModel {
             afterCursorSlot: "",
             basePreamble: "",
             examplesBlock: "",
-            basePromptText: llmTail,
-            ngramSnapshot: nil
+            basePromptText: llmTail
         )
 
         let extension_ = await runtime.extendGhost(request: request, maxWords: maxWords)
@@ -1171,9 +1162,10 @@ final class PredictorViewModel {
         return extension_
     }
 
-    /// Rebuilds the in-memory n-gram model from a list of accepted entries.
+    /// Rebuilds the personalization corpus from a list of accepted entries.
     /// Called at startup (with everything from `TypingHistoryStore`) and after
-    /// "Tout supprimer". Tokenises via the active model's tokenizer.
+    /// "Tout supprimer". Feeds the accepted strings into the llama engine, which
+    /// rebuilds its llama-token-id corpus n-gram (the live personalization bias).
     func rebuildPersonalization(from entries: [TypingHistoryEntry]) async {
         // Layer 1 snapshot refresh — done first so the instant path becomes
         // operational even if the n-gram tokenisation below takes its time.
@@ -1186,41 +1178,23 @@ final class PredictorViewModel {
 
         // Phase 1 personalization : rebuild the llama-token-id corpus n-gram
         // inside the engine. This is the path that biases the llama.cpp
-        // decoder (the MLX-tokenizer n-gram below is now decoupled from the
-        // active llama generation). Strings are the accepted text, prefixed by
-        // their context when present — same join shape as the MLX n-gram.
+        // decoder. Strings are the accepted text, prefixed by their context
+        // when present.
         let corpus = entries.map { Self.corpusString(for: $0) }
         await runtime.setCorpus(corpus)
-
-        guard let container = runtime.container else { return }
-        let tokenizerTag = modelId
-        await container.perform { context in
-            await ngramModel.clear()
-            await ngramModel.setTokenizerTag(tokenizerTag)
-            for entry in entries {
-                let joined: String
-                if entry.contextBefore.isEmpty {
-                    joined = entry.accepted
-                } else {
-                    joined = entry.contextBefore + " " + entry.accepted
-                }
-                let tokens = context.tokenizer.encode(text: joined)
-                await ngramModel.ingest(tokens: tokens)
-            }
-        }
     }
 
     /// Builds the corpus training string for one accepted entry — the accepted
     /// text, prefixed by its preceding context when present. Shared by both the
     /// full rebuild and the incremental accept path so the llama-token-id
-    /// n-gram sees the same shape as the MLX-tokenizer n-gram.
+    /// n-gram sees a consistent shape.
     static func corpusString(for entry: TypingHistoryEntry) -> String {
         entry.contextBefore.isEmpty
             ? entry.accepted
             : entry.contextBefore + " " + entry.accepted
     }
 
-    /// Streams a single newly-accepted entry into the n-gram model.
+    /// Folds a single newly-accepted entry into the personalization corpus.
     func ingestAccepted(_ entry: TypingHistoryEntry) async {
         // Layer 1 snapshot append — keep most-recent-first ordering so the
         // linear scan in SuggestionPolicy's exact-substring helper hits
@@ -1239,18 +1213,6 @@ final class PredictorViewModel {
         // incremental n-gram deltas inside the engine.
         let corpus = self.historySnapshot.map { Self.corpusString(for: $0) }
         await runtime.setCorpus(corpus)
-
-        guard let container = runtime.container else { return }
-        await container.perform { context in
-            let joined: String
-            if entry.contextBefore.isEmpty {
-                joined = entry.accepted
-            } else {
-                joined = entry.contextBefore + " " + entry.accepted
-            }
-            let tokens = context.tokenizer.encode(text: joined)
-            await ngramModel.ingest(tokens: tokens)
-        }
     }
 
     /// Pure decision for the stale-ghost clear (extracted for unit testing).
