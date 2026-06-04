@@ -156,14 +156,16 @@ struct CascadeTighteningTests {
     @Test func undoCachePermissiveRecoverShortDelta() {
         // Undo restitue 5 chars effacés : "ation" sur tail "applic".
         // userTail "applic" (mid-word) → ghost "ation" commence par lettre → prefixFit 1.0.
-        // 1 mot → lengthFit 0.6. Score = 0.65 × 1.0 × 0.6 = 0.39 < 0.45.
-        // Donc même undo 1-mot court est bloqué — c'est plus strict que prévu.
+        // 1 mot → lengthFit 0.6. Score = 0.65 × 1.0 × 0.6 = 0.39.
+        // Avec undoCacheFloor abaissé 0.45 → 0.30 (23ba680), ce undo 1-mot court
+        // est désormais ADMIS (0.39 ≥ 0.30) — c'était précisément le but de
+        // l'abaissement (un undo « Monsieur » scorait 0.39 et était recalé).
         let oneWord = SuggestionPolicy.score(
             source: .undoCache,
             ghost: "ation",
             userTail: "applic"
         )
-        #expect(oneWord.value < SuggestionPolicy.Tuning.undoCacheFloor)
+        #expect(oneWord.value >= SuggestionPolicy.Tuning.undoCacheFloor)
 
         // 2-mots+ pass : 0.65 × 1.0 × 1.0 = 0.65.
         let phrase = SuggestionPolicy.score(
@@ -183,7 +185,7 @@ struct CascadeTighteningTests {
         // ne doit retourner que SuggestionPolicy+Tuning.swift + doc-comments.
         // Test sentinel passant : si les constantes sont bonnes valeurs.
         #expect(SuggestionPolicy.Tuning.cacheFloor == 0.55)
-        #expect(SuggestionPolicy.Tuning.undoCacheFloor == 0.45)
+        #expect(SuggestionPolicy.Tuning.undoCacheFloor == 0.30)
         #expect(SuggestionPolicy.Tuning.afterSpaceL1Bar == 0.6)
     }
 }
