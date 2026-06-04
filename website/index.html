@@ -7,6 +7,9 @@
 <meta name="description" content="Une aide à l'écriture pour Mac, entièrement privée. Souffleuse glisse le mot juste sous votre curseur quand vous hésitez, puis s'efface. Vos textes ne quittent jamais votre Mac." />
 
 <link rel="canonical" href="https://souffleuse.app/" />
+<link rel="alternate" hreflang="fr" href="https://souffleuse.app/" />
+<link rel="alternate" hreflang="en" href="https://souffleuse.app/en/" />
+<link rel="alternate" hreflang="x-default" href="https://souffleuse.app/" />
 <meta name="theme-color" content="#f3ead9" />
 
 <!-- Icônes -->
@@ -18,6 +21,7 @@
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="Souffleuse" />
 <meta property="og:locale" content="fr_FR" />
+<meta property="og:locale:alternate" content="en_US" />
 <meta property="og:url" content="https://souffleuse.app/" />
 <meta property="og:title" content="Souffleuse : le mot juste, soufflé à voix basse" />
 <meta property="og:description" content="Une aide à l'écriture pour Mac, entièrement privée. Le mot juste sous votre curseur quand vous hésitez, puis ça s'efface. Vos textes ne quittent jamais votre Mac." />
@@ -213,6 +217,27 @@
   @media (min-width: 820px) {
     .topnav { display: flex; }
   }
+
+  /* Sélecteur de langue FR / EN : deux petites capitales filées, la courante
+     en rouge. Discret, à côté du CTA — on change de langue, on n'ampute rien. */
+  .langswitch {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-family: var(--display);
+    font-size: 0.8rem;
+    letter-spacing: 0.08em;
+  }
+  .langswitch a {
+    text-decoration: none;
+    color: var(--ink-faint);
+    padding-bottom: 2px;
+    border-bottom: 1px solid transparent;
+    transition: color .2s, border-color .2s;
+  }
+  .langswitch a:hover { color: var(--ink); border-bottom-color: var(--rouge); }
+  .langswitch a[aria-current="true"] { color: var(--rouge); border-bottom-color: var(--rouge); }
+  .langswitch__sep { color: var(--ink-faint); opacity: 0.5; }
 
   /* ---------- Boutons ---------- */
   /* Letterpress sobre : un seul relief discret, pas de saut multi-directions. */
@@ -998,6 +1023,7 @@
     .souffleur__tab { min-height: 44px; padding-block: 0.55rem; }
     .hint-key { min-height: 44px; }
     .topnav a { padding-block: 0.7rem; }
+    .langswitch a { padding-block: 0.7rem; }
   }
 
   /* ---------- La mascotte : la souffleuse, dans la marge gauche ---------- */
@@ -1123,6 +1149,11 @@
         <a href="#coulisses">Les coulisses</a>
         <a href="#faq">Questions</a>
       </nav>
+      <div class="langswitch" role="group" aria-label="Langue / Language">
+        <a href="/" hreflang="fr" aria-current="true">FR</a>
+        <span class="langswitch__sep" aria-hidden="true">·</span>
+        <a href="/en/" hreflang="en">EN</a>
+      </div>
       <a href="./Souffleuse.dmg" download class="btn btn--small">Télécharger</a>
     </div>
   </div>
