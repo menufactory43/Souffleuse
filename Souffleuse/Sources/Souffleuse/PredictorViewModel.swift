@@ -353,6 +353,14 @@ final class PredictorViewModel {
         cache.updateContextFingerprint(contextFingerprint)
         PredictDebug.log("predict_called", "userTail=\(userTail.debugDescription)")
 
+        // Cluster de registre de l'app focus (P1.2). Résolu UNE fois ici et
+        // partagé par le recall L1 (routeInstant) et le few-shot L2
+        // (proseExamplesPool) pour scoper la personnalisation sur un corpus
+        // homogène. `.other` (inconnu/nil) ⇒ AUCUN scope (comportement
+        // historique) ; un cluster connu n'autorise que la prose des apps du
+        // même registre — le privé (.chat) ne fuit jamais ailleurs.
+        let activeDomain = DomainCluster.cluster(for: axSnapshot?.bundleID)
+
         // Source decay : a HIGH-confidence source set by a PREVIOUS predict
         // no longer reflects reality. Demote stale HIGH sources to .llm so
         // this predict can either re-confirm them via a fresh layer hit
@@ -376,7 +384,8 @@ final class PredictorViewModel {
             userTail: userTail,
             historySnapshot: historySnapshot,
             wordCompleter: wordCompleter,
-            lexicon: learnedLexicon
+            lexicon: learnedLexicon,
+            activeDomain: activeDomain
         )
         // `singleLine` here is the single chokepoint for the instant path:
         // corpus / `.history` entries captured from prose can carry a trailing
@@ -646,6 +655,7 @@ final class PredictorViewModel {
         // d'injection few-shot (B-prompt).
         let proseExamplesPool = self.historySnapshot.filter {
             $0.source == .prose && !SuggestionPolicy.isGreetingLike($0.accepted)
+                && (activeDomain == .other || DomainCluster.cluster(for: $0.bundleID) == activeDomain)
         }
 
         let baseSystem = baseSystemPrompt
@@ -748,13 +758,20 @@ final class PredictorViewModel {
             // Few-shot prose injection (B-prompt, 2026-05-30). Retrieve the user's
             // own past PROSE (never accept-fragments) most relevant to the current
             // tail, topped up with recent prose so injection fires whenever the
-            // corpus holds prose. Deliberately NOT hard-filtered by bundleID: the
-            // corpus-import tags seeded Intercom prose `com.intercom.conversations`
-            // while the live browser is `com.brave.Browser`, so an exact-bundle
-            // filter would silently inject NOTHING despite a full corpus. The
-            // injected count is logged so that "full corpus / empty prompt" failure
-            // mode is visible. Synchronous in-memory scan over historySnapshot
-            // (≤200 entries, <5ms) — no TTFT impact.
+            // corpus holds prose. Scoped by generic CLUSTER, never by exact
+            // bundleID (P1.2): `proseExamplesPool` keeps only the prose of apps in
+            // the SAME registre cluster as the focus app (or all prose when
+            // `activeDomain == .other`). Cluster — not exact-bundle — is the right
+            // grain because apps of one registre share a writing style, and
+            // unrelated registres (private `.chat`, `.code`) must never leak as
+            // style demonstrations. Known gap: corpus-import tags seeded Intercom
+            // prose `com.intercom.conversations` → `.other`, while live support is
+            // typed in `com.brave.Browser` → `.web`; these land in DIFFERENT
+            // clusters, so seeds don't reach live use until the seeder re-tags to
+            // the target app's bundleID (P2.3 `SouffleuseCorpusSeed --as-bundle`).
+            // The injected count is logged so the "full corpus / empty prompt"
+            // failure mode stays visible. Synchronous in-memory scan over
+            // historySnapshot (≤200 entries, <5ms) — no TTFT impact.
             var examplesBlock = ""
             if personalizationStrength > 0 && SuggestionPolicy.Tuning.examplesInjectionEnabled {
                 let prose = proseExamplesPool
