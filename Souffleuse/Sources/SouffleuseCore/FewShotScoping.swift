@@ -21,11 +21,14 @@ public enum FewShotScoping {
         _ entries: [TypingHistoryEntry],
         activeDomain: DomainCluster
     ) -> [TypingHistoryEntry] {
-        entries.filter {
-            $0.source == .prose
-                && !SuggestionPolicy.isGreetingLike($0.accepted)
+        // Le scope `.prose` + cluster de registre est partagé avec le recall L1
+        // (`SuggestionPolicy.routeInstant`) via `DomainCluster.scopedProse` — un
+        // seul endroit définit l'invariant privacy. On ne fait COMPOSER ici que
+        // les filtres propres à la DÉMONSTRATION de style : pas de salutation
+        // (cross-pollinisation), pas d'URL/chemin (dilue la « voix »).
+        DomainCluster.scopedProse(entries, to: activeDomain).filter {
+            !SuggestionPolicy.isGreetingLike($0.accepted)
                 && !isUrlOrPathHeavy($0.accepted)
-                && (activeDomain == .other || DomainCluster.cluster(for: $0.bundleID) == activeDomain)
         }
     }
 

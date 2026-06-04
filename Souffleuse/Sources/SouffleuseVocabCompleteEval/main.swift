@@ -58,31 +58,10 @@ func words(_ s: String) -> [String] {
 }
 
 // Tokens enrichis : pour chaque mot, est-il capitalisé EN MILIEU de phrase ?
-// (= 1ʳᵉ lettre majuscule ET non précédé d'un terminateur de phrase / début).
-func tokensWithCase(_ s: String) -> [(word: String, capMid: Bool)] {
-    var out: [(String, Bool)] = []
-    var cur = ""
-    var sentenceStart = true          // le tout 1ᵉʳ mot compte comme début de phrase
-    var pendingTerminator = false     // a-t-on vu . ! ? : depuis le dernier mot ?
-    func flush() {
-        if cur.count >= 2 {
-            let cap = cur.first?.isUppercase == true
-            out.append((cur, cap && !sentenceStart))
-            sentenceStart = false
-        }
-        cur = ""
-        if pendingTerminator { sentenceStart = true; pendingTerminator = false }
-    }
-    for ch in s {
-        if ch.isLetter { cur.append(ch) }
-        else {
-            flush()
-            if ch == "." || ch == "!" || ch == "?" || ch == ":" || ch == "\n" { pendingTerminator = true }
-        }
-    }
-    flush()
-    return out
-}
+// On appelle DIRECTEMENT la fonction de PRODUCTION `LearnedLexicon.tokensWithCase`
+// (au lieu d'une copie locale qui driftait) : l'eval mesure ainsi le VRAI
+// comportement de prod — si la prod recalibre (terminateurs de phrase, seuil de
+// longueur), l'eval suit automatiquement.
 
 // ── Charge l'historique réel. SOUFFLEUSE_HISTORY_DB permet de lire une COPIE
 //    (évite la contention de verrou SQLCipher avec une autre session/worktree).
@@ -110,7 +89,7 @@ var freqByLower: [String: Int] = [:]
 var caseVariants: [String: [String: Int]] = [:]   // lower -> (variante -> count)
 var capMidCount: [String: Int] = [:]              // lower -> #occurrences cap. milieu de phrase
 for e in trainEntries {
-    for (w, capMid) in tokensWithCase(entryText(e)) {
+    for (w, capMid) in LearnedLexicon.tokensWithCase(entryText(e)) {
         let lw = w.lowercased()
         freqByLower[lw, default: 0] += 1
         caseVariants[lw, default: [:]][w, default: 0] += 1

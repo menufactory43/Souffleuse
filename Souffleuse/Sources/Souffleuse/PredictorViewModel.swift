@@ -161,6 +161,11 @@ final class PredictorViewModel {
     /// instant-feedback feel of Cotypist on partial words.
     private let wordCompleter = WordCompleter()
 
+    /// Détecteur de mots valides (NSSpellChecker) — sert la garde d'admission
+    /// partagée `TypingHistoryStore.admissionRejection` côté ingestion mémoire,
+    /// pour que la mémoire applique EXACTEMENT les mêmes 4 gardes que le disque.
+    private let typoDetector = TypoDetector()
+
     /// Phase 4 — Ghost Relevance Gate engine. Owns currentGhost/currentSource/
     /// currentScore/shownAt + the 5 classification events. PVM delegates cascade
     /// routing (L0/L1) and LLM chunk replacement-bar to this engine ; partial-
@@ -1235,14 +1240,19 @@ final class PredictorViewModel {
 
     /// Folds a single newly-accepted entry into the personalization corpus.
     func ingestAccepted(_ entry: TypingHistoryEntry) async {
-        // Privacy (P1.5) : ne JAMAIS ingérer un payload secret-like dans le modèle
-        // EN MÉMOIRE non plus. `TypingHistoryStore.append` le rejette déjà du disque
-        // (event `history_skipped_secretlike`), mais ce chemin l'alimente en
-        // parallèle ; sans cette garde, un mot de passe rejeté du store pourrait
-        // quand même ressortir comme rappel L1 / exemple few-shot / terme appris
-        // pendant la session (tout part de `historySnapshot`). On mirror le filtre.
-        if SecretHeuristic.looksLikeSecret(entry.accepted) {
-            Log.info(.context, "ingest_skipped_secretlike")
+        // Garde d'admission UNIQUE (partagée avec `TypingHistoryStore.append`).
+        // Avant, seul le secret était filtré ici (P1.5) ; les 3 autres gardes du
+        // disque (longueur <3, fragment "s de", mot tronqué mid-glue) ne l'étaient
+        // PAS — un tel payload accepté entrait dans le snapshot mémoire (lexique +
+        // biais n-gram de la session) puis disparaissait au redémarrage, créant une
+        // divergence mémoire↔disque. On consulte désormais la même décision : la
+        // mémoire applique exactement les 4 mêmes gardes que le disque.
+        if let reason = TypingHistoryStore.admissionRejection(
+            contextBefore: entry.contextBefore,
+            accepted: entry.accepted,
+            typoDetector: typoDetector
+        ) {
+            Log.info(.context, reason == .secretLike ? "ingest_skipped_secretlike" : "ingest_skipped_inadmissible")
             return
         }
         // Layer 1 snapshot append — keep most-recent-first ordering so the
