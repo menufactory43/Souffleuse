@@ -196,7 +196,6 @@ let package = Package(
         .executableTarget(
             name: "SouffleuseEnrichmentBench",
             dependencies: [
-                "SouffleusePersonalization",
                 .product(name: "MLXLLM", package: "mlx-swift-examples"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-examples"),
             ]

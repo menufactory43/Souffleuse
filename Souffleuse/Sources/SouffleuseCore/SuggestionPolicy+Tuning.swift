@@ -69,7 +69,7 @@ extension SuggestionPolicy {
         /// register/domain and suppresses off-topic hallucination without the
         /// multi-greeting cross-pollution that motivated the original removal
         /// (PVM:600-609). Flip to false to restore sampler-only personalization
-        /// (NgramLogitBias) with no demonstration text in the prompt.
+        /// (the llama corpus n-gram bias) with no demonstration text in the prompt.
         public static let examplesInjectionEnabled: Bool = true
 
         /// **Token-healing master switch (Task 1 + Task 2).** When `true`, a

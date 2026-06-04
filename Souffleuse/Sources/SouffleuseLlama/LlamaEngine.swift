@@ -180,10 +180,9 @@ public struct LlamaSampling: Sendable {
 }
 
 /// In-memory bigram + trigram model over **llama token ids**, built from the
-/// user's accepted-text corpus. Independent of the MLX-tokenizer `NgramModel`
-/// in `SouffleusePersonalization` (which tokenises into words, not llama
-/// tokens). Lives inside the actor — never crosses an isolation boundary, so
-/// its mutable dictionaries are safe without synchronisation.
+/// user's accepted-text corpus. This is the live personalization bias path.
+/// Lives inside the actor — never crosses an isolation boundary, so its
+/// mutable dictionaries are safe without synchronisation.
 ///
 /// Lookup keys are packed integers to avoid hashing arrays per decode step :
 /// - bigram key  : `a`                          → counts of `next`
