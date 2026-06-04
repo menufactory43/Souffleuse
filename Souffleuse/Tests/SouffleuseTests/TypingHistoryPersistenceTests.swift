@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import Testing
+import SouffleuseCorpus
 @testable import SouffleusePersonalization
 
 // MARK: - TypingHistoryPersistenceTests
