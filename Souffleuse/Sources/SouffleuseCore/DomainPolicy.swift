@@ -1,4 +1,5 @@
 import Foundation
+import SouffleusePersonalization
 
 /// Cluster de **registre générique** déduit du bundleID de l'app focus.
 ///
@@ -50,6 +51,32 @@ extension DomainCluster {
         if webIDs.contains(id) { return .web }
         if docsIDs.contains(id) { return .docs }
         return .other
+    }
+
+    /// **Point unique du scope de personnalisation** (recall L1 ET few-shot L2).
+    ///
+    /// Filtre un snapshot d'historique aux seules entrées `.prose` écrites dans
+    /// une app du MÊME cluster de registre que `activeDomain`. Avant, ce prédicat
+    /// vivait dupliqué mot-pour-mot dans `SuggestionPolicy.routeInstant` (recall
+    /// verbatim) et `FewShotScoping.scopedExamplesPool` (démonstration de style),
+    /// avec le risque que l'invariant privacy diverge entre les deux. Il est
+    /// désormais défini ICI, une seule fois.
+    ///
+    /// Invariants préservés à l'identique :
+    ///   - `.accept` (fragments validés au Tab) toujours exclus — ils nourrissent
+    ///     le biais n-gram mais ne doivent jamais être rappelés/démontrés tels quels ;
+    ///   - `activeDomain == .other` ⇒ AUCUN scope (comportement historique : toute
+    ///     la prose est éligible) ;
+    ///   - pas de fallback cross-cluster : le privé (`.chat`) ne fuit JAMAIS hors
+    ///     de son cluster, et un cluster connu mais sans prose ne rappelle rien.
+    public static func scopedProse(
+        _ entries: [TypingHistoryEntry],
+        to activeDomain: DomainCluster
+    ) -> [TypingHistoryEntry] {
+        entries.filter {
+            $0.source == .prose
+                && (activeDomain == .other || cluster(for: $0.bundleID) == activeDomain)
+        }
     }
 
     // Familles couvertes par préfixe — liste de départ, à étendre.

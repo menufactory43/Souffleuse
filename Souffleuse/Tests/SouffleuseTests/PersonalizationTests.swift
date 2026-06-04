@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import Testing
+import SouffleuseTyping
 @testable import SouffleusePersonalization
 
 // MARK: - Helpers
@@ -247,5 +248,59 @@ struct FragmentGateTests {
         #expect(!TypingHistoryStore.looksLikeFragment("de manger des sushis"))
         #expect(!TypingHistoryStore.looksLikeFragment("Cocotypist arrive bientôt"))
         #expect(!TypingHistoryStore.looksLikeFragment("merguez"))
+    }
+}
+
+// MARK: - Garde d'admission unique (parité disque ↔ mémoire)
+
+/// Verrouille `TypingHistoryStore.admissionRejection` — la décision désormais
+/// PARTAGÉE par `append` (disque) et `PredictorViewModel.ingestAccepted` (corpus
+/// mémoire). Avant, la mémoire n'appliquait que la garde secret ; ces tests
+/// fixent les 4 gardes au même endroit pour qu'aucun fragment / mot tronqué /
+/// payload court accepté ne puisse plus entrer en mémoire alors que le disque le
+/// rejette.
+@Suite("TypingHistoryStore.admissionRejection — garde d'admission unique")
+struct AdmissionRejectionTests {
+    private let typo = TypoDetector()
+
+    private func reject(_ ctx: String, _ acc: String) -> TypingHistoryStore.AdmissionRejection? {
+        TypingHistoryStore.admissionRejection(contextBefore: ctx, accepted: acc, typoDetector: typo)
+    }
+
+    @Test("prose normale admise (nil)")
+    func admitsRealProse() {
+        #expect(reject("", "Puis-je avoir votre relevé Binance ?") == nil)
+        #expect(reject("je vais ", "manger des sushis ce soir") == nil)
+    }
+
+    @Test("payload trimmé < 3 caractères rejeté")
+    func rejectsTooShort() {
+        #expect(reject("", "  f") == .tooShort)
+        #expect(reject("", "ok") == .tooShort)
+    }
+
+    @Test("secret-like rejeté")
+    func rejectsSecret() {
+        #expect(reject("", "Tr0ub4dour3xK9pLmQ7zW") == .secretLike)
+    }
+
+    @Test("fragment live-consume rejeté")
+    func rejectsFragment() {
+        #expect(reject("", "s de manger") == .fragment)
+    }
+
+    @Test("mot tronqué mid-glue rejeté ; complétion valide admise")
+    func rejectsTruncatedButKeepsValid() {
+        // "vérifi" invalide, accepted = run nu sans suite → tronqué.
+        #expect(reject("je vais vér", "ifi") == .truncatedFragment)
+        // "premiere"+"entrée" : "entrée" valide en standalone → next-word, admis.
+        #expect(reject("la premiere ", "entrée du menu") == nil)
+    }
+
+    @Test("ordre des gardes : secret prime sur fragment (parité append)")
+    func gateOrderMatchesDisk() {
+        // Un secret qui commencerait aussi par un fragment-like doit sortir en
+        // .secretLike (même ordre que l'ancien append : longueur→secret→fragment→tronqué).
+        #expect(reject("", "x AbCdEf0123456789Ghij") == .secretLike)
     }
 }

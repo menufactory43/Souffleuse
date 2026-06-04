@@ -64,7 +64,15 @@ public actor ClipboardReader {
     /// `frontmostBundleID` is the currently focused app — used to enforce
     /// the per-app blocklist (we never want to leak a password manager's copy).
     public func read(frontmostBundleID: String?) -> String? {
-        if let bid = frontmostBundleID, isBlocked(bundleID: bid) {
+        // Fail-closed sur bundleID inconnu : si `AppContextProbe` n'a pas pu
+        // identifier l'app focus (`nil`, rare mais possible — transition Mission
+        // Control, glitch au lancement), on NE SAIT PAS si c'est un gestionnaire
+        // de mots de passe ou une app bancaire blocklistée. Plutôt que de lire le
+        // presse-papier sans pouvoir appliquer la blocklist (fail-open = fuite
+        // possible), on s'abstient. Aligne la posture du clipboard sur celle de
+        // l'OCR (`ContextEnricher.snapshot` exige déjà `let bid = ctx.bundleID`).
+        guard let bid = frontmostBundleID else { return nil }
+        if isBlocked(bundleID: bid) {
             return nil
         }
         let count = pasteboard.changeCount

@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import SouffleuseCore
+import SouffleusePersonalization
 
 /// Couvre le scoping de personnalisation par registre générique : un bundleID
 /// connu doit tomber dans son cluster, un préfixe de famille (JetBrains) suit la
@@ -78,5 +79,57 @@ struct DomainPolicyTests {
         #expect(DomainCluster.cluster(for: "com.intercom.conversations") == .other)
         #expect(DomainCluster.cluster(for: "com.anthropic.claudefordesktop") == .other)
         #expect(DomainCluster.cluster(for: "com.apple.Spotlight") == .other)
+    }
+}
+
+/// Verrouille `DomainCluster.scopedProse` — le **point unique** du scope de
+/// personnalisation, partagé désormais par le recall L1 (`SuggestionPolicy`) et
+/// le few-shot L2 (`FewShotScoping`). Avant l'extraction, ce prédicat vivait
+/// dupliqué dans les deux ; ces tests garantissent que l'invariant (privé jamais
+/// hors cluster, `.accept` jamais rappelé, `.other` = pas de scope) reste défini
+/// à un seul endroit.
+@Suite("DomainCluster.scopedProse — seam unique du scope perso")
+struct ScopedProseTests {
+
+    private func prose(_ text: String, _ bundle: String?) -> TypingHistoryEntry {
+        TypingHistoryEntry(timestamp: Date(), contextBefore: "", accepted: text,
+                           bundleID: bundle, source: .prose)
+    }
+    private func accept(_ text: String, _ bundle: String?) -> TypingHistoryEntry {
+        TypingHistoryEntry(timestamp: Date(), contextBefore: "", accepted: text,
+                           bundleID: bundle, source: .accept)
+    }
+
+    @Test(".accept toujours exclu, même dans le bon cluster (recall verbatim seulement prose)")
+    func acceptAlwaysExcluded() {
+        let snap = [prose("votre relevé arrive demain", "com.brave.Browser"),
+                    accept("levé arrive demain", "com.brave.Browser")]
+        let out = DomainCluster.scopedProse(snap, to: .web)
+        #expect(out.count == 1)
+        #expect(out.first?.source == .prose)
+    }
+
+    @Test("scope cluster : le privé .chat ne fuit jamais hors de son cluster")
+    func privateNeverLeaks() {
+        let snap = [prose("on se voit ce soir", "org.whispersystems.signal-desktop")]
+        #expect(DomainCluster.scopedProse(snap, to: .web).isEmpty)
+        #expect(DomainCluster.scopedProse(snap, to: .mail).isEmpty)
+        #expect(DomainCluster.scopedProse(snap, to: .chat).count == 1)   // rappelé dans son propre registre
+    }
+
+    @Test("activeDomain .other ⇒ aucun scope (comportement historique préservé)")
+    func otherNoScope() {
+        let snap = [prose("a", "com.brave.Browser"),
+                    prose("b", "org.whispersystems.signal-desktop"),
+                    accept("c", "com.brave.Browser")]   // .accept toujours filtré, même en .other
+        let out = DomainCluster.scopedProse(snap, to: .other)
+        #expect(out.count == 2)
+    }
+
+    @Test("bundleID nil reste éligible en .other mais jamais dans un cluster connu")
+    func nilBundleScoping() {
+        let snap = [prose("texte sans app connue", nil)]
+        #expect(DomainCluster.scopedProse(snap, to: .other).count == 1)
+        #expect(DomainCluster.scopedProse(snap, to: .web).isEmpty)   // nil → .other ≠ .web
     }
 }
