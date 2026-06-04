@@ -575,9 +575,22 @@ public actor TypingHistoryStore {
             .appendingPathComponent("Souffleuse", isDirectory: true)
             .appendingPathComponent("corpus-import.json")
         guard fm.fileExists(atPath: queueURL.path),
-              let data = try? Data(contentsOf: queueURL),
-              let messages = try? JSONDecoder().decode([String].self, from: data)
+              let data = try? Data(contentsOf: queueURL)
         else { return 0 }
+        // Backward-compatible decode: new `{bundleID, messages}` wrapper (lets the
+        // seeder tag prose with the app the style is used in, so it lands in the
+        // right DomainCluster, P2.3) OR the legacy `[String]` (→ default Intercom tag).
+        let messages: [String]
+        let importBundleID: String
+        if let wrap = try? JSONDecoder().decode(CorpusImportQueue.self, from: data) {
+            messages = wrap.messages
+            importBundleID = wrap.bundleID ?? "com.intercom.conversations"
+        } else if let legacy = try? JSONDecoder().decode([String].self, from: data) {
+            messages = legacy
+            importBundleID = "com.intercom.conversations"
+        } else {
+            return 0
+        }
         load()
         var inserted = 0
         let before = rowCount()
@@ -586,7 +599,7 @@ public actor TypingHistoryStore {
                 timestamp: Date(),
                 contextBefore: "",
                 accepted: body,
-                bundleID: "com.intercom.conversations",
+                bundleID: importBundleID,
                 source: .prose
             )
             append(entry)
