@@ -35,6 +35,9 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/ml-explore/mlx-swift-examples", from: "2.0.0"),
+        // Canal de MAJ beta (manuel-only) — ne doit pas fuiter dans les library
+        // targets ni les tests (sinon `import Sparkle` dans la suite).
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
     ],
     targets: [
         .target(
@@ -190,6 +193,10 @@ let package = Package(
                 "SouffleuseLlama",
                 .product(name: "MLXLLM", package: "mlx-swift-examples"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-examples"),
+                // Sparkle 2 : canal MAJ beta manuel-only. Livré en binary XCFramework
+                // via SPM → uniquement sur l'exécutable (jamais dans un library target
+                // ni le testTarget, pour éviter `import Sparkle` dans la suite ~640 tests).
+                .product(name: "Sparkle", package: "Sparkle"),
             ]
         ),
         .executableTarget(
