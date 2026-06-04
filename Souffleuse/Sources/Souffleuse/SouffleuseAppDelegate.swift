@@ -60,6 +60,9 @@ private func deriveMidWordContinuation(contextBefore: String, accepted: String) 
 @MainActor
 final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
+    /// Canal de mise à jour beta (manuel-only). Armé dès le lancement pour que
+    /// Sparkle s'initialise avant l'affichage du menu.
+    private let updater = UpdaterController()
     /// Carnet d'usage : frappes épargnées, cadence mesurée, actes — affiché au clic
     /// sur l'icône (« mieux qu'un compteur de mots collé à l'icône »).
     private let ledger = UsageLedger()
@@ -750,6 +753,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         prefsItem.keyEquivalentModifierMask = [.command]
         prefsItem.target = self
         menu.addItem(prefsItem)
+        let updateItem = NSMenuItem(title: "Vérifier les mises à jour…", action: #selector(checkForUpdates), keyEquivalent: "")
+        updateItem.target = self
+        menu.addItem(updateItem)
         let onboardingItem = NSMenuItem(title: "Permissions…", action: #selector(openOnboarding), keyEquivalent: "")
         onboardingItem.target = self
         menu.addItem(onboardingItem)
@@ -962,6 +968,10 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         ghostInspectorItem?.state = visible ? .on : .off
     }
     #endif
+
+    /// Déclenche la vérification des mises à jour sur action explicite utilisateur
+    /// (item de menu « Vérifier les mises à jour… »). Aucun check passif — manuel-only.
+    @objc private func checkForUpdates() { updater.checkForUpdates() }
 
     @objc private func openPreferences() {
         if preferences == nil {
