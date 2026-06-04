@@ -1,16 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   Appcast Sparkle de Souffleuse — flux de mises à jour MANUEL-ONLY.
-  Servi à https://souffleuse.app/appcast.xml (SUFeedURL de l'app, HTTPS obligatoire).
+  Servi à https://souffleuse.app/appcast.xml (= SUFeedURL de l'app, HTTPS obligatoire).
 
-  Chaque <item> décrit une release. Les attributs sparkle:edSignature + length
-  sont produits par `sign_update <le.dmg>` (clé privée EdDSA du trousseau).
-  → Utilise deploy/make-appcast-entry.sh pour régénérer un bloc <item> signé.
+  Convention du site : un SEUL Souffleuse.dmg à la racine, écrasé à chaque release.
+  → On garde donc UNE SEULE <item> (la version courante). L'URL d'enclosure est
+    réutilisée à chaque release ; edSignature + length DOIVENT être régénérés en
+    même temps que le DMG uploadé, sinon Sparkle rejette le fichier.
 
-  RAPPELS :
-  - Trie par version : Sparkle compare sparkle:version (= CFBundleVersion).
-  - Le DMG est servi depuis /downloads/ (cf. vercel.json, type octet-stream).
-  - Mode manuel-only : aucun <sparkle:minimumAutoupdateVersion> / phasedRollout.
+  Régénérer la signature :  deploy/make-appcast-entry.sh website/Souffleuse.dmg
 -->
 <rss version="2.0"
      xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
@@ -36,9 +34,10 @@
         <p>macOS 14+ · Apple Silicon · 100 % on-device.</p>
       ]]></description>
       <!-- TODO release : remplacer edSignature + length par la sortie de
-           `sign_update build/Souffleuse.dmg` (via make-appcast-entry.sh). -->
+           `deploy/make-appcast-entry.sh website/Souffleuse.dmg`.
+           ⚠️ Le DMG doit être un build AVEC Sparkle intégré (sinon pas d'updates). -->
       <enclosure
-        url="https://souffleuse.app/downloads/Souffleuse-0.4.0.dmg"
+        url="https://souffleuse.app/Souffleuse.dmg"
         sparkle:edSignature="REMPLACER_PAR_LA_SIGNATURE_sign_update"
         length="REMPLACER_PAR_LA_TAILLE_EN_OCTETS"
         type="application/octet-stream" />

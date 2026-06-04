@@ -1,5 +1,0 @@
-# Ne jamais committer les binaires de release dans le repo applicatif.
-# Les .dmg sont uploadés directement sur Vercel (dossier /downloads), pas ici.
-downloads/
-*.dmg
-*.zip
