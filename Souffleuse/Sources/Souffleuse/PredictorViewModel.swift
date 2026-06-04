@@ -184,6 +184,12 @@ final class PredictorViewModel {
     /// any view.
     @ObservationIgnored private var learnedLexicon = LearnedLexicon()
 
+    /// Registre (DomainCluster) de l'app focus au dernier `predict()`. Mémorisé
+    /// pour que `extendGhost` (refill glissant, sans `axSnapshot`) scope son
+    /// few-shot sur le même cluster — la continuation reste dans le bon registre
+    /// (P1.3). `.other` ⇒ aucun scope (comportement historique).
+    @ObservationIgnored private var lastActiveDomain: DomainCluster = .other
+
     /// Active GGUF model id (the real ghost engine). Mirrored from
     /// `PreferencesStore.ggufModelID` at startup ; changed via `swapGGUF(to:)`.
     private var ggufModelID: String = GGUFModelOption.defaultID
@@ -360,6 +366,7 @@ final class PredictorViewModel {
         // historique) ; un cluster connu n'autorise que la prose des apps du
         // même registre — le privé (.chat) ne fuit jamais ailleurs.
         let activeDomain = DomainCluster.cluster(for: axSnapshot?.bundleID)
+        lastActiveDomain = activeDomain   // mémorisé pour le scope du refill (extendGhost, P1.3)
 
         // Source decay : a HIGH-confidence source set by a PREVIOUS predict
         // no longer reflects reality. Demote stale HIGH sources to .llm so
@@ -1139,6 +1146,27 @@ final class PredictorViewModel {
         let maxTokens = self.maxTokens
         let runtime = self.runtime
 
+        // Few-shot stylé sur le refill glissant (P1.3) : même mécanisme que
+        // `predict()`, scopé sur le cluster du dernier predict (`lastActiveDomain`)
+        // pour que la continuation reste dans le bon registre. Gardé par le maître
+        // (`personalizationStrength`) — le style suit le toggle de perso. Le biais
+        // corpus reste OFF sur le refill (`personalizationStrength: 0` ci-dessous,
+        // orthogonal). Rank synchrone in-memory (<5ms) — hors chemin chaud TTFT.
+        var refillExamplesBlock = ""
+        if personalizationStrength > 0 && SuggestionPolicy.Tuning.examplesInjectionEnabled {
+            let prose = self.historySnapshot.filter {
+                $0.source == .prose && !SuggestionPolicy.isGreetingLike($0.accepted)
+                    && (lastActiveDomain == .other || DomainCluster.cluster(for: $0.bundleID) == lastActiveDomain)
+            }
+            let examples = SimilarHistoryRetrieval.rank(
+                entries: prose, userTail: userTail, limit: SimilarHistoryRetrieval.defaultK
+            )
+            refillExamplesBlock = SimilarHistoryRetrieval.buildExamplesBlock(from: examples)
+            if !examples.isEmpty {
+                Log.info(.predictor, "ghost_refill_examples_injected", count: examples.count)
+            }
+        }
+
         let request = PredictRequest(
             prefix: fullVisible,
             contextPrefix: "",
@@ -1163,7 +1191,7 @@ final class PredictorViewModel {
             fieldContextSlot: "",
             afterCursorSlot: "",
             basePreamble: "",
-            examplesBlock: "",
+            examplesBlock: refillExamplesBlock,
             basePromptText: llmTail
         )
 
