@@ -275,6 +275,6 @@ struct MidWordContinuationGuardTests {
             userTail: userTail, llmTail: userTail, isInstructModel: false,
             systemMessage: "", baseSystem: "", customInstr: "", ctxPrefix: "",
             fieldContextSlot: "", afterCursorSlot: "", basePreamble: "",
-            examplesBlock: "", basePromptText: userTail, ngramSnapshot: nil)
+            examplesBlock: "", basePromptText: userTail)
     }
 }

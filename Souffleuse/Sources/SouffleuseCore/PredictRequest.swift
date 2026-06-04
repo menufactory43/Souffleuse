@@ -1,5 +1,4 @@
 import Foundation
-import SouffleusePersonalization
 
 // MARK: - PredictRequest
 
@@ -53,9 +52,6 @@ public struct PredictRequest: Sendable {
     /// Full assembled prompt text for the base/PT path
     /// (`basePreamble + examplesBlock + llmTail`).
     public let basePromptText: String
-    /// N-gram snapshot — `nil` when personalization is disabled or
-    /// caller has no model. Precomputed off-actor by caller.
-    public let ngramSnapshot: NgramSnapshot?
 
     public init(
         prefix: String,
@@ -82,8 +78,7 @@ public struct PredictRequest: Sendable {
         afterCursorSlot: String,
         basePreamble: String,
         examplesBlock: String,
-        basePromptText: String,
-        ngramSnapshot: NgramSnapshot?
+        basePromptText: String
     ) {
         self.prefix = prefix
         self.contextPrefix = contextPrefix
@@ -110,6 +105,5 @@ public struct PredictRequest: Sendable {
         self.basePreamble = basePreamble
         self.examplesBlock = examplesBlock
         self.basePromptText = basePromptText
-        self.ngramSnapshot = ngramSnapshot
     }
 }
