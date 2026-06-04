@@ -167,6 +167,12 @@ final class PredictorViewModel {
     /// pour que la mémoire applique EXACTEMENT les mêmes 4 gardes que le disque.
     private let typoDetector = TypoDetector()
 
+    /// Plafond de caractères du `userTail` (la queue de texte visible nourrie au
+    /// modèle). Au-delà, le préfixe est tronqué — le contexte lointain n'aide pas
+    /// la complétion locale et coûte des tokens. Constante unique partagée par
+    /// `predict()` et `extendGhost()` (avant : literal `2048` dupliqué aux deux).
+    static let userTailCap = 2048
+
     /// Phase 4 — Ghost Relevance Gate engine. Owns currentGhost/currentSource/
     /// currentScore/shownAt + the 5 classification events. PVM delegates cascade
     /// routing (L0/L1) and LLM chunk replacement-bar to this engine ; partial-
@@ -338,7 +344,7 @@ final class PredictorViewModel {
         customInstructions: String = "",
         axSnapshot: AXSnapshot? = nil
     ) {
-        let userTail = String(prefix.suffix(2048))
+        let userTail = String(prefix.suffix(Self.userTailCap))
         // The exact prefix this invocation produces a suggestion for. Stamped
         // onto `predictedForPrefix` at every site that assigns `suggestion`, so
         // the render boundary can prove freshness. Matches the AppDelegate's
@@ -1126,7 +1132,7 @@ final class PredictorViewModel {
 
         // Texte visible complet : ce qui pilote la continuation du modèle.
         let fullVisible = committedText + currentRemainder
-        let userTail = String(fullVisible.suffix(2048))
+        let userTail = String(fullVisible.suffix(Self.userTailCap))
 
         // Steering de langue (même logique sticky que `predict`).
         if let confident = ModelRuntime.detectLanguage(in: userTail) {

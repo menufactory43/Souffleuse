@@ -380,9 +380,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
 
         predictor.maxTokens = store.completionLength.maxTokens
         predictor.maxWords = store.completionLength.maxWords
-        predictor.personalizationStrength = store.personalizationEnabled
-            ? Float(store.personalizationStrength)
-            : 0
+        predictor.personalizationStrength = store.effectivePersonalizationStrength
         predictor.prefixCorrectionEnabled = store.prefixCorrectionEnabled
         // Few-shot dynamique : le predictor lit ce store à chaque appel à
         // `predict()` pour retrouver des entrées similaires au userTail.
@@ -654,9 +652,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
         // Propagate personalization knob. Strength = 0 when the toggle is off
         // — the predictor fast-paths and skips the n-gram bias entirely.
-        let effectiveStrength: Float = store.personalizationEnabled
-            ? Float(store.personalizationStrength)
-            : 0
+        let effectiveStrength = store.effectivePersonalizationStrength
         if predictor.personalizationStrength != effectiveStrength {
             predictor.personalizationStrength = effectiveStrength
         }
