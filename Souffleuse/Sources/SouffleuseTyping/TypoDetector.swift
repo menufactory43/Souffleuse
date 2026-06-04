@@ -247,11 +247,7 @@ public final class TypoDetector: @unchecked Sendable {
         return (wordStart..<wordEnd, word)
     }
 
-    private static func isWordChar(_ c: Character) -> Bool {
-        if c.isLetter || c.isNumber { return true }
-        if c == "'" || c == "’" || c == "-" { return true }
-        return false
-    }
+    private static func isWordChar(_ c: Character) -> Bool { WordBoundary.isWordChar(c) }
 
     /// Iterative two-row Levenshtein. Fine for the ≤30-char words we feed it.
     static func levenshtein(_ a: String, _ b: String) -> Int {

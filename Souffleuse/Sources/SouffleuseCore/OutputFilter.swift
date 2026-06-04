@@ -1,5 +1,6 @@
 import Foundation
 import NaturalLanguage
+import SouffleuseTyping
 
 // MARK: - OutputFilter (pure-function namespace)
 
@@ -144,8 +145,7 @@ public enum OutputFilter {
         var end = s.endIndex
         while end > s.startIndex {
             let prev = s.index(before: end)
-            let c = s[prev]
-            if c.isLetter || c.isNumber || c == "'" || c == "’" || c == "-" {
+            if WordBoundary.isWordChar(s[prev]) {
                 end = prev
             } else {
                 break
@@ -326,10 +326,10 @@ public enum OutputFilter {
 
     /// A character is a "word character" for coherence purposes when it can
     /// participate in a single word — letters, digits, and the intra-word
-    /// joiners apostrophe / curly-apostrophe / hyphen. Mirrors
-    /// `stripTrailingPartialWord`'s notion so the two stay consistent.
+    /// joiners apostrophe / curly-apostrophe / hyphen. Délègue à la primitive
+    /// unique `WordBoundary.isWordChar` (source de vérité partagée).
     public nonisolated static func isWordChar(_ c: Character) -> Bool {
-        c.isLetter || c.isNumber || c == "'" || c == "’" || c == "-"
+        WordBoundary.isWordChar(c)
     }
 
     /// Returns the in-progress partial word at the END of `userTail`: the
