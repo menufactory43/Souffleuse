@@ -261,6 +261,14 @@ private struct SouffleTab: View {
             }
 
             Section {
+                Toggle("Souffler au milieu d'une ligne", isOn: $store.midLineGhostEnabled)
+                Text("Quand le curseur est posé au milieu d'un texte, le souffle apparaît dans une petite bulle sous la ligne (au lieu de rester muet). Tab l'insère à l'endroit du curseur.")
+                    .font(.callout).foregroundStyle(.secondary)
+            } header: {
+                Text("Au milieu d'une ligne").font(.headline)
+            }
+
+            Section {
                 Toggle("Accepter mot à mot", isOn: $store.partialAcceptEnabled)
                 Text("Tab pose un mot ; le reste attend en gris. Tab encore pour le suivant, Esc pour tout écarter.")
                     .font(.callout).foregroundStyle(.secondary)
