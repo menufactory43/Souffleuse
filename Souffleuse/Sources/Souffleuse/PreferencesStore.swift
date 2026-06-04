@@ -147,6 +147,7 @@ final class PreferencesStore {
         static let translationModel = "translationModel"
         static let trailingSpaceOnPartial = "trailingSpaceOnPartial"
         static let prefixCorrectionEnabled = "prefixCorrectionEnabled"
+        static let midLineGhostEnabled = "midLineGhostEnabled"
     }
 
     var enabled: Bool {
@@ -249,6 +250,15 @@ final class PreferencesStore {
     var prefixCorrectionEnabled: Bool {
         didSet { UserDefaults.standard.set(prefixCorrectionEnabled, forKey: K.prefixCorrectionEnabled) }
     }
+    /// When true, a ghost may appear even when the caret sits INSIDE a line
+    /// (non-whitespace text follows on the same line). Instead of the inline
+    /// ghost — which would overlap the following glyphs — the suggestion is
+    /// shown as a rounded pill floated below the caret line (Cotypist's "Mid-line
+    /// completion"). Default OFF: it's a distinct presentation and a behaviour
+    /// change from the long-standing "suppress mid-line" rule, so it stays opt-in.
+    var midLineGhostEnabled: Bool {
+        didSet { UserDefaults.standard.set(midLineGhostEnabled, forKey: K.midLineGhostEnabled) }
+    }
 
     let allowlist = AllowlistStore()
     let hudAnchors = HUDAnchorStore()
@@ -297,6 +307,7 @@ final class PreferencesStore {
         self.translationModel = InstructModel(rawValue: d.string(forKey: K.translationModel) ?? "") ?? TranslationRuntime.defaultModel()
         self.trailingSpaceOnPartial = (d.object(forKey: K.trailingSpaceOnPartial) as? Bool) ?? true
         self.prefixCorrectionEnabled = (d.object(forKey: K.prefixCorrectionEnabled) as? Bool) ?? true
+        self.midLineGhostEnabled = (d.object(forKey: K.midLineGhostEnabled) as? Bool) ?? false
     }
 
     /// Vision language codes derived from the toggles. Always non-empty (falls

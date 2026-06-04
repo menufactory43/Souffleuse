@@ -14,6 +14,14 @@ public final class OverlayWindow {
     /// normal ghost is shown; toggled instead of recreated so the single panel's
     /// lifecycle (show/hide/accept/esc) stays untouched.
     private let correctionView = CorrectionView()
+    /// Custom-drawn sibling used only for the **mid-line** ghost: when the caret
+    /// sits inside a line (non-whitespace text follows on the same line), an
+    /// inline ghost would paint ON TOP of the user's existing glyphs. So instead
+    /// we render the suggestion as a self-contained rounded "pill" floated just
+    /// BELOW the caret line — Cotypist's mid-line presentation. Hidden whenever a
+    /// normal ghost or correction is shown; toggled, not recreated, so the single
+    /// panel's lifecycle stays untouched.
+    private let pillView = PillView()
 
     public init() {
         self.panel = NSPanel(
@@ -45,9 +53,13 @@ public final class OverlayWindow {
         correctionView.translatesAutoresizingMaskIntoConstraints = false
         correctionView.isHidden = true
 
+        pillView.translatesAutoresizingMaskIntoConstraints = false
+        pillView.isHidden = true
+
         let content = NSView()
         content.addSubview(label)
         content.addSubview(correctionView)
+        content.addSubview(pillView)
         NSLayoutConstraint.activate([
             label.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             label.trailingAnchor.constraint(equalTo: content.trailingAnchor),
@@ -57,6 +69,10 @@ public final class OverlayWindow {
             correctionView.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             correctionView.topAnchor.constraint(equalTo: content.topAnchor),
             correctionView.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            pillView.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            pillView.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            pillView.topAnchor.constraint(equalTo: content.topAnchor),
+            pillView.bottomAnchor.constraint(equalTo: content.bottomAnchor),
         ])
         panel.contentView = content
     }
@@ -120,6 +136,7 @@ public final class OverlayWindow {
         }
 
         correctionView.isHidden = true
+        pillView.isHidden = true
         label.isHidden = false
         label.font = renderFont
         label.stringValue = text
@@ -129,6 +146,67 @@ public final class OverlayWindow {
         }
         lastFrame = frame
         lastText = text
+    }
+
+    /// Paint the **mid-line** ghost as a rounded pill floated just below the caret
+    /// line (Cotypist parity). Used when non-whitespace text follows the caret on
+    /// the same line, where an inline ghost would overlap the user's glyphs. The
+    /// pill is self-contained (own background + border), so it reads cleanly over
+    /// any host text. `caretRectQuartz` is the caret rect; `hostText`/`caretIndex`
+    /// correct the caret X for apps that return line rects (Notes); `hostFont`
+    /// sizes the pill text to roughly match the host.
+    public func showPill(text: String, at caretRectQuartz: CGRect, hostText: String?, caretIndex: Int?, hostFont: NSFont?) {
+        let text = text
+            .replacingOccurrences(of: "\r\n", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+        guard !text.isEmpty else { hide(); return }
+        let renderFont = hostFont
+            ?? Self.estimatedFont(forCaretRectHeight: caretRectQuartz.height)
+            ?? label.font
+            ?? .systemFont(ofSize: 15)
+        let correctedRect = Self.correctCaretRect(caretRectQuartz, hostText: hostText, caretIndex: caretIndex, font: renderFont)
+        let frame = Self.pillFrame(belowCaret: correctedRect, text: text, font: renderFont)
+
+        // Same redundant-repaint guard as the inline ghost: the 80 ms poll
+        // re-calls this ~12×/s with identical content, and the caret rect can
+        // jitter a pixel on Electron hosts. Only repaint on a real change.
+        if panel.isVisible, !pillView.isHidden, text == lastText, frame == lastFrame {
+            return
+        }
+
+        label.isHidden = true
+        label.stringValue = ""
+        correctionView.isHidden = true
+        pillView.isHidden = false
+        pillView.configure(text: text, font: renderFont)
+        panel.setFrame(frame, display: true)
+        if !panel.isVisible {
+            panel.orderFrontRegardless()
+        }
+        lastFrame = frame
+        lastText = text
+    }
+
+    /// AppKit frame for the mid-line pill: a padded rounded box whose TOP sits a
+    /// few points below the caret line (`caret.maxY` in Quartz = line bottom), left
+    /// edge aligned so the pill text starts under the caret X. Clamped to the left
+    /// screen edge so it never clips off-screen at the start of a line.
+    static func pillFrame(belowCaret caret: CGRect, text: String, font: NSFont) -> CGRect {
+        let textSize = (text as NSString).size(withAttributes: [.font: font])
+        let width = ceil(textSize.width) + PillView.hPad * 2
+        let height = ceil(textSize.height) + PillView.vPad * 2
+
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? NSScreen.main?.frame.height ?? 0
+        // Quartz Y grows downward, so the bottom of the line is `caret.maxY`; the
+        // pill hangs `gap` below it. Convert that Quartz bottom-of-pill to AppKit
+        // (origin bottom-left): appKitY = screenH − quartzBottomOfPill.
+        let quartzPillBottom = caret.maxY + PillView.gapBelow + height
+        let appKitY = primaryHeight - quartzPillBottom
+        // Align the pill's text (inset by hPad) under the caret X; clamp ≥ 0.
+        let appKitX = max(0, caret.origin.x - PillView.hPad)
+
+        return CGRect(x: appKitX, y: appKitY, width: width, height: height)
     }
 
     /// Paint the in-place typo correction à la Cotypist from a **pixel-perfect
@@ -209,6 +287,7 @@ public final class OverlayWindow {
 
         label.isHidden = true
         label.stringValue = ""
+        pillView.isHidden = true
         correctionView.isHidden = false
         correctionView.configure(
             original: lifted ? original : nil,
@@ -240,6 +319,7 @@ public final class OverlayWindow {
         label.stringValue = ""
         label.isHidden = false
         correctionView.isHidden = true
+        pillView.isHidden = true
         lastText = ""
         lastFrame = .zero
         if panel.isVisible {
@@ -393,5 +473,59 @@ private final class CorrectionView: NSView {
         let size = text.size(withAttributes: attrs)
         let textY = (bounds.height - size.height) / 2
         text.draw(at: CGPoint(x: wordWidth + gap, y: textY), withAttributes: attrs)
+    }
+}
+
+/// Custom-drawn content for the **mid-line pill**: a rounded, bordered capsule
+/// with a faint background, holding the suggestion in muted text — Cotypist's
+/// presentation when the caret is inside a line. Semantic colours so it adapts
+/// to light/dark mode automatically. Non-flipped (AppKit default, origin
+/// bottom-left) so the text-centring math matches the frame from `pillFrame`.
+@MainActor
+final class PillView: NSView {
+    /// Horizontal text inset inside the pill (each side). Also drives the X
+    /// alignment in `pillFrame`, so the text starts under the caret.
+    static let hPad: CGFloat = 9
+    /// Vertical text inset inside the pill (each side).
+    static let vPad: CGFloat = 4
+    /// Vertical gap between the caret line's bottom and the pill's top.
+    static let gapBelow: CGFloat = 4
+
+    private var text: String = ""
+    private var font: NSFont = .systemFont(ofSize: 15)
+
+    override var isOpaque: Bool { false }
+    override var isFlipped: Bool { false }
+
+    func configure(text: String, font: NSFont) {
+        self.text = text
+        self.font = font
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard !text.isEmpty else { return }
+
+        // Rounded capsule: inset half a point so the 1px border isn't clipped at
+        // the panel edge. Radius = a soft rounded rect (not a full capsule) to
+        // match Cotypist's mid-line bubble.
+        let box = bounds.insetBy(dx: 0.5, dy: 0.5)
+        let radius = min(8, box.height / 2)
+        let path = NSBezierPath(roundedRect: box, xRadius: radius, yRadius: radius)
+        NSColor.windowBackgroundColor.withAlphaComponent(0.98).setFill()
+        path.fill()
+        path.lineWidth = 1
+        NSColor.separatorColor.setStroke()
+        path.stroke()
+
+        // Suggestion text, muted, vertically centred and inset by hPad.
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor.secondaryLabelColor,
+        ]
+        let ns = text as NSString
+        let size = ns.size(withAttributes: attrs)
+        let textY = (bounds.height - size.height) / 2
+        ns.draw(at: CGPoint(x: Self.hPad, y: textY), withAttributes: attrs)
     }
 }
