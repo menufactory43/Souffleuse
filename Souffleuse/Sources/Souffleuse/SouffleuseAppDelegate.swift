@@ -2863,14 +2863,14 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if prefix != lastPredictedPrefix {
-            // Clean slate per mid-line position. A suggestion generated for a
-            // DIFFERENT caret (e.g. the end-of-line ghost) must NOT bleed into the
-            // pill: the instant path (L0/L1) can keep the old `suggestion` while
-            // stamping the new `predictedForPrefix`, so the stale ghost would pass
-            // the freshness gate and render here. Wiping it makes the "a ghost was
-            // already showing" case behave exactly like the "nothing was showing"
-            // case — only a completion generated FOR this position can appear.
-            predictor.cancel()
+            // Freshness is enforced downstream by `shouldRenderSuggestion`
+            // (predictedForPrefix == currentPrefix): a suggestion generated for a
+            // DIFFERENT caret cannot render in the pill. We deliberately do NOT
+            // `predictor.cancel()` here — that wipes the SHARED `predictor.suggestion`
+            // while leaving the end-of-line path's `lastPredictedPrefix` stale, so
+            // bringing the caret back to the line end skipped re-prediction AND saw
+            // an empty suggestion → the normal inline ghost vanished. Same debounce/
+            // predict shape as the end-of-line path; cancel-on-keystroke still holds.
             predictDebounceTask?.cancel()
             let capturedPrefix = prefix
             let capturedContext = cachedEnrichmentPrefix
