@@ -190,6 +190,14 @@ final class PreferencesStore {
     var personalizationStrength: Double {
         didSet { UserDefaults.standard.set(personalizationStrength, forKey: K.personalizationStrength) }
     }
+    /// Force de personnalisation EFFECTIVE propagée au predictor : la force réglée
+    /// quand le toggle est ON, sinon `0`. Source unique de l'invariant « toggle
+    /// OFF ⇒ force 0 » — avant, ce ternaire était dupliqué dans deux endroits de
+    /// `SouffleuseAppDelegate` (init + sync de prefs), au risque de diverger. Le
+    /// predictor fast-path et saute le biais n-gram dès que c'est `0`.
+    var effectivePersonalizationStrength: Float {
+        personalizationEnabled ? Float(personalizationStrength) : 0
+    }
     var personalizationOnboardingShown: Bool {
         didSet { UserDefaults.standard.set(personalizationOnboardingShown, forKey: K.personalizationOnboardingShown) }
     }
