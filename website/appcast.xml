@@ -33,13 +33,12 @@
         </ul>
         <p>macOS 14+ · Apple Silicon · 100 % on-device.</p>
       ]]></description>
-      <!-- TODO release : remplacer edSignature + length par la sortie de
-           `deploy/make-appcast-entry.sh website/Souffleuse.dmg`.
-           ⚠️ Le DMG doit être un build AVEC Sparkle intégré (sinon pas d'updates). -->
+      <!-- Signé le 2026-06-04 (build Developer ID avec Sparkle, non notarisé). -->
+      <!-- Régénérer à chaque release : deploy/make-appcast-entry.sh website/Souffleuse.dmg -->
       <enclosure
         url="https://souffleuse.app/Souffleuse.dmg"
-        sparkle:edSignature="REMPLACER_PAR_LA_SIGNATURE_sign_update"
-        length="REMPLACER_PAR_LA_TAILLE_EN_OCTETS"
+        sparkle:edSignature="D+lo2YbjHDzUN7lokQQzyz0FP+QeF24dSZOqioXQHPC+Ebw4YZEB7ucpk8tthmnu2/ULzfjpT+p5GQQ5TpkiBg=="
+        length="20673861"
         type="application/octet-stream" />
     </item>
 
