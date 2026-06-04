@@ -49,6 +49,19 @@ struct FewShotScopingTests {
         #expect(out.isEmpty)
     }
 
+    @Test("URLs / chemins / hashes exclus du pool de style (bruit navigateur)")
+    func urlsAndPathsExcluded() {
+        let pool = [
+            prose("Puis-je avoir votre relevé Binance ?", "com.brave.Browser"),                 // prose ✓
+            prose("https://intel.arkm.com/explorer/address/bc1qxuyrnxjw", "com.brave.Browser"), // URL ✗
+            prose("/Users/gabriel/cocotypist/website/index.html", "com.brave.Browser"),         // chemin ✗
+            prose("app.zerion.io/0xbcf763f3f85f5f57202f13d1866b6e32fc7d2704", "com.brave.Browser"), // token long ✗
+        ]
+        let out = FewShotScoping.scopedExamplesPool(pool, activeDomain: .web)
+        #expect(out.count == 1)
+        #expect(out.first?.accepted == "Puis-je avoir votre relevé Binance ?")
+    }
+
     @Test("mix réaliste : seule la prose .web non-salutation passe en .web")
     func mixedPoolScopedCorrectly() {
         let pool = [
