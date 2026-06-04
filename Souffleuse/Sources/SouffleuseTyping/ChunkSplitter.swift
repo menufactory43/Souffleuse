@@ -42,9 +42,7 @@ public enum ChunkSplitter {
         return String(s[leadingStart..<i])
     }
 
-    private static func isWordChar(_ c: Character) -> Bool {
-        c.isLetter || c.isNumber || c == "'" || c == "\u{2019}" || c == "-"
-    }
+    private static func isWordChar(_ c: Character) -> Bool { WordBoundary.isWordChar(c) }
 
     private static func isTrailingPunct(_ c: Character) -> Bool {
         ".,;:!?\u{2026})]}»".contains(c)
