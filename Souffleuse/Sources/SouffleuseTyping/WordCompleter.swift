@@ -125,9 +125,5 @@ public final class WordCompleter: @unchecked Sendable {
         return word.isEmpty ? nil : word
     }
 
-    private static func isWordChar(_ c: Character) -> Bool {
-        if c.isLetter || c.isNumber { return true }
-        if c == "'" || c == "’" || c == "-" { return true }
-        return false
-    }
+    private static func isWordChar(_ c: Character) -> Bool { WordBoundary.isWordChar(c) }
 }

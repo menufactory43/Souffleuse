@@ -429,31 +429,13 @@ public actor TypingHistoryStore {
         return true  // all conditions met → truncated sub-word fragment
     }
 
-    /// Whether a character is a word character (mirrors OutputFilter.isWordChar).
-    private static func isWordChar(_ c: Character) -> Bool {
-        c.isLetter || c.isNumber || c == "'" || c == "'" || c == "-"
-    }
-
-    /// Returns the trailing run of word-chars from `s` (mirrors
-    /// OutputFilter.trailingPartialWord without the SouffleuseCore import).
-    private static func trailingPartialWord(_ s: String) -> String {
-        var end = s.endIndex
-        while end > s.startIndex {
-            let prev = s.index(before: end)
-            let c = s[prev]
-            if isWordChar(c) { end = prev } else { break }
-        }
-        return String(s[end...])
-    }
-
-    /// Returns the leading run of word-chars from `s` (mirrors OutputFilter.leadingWordRun).
-    private static func leadingWordRun(_ s: String) -> String {
-        var out = ""
-        for c in s {
-            if isWordChar(c) { out.append(c) } else { break }
-        }
-        return out
-    }
+    /// Primitives de frontière de mot — déléguées à `WordBoundary` (source
+    /// unique). Avant, ce module gardait ses propres copies qui avaient perdu
+    /// l'apostrophe courbe `’` : les gardes d'admission segmentaient `l’app` /
+    /// `d’accord` autrement que le reste du pipeline. Plus de copie = plus de drift.
+    private static func isWordChar(_ c: Character) -> Bool { WordBoundary.isWordChar(c) }
+    private static func trailingPartialWord(_ s: String) -> String { WordBoundary.trailingPartialWord(s) }
+    private static func leadingWordRun(_ s: String) -> String { WordBoundary.leadingWordRun(s) }
 
     private func insert(_ entry: TypingHistoryEntry) {
         guard let db else { return }
