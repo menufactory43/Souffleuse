@@ -20,16 +20,16 @@
     <language>fr</language>
 
     <item>
-      <title>Version 0.4.0</title>
-      <pubDate>Thu, 04 Jun 2026 12:00:00 +0000</pubDate>
-      <sparkle:version>0.4.0</sparkle:version>
-      <sparkle:shortVersionString>0.4.0</sparkle:shortVersionString>
+      <title>Version 0.5.0</title>
+      <pubDate>Thu, 04 Jun 2026 14:56:36 +0000</pubDate>
+      <sparkle:version>0.5.0</sparkle:version>
+      <sparkle:shortVersionString>0.5.0</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
       <description><![CDATA[
-        <h2>Souffleuse 0.4.0</h2>
+        <h2>Souffleuse 0.5.0</h2>
         <ul>
-          <li>Mises à jour intégrées via Sparkle (vérification manuelle, sans suivi passif).</li>
-          <li>Améliorations du ghost et de la pertinence contextuelle.</li>
+          <li><b>Souffle au milieu d'une ligne.</b> Quand le curseur est posé à l'intérieur d'un texte (et plus seulement à la fin), la suggestion s'affiche dans une bulle sous la ligne. Tab la pose mot à mot ; la bulle rétrécit à chaque mot accepté.</li>
+          <li>À activer dans Réglages → « Souffler au milieu d'une ligne ».</li>
         </ul>
         <p>macOS 14+ · Apple Silicon · 100 % on-device.</p>
       ]]></description>
@@ -37,8 +37,8 @@
       <!-- Régénérer à chaque release : deploy/make-appcast-entry.sh website/Souffleuse.dmg -->
       <enclosure
         url="https://souffleuse.app/Souffleuse.dmg"
-        sparkle:edSignature="D+lo2YbjHDzUN7lokQQzyz0FP+QeF24dSZOqioXQHPC+Ebw4YZEB7ucpk8tthmnu2/ULzfjpT+p5GQQ5TpkiBg=="
-        length="20673861"
+        sparkle:edSignature="ZZvBMy6QTJEvm25HOTLu5thK+Ru5WJl04uVpij2BWR15SK7Q54OSuhzbXu9UfGE7HiQuGr5ihvkxuFNtqj8qCg=="
+        length="20688950"
         type="application/octet-stream" />
     </item>
 
