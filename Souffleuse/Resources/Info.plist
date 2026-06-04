@@ -2,45 +2,41 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key>
-  <string>Souffleuse</string>
-  <key>CFBundleDisplayName</key>
-  <string>Souffleuse</string>
-  <key>CFBundleIdentifier</key>
-  <string>app.cocotypist.Souffleuse</string>
-  <key>CFBundleVersion</key>
-  <string>0.4.0</string>
-  <key>CFBundleShortVersionString</key>
-  <string>0.4.0</string>
-  <key>CFBundleExecutable</key>
-  <string>Souffleuse</string>
-  <key>CFBundleIconFile</key>
-  <string>AppIcon</string>
-  <key>CFBundlePackageType</key>
-  <string>APPL</string>
-  <key>CFBundleSignature</key>
-  <string>????</string>
-  <key>LSMinimumSystemVersion</key>
-  <string>14.0</string>
-  <key>LSUIElement</key>
-  <true/>
-  <key>NSHighResolutionCapable</key>
-  <true/>
-  <key>NSAccessibilityUsageDescription</key>
-  <string>Souffleuse lit le contenu du champ texte focalisé pour générer des suggestions et y écrit la suggestion acceptée quand vous appuyez sur Tab.</string>
-  <key>NSAppleEventsUsageDescription</key>
-  <string>Souffleuse a besoin d'envoyer des événements pour injecter du texte dans l'application active.</string>
-  <key>NSScreenCaptureUsageDescription</key>
-  <string>Souffleuse peut capturer la fenêtre active pour extraire du texte visible (OCR local) afin d'améliorer les suggestions. Cette source est désactivée par défaut et tout traitement reste local — rien n'est enregistré ni envoyé sur le réseau.</string>
-  <!-- Sparkle 2 — canal de mise à jour beta (manuel-only, SUEnableAutomaticChecks=false). -->
-  <!-- SUScheduledCheckInterval intentionnellement ABSENT : aucun poll passif (ARCHITECTURE.md:339). -->
-  <key>SUFeedURL</key>
-  <string>https://souffleuse.app/appcast.xml</string>
-  <key>SUEnableAutomaticChecks</key>
-  <false/>
-  <!-- Cle publique EdDSA (generate_keys, 2026-06-04). La cle PRIVEE vit dans le -->
-  <!-- trousseau de session du dev (cf. SPARKLE-RELEASE.md) — JAMAIS dans le repo. -->
-  <key>SUPublicEDKey</key>
-  <string>vUuhm8w0CZyB1qeW6M+ctrqWcGmNcmHGc9rwVY4HTWQ=</string>
+	<key>CFBundleDisplayName</key>
+	<string>Souffleuse</string>
+	<key>CFBundleExecutable</key>
+	<string>Souffleuse</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>app.cocotypist.Souffleuse</string>
+	<key>CFBundleName</key>
+	<string>Souffleuse</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.5.0</string>
+	<key>CFBundleSignature</key>
+	<string>????</string>
+	<key>CFBundleVersion</key>
+	<string>0.5.0</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSAccessibilityUsageDescription</key>
+	<string>Souffleuse lit le contenu du champ texte focalisé pour générer des suggestions et y écrit la suggestion acceptée quand vous appuyez sur Tab.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Souffleuse a besoin d'envoyer des événements pour injecter du texte dans l'application active.</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>Souffleuse peut capturer la fenêtre active pour extraire du texte visible (OCR local) afin d'améliorer les suggestions. Cette source est désactivée par défaut et tout traitement reste local — rien n'est enregistré ni envoyé sur le réseau.</string>
+	<key>SUEnableAutomaticChecks</key>
+	<false/>
+	<key>SUFeedURL</key>
+	<string>https://souffleuse.app/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>vUuhm8w0CZyB1qeW6M+ctrqWcGmNcmHGc9rwVY4HTWQ=</string>
 </dict>
 </plist>
