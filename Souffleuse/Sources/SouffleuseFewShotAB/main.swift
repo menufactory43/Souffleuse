@@ -77,18 +77,21 @@ err("[fewshot-ab] corpus entries loaded: \(decoded.count)")
 // ── 1. Garde la prose `.web` de longueur ≥ 40 car. (FALLBACK si trop peu). ───
 let activeDomain: DomainCluster = .web
 let allProse = decoded.filter { $0.source == "prose" }.map { $0.toHistory() }
-let webProse = allProse.filter {
-    DomainCluster.cluster(for: $0.bundleID) == .web && $0.accepted.count >= 40
-}
+// Prose `.web` PROPRE : on passe par le filtre de prod (scopé `.web` + sans
+// URL/chemin/salutation) pour que les cas TEST soient de la VRAIE prose support,
+// pas des liens collés — sinon le few-shot stylé n'a rien à démontrer.
+let webProse = FewShotScoping.scopedExamplesPool(allProse, activeDomain: .web)
+    .filter { $0.accepted.count >= 40 }
 var usedFallback = false
 var pool: [TypingHistoryEntry]
 if webProse.count >= 12 {
     pool = webProse
-    err("[fewshot-ab] prose .web (accepted ≥ 40 car.): \(pool.count) entrées")
+    err("[fewshot-ab] prose .web PROPRE (≥ 40 car., sans URL/chemin): \(pool.count) entrées")
 } else {
     usedFallback = true
-    pool = allProse.filter { $0.accepted.count >= 40 }
-    err("[fewshot-ab] FALLBACK: trop peu de prose .web (\(webProse.count)) → toute la prose ≥ 40 car. : \(pool.count) entrées")
+    pool = FewShotScoping.scopedExamplesPool(allProse, activeDomain: .other)
+        .filter { $0.accepted.count >= 40 }
+    err("[fewshot-ab] FALLBACK: trop peu de prose .web propre (\(webProse.count)) → toute la prose propre ≥ 40 car. : \(pool.count) entrées")
 }
 guard pool.count >= 9 else {
     err("[fewshot-ab] FATAL: pas assez de prose (\(pool.count)) pour 8 TEST + few-shot"); exit(1)
