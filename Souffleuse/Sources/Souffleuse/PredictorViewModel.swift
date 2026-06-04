@@ -1235,6 +1235,16 @@ final class PredictorViewModel {
 
     /// Folds a single newly-accepted entry into the personalization corpus.
     func ingestAccepted(_ entry: TypingHistoryEntry) async {
+        // Privacy (P1.5) : ne JAMAIS ingérer un payload secret-like dans le modèle
+        // EN MÉMOIRE non plus. `TypingHistoryStore.append` le rejette déjà du disque
+        // (event `history_skipped_secretlike`), mais ce chemin l'alimente en
+        // parallèle ; sans cette garde, un mot de passe rejeté du store pourrait
+        // quand même ressortir comme rappel L1 / exemple few-shot / terme appris
+        // pendant la session (tout part de `historySnapshot`). On mirror le filtre.
+        if SecretHeuristic.looksLikeSecret(entry.accepted) {
+            Log.info(.context, "ingest_skipped_secretlike")
+            return
+        }
         // Layer 1 snapshot append — keep most-recent-first ordering so the
         // linear scan in SuggestionPolicy's exact-substring helper hits
         // fresh entries first. Cap mirrors TypingHistoryStore.maxEntries (200).
