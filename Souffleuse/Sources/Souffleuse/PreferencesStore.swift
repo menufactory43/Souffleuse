@@ -128,6 +128,7 @@ final class PreferencesStore {
         static let captureEnabled = "captureEnabled"
         static let modelID = "modelID"
         static let ggufModelID = "ggufModelID"
+        static let primaryLanguage = "primaryLanguage"
         static let ocrLangFR = "ocrLangFR"
         static let ocrLangEN = "ocrLangEN"
         static let ocrLangES = "ocrLangES"
@@ -165,6 +166,12 @@ final class PreferencesStore {
     /// (The MLX `modelID` above is legacy and no longer user-driven.)
     var ggufModelID: String {
         didSet { UserDefaults.standard.set(ggufModelID, forKey: K.ggufModelID) }
+    }
+    /// Langue d'écriture principale — demandée à l'onboarding, modifiable dans
+    /// l'onglet Souffle. Sert UNIQUEMENT à conseiller la bonne voix (la petite
+    /// Gemma en français, une voix multilingue sinon) ; ne change rien d'autre.
+    var primaryLanguage: PrimaryLanguage {
+        didSet { UserDefaults.standard.set(primaryLanguage.rawValue, forKey: K.primaryLanguage) }
     }
     var ocrLangFR: Bool { didSet { UserDefaults.standard.set(ocrLangFR, forKey: K.ocrLangFR) } }
     var ocrLangEN: Bool { didSet { UserDefaults.standard.set(ocrLangEN, forKey: K.ocrLangEN) } }
@@ -258,6 +265,8 @@ final class PreferencesStore {
         // for the "test only" variants.
         self.modelID = (d.string(forKey: K.modelID)) ?? ModelOption.catalogue[0].id
         self.ggufModelID = (d.string(forKey: K.ggufModelID)) ?? GGUFModelOption.defaultID
+        // Défaut français : l'app est français-first ; l'onboarding affine au 1ᵉʳ lancement.
+        self.primaryLanguage = (d.string(forKey: K.primaryLanguage).flatMap(PrimaryLanguage.init(rawValue:))) ?? .french
         self.ocrLangFR = (d.object(forKey: K.ocrLangFR) as? Bool) ?? true
         self.ocrLangEN = (d.object(forKey: K.ocrLangEN) as? Bool) ?? true
         self.ocrLangES = (d.object(forKey: K.ocrLangES) as? Bool) ?? false
