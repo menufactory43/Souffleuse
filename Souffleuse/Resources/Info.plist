@@ -32,5 +32,15 @@
   <string>Souffleuse a besoin d'envoyer des événements pour injecter du texte dans l'application active.</string>
   <key>NSScreenCaptureUsageDescription</key>
   <string>Souffleuse peut capturer la fenêtre active pour extraire du texte visible (OCR local) afin d'améliorer les suggestions. Cette source est désactivée par défaut et tout traitement reste local — rien n'est enregistré ni envoyé sur le réseau.</string>
+  <!-- Sparkle 2 — canal de mise à jour beta (manuel-only, SUEnableAutomaticChecks=false). -->
+  <!-- SUScheduledCheckInterval intentionnellement ABSENT : aucun poll passif (ARCHITECTURE.md:339). -->
+  <key>SUFeedURL</key>
+  <string>https://souffleuse.app/appcast.xml</string>
+  <key>SUEnableAutomaticChecks</key>
+  <false/>
+  <!-- Cle publique EdDSA (generate_keys, 2026-06-04). La cle PRIVEE vit dans le -->
+  <!-- trousseau de session du dev (cf. SPARKLE-RELEASE.md) — JAMAIS dans le repo. -->
+  <key>SUPublicEDKey</key>
+  <string>vUuhm8w0CZyB1qeW6M+ctrqWcGmNcmHGc9rwVY4HTWQ=</string>
 </dict>
 </plist>
