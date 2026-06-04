@@ -11,7 +11,8 @@
 # - Imprime un bloc <item> prêt à coller dans deploy/vercel/appcast.xml.
 #
 # Le DMG produit par `RELEASE=1 NOTARIZE=0 Souffleuse/make-app.sh` est
-# build/Souffleuse.dmg ; renomme-le Souffleuse-<version>.dmg avant l'upload Vercel.
+# build/Souffleuse.dmg ; copie-le dans website/Souffleuse.dmg (fichier unique,
+# servi à la racine du site, écrasé à chaque release) puis lance ce script dessus.
 set -euo pipefail
 
 DMG="${1:?usage: make-appcast-entry.sh <chemin.dmg> [version]}"
@@ -32,12 +33,11 @@ fi
 # sign_update imprime :  sparkle:edSignature="..." length="..."
 SIG_ATTRS="$("$SIGN_UPDATE" "$DMG")"
 PUBDATE="$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S +0000')"
-DMG_NAME="Souffleuse-${VERSION}.dmg"
 
+# Convention du site : un seul Souffleuse.dmg à la racine, écrasé à chaque release.
 cat <<EOF
 
-<!-- ─── Bloc <item> pour la version ${VERSION} — à coller dans appcast.xml ─── -->
-<!-- Upload le DMG sous : https://souffleuse.app/downloads/${DMG_NAME} -->
+<!-- ─── <item> version ${VERSION} — remplace l'<item> existante dans website/appcast.xml ─── -->
     <item>
       <title>Version ${VERSION}</title>
       <pubDate>${PUBDATE}</pubDate>
@@ -51,7 +51,7 @@ cat <<EOF
         </ul>
       ]]></description>
       <enclosure
-        url="https://souffleuse.app/downloads/${DMG_NAME}"
+        url="https://souffleuse.app/Souffleuse.dmg"
         ${SIG_ATTRS}
         type="application/octet-stream" />
     </item>

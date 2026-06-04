@@ -86,43 +86,46 @@ Ces deux valeurs (`sparkle:edSignature` et `length`) sont à coller dans l'item
 
 ---
 
-## 3. Template appcast.xml
+## 3. Appcast — emplacement réel et publication
 
-L'appcast vit sur le **repo du site Vercel** (pas dans ce repo). Exemple de structure :
+Le site Vercel est **dans ce repo** : `website/` (site statique, servi depuis la
+racine, lié à Vercel via `website/.vercel`). Les fichiers canoniques sont versionnés :
 
-```xml
-<?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0"
-     xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
-     xmlns:dc="http://purl.org/dc/elements/1.1/">
-  <channel>
-    <title>Souffleuse</title>
-    <link>https://souffleuse.app/appcast.xml</link>
-    <description>Canal de mise à jour Souffleuse</description>
-    <language>fr</language>
-    <item>
-      <title>Souffleuse 0.4.1</title>
-      <sparkle:version>0.4.1</sparkle:version>
-      <sparkle:shortVersionString>0.4.1</sparkle:shortVersionString>
-      <pubDate>Thu, 05 Jun 2026 12:00:00 +0000</pubDate>
-      <sparkle:releaseNotesLink>https://souffleuse.app/release-notes/0.4.1.html</sparkle:releaseNotesLink>
-      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <enclosure
-        url="https://souffleuse.app/releases/Souffleuse-0.4.1.dmg"
-        sparkle:edSignature="REMPLACER_PAR_SIGNATURE_sign_update"
-        length="REMPLACER_PAR_LENGTH_sign_update"
-        type="application/octet-stream"/>
-    </item>
-  </channel>
-</rss>
+| Fichier | Rôle |
+|---|---|
+| `website/appcast.xml` | Le flux Sparkle (source de vérité, versionnée). |
+| `website/vercel.json` | En-têtes : `application/xml` pour l'appcast, `octet-stream` pour le DMG. |
+| `website/Souffleuse.dmg` | Le binaire **unique** servi à la racine, écrasé à chaque release (gitignoré). |
+
+**Convention fichier unique** : un seul `Souffleuse.dmg` à
+`https://souffleuse.app/Souffleuse.dmg`, écrasé à chaque version. On garde donc
+**une seule `<item>`** dans l'appcast (l'URL est réutilisée) ; `edSignature` +
+`length` doivent être régénérés en même temps que le DMG uploadé. Cache court +
+`must-revalidate` sur le DMG (cf. `vercel.json`) pour éviter de servir un cache périmé.
+
+### Boucle de release
+
+```bash
+# 1. Builder le DMG AVEC Sparkle (Developer ID, non notarisé)
+cd Souffleuse && RELEASE=1 NOTARIZE=0 ./make-app.sh        # → build/Souffleuse.dmg
+
+# 2. Le placer à la racine du site (fichier unique servi en statique)
+cp build/Souffleuse.dmg ../website/Souffleuse.dmg
+
+# 3. Générer l'<item> signé et la coller dans website/appcast.xml
+../deploy/make-appcast-entry.sh ../website/Souffleuse.dmg
+
+# 4. Déployer (depuis website/, où vit le lien .vercel)
+cd ../website && vercel deploy --prod
 ```
 
+Vérif post-déploiement :
+`curl -sI https://souffleuse.app/appcast.xml | grep -i content-type` → `application/xml`.
+
 Notes :
-- `<sparkle:version>` = `CFBundleVersion` (ex. `0.4.1`).
-- `<sparkle:shortVersionString>` = `CFBundleShortVersionString` (même valeur ici).
-- `<sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>` = macOS 14 minimum.
+- `<sparkle:version>` = `CFBundleVersion`, `<sparkle:shortVersionString>` = `CFBundleShortVersionString` (0.4.0).
 - `url` en **HTTPS** obligatoire (ATS + Sparkle refusent http://).
-- `sparkle:edSignature` et `length` fournis par `sign_update` (voir section 2).
+- `sparkle:edSignature` + `length` fournis par `sign_update` via le script (section 2).
 
 ---
 
@@ -146,8 +149,8 @@ clic-droit → Ouvrir, ou Réglages Système → Confidentialité → « Ouvrir 
 
 Ces étapes sont volontairement hors du scope de cette intégration :
 
-- **Déployer appcast.xml + DMG** sur le site Vercel (repo site séparé).
-- **Exécuter `generate_keys`** : étape manuelle touchant le trousseau — ne peut pas être automatisée.
+- **Déployer appcast.xml + DMG** sur Vercel (`website/`, dans ce repo) — cf. section 3.
+- **Exécuter `generate_keys`** : ✅ fait le 2026-06-04, clé publique dans `Info.plist`, privée au trousseau (+ backup hors repo).
 - **Exécuter `sign_update`** : idem, nécessite la clé privée dans le trousseau.
 - **Notarisation future** : passer `NOTARIZE=1` dans `make-app.sh` + configurer `xcrun notarytool store-credentials`. Voir commentaire dans `make-app.sh` (section RELEASE).
 - **Auto-update futur** : passage à `SUEnableAutomaticChecks=true` + `SUScheduledCheckInterval` — refusé en v1 par ARCHITECTURE.md:339. Décision à réviser explicitement.
