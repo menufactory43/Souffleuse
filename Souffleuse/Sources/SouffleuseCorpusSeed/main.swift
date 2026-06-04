@@ -3,10 +3,13 @@ import SouffleusePersonalization
 
 // MARK: - Usage
 //
-//   SouffleuseCorpusSeed <path> [--sender "Gabriel from Waltio"]
+//   SouffleuseCorpusSeed <path> [--sender "Gabriel from Waltio"] [--as-bundle com.brave.Browser]
 //
 // <path> : a single .txt file OR a directory (scanned recursively for *.txt)
 // --sender : which Intercom participant to import (default: "Gabriel from Waltio")
+// --as-bundle : tag imported prose with this bundleID so it lands in the right
+//   DomainCluster at runtime (P2.3). Default: com.intercom.conversations (.other).
+//   Use the app you actually write that style in (e.g. com.brave.Browser → .web).
 //
 // Reads Intercom conversation exports, extracts messages from the specified
 // sender, cleans the bodies, and bulk-inserts them into the live corpus
@@ -17,18 +20,21 @@ import SouffleusePersonalization
 var args = CommandLine.arguments.dropFirst()
 var senderFilter = "Gabriel from Waltio"
 var inputPath: String? = nil
+var asBundle: String? = nil
 
 var it = args.makeIterator()
 while let a = it.next() {
     if a == "--sender" {
         senderFilter = it.next() ?? senderFilter
+    } else if a == "--as-bundle" {
+        asBundle = it.next()
     } else {
         inputPath = a
     }
 }
 
 guard let path = inputPath else {
-    fputs("Usage: SouffleuseCorpusSeed <file-or-directory> [--sender \"Gabriel from Waltio\"]\n", stderr)
+    fputs("Usage: SouffleuseCorpusSeed <file-or-directory> [--sender \"Gabriel from Waltio\"] [--as-bundle com.brave.Browser]\n", stderr)
     exit(1)
 }
 
@@ -153,10 +159,15 @@ let queueURL = souffleuseDir.appendingPathComponent("corpus-import.json")
 
 var allMessages: [String] = []
 
-// Load existing queue if any (append mode).
-if let existing = try? Data(contentsOf: queueURL),
-   let decoded = try? JSONDecoder().decode([String].self, from: existing) {
-    allMessages = decoded
+// Load existing queue if any (append mode). Accept both the new
+// `{bundleID, messages}` wrapper and the legacy `[String]`.
+if let existing = try? Data(contentsOf: queueURL) {
+    if let wrap = try? JSONDecoder().decode(CorpusImportQueue.self, from: existing) {
+        allMessages = wrap.messages
+        if asBundle == nil { asBundle = wrap.bundleID }   // preserve a prior tag if not overridden
+    } else if let decoded = try? JSONDecoder().decode([String].self, from: existing) {
+        allMessages = decoded
+    }
 }
 
 for filePath in files.sorted() {
@@ -170,10 +181,19 @@ for filePath in files.sorted() {
 let seen = NSMutableOrderedSet(array: allMessages)
 let deduped = seen.array as! [String]
 
-if let data = try? JSONEncoder().encode(deduped) {
+// Write the wrapper format when a bundle tag is given (so the importer scopes it
+// to the right DomainCluster), otherwise the legacy `[String]` for compatibility.
+let payload: Data?
+if let b = asBundle {
+    payload = try? JSONEncoder().encode(CorpusImportQueue(bundleID: b, messages: deduped))
+} else {
+    payload = try? JSONEncoder().encode(deduped)
+}
+if let data = payload {
     try? data.write(to: queueURL, options: .atomic)
     print("Messages parsed : \(allMessages.count)")
     print("After dedup     : \(deduped.count)")
+    print("Bundle tag      : \(asBundle ?? "com.intercom.conversations (défaut)")")
     print("Queue written to: \(queueURL.path)")
     print("→ Lance l'app Souffleuse pour importer dans le corpus.")
 } else {
