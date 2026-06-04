@@ -444,8 +444,8 @@ final class PredictorViewModel {
                 // source est mise en `reason` (« instant:learnedWord » pour un
                 // terme appris) pour distinguer lexique vs corpus vs dico.
                 GhostInspector.shared.record(
-                    tail: userTail, verdict: .shown,
-                    reason: "instant:\(instantSource)", content: instantGhost)
+                    tail: userTail, verdict: .shown, source: route.source,
+                    reason: "instant", content: instantGhost, score: route.score)
             } else {
                 Log.info(.predictor, "ghost_keep_stable", count: suggestion.count)
                 PredictDebug.log("ghost_keep_stable", "current=\(suggestion.debugDescription) candidate=\(instantGhost.debugDescription)")
@@ -889,14 +889,14 @@ final class PredictorViewModel {
                             // « , » → longestExtendingKey trouve « Madame, » → « , Monsieur ».
                             self.cache.store(prefix: userTail, suggestion: word)
                             Log.info(.predictor, "ghost_midword_longghost_shown", count: word.count)
-                            GhostInspector.shared.record(tail: userTail, verdict: .shown,
-                                                         reason: "longghost", content: word)
+                            GhostInspector.shared.record(tail: userTail, verdict: .shown, source: .llm,
+                                                         reason: "longghost", content: word, score: score)
                         } else {
                             self.suggestion = instantGhost
                             self.predictedForPrefix = forPrefix
                             self.suggestionSource = instantSource
                             Log.info(.predictor, "ghost_midword_longghost_hidden")
-                            GhostInspector.shared.record(tail: userTail, verdict: .gated,
+                            GhostInspector.shared.record(tail: userTail, verdict: .gated, source: .llm,
                                                          reason: lg?.reason ?? "longghost-nil", content: lg?.word ?? "(rien)")
                         }
                     }
@@ -914,8 +914,8 @@ final class PredictorViewModel {
                         self.predictedForPrefix = forPrefix
                         self.suggestionSource = .llm
                         Log.info(.predictor, "ghost_midword_escalation_shown", count: word.count)
-                        GhostInspector.shared.record(tail: userTail, verdict: .shown,
-                                                     reason: "escalade \(esc.reason)", content: word)
+                        GhostInspector.shared.record(tail: userTail, verdict: .shown, source: .llm,
+                                                     reason: "escalade \(esc.reason)", content: word, score: score)
                     } else if SuggestionPolicy.Tuning.midWordL0Fallback,
                               let comp = self.wordCompleter.commonCompletion(
                                   for: userTail, minLen: SuggestionPolicy.Tuning.escL0MinPartial),
@@ -931,8 +931,8 @@ final class PredictorViewModel {
                         self.predictedForPrefix = forPrefix
                         self.suggestionSource = .wordComplete
                         Log.info(.predictor, "ghost_midword_l0_fallback", count: comp.count)
-                        GhostInspector.shared.record(tail: userTail, verdict: .shown,
-                                                     reason: "L0 dico (esc \(esc?.reason ?? "hide"))", content: word)
+                        GhostInspector.shared.record(tail: userTail, verdict: .shown, source: .wordComplete,
+                                                     reason: "L0 dico (esc \(esc?.reason ?? "hide"))", content: word, score: score)
                     } else {
                         // Caché (fast-reject / branches divergentes, et pas de
                         // fallback dico) : retombe sur le ghost instant, comme la
@@ -941,7 +941,7 @@ final class PredictorViewModel {
                         self.predictedForPrefix = forPrefix
                         self.suggestionSource = instantSource
                         Log.info(.predictor, "ghost_midword_escalation_hidden")
-                        GhostInspector.shared.record(tail: userTail, verdict: .gated,
+                        GhostInspector.shared.record(tail: userTail, verdict: .gated, source: .llm,
                                                      reason: "escalade \(esc?.reason ?? "hide")", content: esc?.word ?? "(rien)")
                     }
                 }
@@ -970,10 +970,10 @@ final class PredictorViewModel {
                     // affiché → on le marque « affiché (instant) » et non « drop »,
                     // sinon l'inspecteur ment (rien vs ghost réel à l'écran).
                     if instantGhost.isEmpty {
-                        GhostInspector.shared.record(tail: userTail, verdict: .dropped,
+                        GhostInspector.shared.record(tail: userTail, verdict: .dropped, source: .none,
                                                      reason: "LLM dropé · rien à montrer", content: "(rien)")
                     } else {
-                        GhostInspector.shared.record(tail: userTail, verdict: .shown,
+                        GhostInspector.shared.record(tail: userTail, verdict: .shown, source: instantSource,
                                                      reason: "instant (LLM dropé)", content: instantGhost)
                     }
                     self.suggestion = instantGhost
@@ -992,7 +992,7 @@ final class PredictorViewModel {
                 //      — ghost_classified_parasite
                 guard let update = self.policy.onLLMChunk(chunk, userTail: userTail) else {
                     PredictDebug.log("chunk_gated", "oneLine=\(chunk.debugDescription) current=\(self.suggestion.debugDescription) source=\(self.suggestionSource)")
-                    GhostInspector.shared.record(tail: userTail, verdict: .gated,
+                    GhostInspector.shared.record(tail: userTail, verdict: .gated, source: .llm,
                                                  reason: self.policy.lastGateReason, content: chunk)
                     return
                 }
@@ -1030,7 +1030,7 @@ final class PredictorViewModel {
                 if Self.isNextWordStub(userTail: userTail, ghost: ghostText)
                     || Self.isMidWordStub(userTail: userTail, ghost: ghostText) {
                     PredictDebug.log("chunk_stub_skip", "text=\(ghostText.debugDescription) userTail=\(userTail.debugDescription)")
-                    GhostInspector.shared.record(tail: userTail, verdict: .stub, reason: "stub_1char", content: ghostText)
+                    GhostInspector.shared.record(tail: userTail, verdict: .stub, source: .llm, reason: "stub_1char", content: ghostText)
                     return
                 }
                 let fromHigh = (self.suggestionSource == .history
@@ -1040,8 +1040,8 @@ final class PredictorViewModel {
                          fromHigh ? "ghost_swap_to_llm_from_high" : "ghost_apply_llm",
                          count: ghostText.count)
                 PredictDebug.log("chunk_applied", "oneLine=\(ghostText.debugDescription) prev_source=\(self.suggestionSource)")
-                GhostInspector.shared.record(tail: userTail, verdict: .shown,
-                                             reason: String(format: "score=%.2f", update.score.value), content: ghostText)
+                GhostInspector.shared.record(tail: userTail, verdict: .shown, source: .llm,
+                                             reason: "stream", content: ghostText, score: update.score)
                 emitTracker.emitted = true
                 // Re-score quand la dédup a raccourci le texte : `update.score` a
                 // été calculé par onLLMChunk sur le chunk BRUT (avec la

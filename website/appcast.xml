@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Appcast Sparkle de Souffleuse — flux de mises à jour MANUEL-ONLY.
+  Servi à https://souffleuse.app/appcast.xml (= SUFeedURL de l'app, HTTPS obligatoire).
+
+  Convention du site : un SEUL Souffleuse.dmg à la racine, écrasé à chaque release.
+  → On garde donc UNE SEULE <item> (la version courante). L'URL d'enclosure est
+    réutilisée à chaque release ; edSignature + length DOIVENT être régénérés en
+    même temps que le DMG uploadé, sinon Sparkle rejette le fichier.
+
+  Régénérer la signature :  deploy/make-appcast-entry.sh website/Souffleuse.dmg
+-->
+<rss version="2.0"
+     xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
+     xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>Souffleuse</title>
+    <link>https://souffleuse.app/appcast.xml</link>
+    <description>Mises à jour de Souffleuse</description>
+    <language>fr</language>
+
+    <item>
+      <title>Version 0.4.0</title>
+      <pubDate>Thu, 04 Jun 2026 12:00:00 +0000</pubDate>
+      <sparkle:version>0.4.0</sparkle:version>
+      <sparkle:shortVersionString>0.4.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>Souffleuse 0.4.0</h2>
+        <ul>
+          <li>Mises à jour intégrées via Sparkle (vérification manuelle, sans suivi passif).</li>
+          <li>Améliorations du ghost et de la pertinence contextuelle.</li>
+        </ul>
+        <p>macOS 14+ · Apple Silicon · 100 % on-device.</p>
+      ]]></description>
+      <!-- Signé le 2026-06-04 (build Developer ID avec Sparkle, non notarisé). -->
+      <!-- Régénérer à chaque release : deploy/make-appcast-entry.sh website/Souffleuse.dmg -->
+      <enclosure
+        url="https://souffleuse.app/Souffleuse.dmg"
+        sparkle:edSignature="D+lo2YbjHDzUN7lokQQzyz0FP+QeF24dSZOqioXQHPC+Ebw4YZEB7ucpk8tthmnu2/ULzfjpT+p5GQQ5TpkiBg=="
+        length="20673861"
+        type="application/octet-stream" />
+    </item>
+
+  </channel>
+</rss>

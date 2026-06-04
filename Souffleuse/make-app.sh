@@ -55,6 +55,13 @@ for dylib in libllama.0.dylib libggml.0.dylib libggml-base.0.dylib \
   cp "$LLAMA_LIB_DIR/$dylib" "$APP_BUNDLE/Contents/Frameworks/$dylib"
 done
 
+# Copier Sparkle.framework (binary XCFramework résolu par SPM/xcodebuild).
+# xcodebuild ne l'embarque pas automatiquement dans ce flux bundle-à-la-main ;
+# on le localise + copie explicitement, comme les dylibs llama.
+SPARKLE_FW=$(find build -name 'Sparkle.framework' -type d | head -1)
+[ -n "$SPARKLE_FW" ] || { echo "Sparkle.framework introuvable — verifier la resolution SPM"; exit 1; }
+cp -R "$SPARKLE_FW" "$APP_BUNDLE/Contents/Frameworks/Sparkle.framework"
+
 # Copy the mlx-swift_Cmlx.bundle (metallib) so MLX can find its Metal kernels.
 if [ -d "$BUILD_DIR/mlx-swift_Cmlx.bundle" ]; then
   cp -R "$BUILD_DIR/mlx-swift_Cmlx.bundle" "$APP_BUNDLE/Contents/Resources/"
@@ -79,6 +86,24 @@ chmod +x "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 # SIGN_IDENTITY can be overridden via env var (e.g. switch back to "-" for
 # ad-hoc on machines without the cert, or to point at a different identity).
 SIGN_IDENTITY="${SIGN_IDENTITY:-$DEFAULT_SIGN}"
+
+# Signer Sparkle.framework inside-out : les bundles XPC imbriqués DOIVENT être
+# signés AVANT le framework outer (exigence de signature inside-out — sinon la
+# signature outer invalide et codesign --verify --deep --strict échoue).
+# Pas d'entitlements sur les composants Sparkle (comme les dylibs : entitlements
+# uniquement sur l'exécutable principal).
+SP="$APP_BUNDLE/Contents/Frameworks/Sparkle.framework"
+if [ -d "$SP" ]; then
+  for nested in \
+    "$SP/Versions/B/XPCServices/Downloader.xpc" \
+    "$SP/Versions/B/XPCServices/Installer.xpc" \
+    "$SP/Versions/B/Updater.app" \
+    "$SP/Versions/B/Autoupdate"; do
+    [ -e "$nested" ] || continue
+    codesign --force --sign "$SIGN_IDENTITY" --options runtime $TIMESTAMP_FLAG "$nested"
+  done
+  codesign --force --sign "$SIGN_IDENTITY" --options runtime $TIMESTAMP_FLAG "$SP"
+fi
 
 # Sign nested dylibs first (inside-out signing requirement). Without this the
 # outer bundle signature is invalid and dyld refuses to load the libraries.
