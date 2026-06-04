@@ -10,12 +10,59 @@ struct GGUFModelOptionTests {
 
     // MARK: - Catalogue
 
-    @Test("v1 catalogue lists the two Gemma GGUF entries")
+    @Test("v2 catalogue : Gemma + Qwen base, rangés du plus léger au plus lourd")
     func catalogueShape() {
         let ids = GGUFModelOption.catalogue.map(\.id)
-        #expect(ids == ["gemma-3-1b-q5", "gemma-3-4b-q4"])
+        #expect(ids == ["gemma-3-1b-q5", "qwen3-1.7b-q4", "gemma-3-4b-q4", "qwen3-4b-q4", "qwen3-8b-q4"])
+        // Le 1B reste en tête (défaut FR/EN).
         #expect(GGUFModelOption.catalogue[0].fileName == "gemma-3-1b.i1-Q5_K_M.gguf")
-        #expect(GGUFModelOption.catalogue[1].fileName == "gemma-3-4b.i1-Q4_K_M.gguf")
+        // Rangé par empreinte mémoire croissante.
+        let rams = GGUFModelOption.catalogue.map(\.approxRAMMB)
+        #expect(rams == rams.sorted())
+        // Tous téléchargeables, tous des variantes base (jamais instruct/-it).
+        for m in GGUFModelOption.catalogue {
+            #expect(m.downloadable != nil)
+            #expect(!m.fileName.contains("-it"))
+            #expect(m.downloadURL?.host == "huggingface.co")
+        }
+    }
+
+    @Test("la voix conseillée dépend de la langue, et reste la plus légère possible")
+    func recommendationByLanguage() {
+        // Français : la plus petite voix suffit (rapide, peu de RAM), quelle que
+        // soit la RAM — plus gros ≠ mieux pour le ghost.
+        for ram in [8, 16, 32, 64] {
+            #expect(GGUFModelOption.recommendedID(machineRAMGB: ram, language: .french) == "gemma-3-1b-q5")
+        }
+        // Plusieurs langues : la plus petite voix VRAIMENT multilingue.
+        for ram in [8, 16, 32, 64] {
+            #expect(GGUFModelOption.recommendedID(machineRAMGB: ram, language: .multilingual) == "qwen3-1.7b-q4")
+        }
+        // Le 8B n'est jamais auto-conseillé, même multilingue sur très gros Mac.
+        #expect(GGUFModelOption.recommendedID(machineRAMGB: 64, language: .multilingual) != "qwen3-8b-q4")
+    }
+
+    @Test("l'adéquation au Mac suit l'empreinte réelle, pas un seuil grossier")
+    func fitClassification() {
+        let rec = GGUFModelOption.recommendedID(machineRAMGB: 8, language: .multilingual)
+        let qwen8b = GGUFModelOption.option(forID: "qwen3-8b-q4")
+        // 8B (~5,8 Go, min 16) : trop lourd sous 16 Go, juste à 16, à l'aise à 32.
+        #expect(qwen8b.fit(machineRAMGB: 8, recommendedID: rec) == .tooHeavy)
+        #expect(qwen8b.fit(machineRAMGB: 16, recommendedID: rec) == .tight)
+        #expect(qwen8b.fit(machineRAMGB: 32, recommendedID: rec) == .comfortable)
+        // La voix conseillée est marquée .recommended.
+        let recOption = GGUFModelOption.option(forID: rec)
+        #expect(recOption.fit(machineRAMGB: 8, recommendedID: rec) == .recommended)
+    }
+
+    @Test("cohérence : une petite voix n'est jamais « juste » quand la conseillée passe « à l'aise »")
+    func fitCoherenceOn8GB() {
+        // Le bug repéré : sur un Mac 8 Go, une petite voix (~1 Go) ne doit pas
+        // dire « un peu juste » alors que la voix conseillée est verte.
+        let rec = GGUFModelOption.recommendedID(machineRAMGB: 8, language: .multilingual)
+        let gemma1b = GGUFModelOption.option(forID: "gemma-3-1b-q5")
+        #expect(rec == "qwen3-1.7b-q4")
+        #expect(gemma1b.fit(machineRAMGB: 8, recommendedID: rec) == .comfortable)
     }
 
     @Test("le descripteur de téléchargement enregistre la variante -pt sous le nom du catalogue")

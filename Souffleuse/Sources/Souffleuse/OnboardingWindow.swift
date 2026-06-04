@@ -73,6 +73,8 @@ final class OnboardingWindow {
     private let translationRow: ModelRow?
     private let finishButton = NSButton(title: "Commencer à écrire", target: nil, action: nil)
     private var finishTarget: ClosureButtonTarget?
+    /// Cible du sélecteur de langue — gardée vivante le temps de la fenêtre.
+    private var languageTarget: ClosureButtonTarget?
     private var refreshTimer: Timer?
     /// Appelé une fois quand le modèle du souffle PASSE de absent → installé
     /// pendant que la fenêtre est ouverte (fin de téléchargement). Permet à
@@ -92,9 +94,11 @@ final class OnboardingWindow {
     ///   - translation: descripteur du modèle de traduction (optionnel).
     init(
         modelDownloads: ModelDownloadManager,
-        ghost: DownloadableModel?,
+        ghostProvider: @escaping () -> DownloadableModel?,
         ghostReady: @escaping () -> Bool,
         translation: DownloadableModel?,
+        initialLanguage: PrimaryLanguage,
+        onLanguageChange: @escaping @MainActor (PrimaryLanguage) -> Void,
         onGhostInstalled: (@MainActor () -> Void)? = nil
     ) {
         self.onGhostInstalled = onGhostInstalled
@@ -141,16 +145,19 @@ final class OnboardingWindow {
             isGranted: { ScreenCapturer.hasPermission() }
         )
 
-        // Modèle du souffle : requis. `ghostReady` couvre aussi le GGUF déjà
-        // présent via Cotypist (dossier legacy) → pas de re-téléchargement inutile.
-        self.ghostRow = ghost.map { model in
+        // Modèle du souffle : requis. La voix proposée SUIT la langue choisie
+        // (provider relu à chaque refresh) — change la langue et le téléchargement
+        // proposé bascule sur la voix conseillée. `ghostReady` couvre aussi le
+        // GGUF déjà présent via Cotypist (dossier legacy) → pas de re-DL inutile.
+        self.ghostRow = ghostProvider().map { initial in
             ModelRow(
                 title: "Modèle du souffle",
-                description: "Requis — le moteur local qui souffle vos suggestions. ~\(model.approxSizeMB) Mo, une minute environ. 100 % sur votre Mac, rien ne sort.",
-                model: model,
+                description: "Requis — le moteur local qui souffle vos suggestions. Une minute environ, 100 % sur votre Mac, rien ne sort.",
+                model: initial,
                 manager: modelDownloads,
                 optional: false,
-                isReady: ghostReady
+                isReady: ghostReady,
+                modelProvider: ghostProvider
             )
         }
 
@@ -179,11 +186,41 @@ final class OnboardingWindow {
         finishButton.target = finishTarget
         finishButton.action = #selector(ClosureButtonTarget.fire)
 
+        // Étape langue : un choix sobre qui pilote la voix conseillée (et la voix
+        // proposée au téléchargement juste en dessous). Mémorisé dans les prefs.
+        let languageControl = NSSegmentedControl(
+            labels: PrimaryLanguage.allCases.map(\.label),
+            trackingMode: .selectOne,
+            target: nil,
+            action: nil
+        )
+        languageControl.selectedSegment = (initialLanguage == .french) ? 0 : 1
+        let languageTarget = ClosureButtonTarget { [weak self, weak languageControl] in
+            guard let languageControl else { return }
+            let lang: PrimaryLanguage = languageControl.selectedSegment == 0 ? .french : .multilingual
+            onLanguageChange(lang)
+            // La voix proposée juste en dessous bascule aussitôt sur la conseillée.
+            self?.refresh()
+        }
+        self.languageTarget = languageTarget
+        languageControl.target = languageTarget
+        languageControl.action = #selector(ClosureButtonTarget.fire)
+
+        let languageDesc = NSTextField(wrappingLabelWithString: "Sert à vous conseiller la bonne voix : en français, une petite voix rapide suffit ; pour plusieurs langues, une voix multilingue. Modifiable à tout moment.")
+        languageDesc.font = .systemFont(ofSize: 11)
+        languageDesc.textColor = .secondaryLabelColor
+        let languageColumn = NSStackView(views: [languageControl, languageDesc])
+        languageColumn.orientation = .vertical
+        languageColumn.alignment = .leading
+        languageColumn.spacing = 6
+
         var rows: [NSView] = [
             title, subtitle,
             sectionHeader("Les permissions"),
             axRow.view, imRow.view, screenRow.view,
         ]
+        rows.append(sectionHeader("Votre langue"))
+        rows.append(languageColumn)
         rows.append(sectionHeader("Les modèles, sur votre Mac"))
         if let ghostRow { rows.append(ghostRow.view) }
         if let translationRow { rows.append(translationRow.view) }
@@ -374,7 +411,12 @@ private final class ModelRow {
     let view: NSView
     private(set) var ready: Bool = false
 
-    private let model: DownloadableModel
+    /// Voix courante. `var` car elle peut SUIVRE la langue (via `modelProvider`) :
+    /// l'utilisateur change de langue → la voix proposée bascule sans reconstruire la ligne.
+    private var model: DownloadableModel
+    /// Quand fourni, relu à chaque `refresh()` pour suivre la voix conseillée.
+    /// Retourne `nil` si aucune voix n'est téléchargeable → on garde la dernière.
+    private let modelProvider: (() -> DownloadableModel?)?
     private let manager: ModelDownloadManager
     private let optional: Bool
     /// Prêt « hors gestionnaire » : couvre le GGUF déjà présent sur disque
@@ -392,9 +434,11 @@ private final class ModelRow {
         model: DownloadableModel,
         manager: ModelDownloadManager,
         optional: Bool,
-        isReady: @escaping () -> Bool
+        isReady: @escaping () -> Bool,
+        modelProvider: (() -> DownloadableModel?)? = nil
     ) {
         self.model = model
+        self.modelProvider = modelProvider
         self.manager = manager
         self.optional = optional
         self.isReadyExternally = isReady
@@ -438,6 +482,8 @@ private final class ModelRow {
         // toutes les propriétés stockées (dont `view`) soient initialisées.
         let target = ClosureButtonTarget { [weak self] in
             guard let self else { return }
+            // Toujours télécharger la voix COURANTE (peut avoir suivi la langue).
+            if let m = self.modelProvider?() { self.model = m }
             self.manager.download(self.model)
             self.refresh()
         }
@@ -447,6 +493,8 @@ private final class ModelRow {
     }
 
     func refresh() {
+        // Suit la langue : la voix proposée peut avoir changé depuis le dernier refresh.
+        if let m = modelProvider?() { model = m }
         // Déjà sur disque (téléchargé OU présent via Cotypist) → étape satisfaite.
         if isReadyExternally() {
             setReady()

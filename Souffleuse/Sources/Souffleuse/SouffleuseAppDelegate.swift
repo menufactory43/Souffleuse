@@ -483,13 +483,28 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// téléchargement partagé, modèle de souffle sélectionné (avec repli sur le
     /// défaut), modèle de traduction courant.
     private func makeOnboardingWindow() -> OnboardingWindow {
-        let ghost = GGUFModelOption.option(forID: store.ggufModelID).downloadable
-            ?? GGUFModelOption.option(forID: GGUFModelOption.defaultID).downloadable
+        // La voix proposée SUIT `ggufModelID`, lui-même aligné sur la langue
+        // choisie (closure ci-dessous) → l'onboarding télécharge la bonne voix.
+        let ghostProvider: () -> DownloadableModel? = { [store] in
+            GGUFModelOption.option(forID: store.ggufModelID).downloadable
+                ?? GGUFModelOption.option(forID: GGUFModelOption.defaultID).downloadable
+        }
         return OnboardingWindow(
             modelDownloads: store.modelDownloads,
-            ghost: ghost,
+            ghostProvider: ghostProvider,
             ghostReady: { [store] in GGUFModelOption.option(forID: store.ggufModelID).isResolvable },
             translation: store.translationModel.downloadable,
+            initialLanguage: store.primaryLanguage,
+            onLanguageChange: { [weak self] lang in
+                // Mémorise la langue et aligne la voix sélectionnée sur la
+                // conseillée pour cette langue + la RAM réelle du Mac.
+                guard let self else { return }
+                self.store.primaryLanguage = lang
+                self.store.ggufModelID = GGUFModelOption.recommendedID(
+                    machineRAMGB: GGUFModelOption.machineRAMGB(),
+                    language: lang
+                )
+            },
             onGhostInstalled: { [weak self] in
                 // Le GGUF du souffle vient d'arriver sur disque : recharge le
                 // moteur pour que le ghost marche sans relancer l'app.
