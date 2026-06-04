@@ -245,49 +245,7 @@ private struct SouffleTab: View {
 
     var body: some View {
         Form {
-            Section {
-                Picker("Voix active", selection: $store.ggufModelID) {
-                    ForEach(GGUFModelOption.catalogue, id: \.id) { (m: GGUFModelOption) in
-                        VStack(alignment: .leading, spacing: 1) {
-                            HStack(spacing: 6) {
-                                Text(m.displayName)
-                                Text(m.quant)
-                                    .font(.caption.monospaced())
-                                    .foregroundStyle(.secondary)
-                            }
-                            Text(m.isResolvable ? m.hint : "introuvable sur votre Mac")
-                                .font(.caption)
-                                .foregroundStyle(m.isResolvable ? Color.secondary : Color.red)
-                        }
-                        .tag(m.id)
-                        .disabled(!m.isResolvable)
-                    }
-                }
-                .pickerStyle(.radioGroup)
-                ForEach(GGUFModelOption.catalogue, id: \.id) { (m: GGUFModelOption) in
-                    if let d = m.downloadable {
-                        HStack(spacing: 8) {
-                            Text("\(m.displayName) · \(m.quant)").font(.callout)
-                            Spacer()
-                            ModelDownloadBadge(manager: store.modelDownloads, model: d)
-                        }
-                    }
-                }
-                .onAppear {
-                    store.modelDownloads.refresh(GGUFModelOption.catalogue.compactMap(\.downloadable))
-                }
-            } header: {
-                Text("Qui vous souffle").font(.headline)
-            } footer: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Une seule voix souffle à la fois.")
-                    Text("La grande est plus juste, mais plus lente et plus gourmande en mémoire ; la petite est rapide — c'est le choix par défaut.")
-                        .foregroundStyle(.secondary)
-                    Text("Une voix absente se télécharge d'un clic ci-dessus.")
-                        .foregroundStyle(.secondary)
-                }
-                .font(.callout)
-            }
+            GhostModelSection(store: store)
 
             Section {
                 Picker("Longueur du souffle", selection: $store.completionLength) {
@@ -395,6 +353,195 @@ private struct TranslationTab: View {
     }
 }
 
+/// Section « Qui vous souffle » — la galerie des voix, rangée du plus léger au
+/// plus lourd, chaque voix présentée en une carte simple : sa vitesse, ses
+/// langues, sa mémoire, et surtout un verdict en clair pour CE Mac (« Conseillé »,
+/// « À l'aise », « un peu juste », « trop lourd »). Le but : que l'utilisateur
+/// sache tout de suite quoi choisir, sans connaître ni les tailles ni le jargon.
+private struct GhostModelSection: View {
+    @Bindable var store: PreferencesStore
+
+    /// RAM du Mac, lue « en live » à l'ouverture (jamais < 8 Go sur Apple Silicon).
+    @State private var ramGB: Int = GGUFModelOption.machineRAMGB()
+
+    private var recommendedID: String {
+        GGUFModelOption.recommendedID(machineRAMGB: ramGB, language: store.primaryLanguage)
+    }
+
+    var body: some View {
+        Section {
+            // La langue d'écriture : pilote la voix conseillée (la petite Gemma en
+            // français, une voix multilingue sinon). Demandée aussi à l'onboarding.
+            Picker("J'écris…", selection: $store.primaryLanguage) {
+                ForEach(PrimaryLanguage.allCases, id: \.self) { lang in
+                    Text(lang.label).tag(lang)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            // Repère machine : ce que le Mac peut tenir, en une ligne.
+            HStack(spacing: 6) {
+                Image(systemName: "memorychip")
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                Text("Ton Mac : \(ramGB) Go de mémoire")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+
+            ForEach(GGUFModelOption.catalogue, id: \.id) { (m: GGUFModelOption) in
+                GhostModelCard(
+                    model: m,
+                    isActive: store.ggufModelID == m.id,
+                    fit: m.fit(machineRAMGB: ramGB, recommendedID: recommendedID),
+                    downloads: store.modelDownloads,
+                    onSelect: { if m.isResolvable { store.ggufModelID = m.id } }
+                )
+            }
+            .onAppear {
+                ramGB = GGUFModelOption.machineRAMGB()
+                store.modelDownloads.refresh(GGUFModelOption.catalogue.compactMap(\.downloadable))
+            }
+        } header: {
+            Text("Qui vous souffle").font(.headline)
+        } footer: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Une seule voix souffle à la fois. Choisis « Conseillé » si tu hésites.")
+                Text("Les voix « beaucoup de langues » sont meilleures hors français (allemand, italien, espagnol, chinois, japonais…).")
+                    .foregroundStyle(.secondary)
+                Text("Une voix absente se télécharge d'un clic ; tout reste sur ton Mac.")
+                    .foregroundStyle(.secondary)
+            }
+            .font(.callout)
+        }
+    }
+}
+
+/// Une carte de voix : radio de sélection à gauche, identité + étiquettes au
+/// centre (vitesse · langues · mémoire · verdict pour ce Mac), action à droite
+/// (télécharger / progression / « voix active »).
+private struct GhostModelCard: View {
+    let model: GGUFModelOption
+    let isActive: Bool
+    let fit: GGUFModelOption.Fit
+    let downloads: ModelDownloadManager
+    let onSelect: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            // Radio : sélectionne la voix (seulement si le fichier est là).
+            Button(action: onSelect) {
+                Image(systemName: isActive ? "largecircle.fill.circle" : (model.isResolvable ? "circle" : "circle.dotted"))
+                    .font(.title3)
+                    .foregroundStyle(isActive ? Color.sangDeBoeuf : .secondary)
+            }
+            .buttonStyle(.plain)
+            .disabled(!model.isResolvable)
+            .accessibilityLabel("Choisir \(model.displayName)")
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(model.displayName).font(.body.weight(.semibold))
+                    Text(model.quant).font(.caption.monospaced()).foregroundStyle(.secondary)
+                    if fit == .recommended {
+                        recommendedChip
+                    }
+                }
+                Text(model.hint)
+                    .font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                // Étiquettes : vitesse · langues.
+                HStack(spacing: 6) {
+                    chip(model.speedLabel, systemImage: "speedometer", tint: speedTint)
+                    chip(model.languagesLabel, systemImage: "globe", tint: .secondary)
+                }
+                // Mémoire + verdict pour ce Mac.
+                HStack(spacing: 4) {
+                    Image(systemName: "memorychip").font(.caption2).foregroundStyle(.secondary)
+                    Text("~\(formatGo(model.approxRAMMB)) en mémoire")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text("·").font(.caption).foregroundStyle(.secondary)
+                    Text(fitMessage).font(.caption.weight(.medium)).foregroundStyle(fitTint)
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            trailing
+        }
+        .padding(.vertical, 4)
+        .opacity(fit == .tooHeavy ? 0.6 : 1)
+    }
+
+    // MARK: - Action à droite
+
+    @ViewBuilder
+    private var trailing: some View {
+        if let d = model.downloadable, !model.isResolvable {
+            // Absente : on propose le téléchargement.
+            ModelDownloadBadge(manager: downloads, model: d)
+        } else if model.isResolvable {
+            if isActive {
+                Label("Voix active", systemImage: "checkmark.circle.fill")
+                    .labelStyle(.titleAndIcon)
+                    .font(.caption).foregroundStyle(Color.sangDeBoeuf)
+            } else {
+                Button("Choisir", action: onSelect).controlSize(.small)
+            }
+        }
+    }
+
+    // MARK: - Étiquettes
+
+    private var recommendedChip: some View {
+        Text("Conseillé pour ton Mac")
+            .font(.caption2.weight(.bold))
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(Color.green.opacity(0.18), in: Capsule())
+            .foregroundStyle(.green)
+    }
+
+    private func chip(_ text: String, systemImage: String, tint: Color) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: systemImage).font(.caption2)
+            Text(text).font(.caption)
+        }
+        .foregroundStyle(tint)
+        .lineLimit(1)
+    }
+
+    private var speedTint: Color {
+        switch model.speedLabel {
+        case "Rapide": return .green
+        case "Lent": return .orange
+        default: return .secondary
+        }
+    }
+
+    private var fitMessage: String {
+        switch fit {
+        case .recommended: return "le meilleur choix ici"
+        case .comfortable: return "à l'aise sur ton Mac"
+        case .tight: return "ton Mac est un peu juste"
+        case .tooHeavy: return "trop lourd pour ton Mac"
+        }
+    }
+
+    private var fitTint: Color {
+        switch fit {
+        case .recommended: return .green
+        case .comfortable: return .secondary
+        case .tight: return .orange
+        case .tooHeavy: return Color.sangDeBoeuf
+        }
+    }
+
+    /// Mo → « X,X Go », virgule décimale française.
+    private func formatGo(_ mb: Int) -> String {
+        let go = Double(mb) / 1024.0
+        return String(format: "%.1f", go).replacingOccurrences(of: ".", with: ",") + " Go"
+    }
+}
+
 /// Badge d'état de téléchargement d'un GGUF (traduction ou voix du souffle),
 /// réutilisé dans les deux onglets : coche si installé, progression pendant le
 /// téléchargement, bouton « Télécharger (N Mo) » / « Réessayer » sinon.
@@ -413,7 +560,7 @@ private struct ModelDownloadBadge: View {
                 Text("\(Int(p * 100)) %").font(.caption).monospacedDigit()
             }
         case .absent:
-            Button("Télécharger (\(model.approxSizeMB) Mo)") { manager.download(model) }
+            Button("Télécharger (\(formatSize(model.approxSizeMB)))") { manager.download(model) }
                 .controlSize(.small)
         case .failed:
             HStack(spacing: 6) {
@@ -422,6 +569,13 @@ private struct ModelDownloadBadge: View {
                     .controlSize(.small)
             }
         }
+    }
+
+    /// Mo → libellé compact : « 811 Mo » sous 1 Go, « 2,4 Go » au-delà.
+    private func formatSize(_ mb: Int) -> String {
+        if mb < 1024 { return "\(mb) Mo" }
+        let go = Double(mb) / 1024.0
+        return String(format: "%.1f", go).replacingOccurrences(of: ".", with: ",") + " Go"
     }
 }
 
