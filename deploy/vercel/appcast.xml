@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Appcast Sparkle de Souffleuse — flux de mises à jour MANUEL-ONLY.
+  Servi à https://souffleuse.app/appcast.xml (SUFeedURL de l'app, HTTPS obligatoire).
+
+  Chaque <item> décrit une release. Les attributs sparkle:edSignature + length
+  sont produits par `sign_update <le.dmg>` (clé privée EdDSA du trousseau).
+  → Utilise deploy/make-appcast-entry.sh pour régénérer un bloc <item> signé.
+
+  RAPPELS :
+  - Trie par version : Sparkle compare sparkle:version (= CFBundleVersion).
+  - Le DMG est servi depuis /downloads/ (cf. vercel.json, type octet-stream).
+  - Mode manuel-only : aucun <sparkle:minimumAutoupdateVersion> / phasedRollout.
+-->
+<rss version="2.0"
+     xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
+     xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>Souffleuse</title>
+    <link>https://souffleuse.app/appcast.xml</link>
+    <description>Mises à jour de Souffleuse</description>
+    <language>fr</language>
+
+    <item>
+      <title>Version 0.4.0</title>
+      <pubDate>Thu, 04 Jun 2026 12:00:00 +0000</pubDate>
+      <sparkle:version>0.4.0</sparkle:version>
+      <sparkle:shortVersionString>0.4.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>Souffleuse 0.4.0</h2>
+        <ul>
+          <li>Mises à jour intégrées via Sparkle (vérification manuelle, sans suivi passif).</li>
+          <li>Améliorations du ghost et de la pertinence contextuelle.</li>
+        </ul>
+        <p>macOS 14+ · Apple Silicon · 100 % on-device.</p>
+      ]]></description>
+      <!-- TODO release : remplacer edSignature + length par la sortie de
+           `sign_update build/Souffleuse.dmg` (via make-appcast-entry.sh). -->
+      <enclosure
+        url="https://souffleuse.app/downloads/Souffleuse-0.4.0.dmg"
+        sparkle:edSignature="REMPLACER_PAR_LA_SIGNATURE_sign_update"
+        length="REMPLACER_PAR_LA_TAILLE_EN_OCTETS"
+        type="application/octet-stream" />
+    </item>
+
+  </channel>
+</rss>
