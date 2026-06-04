@@ -258,6 +258,16 @@ let package = Package(
             ]
         ),
         .executableTarget(
+            name: "SouffleuseFewShotAB",
+            dependencies: [
+                "SouffleuseCore",
+                "SouffleuseLlama",
+                "SouffleuseLog",
+                "SouffleusePersonalization",
+                "SouffleuseTyping",
+            ]
+        ),
+        .executableTarget(
             name: "SouffleuseVocabCompleteEval",
             dependencies: [
                 "SouffleusePersonalization",
