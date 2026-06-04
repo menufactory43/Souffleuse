@@ -68,6 +68,42 @@ import Testing
     #expect(!OverlayWindow.isUsableWordRect(CGRect(x: CGFloat.infinity, y: 0, width: 48, height: 18)))
 }
 
+// MARK: - OverlayWindow mid-line pill geometry
+
+@MainActor
+@Test func overlayPillFrameSizesWithPadding() {
+    // The pill is a padded box: content size + hPad/vPad on each side, and its
+    // left edge is inset by hPad so the suggestion text starts under the caret.
+    let font = NSFont.systemFont(ofSize: 15)
+    let text = "mon premier post sur le"
+    let caret = CGRect(x: 120, y: 200, width: 1, height: 18)
+    let f = OverlayWindow.pillFrame(belowCaret: caret, text: text, font: font)
+    let textSize = (text as NSString).size(withAttributes: [.font: font])
+    #expect(f.width == ceil(textSize.width) + PillView.hPad * 2)
+    #expect(f.height == ceil(textSize.height) + PillView.vPad * 2)
+    #expect(f.origin.x == caret.origin.x - PillView.hPad)
+}
+
+@MainActor
+@Test func overlayPillFrameClampsToLeftEdge() {
+    // A caret near the left edge must not push the pill off-screen (negative x):
+    // the inset is clamped at 0.
+    let font = NSFont.systemFont(ofSize: 15)
+    let caret = CGRect(x: 3, y: 200, width: 1, height: 18)
+    let f = OverlayWindow.pillFrame(belowCaret: caret, text: "x", font: font)
+    #expect(f.origin.x == 0)
+}
+
+@MainActor
+@Test func overlayPillFrameHangsBelowCaretLine() {
+    // Quartz Y grows downward; a caret one line lower (greater maxY) drops the
+    // pill's AppKit y by exactly the same delta — the pill tracks the caret line.
+    let font = NSFont.systemFont(ofSize: 15)
+    let a = OverlayWindow.pillFrame(belowCaret: CGRect(x: 50, y: 100, width: 1, height: 18), text: "abc", font: font)
+    let b = OverlayWindow.pillFrame(belowCaret: CGRect(x: 50, y: 140, width: 1, height: 18), text: "abc", font: font)
+    #expect(abs((a.origin.y - b.origin.y) - 40) < 0.001)
+}
+
 // MARK: - SouffleuseAppDelegate mid-text suppression
 
 @MainActor
