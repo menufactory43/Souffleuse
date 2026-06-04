@@ -28,6 +28,7 @@ let package = Package(
         .library(name: "SouffleuseContext", targets: ["SouffleuseContext"]),
         .library(name: "SouffleuseLog", targets: ["SouffleuseLog"]),
         .library(name: "SouffleuseTyping", targets: ["SouffleuseTyping"]),
+        .library(name: "SouffleuseCorpus", targets: ["SouffleuseCorpus"]),
         .library(name: "SouffleusePersonalization", targets: ["SouffleusePersonalization"]),
         .library(name: "SouffleusePrompt", targets: ["SouffleusePrompt"]),
         .library(name: "SouffleuseLlama", targets: ["SouffleuseLlama"]),
@@ -84,12 +85,20 @@ let package = Package(
         .target(
             name: "SouffleuseTyping"
         ),
+        // Feuille PURE (Foundation only) : la *forme* des données du corpus
+        // (TypingHistoryEntry, EntrySource, SecretHeuristic, LearnedLexicon),
+        // séparée de la *persistance* (SouffleusePersonalization : SQLCipher,
+        // Keychain). Permet à SouffleuseCore de dépendre des types du corpus sans
+        // lier SQLCipher/Keychain — débloque l'InferenceAgent du split 3-process.
+        .target(
+            name: "SouffleuseCorpus"
+        ),
         .target(
             name: "SouffleuseCore",
             dependencies: [
                 "SouffleuseLog",
                 "SouffleuseTyping",
-                "SouffleusePersonalization",
+                "SouffleuseCorpus",
             ]
         ),
         .target(
@@ -112,7 +121,9 @@ let package = Package(
                 "SouffleuseLog",
                 "CSQLCipher",
                 "SouffleuseTyping",
-                .product(name: "MLXLMCommon", package: "mlx-swift-examples"),
+                "SouffleuseCorpus",
+                // MLXLMCommon retiré : dépendance MORTE depuis la suppression du
+                // chemin n-gram MLX (aucun `import MLX*` dans ce module).
             ]
         ),
         .target(
@@ -140,6 +151,7 @@ let package = Package(
                 "SouffleuseLlama",
                 "SouffleuseCore",
                 "SouffleusePersonalization",
+                "SouffleuseCorpus",
                 "SouffleuseTyping",
             ]
         ),
@@ -157,6 +169,7 @@ let package = Package(
                 "SouffleuseCore",
                 "SouffleuseLlama",
                 "SouffleusePersonalization",
+                "SouffleuseCorpus",
                 "SouffleuseTyping",
                 "SouffleuseLog",
             ]
@@ -172,6 +185,7 @@ let package = Package(
                 "SouffleuseOverlay",
                 "SouffleuseTyping",
                 "SouffleusePersonalization",
+                "SouffleuseCorpus",
                 "SouffleusePrompt",
                 "SouffleuseLlama",
                 .product(name: "MLXLLM", package: "mlx-swift-examples"),
@@ -208,6 +222,7 @@ let package = Package(
                 "SouffleuseLlama",
                 "SouffleuseLog",
                 "SouffleusePersonalization",
+                "SouffleuseCorpus",
             ]
         ),
         .executableTarget(
@@ -217,6 +232,7 @@ let package = Package(
                 "SouffleuseLlama",
                 "SouffleuseLog",
                 "SouffleusePersonalization",
+                "SouffleuseCorpus",
                 "SouffleuseTyping",
             ]
         ),
@@ -225,6 +241,7 @@ let package = Package(
             dependencies: [
                 "SouffleuseCore",
                 "SouffleusePersonalization",
+                "SouffleuseCorpus",
                 "SouffleuseTyping",
             ]
         ),
@@ -234,6 +251,7 @@ let package = Package(
             dependencies: [
                 "SouffleuseCore",
                 "SouffleusePersonalization",
+                "SouffleuseCorpus",
                 "SouffleuseTyping",
             ]
         ),
@@ -244,6 +262,7 @@ let package = Package(
                 "SouffleuseLlama",
                 "SouffleuseLog",
                 "SouffleusePersonalization",
+                "SouffleuseCorpus",
                 "SouffleuseTyping",
             ]
         ),
@@ -254,6 +273,7 @@ let package = Package(
                 "SouffleuseLlama",
                 "SouffleuseLog",
                 "SouffleusePersonalization",
+                "SouffleuseCorpus",
                 "SouffleuseTyping",
             ]
         ),
@@ -264,6 +284,7 @@ let package = Package(
                 "SouffleuseLlama",
                 "SouffleuseLog",
                 "SouffleusePersonalization",
+                "SouffleuseCorpus",
                 "SouffleuseTyping",
             ]
         ),
@@ -271,6 +292,7 @@ let package = Package(
             name: "SouffleuseVocabCompleteEval",
             dependencies: [
                 "SouffleusePersonalization",
+                "SouffleuseCorpus",
             ]
         ),
         .executableTarget(
@@ -286,6 +308,7 @@ let package = Package(
             dependencies: [
                 "SouffleuseCore",
                 "SouffleusePersonalization",
+                "SouffleuseCorpus",
                 "SouffleuseTyping",
             ]
         ),
@@ -296,12 +319,14 @@ let package = Package(
                 "SouffleuseLlama",
                 "SouffleuseLog",
                 "SouffleusePersonalization",
+                "SouffleuseCorpus",
             ]
         ),
         .executableTarget(
             name: "SouffleuseCorpusSeed",
             dependencies: [
                 "SouffleusePersonalization",
+                "SouffleuseCorpus",
                 "SouffleuseLog",
             ]
         ),
@@ -325,6 +350,7 @@ let package = Package(
                 "SouffleuseOverlay",
                 "SouffleuseTyping",
                 "SouffleusePersonalization",
+                "SouffleuseCorpus",
                 "SouffleusePrompt",
                 "SouffleuseLlama",
             ]

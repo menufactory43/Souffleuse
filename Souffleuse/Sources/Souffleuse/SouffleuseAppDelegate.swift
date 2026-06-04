@@ -7,6 +7,7 @@ import SouffleuseCore
 import SouffleuseInput
 import SouffleuseLog
 import SouffleuseOverlay
+import SouffleuseCorpus
 import SouffleusePersonalization
 import SouffleuseTyping
 

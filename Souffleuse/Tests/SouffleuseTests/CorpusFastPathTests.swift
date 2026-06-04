@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import SouffleuseCorpus
 import SouffleusePersonalization
 import SouffleuseTyping
 import SouffleuseCore

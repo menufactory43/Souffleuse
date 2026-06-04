@@ -2,6 +2,7 @@ import Foundation
 import SouffleuseCore
 import SouffleuseLlama
 import SouffleuseLog
+import SouffleuseCorpus
 import SouffleusePersonalization
 import SouffleuseTyping
 

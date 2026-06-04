@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import SouffleuseCore
+import SouffleuseCorpus
 import SouffleusePersonalization
 
 /// Couvre le scoping de personnalisation par registre générique : un bundleID

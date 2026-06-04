@@ -1,4 +1,5 @@
 import Foundation
+import SouffleuseCorpus
 import SouffleusePersonalization
 
 // Souffleuse Learned-Vocabulary Completer Eval
