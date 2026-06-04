@@ -660,10 +660,7 @@ final class PredictorViewModel {
         // `strongCorpusMatch` rappellent toujours les salutations de l'utilisateur
         // — on ne les retire QUE comme exemple imitable. Ceci est le pool
         // d'injection few-shot (B-prompt).
-        let proseExamplesPool = self.historySnapshot.filter {
-            $0.source == .prose && !SuggestionPolicy.isGreetingLike($0.accepted)
-                && (activeDomain == .other || DomainCluster.cluster(for: $0.bundleID) == activeDomain)
-        }
+        let proseExamplesPool = FewShotScoping.scopedExamplesPool(self.historySnapshot, activeDomain: activeDomain)
 
         let baseSystem = baseSystemPrompt
         let customInstr = customInstructions
@@ -1154,10 +1151,7 @@ final class PredictorViewModel {
         // orthogonal). Rank synchrone in-memory (<5ms) — hors chemin chaud TTFT.
         var refillExamplesBlock = ""
         if personalizationStrength > 0 && SuggestionPolicy.Tuning.examplesInjectionEnabled {
-            let prose = self.historySnapshot.filter {
-                $0.source == .prose && !SuggestionPolicy.isGreetingLike($0.accepted)
-                    && (lastActiveDomain == .other || DomainCluster.cluster(for: $0.bundleID) == lastActiveDomain)
-            }
+            let prose = FewShotScoping.scopedExamplesPool(self.historySnapshot, activeDomain: lastActiveDomain)
             let examples = SimilarHistoryRetrieval.rank(
                 entries: prose, userTail: userTail, limit: SimilarHistoryRetrieval.defaultK
             )
