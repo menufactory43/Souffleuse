@@ -889,7 +889,8 @@ public final class SuggestionPolicyEngine {
         userTail: String,
         historySnapshot: [TypingHistoryEntry],
         wordCompleter: WordCompleter,
-        lexicon: LearnedLexicon? = nil
+        lexicon: LearnedLexicon? = nil,
+        activeDomain: DomainCluster = .other
     ) -> GhostUpdate? {
         // Recall verbatim (ghost sans LLM) ne considère QUE la prose de
         // l'utilisateur. Les fragments `.accept` (mot/bout de phrase validé au
@@ -898,7 +899,15 @@ public final class SuggestionPolicyEngine {
         // bouts tronqués que le prior strongCorpus — imbattable — épinglerait au
         // détriment d'une meilleure génération LLM. Même pattern que
         // `proseExamplesPool` (PVM).
-        let proseSnapshot = historySnapshot.filter { $0.source == .prose }
+        // Scope par CLUSTER de registre (P1.2). `activeDomain == .other` ⇒
+        // AUCUN scope (comportement historique). Sinon on ne rappelle que la
+        // prose des apps du MÊME registre : le privé (`.chat`) ne fuit jamais
+        // dans un autre cluster, et la précision monte (corpus homogène). Pas de
+        // fallback cross-cluster : un cluster connu mais sans prose ne rappelle
+        // rien (le LLM gère) — privacy + précision d'abord.
+        let proseSnapshot = historySnapshot.filter {
+            $0.source == .prose && (activeDomain == .other || DomainCluster.cluster(for: $0.bundleID) == activeDomain)
+        }
         // Cas mid-word — historique d'abord (parité Cotypist), puis L0 système.
         if let last = userTail.last, last.isLetter {
             // Rappel de phrase mid-mot : le fragment de mot en cours + son

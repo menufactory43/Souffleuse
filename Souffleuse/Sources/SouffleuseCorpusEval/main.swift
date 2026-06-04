@@ -213,7 +213,8 @@ struct TriggerResult: Encodable {
 @MainActor
 func triggerEval(
     train: [TypingHistoryEntry], test: [TypingHistoryEntry], label: String,
-    sampleHits: inout [String], sampleMisses: inout [String], collectSamples: Bool
+    sampleHits: inout [String], sampleMisses: inout [String], collectSamples: Bool,
+    scoped: Bool = false
 ) -> TriggerResult {
     let policy = SuggestionPolicyEngine(maxWords: 8)
     let wc = WordCompleter()
@@ -223,10 +224,15 @@ func triggerEval(
     ]
     var srcLearned = 0, srcHistory = 0, srcOther = 0
     for e in test {
+        // Scoping (P1.2) : en mode SCOPED, le recall n'utilise QUE la prose des
+        // apps du même cluster de registre que l'entrée testée. En mode UNSCOPED
+        // (baseline), `.other` ⇒ aucun scope (comportement historique).
+        let domain: DomainCluster = scoped ? DomainCluster.cluster(for: e.bundleID) : .other
         for pr in probes(from: e.accepted) {
             byKind[pr.kind]!.probes += 1
             guard let g = policy.routeInstant(
-                userTail: pr.prefix, historySnapshot: train, wordCompleter: wc, lexicon: lex
+                userTail: pr.prefix, historySnapshot: train, wordCompleter: wc, lexicon: lex,
+                activeDomain: domain
             ) else {
                 if collectSamples && sampleMisses.count < 8 {
                     sampleMisses.append("[\(pr.kind)] …\(String(pr.prefix.suffix(22)))| → ∅ (vrai: \(String(pr.trueSuffix.prefix(18))))")
@@ -268,17 +274,59 @@ func triggerEval(
         overallUsefulCoveragePct: oP > 0 ? Int(Double(oC) / Double(oP) * 100) : 0)
 }
 
+// ── Comparaison UNSCOPED vs SCOPED (P1.2), TRAIN 100% held-out ──────────────
+// `triggerCurve` reste la courbe historique (UNSCOPED, .other partout) pour ne
+// pas casser les comparaisons existantes. `scopedResult100` rejoue le MÊME split
+// held-out à TRAIN 100% en scopant chaque entrée sur le cluster déduit de SON
+// bundleID. `scopingComparison` reporte les deux passes (global + par kind).
+struct KindCompare: Encodable {
+    let kind: String
+    let unscopedFireRatePct: Int; let unscopedPrecisionPct: Int; let unscopedUsefulCoveragePct: Int
+    let scopedFireRatePct: Int; let scopedPrecisionPct: Int; let scopedUsefulCoveragePct: Int
+}
+struct ScopingComparison: Encodable {
+    let trainLabel: String
+    let unscopedFireRatePct: Int; let unscopedPrecisionPct: Int; let unscopedUsefulCoveragePct: Int
+    let scopedFireRatePct: Int; let scopedPrecisionPct: Int; let scopedUsefulCoveragePct: Int
+    let byKind: [KindCompare]
+}
+
 var sampleHits: [String] = []
 var sampleMisses: [String] = []
+var scopedResult100: TriggerResult? = nil
 let triggerCurve: [TriggerResult] = await MainActor.run {
     var hits: [String] = []
     var misses: [String] = []
+    var dummyHits: [String] = []
+    var dummyMisses: [String] = []
     let r25 = triggerEval(train: Array(trainAll.prefix(max(1, trainAll.count / 4))), test: test, label: "25%", sampleHits: &hits, sampleMisses: &misses, collectSamples: false)
     let r50 = triggerEval(train: Array(trainAll.prefix(max(1, trainAll.count / 2))), test: test, label: "50%", sampleHits: &hits, sampleMisses: &misses, collectSamples: false)
     let r100 = triggerEval(train: trainAll, test: test, label: "100%", sampleHits: &hits, sampleMisses: &misses, collectSamples: true)
+    // 2e passe : MÊME held-out, TRAIN 100%, mais SCOPED par cluster de l'entrée.
+    scopedResult100 = triggerEval(train: trainAll, test: test, label: "100% scoped", sampleHits: &dummyHits, sampleMisses: &dummyMisses, collectSamples: false, scoped: true)
     sampleHits = hits; sampleMisses = misses
     return [r25, r50, r100]
 }
+
+let scopingComparison: ScopingComparison = {
+    let u = triggerCurve.last!
+    let s = scopedResult100!
+    var kindCompares: [KindCompare] = []
+    let uByKind = Dictionary(uniqueKeysWithValues: u.kinds.map { ($0.kind, $0) })
+    let sByKind = Dictionary(uniqueKeysWithValues: s.kinds.map { ($0.kind, $0) })
+    for k in ["mid-word", "after-space"] {
+        guard let uk = uByKind[k], let sk = sByKind[k] else { continue }
+        kindCompares.append(KindCompare(
+            kind: k,
+            unscopedFireRatePct: uk.fireRatePct, unscopedPrecisionPct: uk.precisionPct, unscopedUsefulCoveragePct: uk.usefulCoveragePct,
+            scopedFireRatePct: sk.fireRatePct, scopedPrecisionPct: sk.precisionPct, scopedUsefulCoveragePct: sk.usefulCoveragePct))
+    }
+    return ScopingComparison(
+        trainLabel: "100%",
+        unscopedFireRatePct: u.overallFireRatePct, unscopedPrecisionPct: u.overallPrecisionPct, unscopedUsefulCoveragePct: u.overallUsefulCoveragePct,
+        scopedFireRatePct: s.overallFireRatePct, scopedPrecisionPct: s.overallPrecisionPct, scopedUsefulCoveragePct: s.overallUsefulCoveragePct,
+        byKind: kindCompares)
+}()
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 5. LEXICON ROUTE — preuve terme-à-terme « Préfixe3 » → terme appris.
@@ -419,12 +467,13 @@ let vocabResult = VocabResult(
 struct Report: Encodable {
     let stats: Stats
     let triggerCurve: [TriggerResult]
+    let scopingComparison: ScopingComparison
     let lexicon: LexResult
     let vocab: VocabResult
     let sampleHits: [String]
     let sampleMisses: [String]
 }
-let report = Report(stats: stats, triggerCurve: triggerCurve, lexicon: lexResult, vocab: vocabResult, sampleHits: sampleHits, sampleMisses: sampleMisses)
+let report = Report(stats: stats, triggerCurve: triggerCurve, scopingComparison: scopingComparison, lexicon: lexResult, vocab: vocabResult, sampleHits: sampleHits, sampleMisses: sampleMisses)
 writeJSON(report, to: "report.json")
 
 let t100 = triggerCurve.last!
@@ -443,6 +492,15 @@ for k in t100.kinds {
     print("  \(k.kind.padding(toLength: 11, withPad: " ", startingAt: 0)): déclenche \(k.fireRatePct)% | précision \(k.precisionPct)% | couverture utile \(k.usefulCoveragePct)%")
 }
 print("  correct par source : lexique=\(t100.correctBySource.learnedWord)  history-L1=\(t100.correctBySource.history)  autre=\(t100.correctBySource.other)")
+let sc = scopingComparison
+print("""
+
+SCOPING par cluster (UNSCOPED baseline vs SCOPED, held-out, TRAIN 100%)
+  global    : déclenche \(sc.unscopedFireRatePct)%→\(sc.scopedFireRatePct)% | précision \(sc.unscopedPrecisionPct)%→\(sc.scopedPrecisionPct)% | couverture utile \(sc.unscopedUsefulCoveragePct)%→\(sc.scopedUsefulCoveragePct)%
+""")
+for k in sc.byKind {
+    print("  \(k.kind.padding(toLength: 11, withPad: " ", startingAt: 0)): déclenche \(k.unscopedFireRatePct)%→\(k.scopedFireRatePct)% | précision \(k.unscopedPrecisionPct)%→\(k.scopedPrecisionPct)% | couverture utile \(k.unscopedUsefulCoveragePct)%→\(k.scopedUsefulCoveragePct)%")
+}
 print("""
 
 LEXIQUE (preuve « Préfixe3 » → terme appris) : \(lexResult.surfaced)/\(lexResult.tested) ressortis  (lexique=\(lexResult.viaLexicon), L1=\(lexResult.viaL1))
