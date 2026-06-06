@@ -47,6 +47,40 @@ public enum SuggestionSource: Sendable {
     case llm            // currently streaming from the active LLM Task
 }
 
+// MARK: - CompletionSuppressionReason (KeyType parity — typed join-key)
+
+/// Raison TYPÉE pour laquelle un ghost candidat n'a PAS été montré. Parité
+/// KeyType (`CompletionSuppressionReason`) : aujourd'hui une suppression part
+/// dans un `PredictDebug.log(...)` ad-hoc, illisible en agrégat. Un enum
+/// fermé devient la clé de jointure pour juger la qualité du moteur on-device
+/// (combien de `noLexicalContext` vs `midWordDeadEnd` vs `lowRelevance`…) et
+/// alimente `GhostInspector`.
+///
+/// **Privacy invariant (audit.sh §4/§6) :** `rawValue` est un littéral fixe —
+/// jamais de texte user. Seul le `rawValue` (un `StaticString`-like) atteint
+/// le log, via le champ `event` whitelisté ; aucune donnée tapée n'y transite.
+public enum CompletionSuppressionReason: String, Sendable, CaseIterable {
+    /// Préfixe vide / blanc → un base model y continuerait le scaffolding du prompt.
+    case emptyPrefix
+    /// Préfixe non-vide mais sans signal lexical réel (pas de mot de contenu) —
+    /// même avec un hint de champ faible. Cause n°1 des ghosts « fortune cookie ».
+    case noLexicalContext
+    /// Mid-word : le stem healé ne peut commencer aucun mot du dico (collapse).
+    case midWordDeadEnd
+    /// Mid-word : le mot healé est inconnu du dico (typo / hallucination).
+    case midWordTypo
+    /// Mid-word : valide mais accord inter-hypothèses trop bas (ambigu) → caché.
+    case midWordLowAgreement
+    /// La continuation ne fait que répéter le texte déjà tapé avant le caret.
+    case echoesPrefix
+    /// La continuation percute / duplique le texte après le caret.
+    case duplicatesSuffix
+    /// Score de pertinence (Relevance Gate) sous le plancher.
+    case lowRelevance
+    /// Sortie non insérable (markup, contrôle, mauvaise langue).
+    case unsafe
+}
+
 // MARK: - Score
 
 /// Scalar [0,1] qui résume la pertinence d'un ghost candidat (D-06).
@@ -107,6 +141,48 @@ public enum SuggestionPolicy {
             prefixFit: Self.prefixFit(ghost: ghost, userTail: userTail),
             lengthFit: Self.lengthFit(ghost: ghost)
         )
+    }
+
+    // MARK: - Lexical-context gate (KeyType empty-prefix parity)
+
+    /// Stop-words FR/EN courts, filtrés avant de compter les mots de CONTENU.
+    /// Volontairement minimal et self-contained (SouffleuseCore n'importe pas
+    /// SouffleusePersonalization) : mêmes principes que
+    /// `SimilarHistoryRetrieval.stopWords`, mais découplé.
+    nonisolated static let contextStopWords: Set<String> = [
+        "de", "la", "le", "les", "un", "une", "des", "et", "à", "au", "aux",
+        "en", "du", "ce", "ces", "se", "sa", "son", "ses", "ne", "pas", "que",
+        "qui", "où", "ou", "si", "je", "tu", "il", "elle", "on", "nous", "vous",
+        "ils", "mon", "ma", "mes", "ton", "ta", "tes", "est", "sont", "the",
+        "is", "and", "of", "to", "in", "for", "on", "at", "by", "be", "as",
+        "it", "this", "that", "with", "are", "was", "were", "you", "your", "my",
+    ]
+
+    /// Le texte avant le caret porte-t-il un VRAI signal lexical (≥ `min` mots de
+    /// contenu) ? Parité KeyType : un base model avec un préfixe sans contenu
+    /// (vide, blanc, ou seulement ponctuation / stop-words / chiffres) part dans
+    /// les priors d'ouverture (« Bonjour », « Coucou ») — un ghost « fortune
+    /// cookie » que rien dans le contexte ne justifie. La garde compte les tokens
+    /// alphabétiques ≥2 chars qui ne sont pas des stop-words ; ≥ `min` ⇒ il y a
+    /// de quoi continuer pertinemment, sinon on supprime (cf.
+    /// `CompletionSuppressionReason.noLexicalContext`).
+    ///
+    /// Pure / nonisolated / sans log — testable sans runtime.
+    public nonisolated static func hasLexicalContext(_ text: String, min: Int = 1) -> Bool {
+        guard min > 0 else { return true }
+        var count = 0
+        var current = ""
+        func flush() {
+            defer { current = "" }
+            guard current.count >= 2, !contextStopWords.contains(current) else { return }
+            count += 1
+        }
+        for scalar in text.lowercased().unicodeScalars {
+            let ch = Character(scalar)
+            if ch.isLetter { current.append(ch) } else { flush() }
+        }
+        flush()
+        return count >= min
     }
 
     /// `TypoDetector` partagé (process-wide) servant à valider le mot partiel

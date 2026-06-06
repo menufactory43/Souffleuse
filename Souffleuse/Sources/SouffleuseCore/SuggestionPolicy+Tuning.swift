@@ -174,6 +174,28 @@ extension SuggestionPolicy {
             ProcessInfo.processInfo.environment["SOUFFLEUSE_MIDWORD_ESCALATION_OFF"] == nil
         }
 
+        // MARK: - No-context strict gate (KeyType empty-prefix parity)
+
+        /// Garde stricte « pas de contexte ⇒ pas de ghost », parité KeyType.
+        /// **OFF par défaut** (env absente) ⇒ le gate field-hint actuel reste seul,
+        /// comportement byte-identique. `SOUFFLEUSE_NOCONTEXT_STRICT=1` ⇒ on bloque
+        /// AUSSI quand le préfixe n'a pas de signal lexical réel
+        /// (`SuggestionPolicy.hasLexicalContext`), MÊME avec un hint de champ faible
+        /// (placeholder/role) — la cause n°1 des ghosts « fortune cookie ».
+        /// Env-overridable pour l'A/B live sans rebuild (même pattern que les autres flags).
+        public static var noContextStrictGateEnabled: Bool {
+            ProcessInfo.processInfo.environment["SOUFFLEUSE_NOCONTEXT_STRICT"] != nil
+        }
+
+        /// Nombre minimal de mots de CONTENU (non stop-word, ≥2 lettres) requis
+        /// dans le préfixe pour autoriser une génération libre quand le gate strict
+        /// est actif. 1 = au moins un vrai mot. Env `SOUFFLEUSE_NOCONTEXT_MINTOKENS`.
+        public static var noContextMinContentTokens: Int {
+            if let s = ProcessInfo.processInfo.environment["SOUFFLEUSE_NOCONTEXT_MINTOKENS"],
+               let v = Int(s) { return max(1, v) }
+            return 1
+        }
+
         /// Fast-accept : un mot greedy/healed valide ET prolongeant le partiel, à
         /// confiance top-1 ≥ ce seuil ET sur un fragment ≥ `escMinFastLen`, est
         /// montré DIRECT (0 branche). 0.85 = plancher mesuré : sous ce seuil un mot
