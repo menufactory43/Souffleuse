@@ -592,7 +592,23 @@ final class PredictorViewModel {
             || (axSnapshot?.help?.isEmpty == false)
             || (axSnapshot?.role != nil)
         if userTail.isEmpty && !hasFieldHint {
+            Log.info(.predictor, "ghost_suppressed_empty_prefix")
             PredictDebug.log("gate_empty_no_context", "")
+            return
+        }
+
+        // KeyType empty-prefix parity (flag-gated, OFF par défaut). Le gate
+        // field-hint ci-dessus laisse passer un préfixe pauvre dès qu'un hint
+        // FAIBLE existe (placeholder/role) → le base model part dans ses priors
+        // d'ouverture (« Bonjour », « Coucou »). Quand le gate strict est actif,
+        // on exige un VRAI signal lexical dans le préfixe (≥ N mots de contenu),
+        // indépendamment des hints — la cause n°1 des ghosts « sans contexte ».
+        if SuggestionPolicy.Tuning.noContextStrictGateEnabled,
+           !SuggestionPolicy.hasLexicalContext(
+                userTail, min: SuggestionPolicy.Tuning.noContextMinContentTokens) {
+            Log.info(.predictor, "ghost_suppressed_no_lexical_context")
+            PredictDebug.log("gate_no_lexical_context",
+                             CompletionSuppressionReason.noLexicalContext.rawValue)
             return
         }
 
