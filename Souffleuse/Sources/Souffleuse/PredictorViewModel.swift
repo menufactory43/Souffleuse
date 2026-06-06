@@ -814,9 +814,23 @@ final class PredictorViewModel {
                 // a specific, unrelated sentence the user typed into the model's
                 // context. Nothing similar ⇒ inject nothing.
                 // TO REVERT: re-add the `if examples.count < defaultK { … }` backfill loop.
-                let examples = SimilarHistoryRetrieval.rank(
-                    entries: prose, userTail: userTail, limit: SimilarHistoryRetrieval.defaultK
-                )
+                let examples: [TypingHistoryEntry]
+                if SuggestionPolicy.Tuning.blendedRetrievalEnabled {
+                    // Mix KeyType (count=1) : pertinence PRIMAIRE puis nudge
+                    // récence × longueur. Même filtre `minRelevanceScore` → pas de
+                    // bruit injecté ; on ne fait que mieux DÉPARTAGER les pertinents.
+                    examples = SimilarHistoryRetrieval.rankBlended(
+                        entries: prose, userTail: userTail,
+                        limit: SimilarHistoryRetrieval.defaultK,
+                        recencyWeight: SuggestionPolicy.Tuning.retrievalRecencyWeight,
+                        lengthWeight: SuggestionPolicy.Tuning.retrievalLengthWeight,
+                        now: Date()
+                    )
+                } else {
+                    examples = SimilarHistoryRetrieval.rank(
+                        entries: prose, userTail: userTail, limit: SimilarHistoryRetrieval.defaultK
+                    )
+                }
                 examplesBlock = SimilarHistoryRetrieval.buildExamplesBlock(from: examples)
                 if !examples.isEmpty {
                     Log.info(.predictor, "ghost_examples_injected", count: examples.count)
