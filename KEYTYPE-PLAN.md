@@ -71,6 +71,13 @@ Cible : `midword_wrong_rate` et `nocontext_generic_rate` **÷2** vs baseline, `p
 - *Cible* : `midword_wrong_rate` ÷2.
 - *Tests autonomes* : workflow → corpus mid-word ambigu (`confir`, `inform`, `pe…`).
 
+### Baseline perso (2026-06-06, synthétique, base Gemma 3 1B)
+- `LLM hits` base **1/25** · bias **11/25** · **promo 21/25** · over-injection **0/33** · instant **25/25**.
+- *Lecture* : la promotion n-gram est excellente MAIS exige `count ≥ 3` (chaque terme répété ×3 ici).
+  En usage réel non-répétitif elle s'arme rarement → perso « morte » ressentie. La **retrieval few-shot
+  marche dès count=1** → c'est le levier KeyType à renforcer (Phase 3), complémentaire à la promotion.
+- *À valider* : `SouffleuseRealPersoEval` (récurrence sur vrai `history.db`) — confirme l'hypothèse count≥3.
+
 ### Phase 3 — Personnalisation (KeyType retrieval mix)
 - Remplacer le retrieval Jaccard-pur par le **mix KeyType** dans `SimilarHistoryRetrieval` :
   `N récents même-cluster + M longs même-cluster + K récents cross-cluster`, dédupliqués, **budget en tokens** (pas en chars), **pondérés par `hasAcceptedCompletion`**.

@@ -196,6 +196,35 @@ extension SuggestionPolicy {
             return 1
         }
 
+        // MARK: - Blended retrieval (KeyType perso mix, count=1)
+
+        /// Active le retrieval few-shot BLENDÉ (`rankBlended` : pertinence + récence
+        /// + longueur) à la place du `rank` Jaccard-pur. **OFF par défaut** ⇒ le
+        /// retrieval actuel (Jaccard top-K) reste, comportement byte-identique.
+        /// `SOUFFLEUSE_BLENDED_RETRIEVAL=1` ⇒ parmi les exemples PERTINENTS (même
+        /// filtre `minRelevanceScore`), on privilégie les démonstrations récentes et
+        /// informatives — le levier perso qui marche dès count=1 (vs promotion n-gram
+        /// qui exige count≥3).
+        public static var blendedRetrievalEnabled: Bool {
+            ProcessInfo.processInfo.environment["SOUFFLEUSE_BLENDED_RETRIEVAL"] != nil
+        }
+
+        /// Poids du bonus de récence dans le blend (multiplicatif). `MW`-style env
+        /// override pour l'A/B. 0.3 = un exemple le plus récent vaut jusqu'à +30 %.
+        public static var retrievalRecencyWeight: Double {
+            if let s = ProcessInfo.processInfo.environment["SOUFFLEUSE_RETRIEVAL_RECENCY"],
+               let v = Double(s) { return v }
+            return 0.3
+        }
+
+        /// Poids du bonus de longueur dans le blend. 0.2 = un exemple long
+        /// (≥ saturation) vaut jusqu'à +20 %.
+        public static var retrievalLengthWeight: Double {
+            if let s = ProcessInfo.processInfo.environment["SOUFFLEUSE_RETRIEVAL_LENGTH"],
+               let v = Double(s) { return v }
+            return 0.2
+        }
+
         /// Fast-accept : un mot greedy/healed valide ET prolongeant le partiel, à
         /// confiance top-1 ≥ ce seuil ET sur un fragment ≥ `escMinFastLen`, est
         /// montré DIRECT (0 branche). 0.85 = plancher mesuré : sous ce seuil un mot
