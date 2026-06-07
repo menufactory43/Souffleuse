@@ -86,7 +86,30 @@ Cible : `midword_wrong_rate` et `nocontext_generic_rate` **÷2** vs baseline, `p
 - *Cible* : `perso_hit_rate` en hausse, pas de pollution (vérif anti-greeting).
 - *Tests autonomes* : workflow → corpus perso simulé + assert reprise de registre.
 
-### Phase 4 — Génération contrainte type KeyType (le gros morceau, derrière flag)
+### Phase 4 — SÉLECTEUR mid-word log-prob (re-scopé après spike — PAS de KV-fork)
+
+**SPIKE JETABLE (`MW_BEAM`, validé au modèle avant toute réécriture) :** le beam KV-fork
+n'est **PAS nécessaire**. Avec candidats = `{greedy} ∪ {dico NSSpellChecker}` (k=0, zéro branche
+stochastique) rerankés par `sequenceLogProb` per-token + stem-dedup + hide fragment-court :
+**20/23** vs vote stochastique actuel **16/23** vs greedy **14/23**. Le cas dur `aspirateur`
+(-3.68) vs `aspiration` (-16.43) est résolu DÉTERMINISTIQUEMENT. La diversité vient du DICO,
+pas d'un beam. → On REMPLACE l'escalade stochastique-K par un sélecteur log-prob déterministe,
+réutilisant `generate`/`WordCompleter`/`sequenceLogProb` (zéro nouveau primitif C, zéro fork KV).
+Résidu : `imposable` (mauvais candidat dico gagne) + `gerard` (nom propre) — non-régressions.
+
+Build prod = porter l'algo k=0 du spike dans `midWordEscalate` derrière `SOUFFLEUSE_GHOST_ENGINE=keytype`,
+re-mesurer (cible 20/23), puis épurer l'escalade stochastique une fois confiant.
+
+**SPIKE MARQUES (`MW_BRAND`, 20 cas mid-word, corpus seedé ×3) — le routage final :**
+- OFF 7/20 · **PROMO (n-gram) 20/20** · LOGSEL (log-prob) **5/20** · **HYBRIDE 20/20**.
+- Le log-prob DÉMOTE les termes appris (`Bina→Binaire`, `Fisc→Fiscalité`, `Géra→Gérald`) : toxique pour les marques.
+- **Deux régimes, deux leviers** : mots communs → sélecteur log-prob (20/23) ; marques/noms propres → promotion n-gram (20/20).
+- **Routage** : `si promotion atteste un terme appris → montrer le terme (ne PAS re-démoter par log-prob) ; sinon → sélecteur log-prob`. Déterministe, zéro fork KV.
+- Bémol : PROMO 20/20 suppose le corpus seedé ×3 (récurrence). Marque tapée 1× → **Phase 3 (retrieval blendée count=1)** prend le relais. Leviers complémentaires.
+
+---
+
+#### (Archive) Hypothèse initiale — beam KV-fork, RÉFUTÉE par le spike
 
 **Découverte (vérifiée dans le code) :** la prod fait DÉJÀ une escalade par branches pour le
 mid-word (`ModelRuntime.midWordEscalate`, gaté par `midWordEscalationEnabled`) :
