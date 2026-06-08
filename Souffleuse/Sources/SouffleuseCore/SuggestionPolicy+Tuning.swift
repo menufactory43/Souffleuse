@@ -309,6 +309,46 @@ extension SuggestionPolicy {
             return 4
         }
 
+        // MARK: - Gradient d'engagement mi-mot (flag OFF) — 3 niveaux pilotés par
+        // la cascade escalate EXISTANTE (P1 fast-accept + accord des k branches).
+        //
+        // Au lieu d'un long-ghost binaire montre/cache, on module la PROFONDEUR du
+        // souffle selon l'incertitude du modèle, RÉUTILISÉE telle quelle depuis
+        // `midWordFastDecision`/`midWordBranchDecision` (PAS d'entropie, PAS de
+        // nouveau signal moteur) :
+        //   PLEIN   : greedy ~maxWords + rolling refill autorisé (living ghost).
+        //   PRUDENT : 1 mot (le modal), FIGÉ, rolling INTERDIT.
+        //   ZÉRO    : abstient (rien montré).
+        // Le gradient ne s'active QUE sous le flag ci-dessous ET à l'intérieur de la
+        // branche long-ghost (`midWordLongGhostEnabled` ON). Flag ABSENT ⇒ chemin
+        // long-ghost byte-identique à aujourd'hui (zéro changement de chemin).
+
+        /// `MW_ENGAGEMENT` — active le gradient d'engagement mi-mot à 3 niveaux.
+        /// **OFF par défaut** (env absente) ⇒ le long-ghost reste binaire montre/
+        /// cache, byte-identique à aujourd'hui. Présent ⇒ le niveau d'engagement
+        /// (PLEIN/PRUDENT/ZÉRO) est décidé par la cascade escalate sur le chemin
+        /// long-ghost. Pattern identique aux autres flags d'A/B (`!= nil`).
+        public static var midWordEngagementEnabled: Bool {
+            ProcessInfo.processInfo.environment["MW_ENGAGEMENT"] != nil
+        }
+
+        /// `MW_ENG_PLEIN` — accord inter-branches minimal pour le niveau PLEIN
+        /// (greedy ~maxWords + rolling). Défaut 0.8 : forte convergence des branches
+        /// ⇒ on a confiance pour dérouler le souffle long ET le laisser rouler.
+        public static var midWordEngagementPleinThresh: Double {
+            if let s = ProcessInfo.processInfo.environment["MW_ENG_PLEIN"], let v = Double(s) { return v }
+            return 0.8
+        }
+
+        /// `MW_ENG_PRUDENT` — accord inter-branches minimal pour le niveau PRUDENT
+        /// (1 mot modal FIGÉ, rolling interdit). Défaut 0.5 : convergence moyenne ⇒
+        /// on montre juste le mot modal, sans s'engager sur une suite ni rouler.
+        /// Sous ce seuil ⇒ ZÉRO (abstention). Doit rester < `…PleinThresh`.
+        public static var midWordEngagementPrudentThresh: Double {
+            if let s = ProcessInfo.processInfo.environment["MW_ENG_PRUDENT"], let v = Double(s) { return v }
+            return 0.5
+        }
+
         // MARK: - Ghost ROLLING REFILL (sliding window, flag OFF) — parité Cotypist
         //
         // Au lieu d'un ghost fixe (3-4 mots) qui SE VIDE à mesure que l'utilisateur

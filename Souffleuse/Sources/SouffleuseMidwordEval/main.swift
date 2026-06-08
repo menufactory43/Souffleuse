@@ -1026,6 +1026,147 @@ if ProcessInfo.processInfo.environment["MW_INTENT_REAL"] != nil {
     exit(0)
 }
 
+// ── Mode A/B INTENTION (MW_AB_INTENT=1) ────────────────────────────────────
+// Compare les DEUX bras LLM mid-mot — long-ghost (greedy, montré tel quel) vs
+// escalate (gated, peut s'abstenir) — sur des cas à CLASSE D'INTENTION : le gold
+// est un ENSEMBLE de réponses équivalentes (Tesla≈voiture, SpaceX→satellite),
+// pas un mot exact. Juge DURCI (corrige le laxisme de MW_INTENT_REAL) :
+//   in-class  = containment / stem≥4 / embedding strict (≥ MW_SEM_THRESH 0.55)
+//   garde LANGUE (NLLanguageRecognizer) → rejette le charabia étranger
+//   anti-STUB  → rejette « v e u r », fragments d'1 lettre.
+// Métriques {in-class, miss(FR hors-classe), garbage(langue/stub), caché} par bras.
+// Pas d'historique requis → lancer avec MW_NO_HISTORY=1 (zéro Keychain).
+if ProcessInfo.processInfo.environment["MW_AB_INTENT"] != nil {
+    let lgMaxTokens = max(1, Int(ProcessInfo.processInfo.environment["MW_LG_MAXTOKENS"] ?? "14") ?? 14)
+    let lgMaxWords  = max(1, Int(ProcessInfo.processInfo.environment["MW_LG_MAXWORDS"] ?? "4") ?? 4)
+    let fastP1      = Double(ProcessInfo.processInfo.environment["MW_FAST_P1"] ?? "0.85") ?? 0.85
+    let minFastLen  = Int(ProcessInfo.processInfo.environment["MW_FAST_LEN"] ?? "4") ?? 4
+    let escK        = max(1, Int(ProcessInfo.processInfo.environment["MW_ESC_K"] ?? "3") ?? 3)
+    let escTemp     = Float(ProcessInfo.processInfo.environment["MW_ESC_TEMP"] ?? "0.7") ?? 0.7
+    let agreeThresh = Double(ProcessInfo.processInfo.environment["MW_AGREE"] ?? "0.6") ?? 0.6
+    let semThresh   = Double(ProcessInfo.processInfo.environment["MW_SEM_THRESH"] ?? "0.55") ?? 0.55
+    let stopSet: Set<Character> = [".", "!", "?", ";", ":", "\n"]
+
+    struct IntentCase { let label: String; let cuts: [String]; let accept: [String] }
+    // Chaque cas : 2 coupes mi-mot (peu profonde 1 lettre = régime hallucination,
+    // profonde = régime utile). « accept » = la classe d'intention (folded au juge).
+    let intentCases: [IntentCase] = [
+        .init(label: "elon→voiture/Tesla",
+              cuts: ["Elon Musk construit des v", "Elon Musk construit des voi"],
+              accept: ["voiture", "tesla", "auto", "automobile", "vehicule", "electrique", "berline"]),
+        .init(label: "spacex→satellite (multi-step)",
+              cuts: ["Elon Musk construit des voitures. Il possède aussi une autre entreprise qui envoie des s",
+                     "Elon Musk construit des voitures. Il possède aussi une autre entreprise qui envoie des satel"],
+              accept: ["satellite", "fusee", "vaisseau", "sonde", "navette", "roquette", "engin", "spatial"]),
+        .init(label: "eiffel→Paris",
+              cuts: ["La tour Eiffel se trouve à P", "La tour Eiffel se trouve à Par"],
+              accept: ["paris"]),
+        .init(label: "apple→iPhone",
+              cuts: ["Le PDG d'Apple vient de présenter le nouvel i", "Le PDG d'Apple vient de présenter le nouvel iPh"],
+              accept: ["iphone", "smartphone", "telephone", "mobile"]),
+        .init(label: "allemagne→Berlin",
+              cuts: ["La capitale de l'Allemagne est B", "La capitale de l'Allemagne est Ber"],
+              accept: ["berlin"]),
+        .init(label: "formulaire→2086 (numérique)",
+              cuts: ["Pour déclarer vos cessions de crypto, remplissez le formulaire 2",
+                     "Pour déclarer vos cessions de crypto, remplissez le formulaire 20"],
+              accept: ["2086"]),
+        .init(label: "binance→historique",
+              cuts: ["Sur Binance, pour tout exporter, ouvrez la section H",
+                     "Sur Binance, pour tout exporter, ouvrez la section Histo"],
+              accept: ["historique", "history", "transaction", "rapport"]),
+        .init(label: "fifo→méthode",
+              cuts: ["Pour la taxation de vos cryptos, on applique la méthode F",
+                     "Pour la taxation de vos cryptos, on applique la méthode FI"],
+              accept: ["fifo"]),
+        .init(label: "contrôle: demander",
+              cuts: ["Bonjour, je me permets de vous écrire pour vous dem",
+                     "Bonjour, je me permets de vous écrire pour vous deman"],
+              accept: ["demander", "demande", "solliciter", "renseignement", "information"]),
+    ]
+
+    // ── Juge durci ──
+    func isDegenerate(_ s: String) -> Bool {
+        let toks = s.split(separator: " ").map(String.init)
+        let singleAlpha = toks.filter { $0.count == 1 && ($0.first?.isLetter ?? false) }.count
+        if singleAlpha >= 2 { return true }
+        return s.filter { $0.isLetter }.count < 2
+    }
+    func looksFrench(_ s: String) -> Bool {
+        guard s.filter({ $0.isLetter }).count >= 6 else { return true }   // trop court pour juger fiablement
+        let rec = NLLanguageRecognizer(); rec.processString(s)
+        guard let lang = rec.dominantLanguage else { return true }
+        if lang == .french { return true }
+        let conf = rec.languageHypotheses(withMaximum: 1)[lang] ?? 0
+        return conf < 0.55   // pas CONFIDEMMENT étranger → on accepte
+    }
+    let abEmb = MWSemEmbedding.shared
+    func inClass(_ cand: String, _ accept: [String]) -> Bool {
+        let cf = mwFold(cand)
+        for a in accept { let af = mwFold(a); if af.count >= 2 && cf.contains(af) { return true } }   // littéral (2086, exact)
+        let words = mwContentWords(cand)
+        for w in words { for a in accept where mwStemMatch(w, mwFold(a)) { return true } }
+        guard let cv = mwSentenceVector(cand, abEmb) else { return false }
+        for a in accept {
+            if let av = mwSentenceVector(a, abEmb), let c = mwCosine(cv, av), c >= semThresh { return true }
+        }
+        return false
+    }
+    func verdict(_ cand: String, _ accept: [String]) -> String {
+        if cand.trimmingCharacters(in: .whitespaces).isEmpty { return "vide" }
+        if isDegenerate(cand) { return "stub" }
+        if !looksFrench(cand) { return "foreign" }
+        return inClass(cand, accept) ? "in-class" : "miss"
+    }
+
+    print("\n──────── A/B INTENTION : long-ghost vs escalate (juge intent-class durci) ────────")
+    print("gold = CLASSE d'intention · in-class=bon · miss=FR hors-classe · foreign/stub=garbage · caché=abstention\n")
+
+    var lgIn = 0, lgMiss = 0, lgGarb = 0, lgVide = 0
+    var esIn = 0, esMiss = 0, esGarb = 0, esHideGood = 0, esHideBad = 0
+    var nCuts = 0
+    for ic in intentCases {
+        print("◆ \(ic.label)   [classe: \(ic.accept.prefix(4).joined(separator: ", "))…]")
+        for cut in ic.cuts {
+            nCuts += 1
+            let partial = OutputFilter.trailingPartialWord(cut)
+            // — bras long-ghost (montre tout) —
+            let ghost = await mwLongGhost(beforeCursor: cut, maxTokens: lgMaxTokens, maxWords: lgMaxWords, stopSet: stopSet)
+            let lgCand = partial + ghost
+            let lgV = ghost.trimmingCharacters(in: .whitespaces).isEmpty ? "vide" : verdict(lgCand, ic.accept)
+            switch lgV { case "in-class": lgIn += 1; case "miss": lgMiss += 1; case "vide": lgVide += 1; default: lgGarb += 1 }
+            // — bras escalate (gated, peut cacher) —
+            let r = await escalate(c: MWCase(label: ic.label, prefix: cut, expected: ""),
+                                   engine: engine, fastP1: fastP1, minFastLen: minFastLen,
+                                   k: escK, temp: escTemp, agreeThresh: agreeThresh)
+            let esV = verdict(r.word, ic.accept)
+            if r.shown {
+                switch esV { case "in-class": esIn += 1; case "miss": esMiss += 1; default: esGarb += 1 }
+            } else {
+                if esV == "in-class" { esHideBad += 1 } else { esHideGood += 1 }
+            }
+            let tail = cut.count > 24 ? "…" + String(cut.suffix(24)) : cut
+            print("  \(pad(tail, 26)) | LG \(pad(lgV, 8)) → \"\(lgCand.suffix(30))\"")
+            print("  \(pad("", 26)) | ES \(r.shown ? "SHOW" : "hide") \(pad(esV, 8)) → \"\(r.word)\" [\(r.stage)]")
+        }
+    }
+
+    print("\n──────── Bilan (\(nCuts) coupes mi-mot, métrique INTENTION) ────────")
+    print("LONG-GHOST (montre tout) : in-class \(lgIn) · miss \(lgMiss) · garbage \(lgGarb) · vide \(lgVide)")
+    print("ESCALATE [montrés]       : in-class \(esIn) · miss \(esMiss) · garbage \(esGarb)")
+    print("ESCALATE [cachés]        : bonne abstention \(esHideGood) · MAUVAISE (a caché un in-class) \(esHideBad)")
+    print("""
+
+LECTURE :
+  • LG garbage > 0 & ES garbage ≈ 0 → l'escalate filtre le charabia (langue/stub).
+  • ES « MAUVAISE abstention » = des in-class perdus en s'abstenant (coût escalate).
+  • LG in-class vs ES in-class montrés = compromis couverture/précision, en INTENTION.
+  • Coupe 1 lettre = régime hallucination (foreign) ; profonde = régime utile.
+════════════════════════════════════════════════════════════════════════════════
+""")
+    exit(0)
+}
+
 if !escalateMode {
 err("\n──────────── Mid-word layer eval (\(cases.count) cases) ────────────")
 var l0Hits = 0, l1Hits = 0, pickL0 = 0, pickL1 = 0, pickNone = 0

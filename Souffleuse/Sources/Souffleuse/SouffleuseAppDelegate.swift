@@ -2694,6 +2694,10 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// contre les tempêtes par `ghostRefillInFlight` + une re-vérification de l'état.
     private func maybeSpawnRollingRefill(committedText: String, bundleID: String) {
         guard SuggestionPolicy.Tuning.midWordGhostRollingEnabled else { return }
+        // Gradient d'engagement (flag MW_ENGAGEMENT) : le rolling ne roule que pour un
+        // ghost de niveau PLEIN. PRUDENT (1 mot figé) interdit le refill. HORS flag,
+        // `ghostRollingAllowed` reste `true` → roulement inchangé (byte-identique).
+        guard predictor.ghostRollingAllowed else { return }
         guard !ghostRefillInFlight else { return }
         let remainder = partialRemainder
         let remainderWords = Self.wholeWordCount(remainder)
