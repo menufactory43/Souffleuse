@@ -89,6 +89,13 @@ final class ModelRuntime {
     /// (`rebuildPersonalization`) ; all ghost text comes from `llamaEngine`.
     let llamaEngine = LlamaEngine()
 
+    /// Plancher dico mid-mot (flag `MW_DICO_FLOOR`). `NSSpellChecker` via
+    /// `WordCompleter` : complète le mot EN COURS quand le gradient d'engagement
+    /// s'abstient, pour qu'un ghost valide apparaisse à chaque lettre. Tenu ici
+    /// (pas recréé par souffle) ; `@unchecked Sendable`, appelé sur le MainActor
+    /// (ModelRuntime) comme dans PVM, donc sûr.
+    private let dicoFloorCompleter = WordCompleter()
+
     /// NSSpellChecker wrapper, reused for the mid-word coherence guard
     /// (`OutputFilter.midWordCandidate` + `isValidWord`). Process-wide and
     /// thread-safe behind its own `@unchecked Sendable` declaration, so it can
@@ -699,11 +706,23 @@ final class ModelRuntime {
         // Raison granulaire du gate (visible dans l'inspecteur) : pourquoi rien affiché.
         var why = result.isEmpty ? "emptygen" : "ok"
 
-        // Exit-guard ÉCHO (gardé : le modèle ne doit pas répéter ce que tu tapes).
-        if !result.isEmpty,
-           OutputFilter.echoScore(ghost: result, tail: request.userTail)
-            >= OutputFilter.continuationEchoThreshold {
-            result = ""; why = "echo"
+        // Exit-guard ÉCHO POSITIONNEL (le modèle ne doit pas RECRACHER ta phrase —
+        // mais il a le droit de réutiliser du vocabulaire). Le sac-de-mots
+        // `echoScore` seul tuait ~50% de bons ghosts (« lancer le serveur »,
+        // « m'organiser ») : il confond « répéter verbatim » et « réutiliser des
+        // mots ». On exige donc AUSSI un run VERBATIM ≥ `echoMinVerbatimRunWords`
+        // mots recopié du tail — seules les vraies boucles (« à savoir si la
+        // radioactivité » recrachée) le franchissent. Calibré + validé par
+        // `SouffleuseEchoEval` (récupère 3/6 gatés, garde 3/3 boucles).
+        if !result.isEmpty {
+            let echo = OutputFilter.echoScore(ghost: result, tail: request.userTail)
+            if echo >= OutputFilter.continuationEchoThreshold {
+                let run = OutputFilter.longestVerbatimRunWords(ghost: result, tail: request.userTail)
+                if run >= SuggestionPolicy.Tuning.echoMinVerbatimRunWords {
+                    why = "echo(s=\(Self.fmt2(echo)) run=\(run))"
+                    result = ""
+                }
+            }
         }
         // Garde LANGUE : DÉSACTIVÉE par défaut sur le chemin simple. La détection
         // de langue est peu fiable sur 2-3 mots et vidait la majorité des ghosts
@@ -779,7 +798,11 @@ final class ModelRuntime {
         // direct, on évite le coût des branches. Garde structurelle, PAS dico : ne
         // recale plus les OOV légitimes (marques, noms, anglais, jargon).
         guard SuggestionPolicy.midWordExtendsStructurally(partial: partial, modal: greedyLead) else {
-            return MidWordEscalationResult(show: false, word: fullContinuation,
+            // Le LLM ne prolonge même pas le mot tapé (« docu » → dérive) : c'est
+            // PRÉCISÉMENT là que le dico est le plus utile. Plancher avant de rendre
+            // le vide.
+            return dicoFloorResult(partial: partial, greedyLead: greedyLead, why: "structdegen")
+                ?? MidWordEscalationResult(show: false, word: fullContinuation,
                                            reason: "longghost-engage:zero(\(why))",
                                            engagement: .zero)
         }
@@ -827,7 +850,11 @@ final class ModelRuntime {
 
         switch level {
         case .zero:
-            return MidWordEscalationResult(show: false, word: fullContinuation,
+            // Branches lancées, accord trop faible (fin de phrase divergente) :
+            // le LLM s'abstient, mais on complète quand même le mot EN COURS via le
+            // dico → un mot valide à chaque lettre, plutôt que du vide.
+            return dicoFloorResult(partial: partial, greedyLead: greedyLead, why: "agree=\(agreeStr)")
+                ?? MidWordEscalationResult(show: false, word: fullContinuation,
                                            reason: "longghost-engage:zero(agree=\(agreeStr))",
                                            engagement: .zero)
         case .prudent:
@@ -842,6 +869,38 @@ final class ModelRuntime {
                                            reason: "longghost-engage:plein(agree=\(agreeStr))",
                                            engagement: .plein)
         }
+    }
+
+    /// **Plancher dico mid-mot (flag `MW_DICO_FLOOR`, ON par défaut).** Renvoie un
+    /// souffle FIGÉ qui complète le mot EN COURS quand le gradient d'engagement
+    /// allait rendre du vide (`.zero`). La complétion vient de `NSSpellChecker`
+    /// (`WordCompleter.completion`) : le meilleur candidat qui PROLONGE réellement
+    /// le préfixe tapé (jamais un mot qui obligerait à reculer). Comme la complétion
+    /// se ré-évalue à chaque frappe, une approximation à 3 lettres se précise en
+    /// avançant — d'où « un mot valide à chaque lettre tant que le mot n'est pas
+    /// fini ». `engagement: .prudent` ⇒ ghost figé, rolling interdit : le plancher
+    /// REMPLIT le vide, il ne déclenche jamais le living ghost. `nil` (→ abstention
+    /// d'origine) si le flag est coupé, le mot trop court (< 3, `minPartialLength`),
+    /// ou aucun candidat ne prolonge. À une frontière (fin de phrase) on n'arrive
+    /// jamais ici (chemin gardé par `!isBoundary` + mot partiel en amont).
+    private func dicoFloorResult(partial: String, greedyLead: String, why: String) -> MidWordEscalationResult? {
+        guard SuggestionPolicy.Tuning.midWordDicoFloorEnabled else { return nil }
+        // Orienté par le greedy : NSSpellChecker est context-blind (« mange » →
+        // « manger »), mais le mot que le LLM penchait à produire (« mangeons »
+        // après « nous ») désambiguïse la conjugaison/forme sans qu'on régénère
+        // rien. Si le greedy est vide / parti en vrille (cas dégénéré structurel),
+        // la surcharge retombe d'elle-même sur le 1ᵉʳ candidat aveugle.
+        guard let suffix = dicoFloorCompleter.completion(for: partial, preferring: greedyLead),
+              !suffix.isEmpty else { return nil }
+        return MidWordEscalationResult(show: true, word: suffix,
+                                       reason: "longghost-engage:floor-dico(\(why))",
+                                       engagement: .prudent)
+    }
+
+    /// Format court 2 décimales sans `String(format:)` localisé ( for logs/inspecteur).
+    nonisolated static func fmt2(_ x: Double) -> String {
+        let n = Int((x * 100).rounded())
+        return "\(n / 100).\(String(format: "%02d", n % 100))"
     }
 
     /// Réduit un ghost à son PREMIER mot entier (niveau PRUDENT), en préservant

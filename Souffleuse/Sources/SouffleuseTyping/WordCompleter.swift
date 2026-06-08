@@ -57,6 +57,49 @@ public final class WordCompleter: @unchecked Sendable {
         return nil
     }
 
+    /// Comme `completion(for:)` mais **orientée par un indice** `hint` — le mot que
+    /// le LLM penchait à produire (le greedy lead). `NSSpellChecker` est
+    /// context-blind : pour « mange » il renvoie « manger » (infinitif, le plus
+    /// fréquent) même après « nous ». Si `hint` prolonge le MÊME mot
+    /// (« mangeons »), on choisit le candidat qui partage le PLUS LONG préfixe avec
+    /// `hint` — donc la bonne conjugaison/forme — au lieu du 1ᵉʳ candidat aveugle.
+    ///
+    /// L'indice n'est retenu que s'il désambiguïse AU-DELÀ de ce qui est déjà tapé
+    /// (`commun(candidat, hint) > |mot tapé|`). Si `hint` est vide, ne prolonge pas
+    /// le mot (greedy parti en vrille), ou n'apporte rien, on retombe EXACTEMENT sur
+    /// `completion(for:)` (1ᵉʳ candidat). Donc : jamais pire que la version aveugle,
+    /// souvent juste. Renvoie le suffixe à ajouter, ou nil.
+    public func completion(for prefix: String, preferring hint: String) -> String? {
+        guard let word = Self.trailingPartialWord(prefix) else { return nil }
+        guard word.count >= Self.minPartialLength else { return nil }
+        let lowered = word.lowercased()
+        for lang in ["fr", "en"] {
+            let nsRange = NSRange(location: 0, length: (word as NSString).length)
+            guard let completions = checker.completions(
+                forPartialWordRange: nsRange,
+                in: word,
+                language: lang,
+                inSpellDocumentWithTag: 0
+            ), !completions.isEmpty else { continue }
+            let extending = completions.filter {
+                $0.count > word.count && $0.lowercased().hasPrefix(lowered)
+            }
+            guard let first = extending.first else { continue }
+            // L'indice n'est exploitable que s'il prolonge le même mot que l'on tape.
+            if hint.count > word.count, hint.lowercased().hasPrefix(lowered) {
+                let best = extending.max {
+                    Self.longestCommonPrefix([$0, hint]).count
+                        < Self.longestCommonPrefix([$1, hint]).count
+                }
+                if let best, Self.longestCommonPrefix([best, hint]).count > word.count {
+                    return String(best.dropFirst(word.count))
+                }
+            }
+            return String(first.dropFirst(word.count))
+        }
+        return nil
+    }
+
     /// **F3 — complétion dico « confiante ».** Au lieu du 1ᵉʳ candidat (aveugle
     /// au contexte, source du bug historique « inv→invite »), on renvoie le plus
     /// long préfixe COMMUN aux suffixes de TOUTES les complétions qui prolongent
