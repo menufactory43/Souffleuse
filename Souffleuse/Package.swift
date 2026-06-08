@@ -17,6 +17,7 @@ let package = Package(
         .executable(name: "SouffleuseInjectionEval", targets: ["SouffleuseInjectionEval"]),
         .executable(name: "SouffleuseAXProbe", targets: ["SouffleuseAXProbe"]),
         .executable(name: "SouffleuseContextProbe", targets: ["SouffleuseContextProbe"]),
+        .executable(name: "SouffleuseCotypistObserve", targets: ["SouffleuseCotypistObserve"]),
         .executable(name: "SouffleuseReplay", targets: ["SouffleuseReplay"]),
         .executable(name: "SouffleuseBoundaryAblation", targets: ["SouffleuseBoundaryAblation"]),
         .executable(name: "SouffleuseCorpusSeed", targets: ["SouffleuseCorpusSeed"]),
@@ -164,6 +165,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "SouffleuseContextProbe",
+            dependencies: ["SouffleuseAX", "SouffleuseContext"]
+        ),
+        .executableTarget(
+            name: "SouffleuseCotypistObserve",
             dependencies: ["SouffleuseAX", "SouffleuseContext"]
         ),
         .executableTarget(
