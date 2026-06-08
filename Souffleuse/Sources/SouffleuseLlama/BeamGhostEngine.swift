@@ -134,6 +134,42 @@ public struct BeamResult: Sendable {
     }
 }
 
+// MARK: - Réutilisation de branche (KV reuse à la frappe suivante)
+
+/// Nature d'un pas de frappe servi par `advance(typedChar:)` — l'observable
+/// central de l'éval amortie. C'est le « coût réel » du beam en usage vivant.
+public enum AdvanceKind: Sendable {
+    /// HIT : ≥1 branche de la réserve avait ce char en tête de son suffixe ghost.
+    /// On a juste avancé le pointeur de consommation — AUCUN `llama_decode`. Le
+    /// nouveau ghost est le reste du suffixe déjà calculé. C'est le cas Cotypist
+    /// « la frappe suivante recycle une branche ».
+    case hit
+    /// REFILL : les survivants ont matché MAIS leur suffixe pré-calculé est devenu
+    /// trop court (l'utilisateur a consommé presque tout le KV d'avance). On a
+    /// re-décodé quelques tokens — SEULEMENT sur les survivants, SEULEMENT en
+    /// profondeur — pour reconstituer la réserve. Bien moins cher qu'un beam froid.
+    case refill
+    /// MISS : aucune branche compatible avec le char tapé (vraie divergence) →
+    /// re-beam complet depuis le nouveau préfixe. C'est le coût froid.
+    case miss
+}
+
+/// Résultat d'un pas de frappe amorti : le ghost à afficher, la nature du pas
+/// (hit/refill/miss) et la latence. Sert l'éval amortie ; `Sendable` trivial.
+public struct AdvanceResult: Sendable {
+    public let ghost: String
+    public let kind: AdvanceKind
+    public let elapsedMillis: Int
+    /// Nombre de branches survivantes après le pas (santé de la réserve).
+    public let survivors: Int
+    public init(ghost: String, kind: AdvanceKind, elapsedMillis: Int, survivors: Int) {
+        self.ghost = ghost
+        self.kind = kind
+        self.elapsedMillis = elapsedMillis
+        self.survivors = survivors
+    }
+}
+
 /// Moteur de ghost multi-séquences. `actor` (comme `LlamaEngine`) : les
 /// pointeurs llama.cpp ne franchissent jamais la frontière d'isolation.
 public actor BeamGhostEngine {
@@ -151,6 +187,21 @@ public actor BeamGhostEngine {
 
     private var handles: Handles?
     private var config: BeamConfig
+
+    /// La RÉSERVE : les branches candidates laissées VIVANTES après un beam, KV
+    /// inclus. Chacune porte un seqId KV non recyclé (préfixe partagé + ses tokens
+    /// propres déjà décodés) et un pointeur de consommation `consumed` indiquant
+    /// combien de chars de son suffixe l'utilisateur a déjà tapés. À la frappe
+    /// suivante, on matche le char tapé contre le 1ᵉʳ char non-consommé de chaque
+    /// réserve : les compatibles avancent leur pointeur (HIT, zéro decode), les
+    /// divergentes voient leur KV effacé. C'est « plusieurs futurs en réserve,
+    /// recyclés quand l'utilisateur continue de taper » (RE stage 04 / 08).
+    private var reserve: [ReservedBranch] = []
+    /// Contexte (prompt + requiredPrefix) auquel la réserve est attachée — sert à
+    /// re-beamer proprement sur un MISS (on connaît le prompt d'origine + le texte
+    /// déjà accepté implicitement par les frappes successives).
+    private var reservePrompt: String = ""
+    private var reserveTypedSoFar: String = ""
 
     public init(config: BeamConfig = .cotypistDefault) {
         self.config = config
@@ -323,6 +374,14 @@ public actor BeamGhostEngine {
     /// log-prob softmax par token, on ouvre des branches sur les tokens de
     /// probabilité ≥ `minBranchProbability`, on accumule, puis on élague top-K.
     public func generateBeam(prompt: String, requiredPrefix: String = "") -> BeamResult {
+        generateBeam(prompt: prompt, requiredPrefix: requiredPrefix, captureReserve: false)
+    }
+
+    /// Variante interne avec capture de réserve. Quand `captureReserve == true`,
+    /// on NE recycle PAS le KV des branches finales : on les conserve (seqId +
+    /// tokens + suffixe ghost) dans `self.reserve` pour que la frappe suivante
+    /// recycle une branche sans re-décoder. C'est le cœur du « KV branch reuse ».
+    private func generateBeam(prompt: String, requiredPrefix: String, captureReserve: Bool) -> BeamResult {
         let start = Date()
         guard let h = handles else { return BeamResult(best: nil, candidates: [], elapsedMillis: 0) }
 
@@ -474,6 +533,24 @@ public actor BeamGhostEngine {
         for var b in live where b.remainingRequiredPrefix.isEmpty && !b.tokens.isEmpty {
             b.finished = true
             finished.append(b)
+        }
+
+        // ── Capture de la réserve (KV reuse) ─────────────────────────────────
+        // On retient DEUX familles de candidats :
+        //  1. Les branches FINALES `live` : KV encore VIVANT, seqId propre (jamais
+        //     recyclé après le dernier `assignSeqIds`). Réutilisables ET refillables
+        //     (on peut re-décoder en profondeur dans leur séquence).
+        //  2. Les branches ARRÊTÉES (frontière de phrase / budget mots) : leur
+        //     suffixe est COMPLET et FIGÉ, donc affichable par simple avance de
+        //     pointeur SANS aucun KV (`seqId = -1`). Ce sont souvent les MEILLEURS
+        //     candidats (le ghost « propre » se termine sur un point) — les exclure
+        //     vidait la réserve de ses futurs les plus probables (cause des faux
+        //     MISS). On les conserve gelés.
+        // On NE fait PAS le `seq_rm(-1)` qui ouvrirait le prochain beam : on garde
+        // le KV des branches vivantes pour le recycler à la frappe suivante.
+        if captureReserve {
+            buildReserve(live: live, finished: finished,
+                         rootRequired: rootRequired, prompt: prompt)
         }
 
         // ── Construction du résultat ─────────────────────────────────────────
@@ -850,6 +927,232 @@ public actor BeamGhostEngine {
         return s
     }
 
+    // MARK: - Réserve : structure & capture
+
+    /// Une branche conservée VIVANTE pour la réutilisation à la frappe suivante.
+    /// Son KV (préfixe partagé + `tokens`) vit sous `seqId` ; `surfaceSuffix` est
+    /// le texte ghost déjà décodé (au-delà du requiredPrefix initial) ; `consumed`
+    /// compte les chars de ce suffixe que l'utilisateur a tapés depuis. Le ghost
+    /// courant d'une réserve = `surfaceSuffix` à partir de l'offset `consumed`.
+    private struct ReservedBranch {
+        let seqId: Int32
+        var tokens: [Int32]          // tokens propres (hors prompt) déjà décodés
+        var totalLogprob: Double
+        var surfaceSuffix: String    // texte ghost déjà calculé (post requiredPrefix)
+        var consumed: Int            // chars de surfaceSuffix déjà tapés par l'utilisateur
+
+        /// Le ghost restant à afficher (suffixe non encore tapé).
+        var remainingGhost: String {
+            consumed >= surfaceSuffix.count ? "" : String(surfaceSuffix.dropFirst(consumed))
+        }
+        /// Profondeur restante en chars pré-calculés (santé de la réserve).
+        var depthLeft: Int { max(0, surfaceSuffix.count - consumed) }
+    }
+
+    /// Profondeur (en chars) sous laquelle on déclenche un REFILL incrémental :
+    /// si après une frappe une réserve survivante a moins que ça d'avance, on
+    /// re-décode quelques tokens — seulement sur les survivants — pour reconstituer
+    /// le ghost. Statique, style maison.
+    private static let refillThresholdChars = 4
+    /// Nombre de tokens re-décodés par survivant lors d'un refill. Borné : le
+    /// refill doit rester BIEN moins cher qu'un beam froid (pas de re-fan-out).
+    private static let refillTokens = 6
+
+    /// Recadre le suffixe ghost d'une branche (comme `ghostText`) pour le matching
+    /// de frappe : retire la partie re-tapée du requiredPrefix, élide l'espace de
+    /// tête after-space. Renvoie nil si le suffixe est vide/blanc.
+    private func reserveSuffix(of b: Branch, rootRequired: String) -> String? {
+        guard b.remainingRequiredPrefix.isEmpty, !b.tokens.isEmpty else { return nil }
+        var s = b.surfaceText
+        let drop = min(b.requiredPrefixConsumed, s.count)
+        if drop > 0 { s = String(s.dropFirst(drop)) }
+        // After-space : la 1ʳᵉ surface porte sa métaspace → espace de tête. On
+        // l'élide comme `ghostText` ; sinon le 1ᵉʳ char comparé au matching serait
+        // un espace et la frappe d'une lettre raterait toujours (faux MISS).
+        if rootRequired.isEmpty, s.first == " " { s.removeFirst() }
+        if s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return nil }
+        return s
+    }
+
+    /// Construit la réserve depuis les branches `live` (KV vivant, refillables) ET
+    /// `finished` (arrêtées, suffixe figé, sans KV). Dé-doublonne par suffixe en
+    /// PRÉFÉRANT la version KV-vivante (`seqId ≥ 0`) quand le même texte existe des
+    /// deux côtés. Mémorise le prompt d'origine pour un MISS.
+    private func buildReserve(live: [Branch], finished: [Branch],
+                              rootRequired: String, prompt: String) {
+        // 1) Branches vivantes : seqId réel, refillables.
+        var bySuffix: [String: ReservedBranch] = [:]
+        var order: [String] = []
+        for b in live {
+            guard let s = reserveSuffix(of: b, rootRequired: rootRequired) else { continue }
+            if bySuffix[s] == nil { order.append(s) }
+            bySuffix[s] = ReservedBranch(seqId: b.seqId, tokens: b.tokens,
+                                         totalLogprob: b.totalLogprob, surfaceSuffix: s, consumed: 0)
+        }
+        // 2) Branches arrêtées : gelées (seqId = -1), affichables sans KV. On
+        //    n'écrase PAS une entrée vivante de même suffixe (KV > gelé).
+        for b in finished {
+            guard let s = reserveSuffix(of: b, rootRequired: rootRequired) else { continue }
+            if bySuffix[s] != nil { continue }
+            order.append(s)
+            bySuffix[s] = ReservedBranch(seqId: -1, tokens: b.tokens,
+                                         totalLogprob: b.totalLogprob, surfaceSuffix: s, consumed: 0)
+        }
+        // Trie par log-prob décroissante, borne à K (la largeur de réserve).
+        reserve = order.compactMap { bySuffix[$0] }
+            .sorted { $0.totalLogprob > $1.totalLogprob }
+        if reserve.count > config.maxResultWidth { reserve.removeLast(reserve.count - config.maxResultWidth) }
+        reservePrompt = prompt
+        reserveTypedSoFar = ""
+    }
+
+    /// Vide la réserve et libère son KV (toutes séquences). À appeler quand on
+    /// abandonne une session de frappe.
+    public func clearReserve() {
+        guard let h = handles else { reserve = []; return }
+        if let mem = llama_get_memory(h.context) { llama_memory_seq_rm(mem, -1, -1, -1) }
+        reserve = []
+        reservePrompt = ""
+        reserveTypedSoFar = ""
+    }
+
+    // MARK: - Réserve : avance à la frappe (HIT / REFILL / MISS)
+
+    /// Avance la réserve d'UN caractère tapé. C'est le chemin chaud Cotypist :
+    ///  • HIT   — ≥1 réserve avait `typedChar` en tête de son ghost restant : on
+    ///            avance leur pointeur `consumed`, on jette les divergentes (leur KV
+    ///            est effacé via `seq_rm`). AUCUN `llama_decode`. ~0 ms.
+    ///  • REFILL— survivants OK mais ghost devenu trop court : on re-décode quelques
+    ///            tokens sur les SEULS survivants (greedy, profondeur seule).
+    ///  • MISS  — aucune réserve compatible : re-beam complet (coût froid).
+    ///
+    /// `requiredPrefixForMiss` : le fragment mid-mot au moment d'un MISS (l'éval le
+    /// passe ; vide en after-space).
+    public func advance(typedChar: Character, requiredPrefixForMiss: String = "") -> AdvanceResult {
+        let start = Date()
+        guard handles != nil else {
+            return AdvanceResult(ghost: "", kind: .miss, elapsedMillis: 0, survivors: 0)
+        }
+
+        // ── Match : quelles réserves ont `typedChar` en tête de leur ghost ? ──
+        // On compare au 1ᵉʳ char NON consommé. Les espaces sont gérés tels quels
+        // (taper l'espace consomme l'espace de tête d'un futur « mot suivant »).
+        var survivors: [ReservedBranch] = []
+        var dropped: [ReservedBranch] = []
+        for var r in reserve {
+            if r.consumed < r.surfaceSuffix.count {
+                let idx = r.surfaceSuffix.index(r.surfaceSuffix.startIndex, offsetBy: r.consumed)
+                if r.surfaceSuffix[idx] == typedChar {
+                    r.consumed += 1            // avance dans le KV déjà calculé
+                    survivors.append(r)
+                    continue
+                }
+            }
+            dropped.append(r)                  // diverge (ou suffixe épuisé) → à recycler
+        }
+
+        // Recycle le KV des divergentes : efface leur séquence. On garde > 0 :
+        //  • seqId 0  = la séquence du prompt partagé (jamais à effacer ici),
+        //  • seqId -1 = un candidat GELÉ sans KV (rien à effacer),
+        //  • seqId -1 passé à seq_rm = wildcard « toutes séquences » → DANGER.
+        let mem = handles.flatMap { llama_get_memory($0.context) }
+        for d in dropped where d.seqId > 0 {
+            if let mem { llama_memory_seq_rm(mem, d.seqId, -1, -1) }
+        }
+
+        reserveTypedSoFar.append(typedChar)
+
+        // ── MISS : plus aucune réserve compatible → re-beam froid ────────────
+        if survivors.isEmpty {
+            // Le préfixe a avancé d'un char : on re-beame sur prompt + texte tapé.
+            let newPrompt = reservePrompt + reserveTypedSoFar
+            resetSeqPool()
+            let r = generateBeam(prompt: newPrompt, requiredPrefix: requiredPrefixForMiss,
+                                 captureReserve: true)
+            let ms = Int(Date().timeIntervalSince(start) * 1000)
+            return AdvanceResult(ghost: r.best?.ghost ?? "", kind: .miss,
+                                 elapsedMillis: ms, survivors: reserve.count)
+        }
+
+        reserve = survivors
+
+        // ── REFILL : les survivants sont-ils trop courts ? ───────────────────
+        // Si TOUS les survivants ont < seuil de profondeur restante, on re-décode
+        // quelques tokens — SEULEMENT sur les survivants À KV VIVANT — pour
+        // reconstituer du ghost d'avance. Bien moins cher qu'un beam (pas de
+        // fan-out, K survivants seulement, profondeur bornée). Un survivant GELÉ
+        // (`seqId == -1`, branche arrêtée sur un point) ne se refille pas : son
+        // ghost est complet et fini — épuisé, il laisse juste un ghost vide.
+        let shallow = reserve.allSatisfy { $0.depthLeft < BeamGhostEngine.refillThresholdChars }
+        let refillable = reserve.contains { $0.seqId >= 0 && $0.depthLeft < BeamGhostEngine.refillThresholdChars }
+        if shallow && refillable {
+            refillSurvivors()
+            let ghost = bestReserveGhost()
+            let ms = Int(Date().timeIntervalSince(start) * 1000)
+            return AdvanceResult(ghost: ghost, kind: .refill, elapsedMillis: ms, survivors: reserve.count)
+        }
+
+        // ── HIT : zéro decode, le ghost est le reste du suffixe pré-calculé ──
+        let ghost = bestReserveGhost()
+        let ms = Int(Date().timeIntervalSince(start) * 1000)
+        return AdvanceResult(ghost: ghost, kind: .hit, elapsedMillis: ms, survivors: reserve.count)
+    }
+
+    /// Le ghost à afficher : le suffixe restant du MEILLEUR survivant (plus haut
+    /// totalLogprob — la réserve sort triée du beam, mais le drop/refill peut
+    /// réordonner ; on re-classe par log-prob cumulée).
+    private func bestReserveGhost() -> String {
+        reserve.max(by: { $0.totalLogprob < $1.totalLogprob })?.remainingGhost ?? ""
+    }
+
+    /// Re-décode GREEDY quelques tokens sur chaque survivant — uniquement en
+    /// profondeur (1 token next par séquence, pas de fan-out). Étend `tokens`,
+    /// `surfaceSuffix`, `totalLogprob`. C'est le « top-up incrémental » : on
+    /// réutilise le KV vivant du survivant et on n'y ajoute que la profondeur
+    /// manquante. Coût ≈ refillTokens passes mono-token sur K séquences.
+    private func refillSurvivors() {
+        guard let h = handles, !reserve.isEmpty else { return }
+        // Position du prochain token d'un survivant = (longueur du prompt d'origine)
+        // + |tokens propres|. Le KV de ces tokens vit DÉJÀ à ces positions ; on
+        // re-tokenise le prompt d'origine (`reservePrompt`, invariant entre frappes
+        // HIT) pour retrouver `basePos`. Le requiredPrefix healing du prompt n'altère
+        // pas cette base car la réserve provient d'un beam sur ce même prompt.
+        let basePos = Int32(tokenize(reservePrompt, addSpecial: true).count)
+
+        for _ in 0..<BeamGhostEngine.refillTokens {
+            // Indices des survivants REFILLABLES (KV vivant). Les gelés (seqId == -1)
+            // n'ont pas de séquence à décoder → exclus du batch.
+            let idxs = reserve.indices.filter { reserve[$0].seqId >= 0 && !reserve[$0].tokens.isEmpty }
+            if idxs.isEmpty { break }
+            var batch = llama_batch_init(Int32(idxs.count), 0, h.nSeqMax)
+            defer { llama_batch_free(batch) }
+            batch.n_tokens = Int32(idxs.count)
+            for (bi, ri) in idxs.enumerated() {
+                let r = reserve[ri]
+                batch.token[bi] = r.tokens.last!
+                batch.pos[bi] = basePos + Int32(r.tokens.count - 1)
+                batch.n_seq_id[bi] = 1
+                batch.seq_id[bi]![0] = r.seqId
+                batch.logits[bi] = 1
+            }
+            guard llama_decode(h.context, batch) == 0 else { return }
+            let nVocab = Int(h.nVocab)
+            var stop = true
+            for (bi, ri) in idxs.enumerated() {
+                guard let row = llama_get_logits_ith(h.context, Int32(bi)) else { continue }
+                // Greedy argmax (le refill ne ré-ouvre pas de branches).
+                var best: Int32 = 0; var bestVal: Float = -.greatestFiniteMagnitude
+                for v in 0..<nVocab where row[v] > bestVal { bestVal = row[v]; best = Int32(v) }
+                if llama_vocab_is_eog(h.vocab, best) { continue }
+                let surf = surface(best)
+                reserve[ri].tokens.append(best)
+                reserve[ri].surfaceSuffix += surf
+                stop = false
+            }
+            if stop { break }
+        }
+    }
+
     // MARK: - Entrée publique avec reset du pool
 
     /// Variante publique qui RÉINITIALISE le pool de séquences avant de lancer la
@@ -858,5 +1161,14 @@ public actor BeamGhostEngine {
     public func ghost(prompt: String, requiredPrefix: String = "") -> BeamResult {
         resetSeqPool()
         return generateBeam(prompt: prompt, requiredPrefix: requiredPrefix)
+    }
+
+    /// Variante qui lance le beam ET capture la réserve, pour DÉMARRER une session
+    /// de frappe réutilisable. Le premier appel = le « cold first-paint » ; ensuite
+    /// l'appelant utilise `advance(typedChar:)` à chaque frappe. C'est le point
+    /// d'entrée de l'éval amortie.
+    public func ghostWithReserve(prompt: String, requiredPrefix: String = "") -> BeamResult {
+        resetSeqPool()
+        return generateBeam(prompt: prompt, requiredPrefix: requiredPrefix, captureReserve: true)
     }
 }
