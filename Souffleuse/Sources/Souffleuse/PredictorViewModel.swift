@@ -79,6 +79,16 @@ final class PredictorViewModel {
     /// far downstream at "…autre chose pou". Empty until the first suggestion is
     /// produced; reset on `cancel()` and on the stale-clear path.
     private(set) var predictedForPrefix: String = ""
+
+    /// Gradient d'engagement (flag `MW_ENGAGEMENT`) : le ghost courant autorise-t-il
+    /// le ROLLING REFILL (living ghost) ? Vrai en niveau PLEIN, faux en PRUDENT
+    /// (1 mot figé). HORS flag, toujours `true` ⇒ le rolling roule comme aujourd'hui
+    /// (le long-ghost statique reste roulant). Lu par `SouffleuseAppDelegate`
+    /// (`maybeSpawnRollingRefill`) pour gater le refill par-décision.
+    /// `@MainActor`-only (PVM l'est) ; `@ObservationIgnored` car un changement ne
+    /// doit pas, à lui seul, redessiner — il accompagne `suggestion` qui, lui, le fait.
+    @ObservationIgnored
+    private(set) var ghostRollingAllowed: Bool = true
     var ttftMillis: Int?
     var tokensPerSecond: Double?
     var lastError: String?
@@ -883,15 +893,29 @@ final class PredictorViewModel {
                             self.suggestion = word
                             self.predictedForPrefix = forPrefix
                             self.suggestionSource = .llm
+                            // Gradient d'engagement (flag MW_ENGAGEMENT) : PLEIN autorise le
+                            // rolling (living ghost), PRUDENT le FIGE. Hors flag, `rollingAllowed`
+                            // est toujours `true` (engagement .plein par défaut) → comportement
+                            // de roulement inchangé. Lu par `maybeSpawnRollingRefill`.
+                            self.ghostRollingAllowed = lg.rollingAllowed
                             // Alimente le CompletionCache (comme le fait le streaming en
                             // ~1047) pour que `undo-as-ghost` (PVM:515) puisse restaurer
                             // le ghost au backspace : « Madame, »→« Monsieur », efface
                             // « , » → longestExtendingKey trouve « Madame, » → « , Monsieur ».
                             self.cache.store(prefix: userTail, suggestion: word)
                             Log.info(.predictor, "ghost_midword_longghost_shown", count: word.count)
+                            // Inspecteur : un `reason` DISTINCT par niveau d'engagement
+                            // (engage:plein / engage:prudent) quand le gradient est actif,
+                            // sinon "longghost" (inchangé). Observable en live.
                             GhostInspector.shared.record(tail: userTail, verdict: .shown, source: .llm,
-                                                         reason: "longghost", content: word, score: score)
+                                                         reason: SuggestionPolicy.Tuning.midWordEngagementEnabled
+                                                            ? lg.engagement.inspectorReason : "longghost",
+                                                         content: word, score: score)
                         } else {
+                            // ZÉRO (ou hide) : rien d'affiché → le rolling n'a aucun ghost à
+                            // rouler ; on remet `rollingAllowed` à true (état neutre) pour ne
+                            // pas figer un ghost FUTUR émis par un autre chemin.
+                            self.ghostRollingAllowed = true
                             self.suggestion = instantGhost
                             self.predictedForPrefix = forPrefix
                             self.suggestionSource = instantSource

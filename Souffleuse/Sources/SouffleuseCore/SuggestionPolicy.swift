@@ -517,6 +517,19 @@ public enum SuggestionPolicy {
         return defaultPartialWordIsComplete(modal)
     }
 
+    /// Garde STRUCTURELLE (sans dico) : le mot de tête prolonge-t-il *réellement* le
+    /// partiel ? `hasPrefix(partial)` + strictement plus long. Attrape les échecs de
+    /// healing — "i"/"pingo"/"a"/"s" ne commencent pas par le partiel — SANS rejeter
+    /// les OOV légitimes (marques "Waltio"/"Binance", noms propres, anglais, jargon)
+    /// que le verdict dico de `midWordValidExtends` recalerait à tort. Le code
+    /// avertit déjà qu'on ne peut PAS se fier au dico ici (ModelRuntime, splice).
+    /// Les devinettes valides-mais-fausses ("peinardes") restent gérées par l'accord
+    /// des branches (PLEIN vs PRUDENT), pas par cette garde.
+    public nonisolated static func midWordExtendsStructurally(partial: String, modal: String) -> Bool {
+        guard !modal.isEmpty, modal.count > partial.count else { return false }
+        return modal.lowercased().hasPrefix(partial.lowercased())
+    }
+
     /// Mot de tête **dé-fragmenté**. Le 1B éclate parfois un mot par des espaces
     /// (« caca huète », « pingo u is »). `midWordLeadWord` s'arrêterait au 1ᵉʳ
     /// espace (« caca »), ratant le mot réel. Ici, si le run de tête simple ne
@@ -602,6 +615,58 @@ public enum SuggestionPolicy {
         let show = agreement >= Tuning.escAgreeThreshRuntime
             && midWordValidExtends(partial: partial, modal: modal)
         return (show, modal, agreement)
+    }
+
+    // MARK: - Gradient d'engagement mi-mot (flag MW_ENGAGEMENT)
+
+    /// Niveau d'engagement du souffle mi-mot, décidé par la cascade escalate
+    /// EXISTANTE (fast-accept P1 + accord des branches). Ne s'active que sous le
+    /// flag `MW_ENGAGEMENT`, à l'intérieur de la branche long-ghost.
+    /// - `.plein`   : greedy ~maxWords + rolling refill autorisé (living ghost).
+    /// - `.prudent` : 1 mot (le modal), FIGÉ, rolling INTERDIT.
+    /// - `.zero`    : abstention (rien montré).
+    public enum MidWordEngagement: Sendable, Equatable {
+        case plein
+        case prudent
+        case zero
+
+        /// Le rolling refill n'est autorisé QU'EN PLEIN — PRUDENT figé, ZÉRO rien.
+        public var rollingAllowed: Bool { self == .plein }
+
+        /// Raison granulaire exposée à l'inspecteur (un niveau distinct par souffle).
+        public var inspectorReason: String {
+            switch self {
+            case .plein: return "engage:plein"
+            case .prudent: return "engage:prudent"
+            case .zero: return "engage:zero"
+            }
+        }
+    }
+
+    /// **Gradient d'engagement (flag MW_ENGAGEMENT).** Mappe les signaux de la
+    /// cascade escalate vers un niveau, en RÉUTILISANT les mêmes seuils que F1/F2 :
+    ///   - mot dégénéré/invalide (`!midWordValidExtends`) ⇒ ZÉRO.
+    ///   - fast-accept (P1 ≥ `escFastP1` ET `partial.count ≥ escMinFastLen`) ⇒ PLEIN.
+    ///   - sinon accord des branches : ≥ `midWordEngagementPleinThresh` ⇒ PLEIN ;
+    ///     ≥ `midWordEngagementPrudentThresh` ⇒ PRUDENT ; sinon ⇒ ZÉRO.
+    /// `greedyLeadWord` = le mot de tête défragmenté du greedy (le modal greedy),
+    /// `agreement` = l'accord [0,1] déjà calculé par `midWordBranchDecision`.
+    public nonisolated static func midWordEngagementLevel(
+        partial: String, greedyLeadWord: String, firstTokenProb: Double?, agreement: Double
+    ) -> MidWordEngagement {
+        // 1) ZÉRO seulement si STRUCTURELLEMENT dégénéré (le mot de tête ne prolonge
+        //    pas le partiel : "i"/"pingo"/"a"/"s"). PAS de garde dico ici — elle
+        //    recalait les OOV légitimes (marques, noms, anglais). Voir
+        //    `midWordExtendsStructurally`.
+        guard midWordExtendsStructurally(partial: partial, modal: greedyLeadWord) else { return .zero }
+        // 2) Fast-accept (mêmes seuils que `midWordFastDecision`) ⇒ PLEIN direct.
+        if (firstTokenProb ?? 0) >= Tuning.escFastP1, partial.count >= Tuning.escMinFastLen {
+            return .plein
+        }
+        // 3) Sinon, accord des branches contre les deux seuils du gradient.
+        if agreement >= Tuning.midWordEngagementPleinThresh { return .plein }
+        if agreement >= Tuning.midWordEngagementPrudentThresh { return .prudent }
+        return .zero
     }
 
     // MARK: - Anti-répétition de contenu (dédup du mot déjà tapé)

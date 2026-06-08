@@ -340,6 +340,21 @@ final class ModelRuntime {
         let show: Bool
         let word: String
         let reason: String     // "fast-accept" / "fast-reject" / "branch agree=0.75"
+        /// Niveau d'engagement quand le gradient `MW_ENGAGEMENT` est actif (sinon
+        /// `.plein` par défaut — comportement long-ghost statique inchangé, le
+        /// rolling reste autorisé comme aujourd'hui hors flag).
+        let engagement: SuggestionPolicy.MidWordEngagement
+        /// Le rolling refill est-il autorisé pour ce souffle ? Hors gradient =
+        /// toujours `true` (byte-identique). Sous gradient = vrai en PLEIN seulement.
+        var rollingAllowed: Bool { engagement.rollingAllowed }
+
+        init(show: Bool, word: String, reason: String,
+             engagement: SuggestionPolicy.MidWordEngagement = .plein) {
+            self.show = show
+            self.word = word
+            self.reason = reason
+            self.engagement = engagement
+        }
     }
 
     /// **Frame C — escalade mid-mot.** Appelée par `PredictorViewModel.predict`
@@ -573,6 +588,12 @@ final class ModelRuntime {
         GpuGate.shared.ghostBegan()
         defer { GpuGate.shared.ghostEnded() }
 
+        // Gradient d'engagement (flag MW_ENGAGEMENT) : sous le flag on capte la
+        // confiance top-1 du greedy (epsilon, n'aborte jamais → sortie inchangée)
+        // pour pouvoir trancher le niveau PLEIN/PRUDENT/ZÉRO en aval. Hors flag,
+        // `minFirstTokenProb: 0` → chemin et sortie byte-identiques à aujourd'hui.
+        let engagementOn = SuggestionPolicy.Tuning.midWordEngagementEnabled
+
         // ── UNE passe greedy healed (même profil de bans que l'escalade, mais
         // SANS minFirstTokenProb : pas de gating de confiance, on montre la sortie).
         final class Acc: @unchecked Sendable {
@@ -580,7 +601,7 @@ final class ModelRuntime {
             var tokens = 0
         }
         let acc = Acc()
-        _ = await llamaEngine.generate(
+        let greedyMetrics = await llamaEngine.generate(
             prompt: prompt,
             maxTokens: cap,
             sampling: LlamaSampling(
@@ -592,7 +613,8 @@ final class ModelRuntime {
                 banMarkup: true,
                 banDigitsLeading: true,
                 banEmoji: true,
-                minFirstTokenProb: 0,
+                minFirstTokenProb: engagementOn
+                    ? Float(SuggestionPolicy.Tuning.escFirstTokenProbEpsilon) : 0,
                 // À une frontière on NE heale PAS (on veut le mot SUIVANT, pas une
                 // extension du mot complet « une ») ; mid-mot incomplet → on heale le partiel.
                 healPrefix: isBoundary ? nil : (partial.isEmpty ? nil : partial)
@@ -707,8 +729,129 @@ final class ModelRuntime {
         result = OutputFilter.singleLine(result)
         if result.isEmpty, why == "ok" { why = "trim" }
 
+        // ── Gradient d'engagement (flag MW_ENGAGEMENT). Hors flag → return d'origine
+        // (byte-identique : engagement = .plein par défaut, rolling autorisé comme
+        // aujourd'hui). Sous flag, on module la PROFONDEUR du souffle selon
+        // l'incertitude de la cascade escalate EXISTANTE (P1 fast-accept + accord
+        // des k branches), SANS nouveau signal moteur.
+        // Le gradient ne s'applique QU'AU MID-MOT incomplet GLUÉ (complétion du mot
+        // courant). À une FRONTIÈRE, ou si le modèle produit un mot NEUF (ghost à
+        // espace de tête, ex. « Elon » → «  Musk »), la garde « prolonge le partiel »
+        // n'a aucun sens → on garde le long-ghost plein + rolling (living ghost).
+        if engagementOn, !isBoundary, result.first != " " {
+            return await midWordEngagementResult(
+                prompt: prompt, partial: partial, request: request,
+                greedyFullLine: acc.text, greedyP1: greedyMetrics.firstTokenProb,
+                fullContinuation: result, why: why)
+        }
+
         return MidWordEscalationResult(show: !result.isEmpty, word: result,
                                        reason: result.isEmpty ? "longghost-\(why)" : "longghost")
+    }
+
+    /// **Gradient d'engagement mi-mot (flag MW_ENGAGEMENT).** À partir du greedy
+    /// long-ghost DÉJÀ généré (`fullContinuation` = la continuation pleinement
+    /// gatée, `greedyP1` = sa confiance top-1), décide un niveau PLEIN/PRUDENT/ZÉRO
+    /// en RÉUTILISANT la cascade escalate existante (mêmes branches `runEscalationPass`
+    /// + `midWordBranchDecision` + `midWordEngagementLevel`, mêmes seuils que F1/F2).
+    ///
+    /// - **PLEIN**   : on garde la continuation greedy complète (~maxWords) ;
+    ///   rolling refill autorisé (living ghost).
+    /// - **PRUDENT** : on RÉDUIT à 1 mot (le modal greedy défragmenté, FIGÉ) ;
+    ///   rolling INTERDIT.
+    /// - **ZÉRO**    : abstention (`show: false`).
+    ///
+    /// DECISION : pour obtenir l'accord des branches sur le chemin long-ghost SANS
+    /// dupliquer le vote, on relance les MÊMES branches que l'escalade via le helper
+    /// `runEscalationPass` existant (cap court `escBranchMaxTokens`), puis on passe
+    /// par `midWordBranchDecision` pour l'accord [0,1]. Le greedy déjà généré compte
+    /// comme 1 vote (mot de tête défragmenté). On ne régénère JAMAIS la continuation —
+    /// PLEIN réutilise `fullContinuation`, PRUDENT n'en garde que le 1ᵉʳ mot.
+    private func midWordEngagementResult(
+        prompt: String, partial: String, request: PredictRequest,
+        greedyFullLine: String, greedyP1: Double?, fullContinuation: String, why: String
+    ) async -> MidWordEscalationResult {
+        // Mot de tête défragmenté du greedy (le modal greedy, gardien du vote).
+        let greedyLead = SuggestionPolicy.midWordLeadWordDefrag(
+            OutputFilter.singleLine(greedyFullLine), partial: partial)
+
+        // Dégénéré STRUCTUREL (le mot de tête ne prolonge pas le partiel) ⇒ ZÉRO
+        // direct, on évite le coût des branches. Garde structurelle, PAS dico : ne
+        // recale plus les OOV légitimes (marques, noms, anglais, jargon).
+        guard SuggestionPolicy.midWordExtendsStructurally(partial: partial, modal: greedyLead) else {
+            return MidWordEscalationResult(show: false, word: fullContinuation,
+                                           reason: "longghost-engage:zero(\(why))",
+                                           engagement: .zero)
+        }
+
+        // Fast-accept (mêmes seuils que `midWordFastDecision`) ⇒ PLEIN sans brancher.
+        let isFastAccept = (greedyP1 ?? 0) >= SuggestionPolicy.Tuning.escFastP1
+            && partial.count >= SuggestionPolicy.Tuning.escMinFastLen
+
+        var agreement = 1.0   // fast-accept : accord implicite (pas de branches lancées)
+        if !isFastAccept {
+            // Branches stochastiques EXISTANTES (mêmes seeds/cap/temp que l'escalade),
+            // pour mesurer l'accord. Early-exit dès la majorité (comme `midWordEscalate`).
+            let k = SuggestionPolicy.Tuning.escBranchKRuntime
+            if k > 0 {
+                let branchCap = min(request.maxTokens, SuggestionPolicy.Tuning.escBranchMaxTokens)
+                var leads = [greedyLead]
+                let needed = Int((SuggestionPolicy.Tuning.escAgreeThreshRuntime
+                                  * Double(k + 1)).rounded(.up))
+                for i in 0..<k {
+                    if Task.isCancelled {
+                        return MidWordEscalationResult(show: false, word: fullContinuation,
+                                                       reason: "longghost-engage:zero(cancel)",
+                                                       engagement: .zero)
+                    }
+                    let b = await runEscalationPass(
+                        prompt: prompt, partial: partial, cap: branchCap,
+                        temperature: SuggestionPolicy.Tuning.escBranchTempRuntime,
+                        seed: UInt32(i + 1), captureP1: false)
+                    leads.append(b.lead)
+                    let counts = Dictionary(leads.map { ($0.lowercased(), 1) }, uniquingKeysWith: +)
+                    if let top = counts.values.max(), top >= needed { break }
+                }
+                agreement = SuggestionPolicy.midWordBranchDecision(
+                    partial: partial, greedyModal: greedyLead,
+                    branchLeads: Array(leads.dropFirst())).agreement
+            } else {
+                agreement = 0   // k=0 (override DEV) → pas de signal d'accord → PRUDENT/ZÉRO
+            }
+        }
+
+        let level = SuggestionPolicy.midWordEngagementLevel(
+            partial: partial, greedyLeadWord: greedyLead,
+            firstTokenProb: greedyP1, agreement: agreement)
+        let agreeStr = String(format: "%.2f", agreement)
+
+        switch level {
+        case .zero:
+            return MidWordEscalationResult(show: false, word: fullContinuation,
+                                           reason: "longghost-engage:zero(agree=\(agreeStr))",
+                                           engagement: .zero)
+        case .prudent:
+            // 1 mot (le modal greedy), FIGÉ : on réduit la continuation à son
+            // PREMIER mot entier, en préservant l'éventuel espace de tête.
+            let prudent = Self.firstWholeWord(of: fullContinuation)
+            return MidWordEscalationResult(show: !prudent.isEmpty, word: prudent,
+                                           reason: "longghost-engage:prudent(agree=\(agreeStr))",
+                                           engagement: .prudent)
+        case .plein:
+            return MidWordEscalationResult(show: !fullContinuation.isEmpty, word: fullContinuation,
+                                           reason: "longghost-engage:plein(agree=\(agreeStr))",
+                                           engagement: .plein)
+        }
+    }
+
+    /// Réduit un ghost à son PREMIER mot entier (niveau PRUDENT), en préservant
+    /// l'éventuel espace de tête (séparateur) — miroir du word-cap de `midWordLongGhost`.
+    nonisolated static func firstWholeWord(of ghost: String) -> String {
+        let hadLeadingSpace = ghost.first == " "
+        let words = ghost.split(whereSeparator: { $0.isWhitespace })
+        guard let first = words.first else { return ghost }
+        let one = String(first)
+        return hadLeadingSpace ? " " + one : one
     }
 
     /// **Rolling-refill : prolonge le ghost affiché** (mode sliding-window,
