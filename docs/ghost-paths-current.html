@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Souffleuse — Chemins de génération du ghost (état branché)</title>
+<style>
+  :root{
+    --bg:#0e1117; --panel:#161b22; --panel2:#1c2230; --border:#2b3344;
+    --txt:#d6dde8; --muted:#8b97a8; --accent:#6dc2ca; --on:#3fb950; --off:#6e7681;
+    --llm:#d2792c; --instant:#597dce; --floor:#d04648; --warn:#dad45e;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font:14px/1.55 -apple-system,BlinkMacSystemFont,"SF Pro Text",Segoe UI,sans-serif;
+    padding:32px 24px 80px;max-width:1180px;margin:0 auto}
+  h1{font-size:26px;margin:0 0 4px;letter-spacing:-.02em}
+  h2{font-size:18px;margin:38px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border);letter-spacing:-.01em}
+  h3{font-size:15px;margin:20px 0 8px;color:var(--accent)}
+  .sub{color:var(--muted);margin:0 0 6px}
+  code{background:#0a0d12;border:1px solid var(--border);border-radius:4px;padding:1px 5px;font:12px/1.4 "SF Mono",Menlo,monospace;color:#e6c07b}
+  .badge{display:inline-block;font:600 11px/1 -apple-system,sans-serif;padding:3px 7px;border-radius:5px;vertical-align:middle}
+  .b-on{background:rgba(63,185,80,.16);color:var(--on);border:1px solid rgba(63,185,80,.4)}
+  .b-off{background:rgba(110,118,129,.16);color:var(--off);border:1px solid rgba(110,118,129,.4)}
+  .b-new{background:rgba(208,70,72,.16);color:#ff7b7d;border:1px solid rgba(208,70,72,.45)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px 18px}
+  .card.instant{border-left:3px solid var(--instant)}
+  .card.llm{border-left:3px solid var(--llm)}
+  .card.floor{border-left:3px solid var(--floor)}
+  .pill{display:inline-block;padding:2px 9px;border-radius:20px;font:600 11px/1.6 sans-serif}
+  .p-instant{background:rgba(89,125,206,.18);color:#8fb3ff}
+  .p-llm{background:rgba(210,121,44,.18);color:#f0a868}
+  .p-floor{background:rgba(208,70,72,.18);color:#ff8d8f}
+  .flow{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:18px;margin:14px 0}
+  .step{position:relative;padding:10px 14px 10px 16px;margin:8px 0;background:var(--panel2);border-radius:8px;border-left:3px solid var(--border)}
+  .step .n{position:absolute;left:-11px;top:12px;width:22px;height:22px;border-radius:50%;background:var(--accent);color:#06121a;font:700 12px/22px sans-serif;text-align:center}
+  .step.s-instant{border-left-color:var(--instant)}
+  .step.s-llm{border-left-color:var(--llm)}
+  .step.s-floor{border-left-color:var(--floor)}
+  .indent{margin-left:22px;border-left:2px dashed var(--border);padding-left:16px}
+  table{border-collapse:collapse;width:100%;margin:10px 0;font-size:13px}
+  th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);font-weight:600}
+  td code{white-space:nowrap}
+  .muted{color:var(--muted)}
+  .arrow{color:var(--muted);margin:0 4px}
+  .lead{color:var(--accent);font-weight:600}
+  .note{background:rgba(218,212,94,.08);border:1px solid rgba(218,212,94,.3);border-radius:8px;padding:10px 14px;margin:12px 0;font-size:13px}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;margin:6px 0 0;font-size:12px;color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .dot{width:11px;height:11px;border-radius:3px;display:inline-block}
+  ul{margin:6px 0;padding-left:20px}
+  li{margin:3px 0}
+  .small{font-size:12px;color:var(--muted)}
+  .kbar{font:11px/1.4 "SF Mono",monospace;color:var(--muted)}
+</style>
+</head>
+<body>
+
+<h1>Génération du ghost — ce qui est <em>réellement branché</em></h1>
+<p class="sub">Branche <code>feat/midword-engagement</code> · worktree <code>cocotypist-midline</code> · build Debug en cours d'exécution</p>
+<p class="kbar">Flags runtime actifs : <code>MW_ENGAGEMENT=1</code> · <code>MW_ENG_PRUDENT=0</code> · <code>SOUFFLEUSE_GHOST_INSPECTOR=1</code> · <code>SOUFFLEUSE_GHOST_LINE_OFFSET=1</code> — tout le reste = défaut du code.</p>
+
+<div class="legend">
+  <span><span class="dot" style="background:var(--instant)"></span> Affiché DIRECTEMENT (zéro LLM)</span>
+  <span><span class="dot" style="background:var(--llm)"></span> Génération LLM (llama.cpp / Gemma 1B base)</span>
+  <span><span class="dot" style="background:var(--floor)"></span> Plancher dico (NSSpellChecker) — NOUVEAU</span>
+</div>
+
+<!-- ─────────────────────────────────────────── -->
+<h2>1 · Le pipeline, en un coup d'œil</h2>
+<div class="flow">
+  <div class="step"><span class="n">1</span><b>Poll 50 ms</b> → <code>AXSnapshot</code> (ce qui est focus) → debounce ~15 ms après stabilisation du préfixe.</div>
+  <div class="step s-instant"><span class="n">2</span><b>routeInstant</b> <span class="pill p-instant">zéro LLM</span> — tente un ghost <i>instantané</i> depuis ton historique &amp; ton lexique. Si trouvé → <b>affiché direct</b>, le LLM ne pourra que l'ÉTENDRE.</div>
+  <div class="step"><span class="n">3</span><b>CompletionCache</b> — hit FIFO (cycle espace↔backspace) + <b>KV cache</b> réutilisé entre frappes.</div>
+  <div class="step s-llm"><span class="n">4</span><b>Génération LLM</b> — uniquement si l'instant et le cache n'ont rien. Deux familles : <span class="pill p-llm">mid-mot long-ghost</span> et <span class="pill p-llm">après-espace streaming</span>.</div>
+  <div class="step s-floor"><span class="n">5</span><b>Plancher dico</b> <span class="pill p-floor">filet</span> — quand le gradient d'engagement allait rendre du <b>vide</b> mid-mot, on complète le mot courant (orienté par le greedy).</div>
+  <div class="step"><span class="n">6</span><b>Rolling refill</b> (living ghost) — quand le souffle est PLEIN, on régénère les mots à droite pendant que tu consommes à gauche.</div>
+</div>
+
+<!-- ─────────────────────────────────────────── -->
+<h2>2 · Arbre de décision (avec tes flags)</h2>
+
+<h3>① routeInstant — affiché DIRECTEMENT, sans aucune inférence</h3>
+<div class="flow">
+  <div class="step s-instant"><b>Si caret MID-MOT</b> (dernière lettre tapée est une lettre) :
+    <div class="indent">
+      <p><span class="lead">L1 · Rappel corpus fort</span> — ta prose passée (scopée par cluster d'app/registre). Match → ghost <code>source=.history</code>, prior <code>0.92</code> (quasi-imbattable). <span class="small">Quality-gate rejette un rappel tronqué.</span></p>
+      <p><span class="muted">→ Si le mot partiel est déjà un mot complet (≥4 car. + valide) : on laisse la main au next-word / LLM.</span></p>
+      <p><span class="lead">L0 · Lexique appris</span> — tes termes distinctifs que le modèle ignore (Binance, noms clients…), gated capitale + fréquence (~90 % précision). Match → <code>source=.learnedWord</code>.</p>
+      <p><span class="lead">L0 · Complétion dico système</span> <span class="badge b-off">OFF</span> — <code>wordCompleterEnabledRuntime</code> en pause (réactivable via <code>SOUFFLEUSE_WORDCOMPLETER=1</code>). <b>Donc ici : rien.</b></p>
+    </div>
+  </div>
+  <div class="step s-instant"><b>Si APRÈS-ESPACE / ponctuation / vide</b> :
+    <div class="indent">
+      <p><span class="lead">Rappel corpus fort</span> puis <span class="lead">L1 · sous-chaîne exacte d'historique</span> → <code>source=.history</code>.</p>
+    </div>
+  </div>
+  <p class="small">Aucun match instant → on tombe dans le cache, puis le LLM.</p>
+</div>
+
+<h3>② LLM mid-mot — le cœur (long-ghost + gradient d'engagement)</h3>
+<div class="flow">
+  <p class="small">Déclenché quand : fragment de mot INCOMPLET <b>et</b> l'instant L1 n'a rien rappelé. <code>midWordEscalationEnabled</code> <span class="badge b-on">ON</span>, <code>midWordLongGhostEnabled</code> <span class="badge b-on">ON</span> ⇒ on prend le <b>long-ghost</b> (une passe greedy healed), <b>PAS</b> la cascade K-branches d'origine <span class="small">(elle ne reviendrait qu'avec <code>SOUFFLEUSE_LONGGHOST_OFF=1</code>)</span>.</p>
+
+  <div class="step s-llm"><b>Gradient d'engagement</b> <span class="badge b-on">MW_ENGAGEMENT ON</span> — décide la PROFONDEUR du souffle :
+  <div class="indent">
+
+    <p><b>a) Dégénéré structurel</b> — le greedy ne prolonge même pas ton mot (« docu » → dérive) → niveau <code>.zero</code>.
+      <br><span class="p-floor pill">→ PLANCHER DICO</span> <span class="badge b-new">NOUVEAU</span> orienté par le greedy. Si une complétion existe → <b>mot figé affiché</b> ; sinon → vide.</p>
+
+    <p><b>b) Fast-accept</b> (<code>P1 ≥ escFastP1</code> &amp; <code>partial ≥ escMinFastLen</code>) → <span class="lead">PLEIN</span> direct, sans lancer les branches.</p>
+
+    <p><b>c) Sinon → K=3 branches</b> (greedy stochastiques, mêmes seeds/temp que l'escalade, early-exit à la majorité) → accord <code>[0,1]</code> via <code>midWordBranchDecision</code> :</p>
+    <table>
+      <tr><th>Accord</th><th>Niveau</th><th>Résultat</th></tr>
+      <tr><td>≥ <b>0.8</b> <span class="small">(MW_ENG_PLEIN)</span></td><td><span class="lead">PLEIN</span></td><td>Continuation pleine (~maxWords) + <b>rolling refill autorisé</b> (living ghost)</td></tr>
+      <tr><td>≥ <b>0</b> <span class="small">(MW_ENG_PRUDENT=0)</span></td><td>PRUDENT</td><td>1 mot (le modal), <b>FIGÉ</b>, pas de rolling</td></tr>
+      <tr><td class="muted">&lt; 0 → impossible</td><td class="muted">ZÉRO</td><td class="muted">inatteignable car seuil PRUDENT = 0</td></tr>
+    </table>
+    <div class="note">⚠️ <b>Conséquence de <code>MW_ENG_PRUDENT=0</code> :</b> tu as neutralisé la sortie <code>.zero</code> <i>par accord faible</i> → tout accord ≥ 0 donne au moins PRUDENT. Le <b>seul</b> vide mid-mot restant vient du <b>dégénéré structurel</b> (cas a) — et c'est exactement ce que le plancher dico couvre.</div>
+  </div>
+  </div>
+</div>
+
+<h3>③ Plancher dico — le filet (détail)</h3>
+<div class="grid">
+  <div class="card floor">
+    <p><b>Quand</b> : uniquement sur <code>.zero</code> mid-mot (LLM s'abstient), mot en cours ≥ 3 lettres. Jamais en fin de phrase, jamais par-dessus un souffle LLM.</p>
+    <p><b>Source</b> : <code>NSSpellChecker</code> (FR+EN) via <code>WordCompleter.completion(for:preferring:)</code>.</p>
+    <p><b>Orienté greedy</b> : choisit le candidat dico qui partage le plus long préfixe avec le mot que le LLM penchait à produire → la <b>bonne conjugaison</b> (« nous mange » + greedy « mangeons » → <code>ons</code>, pas l'infinitif). Greedy vide/en vrille → repli sur le 1ᵉʳ candidat (jamais pire).</p>
+    <p class="small">Inspecteur : raison <code>engage:floor-dico(structdegen | agree=…)</code>. Figé (engagement <code>.prudent</code>).</p>
+  </div>
+  <div class="card llm">
+    <p><b>④ LLM après-espace / next-word — streaming</b></p>
+    <p><code>generateLlama</code> + <code>onLLMChunk</code> = <b>Relevance Gate</b> : un chunk doit passer <code>gateFloor 0.25</code> et battre l'existant d'un facteur <code>replacementBar 1.15</code> pour s'afficher.</p>
+    <p class="small">En pratique ce chemin streaming s'affiche très rarement : le long-ghost mid-mot capte la quasi-totalité des ghosts (mesuré ~0/449 côté streaming, ~250 long-ghost).</p>
+    <p><code>ghostStreamEnabled</code> <span class="badge b-off">OFF</span> → le long-ghost est peint en one-shot, pas token-par-token.</p>
+  </div>
+</div>
+
+<h3>⑤ Rolling refill — le « ghost vivant »</h3>
+<div class="flow">
+  <p><code>midWordGhostRollingEnabled</code> <span class="badge b-on">ON</span> — <b>seulement quand le niveau est PLEIN</b> (<code>rollingAllowed</code>). À mesure que tu tapes dans le ghost, <code>extendGhost()</code> régénère le(s) mot(s) suivant(s) à droite (profondeur cible 4 mots, recharge sous 2). Il <b>rejoue la même persona/contexte</b> que le souffle initial (ctxPrefix + customInstr + field + biais n-gram appris) → ne dérive plus vers le générique. PRUDENT et le plancher dico sont FIGÉS (pas de roulement).</p>
+</div>
+
+<!-- ─────────────────────────────────────────── -->
+<h2>3 · Ce qui part au LLM (prompt) vs ce qui s'affiche direct</h2>
+<div class="grid">
+  <div class="card llm">
+    <h3 style="margin-top:0">Envoyé à llama.cpp <span class="small">(buildLlamaPrompt)</span></h3>
+    <p>Modèle <b>base/pt</b> (pas instruct) → continuation brute gauche→droite. Le prompt assemblé, dans l'ordre :</p>
+    <ul>
+      <li><code>Contexte : {customInstr}</code> — ta personnalisation (prose FR, jamais une commande)</li>
+      <li><b>Few-shot</b> — ta prose passée scopée (<code>examplesInjectionEnabled</code> <span class="badge b-on">ON</span>), brute, sans label</li>
+      <li><code>ctxPrefix</code> — contexte app/fenêtre</li>
+      <li><code>fieldContext</code> — champ / placeholder / aide</li>
+      <li><b><code>beforeCursor</code></b> — derniers <b>1024 car.</b> du texte avant le caret, espace final retiré (toujours en DERNIER)</li>
+    </ul>
+    <p class="note" style="margin-bottom:0"><code>system</code> et <code>afterCursor</code> sont <b>IGNORÉS</b> — un base model ne suit pas d'instruction, et le texte APRÈS le curseur n'entre jamais dans le prompt.</p>
+  </div>
+  <div class="card instant">
+    <h3 style="margin-top:0">Affiché SANS LLM</h3>
+    <ul>
+      <li><b>Rappel corpus</b> (L1) — ta prose passée, telle quelle</li>
+      <li><b>Lexique appris</b> (L0) — tes termes distinctifs</li>
+      <li><b>Plancher dico</b> — complétion <code>NSSpellChecker</code> du mot courant</li>
+      <li><b>Cache</b> — résultats récents (FIFO + KV)</li>
+    </ul>
+    <p class="small">Le biais perso <b>n-gram appris</b> (accepts) influence aussi la GÉNÉRATION LLM via le sampler, quand <code>personalizationStrength &gt; 0</code> — y compris sur le refill roulant.</p>
+  </div>
+</div>
+
+<!-- ─────────────────────────────────────────── -->
+<h2>4 · Table des flags — état effectif</h2>
+<table>
+  <tr><th>Flag</th><th>Kill/active par</th><th style="text-align:center">État actuel</th><th>Effet</th></tr>
+  <tr><td><code>midWordEngagementEnabled</code></td><td><code>MW_ENGAGEMENT</code> présent</td><td style="text-align:center"><span class="badge b-on">ON</span></td><td>Gradient PLEIN/PRUDENT/ZÉRO mid-mot</td></tr>
+  <tr><td><code>midWordEngagementPrudentThresh</code></td><td><code>MW_ENG_PRUDENT=0</code></td><td style="text-align:center"><span class="badge b-on">0</span></td><td>Toujours ≥ PRUDENT (zéro-accord neutralisé)</td></tr>
+  <tr><td><code>midWordEngagementPleinThresh</code></td><td>défaut</td><td style="text-align:center"><span class="badge b-on">0.8</span></td><td>Seuil rolling/living ghost</td></tr>
+  <tr><td><code>midWordDicoFloorEnabled</code></td><td><code>MW_DICO_FLOOR_OFF</code> absent</td><td style="text-align:center"><span class="badge b-new">ON ★</span></td><td>Plancher dico orienté greedy (NOUVEAU)</td></tr>
+  <tr><td><code>midWordLongGhostEnabled</code></td><td><code>SOUFFLEUSE_LONGGHOST_OFF</code> absent</td><td style="text-align:center"><span class="badge b-on">ON</span></td><td>Long-ghost simplifié (cascade K-branches dormante)</td></tr>
+  <tr><td><code>midWordGhostRollingEnabled</code></td><td><code>SOUFFLEUSE_ROLLING_OFF</code> absent</td><td style="text-align:center"><span class="badge b-on">ON</span></td><td>Refill glissant (living ghost) en PLEIN</td></tr>
+  <tr><td><code>midWordEscalationEnabled</code></td><td><code>…ESCALATION_OFF</code> absent</td><td style="text-align:center"><span class="badge b-on">ON</span></td><td>Active le chemin mid-mot LLM</td></tr>
+  <tr><td><code>ghostStreamEnabled</code></td><td><code>SOUFFLEUSE_GHOST_STREAM</code> présent</td><td style="text-align:center"><span class="badge b-off">OFF</span></td><td>Long-ghost peint en one-shot (pas token-par-token)</td></tr>
+  <tr><td><code>wordCompleterEnabledRuntime</code></td><td><code>SOUFFLEUSE_WORDCOMPLETER</code> présent</td><td style="text-align:center"><span class="badge b-off">OFF</span></td><td>Complétion dico système au routeInstant — EN PAUSE</td></tr>
+  <tr><td><code>midWordL0Fallback</code></td><td><code>MW_L0_OFF</code> absent</td><td style="text-align:center"><span class="badge b-on">ON</span></td><td>Fallback dico de l'escalade (chemin cascade)</td></tr>
+  <tr><td><code>examplesInjectionEnabled</code></td><td>constante</td><td style="text-align:center"><span class="badge b-on">ON</span></td><td>Few-shot ta-prose dans le prompt</td></tr>
+  <tr><td><code>escBranchK</code></td><td>défaut</td><td style="text-align:center"><span class="badge b-on">3</span></td><td>Nb de branches pour l'accord</td></tr>
+  <tr><td>Relevance Gate</td><td><code>gateFloor / replacementBar</code></td><td style="text-align:center"><span class="badge b-on">0.25 / 1.15</span></td><td>Filtre le streaming après-espace</td></tr>
+  <tr><td><code>llmContextWindowChars</code></td><td>défaut</td><td style="text-align:center"><span class="badge b-on">1024</span></td><td>Taille du beforeCursor envoyé</td></tr>
+</table>
+
+<!-- ─────────────────────────────────────────── -->
+<h2>5 · Résumé en une phrase</h2>
+<div class="flow">
+  <p>À chaque frappe : on tente d'abord un ghost <span class="p-instant pill">instant</span> depuis <b>ton historique/lexique</b> (zéro LLM) ; sinon le <span class="p-llm pill">long-ghost LLM mid-mot</span> génère et un <b>gradient d'engagement</b> (accord de 3 branches) décide s'il déroule un <b>living ghost roulant</b> (PLEIN) ou juste <b>1 mot figé</b> (PRUDENT) ; et là où le LLM s'abstiendrait au milieu d'un mot, un <span class="p-floor pill">plancher dico orienté greedy</span> garantit malgré tout un mot valide — sauf en fin de phrase. Le chemin <i>streaming après-espace</i> existe mais ne s'affiche presque jamais.</p>
+</div>
+
+<p class="small" style="margin-top:30px">Généré pour refléter l'état exact du code &amp; des flags au moment de la lecture. Le plancher dico (★) est non commité — <code>WordCompleter.completion(for:preferring:)</code> + <code>ModelRuntime.dicoFloorResult</code> + flag <code>midWordDicoFloorEnabled</code>.</p>
+
+</body>
+</html>
