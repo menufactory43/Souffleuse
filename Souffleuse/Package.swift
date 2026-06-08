@@ -327,6 +327,14 @@ let package = Package(
             ]
         ),
         .executableTarget(
+            name: "SouffleuseBeamEval",
+            dependencies: [
+                "SouffleuseCore",
+                "SouffleuseLlama",
+                "SouffleuseLog",
+            ]
+        ),
+        .executableTarget(
             name: "SouffleuseLexiconRouteEval",
             dependencies: [
                 "SouffleuseCore",
