@@ -16,6 +16,21 @@ extension SuggestionPolicy {
         public static let gateFloor: Float = 0.25
         public static let replacementBar: Float = 1.15
 
+        /// `MW_ECHO_RUN` — longueur min (en mots) d'un run VERBATIM recopié du tail
+        /// pour qu'un ghost soit jugé « écho/boucle » et gaté. **Défaut 4** (calibré
+        /// par `SouffleuseEchoEval`, 2026-06-08). Le garde sac-de-mots seul
+        /// (`echoScore ≥ continuationEchoThreshold`) tuait ~50% de BONS ghosts qui
+        /// réutilisent simplement du vocabulaire du contexte (« lancer le serveur »,
+        /// « m'organiser », « beurre » à s=1.00) ; ce 2ᵉ critère POSITIONNEL ne gate
+        /// que les vraies répétitions verbatim (≥4 mots contigus, ex. la boucle
+        /// « à savoir si la radioactivité » recrachée telle quelle), récupérant les
+        /// bons ghosts sans laisser passer une seule boucle (3/3 contrôles). Mettre
+        /// `MW_ECHO_RUN=0` ⇒ comportement d'origine (gate sur le seul sac-de-mots).
+        public static var echoMinVerbatimRunWords: Int {
+            if let s = ProcessInfo.processInfo.environment["MW_ECHO_RUN"], let v = Int(s) { return max(0, v) }
+            return 4
+        }
+
         // MARK: - D-08 Routing thresholds
         ///
         /// Tightening pass 2026-05-26 (post 04-07 empirical validation):
@@ -347,6 +362,21 @@ extension SuggestionPolicy {
         public static var midWordEngagementPrudentThresh: Double {
             if let s = ProcessInfo.processInfo.environment["MW_ENG_PRUDENT"], let v = Double(s) { return v }
             return 0.5
+        }
+
+        /// `MW_DICO_FLOOR_OFF` — **plancher dico mid-mot. ON par défaut.** Quand le
+        /// gradient d'engagement s'abstient (`.zero`) ALORS qu'un mot est EN COURS,
+        /// on ne montre pas du vide : on complète le mot courant via NSSpellChecker
+        /// (`WordCompleter.completion`, meilleur candidat qui PROLONGE le préfixe
+        /// tapé). Garantit l'invariant « un mot valide à chaque lettre tant que le
+        /// mot n'est pas fini » — la complétion se ré-évalue à chaque frappe, donc
+        /// une approximation à 3 lettres se précise à 4+. Déterministe (<1ms, dico
+        /// système), ghost FIGÉ (rolling interdit), et il ne fait que REMPLIR LE
+        /// VIDE : jamais il ne remplace un souffle LLM PLEIN/PRUDENT. À une frontière
+        /// (fin de phrase / pas de mot partiel) il ne se déclenche pas. Coupé par
+        /// `MW_DICO_FLOOR_OFF` (retour à l'abstention pure du gradient).
+        public static var midWordDicoFloorEnabled: Bool {
+            ProcessInfo.processInfo.environment["MW_DICO_FLOOR_OFF"] == nil
         }
 
         // MARK: - Ghost ROLLING REFILL (sliding window, flag OFF) — parité Cotypist
