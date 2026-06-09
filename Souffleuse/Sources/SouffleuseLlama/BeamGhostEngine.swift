@@ -73,6 +73,23 @@ public struct BeamConfig: Sendable {
         maxWords: 4
     )
 
+    /// Config du **cœur de génération de prod** (`SOUFFLEUSE_BEAM_CORE`). Seule
+    /// différence avec `cotypistDefault` : K=3 au lieu de 9. Le sweep
+    /// `SouffleuseBeamWidthSweepEval` a prouvé un plateau dès K=3 (75 % intention,
+    /// accord 9/10, cold-lat 237 ms) — K≥4 paie la latence pour ~0 gain, et la
+    /// contrainte `requiredPrefix` fait l'essentiel (K=1 = 70 %). On garde
+    /// `cotypistDefault` (K=9) INTACT comme reconstruction fidèle + baseline des
+    /// evals ; ce profil-ci est celui que `ModelRuntime` charge en prod.
+    public static let ghostCoreDefault = BeamConfig(
+        maxSearchWidth: 3,
+        maxResultWidth: 3,
+        minBranchProbability: 0.05,
+        relativeCutoff: 1e-10,
+        positionExponent: 0.0,
+        maxTokens: 14,
+        maxWords: 4
+    )
+
     public init(maxSearchWidth: Int, maxResultWidth: Int, minBranchProbability: Double,
                 relativeCutoff: Double, positionExponent: Double, maxTokens: Int, maxWords: Int) {
         self.maxSearchWidth = maxSearchWidth
