@@ -112,7 +112,39 @@ entier, mot suivant à deviner) restent bien servies — le beam contraint peut
 terminer le mot par un espace (couverture 95 %, après-espace inchangé 31 %).
 À confirmer au ressenti en frappe réelle (`SOUFFLEUSE_BEAM_CORE=1`).
 
-## 5. Artefacts
+## 5. Optimisation latence −42 % (workflow `ghost-latency-minus-30`, commit suivant)
+
+Objectif : latence −30 % minimum en perdant ≤5 % de validité. Deux configs de
+knobs testées séquentiellement (GPU exclusif), mêmes 1087 frappes :
+
+| config | lat moy/p50/p95 | KTC ≤1/≤3 | jamais | word-accept | couverture |
+|---|---|---|---|---|---|
+| K=3 · tok14 · mots4 (baseline) | 216 / 209 / 440 | 55 / 85 % | 7 % | 52 % | 95 % |
+| C1 : K=2 · tok11 · mots4 | 156 / 149 / 283 | 56 / 82 % | 7 % | 53 % | 95 % |
+| **C2 : K=2 · tok12 · mots3 (retenue)** | **125 / 114 / 229** | **58 / 82 %** | 8 % | 51 % | 95 % |
+
+**C2 = nouveau `ghostCoreDefault`** : latence **−42 %** (216→125 ms moy,
+p95 440→229), KTC≤3 −3,5 % relatif (85→82), word-accept −1,9 % (52→51) — dans
+le budget de 5 % — et le hit à 1 lettre MONTE de 3 pts (58 %) : moins de
+branches = moins de candidats exotiques en tête du ranking. Overrides env
+toujours disponibles (`SOUFFLEUSE_BEAM_K/MAXTOK/MAXWORDS/EXP`).
+
+**Diagnostic moteur** (agent d'analyse, BeamGhostEngine lu en entier) : le
+decode par étape EST bien batché en un seul `llama_decode` ; le ×3 de K=3 vs
+K=1 vient de (1) plus d'étapes (les K branches ne s'arrêtent pas ensemble),
+(2) softmax CPU scalaire O(262k) PAR branche et PAR étape (~0,9 ms/ligne),
+(3) lm_head ×K lignes, (4) overhead batch/étape. Leviers restants documentés,
+SANS perte de validité :
+- **Prefix-caching KV du prompt entre frappes** (seq 0, LCP tokens) : ~25 %
+  de gain en plus, byte-identique — mécanisme déjà validé côté greedy
+  (`KVCacheHolder`, tests KVCacheReuse).
+- **Softmax vectorisé** (`vvexpf`/`vDSP_sve`) : ~15 %, ordre du ranking
+  strictement préservé (logZ à quelques ulps près).
+- **Brancher la réserve `ghostWithReserve`/`advance`** déjà implémentée dans
+  le moteur mais non câblée par `ModelRuntime` : ~70 % amorti sur les HIT
+  (gros chantier, change le profil de fraîcheur du ghost).
+
+## 6. Artefacts
 
 - Rapport prod : `/tmp/parity-eval-report.txt` · JSONL par frappe : `/tmp/parity-eval.jsonl`
 - Rapport diag : `/tmp/parity-eval-beamfix.txt` · JSONL : `/tmp/parity-eval-beamfix.jsonl`
