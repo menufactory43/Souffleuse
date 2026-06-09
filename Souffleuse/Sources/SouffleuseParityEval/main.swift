@@ -47,6 +47,9 @@ import SouffleuseTyping
 //                        partiel non vide → requiredPrefix + K plein, même si
 //                        `defaultPartialWordIsComplete` le juge « mot complet ».
 //                        Mesure le plafond de gain d'un fix du routage mid-mot.
+//   PARITY_LONGCTX=1     DIAGNOSTIC : injecte un ctxPrefix réaliste (~150 mots,
+//                        type contexte app/OCR/persona de prod) dans le prompt
+//                        beam — mesure le poids du re-prefill par frappe.
 // ─────────────────────────────────────────────────────────────────────────────
 
 let env = ProcessInfo.processInfo.environment
@@ -325,6 +328,22 @@ guard let gguf = resolveGGUF() else {
 }
 
 let forceMidword = (env["PARITY_BEAM_MIDWORD"] ?? "").lowercased() == "force"
+// ctxPrefix réaliste de prod (persona + contexte app + OCR) pour mesurer le
+// poids du re-prefill du prompt à chaque frappe (DIAGNOSTIC prefix-caching KV).
+let longCtx: String = (env["PARITY_LONGCTX"] ?? "") == "1" ? """
+L'utilisateur écrit depuis l'application Mail sur macOS. La fenêtre active est \
+une réponse à un fil de discussion professionnel concernant le suivi d'un dossier \
+client. Le ton employé est courtois et professionnel. À l'écran on peut lire le \
+message précédent du correspondant : il remercie pour l'envoi du devis, demande \
+une confirmation de disponibilité du produit pour une livraison la semaine \
+prochaine, et signale qu'il sera joignable au bureau jusqu'à vendredi soir. \
+La signature du correspondant indique qu'il est responsable des achats dans une \
+entreprise de distribution basée à Lyon. L'utilisateur a l'habitude de répondre \
+de manière concise, en confirmant les points demandés un par un, et termine \
+généralement ses messages par une formule de politesse brève. Le presse-papiers \
+contient la référence du dossier ainsi que le numéro de commande mentionnés plus \
+tôt dans la conversation. La langue de la conversation est le français.
+""" : ""
 let beamConfig = BeamConfig.ghostCore()
 let beamWidth = beamConfig.maxSearchWidth
 let beamMaxWords = beamConfig.maxWords
@@ -352,7 +371,7 @@ func runBeamEngine() async -> [SentenceRun] {
             if forceMidword, !partial.isEmpty {
                 choice = (requiredPrefix: partial, width: beamWidth, isBoundary: false)
             }
-            let prompt = BeamGhostShaper.buildPrompt(customInstr: "", ctxPrefix: "", llmTail: userTail)
+            let prompt = BeamGhostShaper.buildPrompt(customInstr: "", ctxPrefix: longCtx, llmTail: userTail)
             let result = await beam.ghost(prompt: prompt, requiredPrefix: choice.requiredPrefix,
                                           maxWidth: choice.width)
             let caretAfterSpace = userTail.last == " " || userTail.last == "\t"

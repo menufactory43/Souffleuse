@@ -334,6 +334,7 @@ public actor BeamGhostEngine {
         )
         surfacePieceCache = nil   // nouveau vocab → cache surface à rebâtir
         firstCharIndex = nil      // idem pour l'index 1er-char
+        cachedPromptTokens = []   // KV neuf → pas de préfixe réutilisable
         Log.info(.predictor, "beam_loaded")
         return true
     }
@@ -344,6 +345,7 @@ public actor BeamGhostEngine {
             if h.ownsModel { llama_model_free(h.model) }
         }
         handles = nil
+        cachedPromptTokens = []
     }
 
     deinit {
@@ -499,13 +501,33 @@ public actor BeamGhostEngine {
         }
 
         let mem = llama_get_memory(h.context)
-        // Repartir d'un KV propre : ce moteur est dédié, on possède tout le KV.
-        if let mem { llama_memory_seq_rm(mem, -1, -1, -1) }
+        // ── Prefix-caching KV du prompt (seq 0) entre deux appels ─────────────
+        // Entre deux frappes, le prompt (contexte prose + texte avant curseur) ne
+        // diffère que par sa QUEUE : re-préfiller l'intégralité coûtait ~110 ms
+        // par frappe avec un ctxPrefix réaliste (mesuré PARITY_LONGCTX=1). On
+        // garde le KV de la seq 0, on coupe à partir du point de divergence
+        // (plus long préfixe commun en TOKENS — la retokenisation de fin de mot
+        // rend la comparaison char-à-char invalide) et on ne décode QUE le
+        // suffixe nouveau. Toujours ≥ 1 token re-décodé : les logits next-token
+        // doivent être frais (même garde que `KVCacheHolder` côté greedy).
+        // Les séquences de branches (1..K) d'un appel précédent sont effacées ;
+        // les tokens de branche logés en seq 0 (1ᵉʳ survivant « en place ») le
+        // sont aussi par la coupe (positions ≥ ancien promptLen ≥ lcp).
+        var lcp = 0
+        let maxShared = min(cachedPromptTokens.count, promptTokens.count - 1)
+        while lcp < maxShared, cachedPromptTokens[lcp] == promptTokens[lcp] { lcp += 1 }
+        if let mem {
+            for sid in 1..<h.nSeqMax { llama_memory_seq_rm(mem, sid, -1, -1) }
+            llama_memory_seq_rm(mem, 0, Int32(lcp), -1)
+        }
 
-        // ── Préfill UNIQUE du prompt en séquence 0 (le préfixe partagé) ───────
-        guard prefill(promptTokens: promptTokens) else {
+        // ── Préfill du SUFFIXE nouveau en séquence 0 (le préfixe partagé) ─────
+        guard prefill(suffix: Array(promptTokens[lcp...]), fromPos: Int32(lcp)) else {
+            cachedPromptTokens = []
+            if let mem { llama_memory_seq_rm(mem, -1, -1, -1) }   // KV partiel → repartir propre
             return BeamResult(best: nil, candidates: [], elapsedMillis: Int(Date().timeIntervalSince(start) * 1000))
         }
+        cachedPromptTokens = promptTokens
         let promptLen = Int32(promptTokens.count)
 
         // Branche racine : seqId 0, aucun token propre, score 0, requiredPrefix
@@ -649,14 +671,27 @@ public actor BeamGhostEngine {
 
     // MARK: - Étapes internes
 
-    /// Préfille `promptTokens` en séquence 0. Réutilise `llama_batch_get_one`
-    /// (la seq par défaut est 0, exactement ce qu'on veut pour la racine).
-    private func prefill(promptTokens: [Int32]) -> Bool {
-        guard let h = handles else { return false }
-        var toks = promptTokens
-        return toks.withUnsafeMutableBufferPointer { ptr -> Bool in
-            llama_decode(h.context, llama_batch_get_one(ptr.baseAddress, Int32(ptr.count))) == 0
+    /// Tokens du prompt actuellement en KV (seq 0), pour le prefix-caching entre
+    /// appels. Invalidé au load/unload/clearReserve (KV détruit ou wipé).
+    private var cachedPromptTokens: [Int32] = []
+
+    /// Préfille `suffix` en séquence 0 à partir de la position `fromPos` (batch
+    /// explicite : logits activés sur la DERNIÈRE entrée seulement, mêmes
+    /// sémantiques que `llama_batch_get_one`). `fromPos == 0` ⇒ prefill complet.
+    private func prefill(suffix: [Int32], fromPos: Int32) -> Bool {
+        guard let h = handles, !suffix.isEmpty else { return false }
+        let n = suffix.count
+        var batch = llama_batch_init(Int32(n), 0, h.nSeqMax)
+        defer { llama_batch_free(batch) }
+        batch.n_tokens = Int32(n)
+        for i in 0..<n {
+            batch.token[i] = suffix[i]
+            batch.pos[i] = fromPos + Int32(i)
+            batch.n_seq_id[i] = 1
+            batch.seq_id[i]![0] = 0
+            batch.logits[i] = (i == n - 1) ? 1 : 0
         }
+        return llama_decode(h.context, batch) == 0
     }
 
     /// Décode un batch multi-séquences : un token par branche vivante (le DERNIER
@@ -1111,6 +1146,7 @@ public actor BeamGhostEngine {
         reserve = []
         reservePrompt = ""
         reserveTypedSoFar = ""
+        cachedPromptTokens = []   // KV wipé → le prefix-cache ne pointe plus sur rien
     }
 
     // MARK: - Réserve : avance à la frappe (HIT / REFILL / MISS)
