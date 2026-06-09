@@ -88,19 +88,29 @@ PARITY_ENGINE=beam PARITY_BEAM_MIDWORD=force swift run -c release SouffleusePari
    après le mot courant — c'est le word-accept (41-52 %) qui reflète l'usage réel
    (partial-accept / accept-puis-continue).
 
-## 4. Reco (prochain pas, hors de cette branche d'éval)
+## 4. Fix appliqué et VÉRIFIÉ (commit `1020f92`)
 
-**Fixer le routage mid-mot du beam-core** dans `BeamGhostShaper.beamConfigChoice` :
-ne plus céder la contrainte au juge « mot complet » — tout partiel non vide →
-`requiredPrefix=partial`, K plein ; K=1 réservé au VRAI après-espace. Corollaire :
-l'espace forcé de `beamPostFilter` (ligne `isBoundary && !caretAfterSpace`) ne
-s'applique plus à ces cas. Flag-gaté comme le reste, puis re-passer cette éval
-pour confirmer les chiffres et `swift test` + `audit.sh`.
+`BeamGhostShaper.beamConfigChoice` ne cède plus la contrainte au juge « mot
+complet » : tout partiel non vide → `requiredPrefix=partial`, K plein ; K=1
+réservé au VRAI après-espace (partiel vide). Corollaire automatique : l'espace
+forcé de `beamPostFilter` (`isBoundary && !caretAfterSpace`) ne s'applique plus
+à ces cas. Chemin actif uniquement sous `SOUFFLEUSE_BEAM_CORE` — sans flag,
+comportement byte-identique.
 
-Risque résiduel à surveiller : les fins de mot réelles (« la », « de » tapés en
-entier, mot suivant à deviner). Dans le run forcé, elles restent bien servies
-(le beam contraint peut terminer le mot par un espace : couverture 95 %,
-après-espace inchangé 31 %) — mais à valider au ressenti.
+**Vérification** :
+- Re-run de l'éval sur le pipeline PROD corrigé (`/tmp/parity-eval-fixed.txt`) :
+  chiffres IDENTIQUES au diagnostic forcé — mot juste à ≤1 lettre **55 %**,
+  ≤3 lettres **85 %**, médiane **1 lettre**, jamais juste **7 %**, stabilité
+  k→k+1 **100 %**, glissement cohérent **86 %**, word-accept **52 %**, latence
+  p50/p95 **209/440 ms** à froid.
+- **729 tests verts** (727 + 2 nouveaux verrouillant le routage :
+  `config_dicoValidFragmentStaysConstrained`, `config_completeWordKeepsConstraintToo`).
+- **`audit.sh` PASSED**.
+
+Risque résiduel surveillé : les fins de mot réelles (« la », « de » tapés en
+entier, mot suivant à deviner) restent bien servies — le beam contraint peut
+terminer le mot par un espace (couverture 95 %, après-espace inchangé 31 %).
+À confirmer au ressenti en frappe réelle (`SOUFFLEUSE_BEAM_CORE=1`).
 
 ## 5. Artefacts
 
