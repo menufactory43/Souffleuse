@@ -855,25 +855,23 @@ final class ModelRuntime {
         // cours n'est pas amorcée (≥ beamMinSentenceLetters lettres après le dernier
         // terminateur). Couvre « on reprend quand l'utilisateur a retapé quelques
         // lettres après le point » SANS coût LLM.
-        guard Self.currentSentenceLetterCount(userTail) >= Self.beamMinSentenceLetters else {
+        guard BeamGhostShaper.sentenceArmed(userTail: userTail) else {
             return MidWordEscalationResult(show: false, word: "", reason: "beam-newsentence")
         }
 
-        let partial = OutputFilter.trailingPartialWord(userTail)
-        let isBoundary = partial.isEmpty
-            || SuggestionPolicy.defaultPartialWordIsComplete(userTail)
-        let requiredPrefix = isBoundary ? "" : partial
-        // Mid-mot → K plein (la contrainte trie) ; frontière → K=1 (≡ greedy).
-        let width = isBoundary ? 1 : beamWidth
+        // Choix de config beam (mid-mot → requiredPrefix + K plein ; frontière →
+        // décode libre K=1). Logique de mise en forme PURE → `BeamGhostShaper`.
+        let choice = BeamGhostShaper.beamConfigChoice(userTail: userTail, beamWidth: beamWidth)
+        let requiredPrefix = choice.requiredPrefix
+        let isBoundary = choice.isBoundary
+        let width = choice.width
 
         // Prompt = contexte PROSE (« Contexte: » persona + ctxPrefix app/fenêtre/OCR,
         // prose que le base/PT CONTINUE bien) + tout le texte avant curseur. EXCLUS :
-        // exemples few-shot (pollueur prouvé), annotation `Champ:`, FIM. `system` /
-        // `afterCursor` sont ignorés par le builder.
-        let prompt = ModelRuntime.buildLlamaPrompt(
-            system: "", customInstr: request.customInstr, ctxPrefix: request.ctxPrefix,
-            fieldContext: "", afterCursor: "", beforeCursor: request.llmTail
-        )
+        // exemples few-shot (pollueur prouvé), annotation `Champ:`, FIM. Slots choisis
+        // par `BeamGhostShaper.promptSlots` (mise en forme partagée avec la probe).
+        let prompt = BeamGhostShaper.buildPrompt(
+            customInstr: request.customInstr, ctxPrefix: request.ctxPrefix, llmTail: request.llmTail)
 
         // GPU gate (parité translation, TRANSLATION-SPEC §2.9) autour du beam.
         GpuGate.shared.ghostBegan()
@@ -883,7 +881,7 @@ final class ModelRuntime {
         Log.info(.predictor, "ghost_beam_seed_ms", count: result.elapsedMillis)
 
         let caretAfterSpace = request.llmTail.last == " " || request.llmTail.last == "\t"
-        let ghost = Self.beamPostFilter(
+        let ghost = BeamGhostShaper.beamPostFilter(
             rawGhost: result.best?.ghost ?? "", isBoundary: isBoundary, caretAfterSpace: caretAfterSpace,
             userTail: userTail, maxWords: request.maxWords)
         Log.info(.predictor, "ghost_beam_words",
@@ -892,65 +890,12 @@ final class ModelRuntime {
                                        reason: ghost.isEmpty ? "beam-gated" : "beam")
     }
 
-    /// Nombre de lettres de la PHRASE EN COURS = depuis le dernier terminateur de
-    /// phrase (`.` `!` `?`) jusqu'à la fin du texte. Pilote G2 : juste après un
-    /// point ⇒ 0 ⇒ silence ; on reprend dès quelques lettres de la nouvelle phrase.
-    nonisolated static func currentSentenceLetterCount(_ text: String) -> Int {
-        var count = 0
-        for ch in text.reversed() {
-            if ".!?".contains(ch) { break }
-            if ch.isLetter { count += 1 }
-        }
-        return count
-    }
-
-    /// « Quelques lettres » de G2 — seuil d'amorce d'une nouvelle phrase.
-    nonisolated static let beamMinSentenceLetters = 3
-
-    /// Garde de sortie du ghost beam — MIROIR des post-filtres du long-ghost
-    /// (singleLine, dédup mot répété, séparateur d'espace, écho positionnel,
-    /// coupe-clause, word-cap), appliquée au suffixe brut renvoyé par le beam.
-    /// `nonisolated static` (pures fonctions OutputFilter/SuggestionPolicy).
-    nonisolated static func beamPostFilter(
-        rawGhost: String, isBoundary: Bool, caretAfterSpace: Bool,
-        userTail: String, maxWords: Int
-    ) -> String {
-        var result = OutputFilter.singleLine(rawGhost)
-        if result.isEmpty { return "" }
-        // Dédup d'un mot répété en tête (le beam peut re-émettre le dernier mot tapé).
-        result = SuggestionPolicy.dedupLeadingRepeat(ghost: result, userTail: userTail)
-        if result.isEmpty { return "" }
-        // Séparateur : le beam strippe déjà l'espace de tête après-espace
-        // (ghostText, requiredPrefixLen==0). À une frontière NON précédée d'un
-        // espace (« message.| »), on rétablit un séparateur ; le mid-mot reste
-        // collé (complétion de mot, pas de séparateur).
-        if isBoundary, !caretAfterSpace, let f = result.first, f != " ", f != "\t" {
-            result = " " + result
-        }
-        // Écho positionnel : tue les vraies boucles (run verbatim ≥ seuil), garde
-        // la réutilisation de vocabulaire — même garde que midWordLongGhost.
-        let echo = OutputFilter.echoScore(ghost: result, tail: userTail)
-        if echo >= OutputFilter.continuationEchoThreshold {
-            let run = OutputFilter.longestVerbatimRunWords(ghost: result, tail: userTail)
-            if run >= SuggestionPolicy.Tuning.echoMinVerbatimRunWords { return "" }
-        }
-        // Coupe à la 1ʳᵉ frontière de clause/phrase (newline . ! ? ; :), bornes
-        // INCLUSES — exactement « comme d'hab » (long-ghost) : on montre la suite
-        // jusqu'à la fin de phrase comprise, on ne va pas AU-DELÀ. Ne pas proposer
-        // la phrase SUIVANTE est le rôle de G2 (reprise après le point), pas de
-        // supprimer la complétion en cours.
-        if let idx = result.firstIndex(where: { "\n.!?;:".contains($0) }) {
-            result = String(result[...idx])
-        }
-        // Cap à maxWords mots entiers, espace de tête préservé.
-        let words = result.split(whereSeparator: { $0.isWhitespace })
-        if words.count > max(1, maxWords) {
-            let hadLeadingSpace = result.first == " "
-            result = words.prefix(max(1, maxWords)).joined(separator: " ")
-            if hadLeadingSpace, result.first != " ", !result.isEmpty { result = " " + result }
-        }
-        return OutputFilter.singleLine(result)
-    }
+    // La logique de mise en forme PURE du cœur beam (seuil de phrase G2,
+    // `currentSentenceLetterCount`, choix requiredPrefix/largeur, slots de prompt,
+    // post-filtre de sortie) vit désormais dans `BeamGhostShaper` (SouffleuseCore),
+    // pour être IMPORTABLE par la probe `SouffleuseBeamGhostProbe` (le target
+    // exécutable `Souffleuse` ne l'est pas). `generateGhostBeam` ci-dessus appelle
+    // directement le shaper — comportement byte-identique (extrait verbatim).
 
     /// **Gradient d'engagement mi-mot (flag MW_ENGAGEMENT).** À partir du greedy
     /// long-ghost DÉJÀ généré (`fullContinuation` = la continuation pleinement
