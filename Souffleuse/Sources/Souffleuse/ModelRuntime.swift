@@ -102,6 +102,13 @@ final class ModelRuntime {
     /// `beamCoreEnabled`). Gates `generateGhostBeam`.
     private(set) var beamReady = false
 
+    /// La queue (`userTail`) à laquelle la RÉSERVE du beam est actuellement
+    /// attachée. Vide ⇒ pas de réserve vivante (prochain ghost = re-seed froid).
+    /// Mis à jour par `generateGhostBeam` à chaque appel (avant le `await`), remis
+    /// à "" par `clearBeamReserve`. C'est la source de vérité du reuse HIT/MISS :
+    /// une frappe = extension d'UN char de cette queue ⇒ `advance`, sinon re-seed.
+    private var beamReserveTail: String = ""
+
     /// Plancher dico mid-mot (flag `MW_DICO_FLOOR`). `NSSpellChecker` via
     /// `WordCompleter` : complète le mot EN COURS quand le gradient d'engagement
     /// s'abstient, pour qu'un ghost valide apparaisse à chaque lettre. Tenu ici
@@ -262,6 +269,7 @@ final class ModelRuntime {
         if beamReady {
             await beamEngine.unload()
             beamReady = false
+            beamReserveTail = ""
         }
         let ok = await llamaEngine.load(modelPath: ggufPath, contextTokens: 4096)
         llamaReady = ok
@@ -312,6 +320,7 @@ final class ModelRuntime {
         // sinon le contexte beam pointerait un modèle déjà libéré.
         await beamEngine.unload()
         beamReady = false
+        beamReserveTail = ""
         await llamaEngine.unload()
         llamaReady = false
         // Drop le container MLX : seul son tokenizer sert (au rebuild n-gram /
@@ -827,8 +836,20 @@ final class ModelRuntime {
     /// Post-filtré par `beamPostFilter` (singleLine, dédup, séparateur, écho
     /// positionnel, coupe-clause, word-cap) — la même garde de sortie que le
     /// long-ghost. Réutilise `MidWordEscalationResult` pour un call-site PVM
-    /// commun (show/word/reason ; `engagement` reste `.plein` ⇒ rolling autorisé).
-    /// `nil` si le moteur n'est pas prêt ou la tâche est annulée.
+    /// commun (show/word/reason).
+    ///
+    /// **Reuse (HIT/REFILL/MISS).** `beamReserveTail` = la queue à laquelle la
+    /// RÉSERVE du moteur est attachée. Si la frappe courante est une extension
+    /// d'UN caractère de cette queue → `advance(typedChar:)` (HIT = avance de
+    /// pointeur, **0 décode** ; REFILL = top-up court ; MISS = re-beam). Sinon
+    /// (1ᵉʳ paint, saut, backspace, frappe interleavée par un hit instant) →
+    /// `ghostWithReserve` (re-seed froid). `beamReserveTail` est réécrit AVANT le
+    /// `await` : deux frappes consécutives s'enchaînent dans l'ordre (advance n,
+    /// puis f) et tout skip/cancel retombe proprement sur le re-seed froid (la
+    /// réserve du moteur se re-synchronise alors via `seq_rm(-1)` au seed).
+    /// **Hold-stale** : le re-beam MISS se fait À L'INTÉRIEUR de `advance`, donc
+    /// l'ancien ghost reste affiché pendant les ~237 ms (PVM ne blanke pas avant),
+    /// puis swap — pas de flicker.
     func generateGhostBeam(request: PredictRequest) async -> MidWordEscalationResult? {
         guard beamReady else { return nil }
         let userTail = request.userTail
@@ -838,6 +859,14 @@ final class ModelRuntime {
         let requiredPrefix = isBoundary ? "" : partial
         // Mid-mot → K plein (la contrainte trie) ; frontière → K=1 (≡ greedy).
         let width = isBoundary ? 1 : BeamConfig.ghostCoreDefault.maxSearchWidth
+
+        // La frappe est-elle une extension d'UN caractère de la queue de la réserve ?
+        let isAdvance = !beamReserveTail.isEmpty
+            && userTail.count == beamReserveTail.count + 1
+            && userTail.hasPrefix(beamReserveTail)
+        let typedChar = userTail.last
+        // Attache la réserve à CETTE queue (sync, avant toute suspension `await`).
+        beamReserveTail = userTail
 
         let prompt = ModelRuntime.buildLlamaPrompt(
             system: request.systemMessage,
@@ -851,19 +880,36 @@ final class ModelRuntime {
 
         // GPU gate (parité translation, TRANSLATION-SPEC §2.9) autour du beam.
         GpuGate.shared.ghostBegan()
-        let result = await beamEngine.ghost(prompt: prompt, requiredPrefix: requiredPrefix, maxWidth: width)
+        let rawGhost: String
+        let kindReason: String
+        if isAdvance, let ch = typedChar {
+            let r = await beamEngine.advance(
+                typedChar: ch, requiredPrefixForMiss: requiredPrefix, missWidth: width)
+            rawGhost = r.ghost
+            kindReason = "beam-\(r.kind)"   // beam-hit / beam-refill / beam-miss
+        } else {
+            let res = await beamEngine.ghostWithReserve(
+                prompt: prompt, requiredPrefix: requiredPrefix, maxWidth: width)
+            rawGhost = res.best?.ghost ?? ""
+            kindReason = "beam-seed"
+        }
         GpuGate.shared.ghostEnded()
         if Task.isCancelled { return nil }
 
-        guard let best = result.best else {
-            return MidWordEscalationResult(show: false, word: "", reason: "beam-empty")
-        }
         let caretAfterSpace = request.llmTail.last == " " || request.llmTail.last == "\t"
         let ghost = Self.beamPostFilter(
-            rawGhost: best.ghost, isBoundary: isBoundary, caretAfterSpace: caretAfterSpace,
+            rawGhost: rawGhost, isBoundary: isBoundary, caretAfterSpace: caretAfterSpace,
             userTail: userTail, maxWords: request.maxWords)
         return MidWordEscalationResult(show: !ghost.isEmpty, word: ghost,
-                                       reason: ghost.isEmpty ? "beam-gated" : "beam-core")
+                                       reason: ghost.isEmpty ? "\(kindReason)-gated" : kindReason)
+    }
+
+    /// Vide la réserve du beam et oublie sa queue d'attache → le prochain ghost
+    /// re-seed froid. À appeler quand on abandonne une session de frappe (unload,
+    /// swap de modèle). Sûr hors flag (no-op si rien chargé).
+    func clearBeamReserve() async {
+        await beamEngine.clearReserve()
+        beamReserveTail = ""
     }
 
     /// Garde de sortie du ghost beam — MIROIR des post-filtres du long-ghost

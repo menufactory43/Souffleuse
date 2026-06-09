@@ -877,8 +877,11 @@ final class PredictorViewModel {
                         self.suggestion = word
                         self.predictedForPrefix = forPrefix
                         self.suggestionSource = .llm
-                        // `engagement: .plein` ⇒ rolling autorisé (living ghost).
-                        self.ghostRollingAllowed = beam.rollingAllowed
+                        // Living ghost : sous le beam-core, c'est le REFILL natif de
+                        // la réserve (advance → top-up) qui prolonge le ghost, PAS le
+                        // rolling-refill greedy. On le COUPE (`false`) pour qu'il
+                        // n'appende pas du texte greedy par-dessus le ghost beam.
+                        self.ghostRollingAllowed = false
                         // Alimente le CompletionCache (couche instant + undo-as-ghost),
                         // comme le fait le long-ghost.
                         self.cache.store(prefix: userTail, suggestion: word)
