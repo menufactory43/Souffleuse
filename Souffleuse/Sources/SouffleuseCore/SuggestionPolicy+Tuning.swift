@@ -294,6 +294,19 @@ extension SuggestionPolicy {
             ProcessInfo.processInfo.environment["SOUFFLEUSE_LONGGHOST_OFF"] == nil
         }
 
+        /// `SOUFFLEUSE_BEAM_CORE` — fait du **beam contraint** (`BeamGhostEngine`,
+        /// K=3) le SEUL chemin de génération LLM du ghost. ON ⇒ `predict()` route
+        /// le cœur LLM vers le beam (mid-mot = `requiredPrefix`, après-espace =
+        /// décode libre K=1 ≡ greedy) ; le greedy long-ghost + le gradient
+        /// d'engagement + le plancher dico ne sont PLUS appelés. La couche instant
+        /// (recall/lexique/cache/perso, `routeInstant`) reste DEVANT, inchangée.
+        /// ABSENT (défaut) ⇒ chemin actuel byte-identique (kill-switch trivial,
+        /// rollback runtime sans rebuild). Preuves : intention 64 % vs 29 %, accord
+        /// 9/10 vs 4/10 (cf. BEAM-LLM-CORE-HANDOFF.md §1).
+        public static var beamCoreEnabled: Bool {
+            ProcessInfo.processInfo.environment["SOUFFLEUSE_BEAM_CORE"] != nil
+        }
+
         /// `SOUFFLEUSE_GHOST_STREAM` — peint le longghost AU FIL des tokens (TTFT ~20 ms)
         /// au lieu d'attendre la génération complète (~300 ms, que la frappe suivante
         /// annulerait). OFF par défaut ⇒ one-shot d'origine, byte-identique.
