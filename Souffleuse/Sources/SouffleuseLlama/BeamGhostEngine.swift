@@ -85,10 +85,27 @@ public struct BeamConfig: Sendable {
         maxResultWidth: 3,
         minBranchProbability: 0.05,
         relativeCutoff: 1e-10,
-        positionExponent: 0.0,
+        // Normalisation par longueur. À 0.0 le score = somme PURE des log-probs →
+        // chaque token ajouté rend le score plus négatif → le ranking pénalise
+        // mécaniquement les continuations longues (le beam préfère le court/tronqué).
+        // L'eval ne mesurait que le hit@1 du MOT (court, insensible) ; la suite
+        // 2-4 mots a besoin de length-norm pour être classée équitablement. 0.7 =
+        // milieu classique (façon GNMT). Override live via `SOUFFLEUSE_BEAM_EXP`.
+        positionExponent: 0.7,
         maxTokens: 14,
         maxWords: 4
     )
+
+    /// Config du cœur de prod avec overrides d'ENVIRONNEMENT (A/B sans rebuild) :
+    /// `SOUFFLEUSE_BEAM_EXP` (Double, length-norm) et `SOUFFLEUSE_BEAM_K` (Int). Part
+    /// de `ghostCoreDefault`. Lu une fois par `ModelRuntime` au lancement.
+    public static func ghostCore() -> BeamConfig {
+        var c = ghostCoreDefault
+        let env = ProcessInfo.processInfo.environment
+        if let s = env["SOUFFLEUSE_BEAM_EXP"], let v = Double(s) { c.positionExponent = v }
+        if let s = env["SOUFFLEUSE_BEAM_K"], let v = Int(s), v > 0 { c.maxSearchWidth = v; c.maxResultWidth = v }
+        return c
+    }
 
     public init(maxSearchWidth: Int, maxResultWidth: Int, minBranchProbability: Double,
                 relativeCutoff: Double, positionExponent: Double, maxTokens: Int, maxWords: Int) {
@@ -1000,10 +1017,13 @@ public actor BeamGhostEngine {
     /// si après une frappe une réserve survivante a moins que ça d'avance, on
     /// re-décode quelques tokens — seulement sur les survivants — pour reconstituer
     /// le ghost. Statique, style maison.
-    private static let refillThresholdChars = 4
+    /// 10 chars ≈ ~2 mots d'avance : on prolonge AVANT que le ghost ne se vide,
+    /// pour garder un lookahead vivant (living ghost) au lieu de re-beamer à sec.
+    private static let refillThresholdChars = 10
     /// Nombre de tokens re-décodés par survivant lors d'un refill. Borné : le
     /// refill doit rester BIEN moins cher qu'un beam froid (pas de re-fan-out).
-    private static let refillTokens = 6
+    /// 12 ≈ ~3 mots de suite régénérés par top-up.
+    private static let refillTokens = 12
 
     /// Recadre le suffixe ghost d'une branche (comme `ghostText`) pour le matching
     /// de frappe : retire la partie re-tapée du requiredPrefix, élide l'espace de
@@ -1045,9 +1065,12 @@ public actor BeamGhostEngine {
             bySuffix[s] = ReservedBranch(seqId: -1, tokens: b.tokens,
                                          totalLogprob: b.totalLogprob, surfaceSuffix: s, consumed: 0)
         }
-        // Trie par log-prob décroissante, borne à K (la largeur de réserve).
+        // Trie par score NORMALISÉ par longueur (cohérent avec le ranking final du
+        // beam, `positionExponent`), pas par log-prob brute — sinon la réserve
+        // re-préfère systématiquement le suffixe le plus COURT et le reuse (HIT)
+        // annulerait la length-norm appliquée au seed. Borne à K.
         reserve = order.compactMap { bySuffix[$0] }
-            .sorted { $0.totalLogprob > $1.totalLogprob }
+            .sorted { reserveScore($0) > reserveScore($1) }
         if reserve.count > config.maxResultWidth { reserve.removeLast(reserve.count - config.maxResultWidth) }
         reservePrompt = prompt
         reserveTypedSoFar = ""
@@ -1141,20 +1164,41 @@ public actor BeamGhostEngine {
 
         reserve = survivors
 
-        // ── REFILL : les survivants sont-ils trop courts ? ───────────────────
-        // Si TOUS les survivants ont < seuil de profondeur restante, on re-décode
-        // quelques tokens — SEULEMENT sur les survivants À KV VIVANT — pour
-        // reconstituer du ghost d'avance. Bien moins cher qu'un beam (pas de
-        // fan-out, K survivants seulement, profondeur bornée). Un survivant GELÉ
-        // (`seqId == -1`, branche arrêtée sur un point) ne se refille pas : son
-        // ghost est complet et fini — épuisé, il laisse juste un ghost vide.
-        let shallow = reserve.allSatisfy { $0.depthLeft < BeamGhostEngine.refillThresholdChars }
-        let refillable = reserve.contains { $0.seqId >= 0 && $0.depthLeft < BeamGhostEngine.refillThresholdChars }
-        if shallow && refillable {
-            refillSurvivors()
-            let ghost = bestReserveGhost()
-            let ms = Int(Date().timeIntervalSince(start) * 1000)
-            return AdvanceResult(ghost: ghost, kind: .refill, elapsedMillis: ms, survivors: reserve.count)
+        // ── REFILL : prolonger le ghost MID-PHRASE dès qu'il s'épuise ─────────
+        // On regarde le MEILLEUR survivant (celui affiché) : s'il reste peu de
+        // profondeur ET qu'on n'est PAS en fin de phrase, on PROLONGE (living
+        // ghost « continue dès qu'un mot est tapé »). Deux cas :
+        //  • une branche VIVANTE (seqId ≥ 0) existe → top-up greedy en profondeur
+        //    (refillSurvivors, ~quelques décodes, pas de fan-out — cheap) ;
+        //  • toutes GELÉES (arrêtées sur budget, KV mort) → re-beam frais pour
+        //    régénérer une suite (coût froid, mais c'est la frappe de dépletion).
+        // En FIN DE PHRASE (le suffixe se termine par . ! ?), on NE prolonge pas :
+        // le ghost se vide proprement, on laisse l'utilisateur clore la phrase.
+        let best = reserve.max(by: { reserveScore($0) < reserveScore($1) })
+        let bestShallow = (best?.depthLeft ?? 0) < BeamGhostEngine.refillThresholdChars
+        let atSentenceEnd: Bool = {
+            guard let s = best?.surfaceSuffix.trimmingCharacters(in: .whitespacesAndNewlines),
+                  let last = s.last else { return false }
+            return ".!?".contains(last)
+        }()
+        if bestShallow && !atSentenceEnd {
+            if reserve.contains(where: { $0.seqId >= 0 }) {
+                refillSurvivors()
+                let ghost = bestReserveGhost()
+                let ms = Int(Date().timeIntervalSince(start) * 1000)
+                return AdvanceResult(ghost: ghost, kind: .refill, elapsedMillis: ms, survivors: reserve.count)
+            } else {
+                // Toutes gelées → re-beam pour régénérer la continuation.
+                let newPrompt = reservePrompt + reserveTypedSoFar
+                resetSeqPool()
+                let r = withConfigWidth(missWidth) {
+                    generateBeam(prompt: newPrompt, requiredPrefix: requiredPrefixForMiss,
+                                 captureReserve: true)
+                }
+                let ms = Int(Date().timeIntervalSince(start) * 1000)
+                return AdvanceResult(ghost: r.best?.ghost ?? "", kind: .refill,
+                                     elapsedMillis: ms, survivors: reserve.count)
+            }
         }
 
         // ── HIT : zéro decode, le ghost est le reste du suffixe pré-calculé ──
@@ -1163,11 +1207,18 @@ public actor BeamGhostEngine {
         return AdvanceResult(ghost: ghost, kind: .hit, elapsedMillis: ms, survivors: reserve.count)
     }
 
-    /// Le ghost à afficher : le suffixe restant du MEILLEUR survivant (plus haut
-    /// totalLogprob — la réserve sort triée du beam, mais le drop/refill peut
-    /// réordonner ; on re-classe par log-prob cumulée).
+    /// Le ghost à afficher : le suffixe restant du MEILLEUR survivant, classé par
+    /// score NORMALISÉ par longueur (cohérent avec le seed ; le drop/refill peut
+    /// réordonner). Sans normalisation, on re-préférerait le suffixe le plus court.
     private func bestReserveGhost() -> String {
-        reserve.max(by: { $0.totalLogprob < $1.totalLogprob })?.remainingGhost ?? ""
+        reserve.max(by: { reserveScore($0) < reserveScore($1) })?.remainingGhost ?? ""
+    }
+
+    /// Score d'une branche de réserve, normalisé par longueur via
+    /// `config.positionExponent` (miroir de `Branch.score`) — `totalLogprob /
+    /// pow(nbTokens, exponent)`. À exponent 0 ⇒ somme pure (court-biaisé).
+    private func reserveScore(_ r: ReservedBranch) -> Double {
+        r.totalLogprob / pow(Double(max(1, r.tokens.count)), config.positionExponent)
     }
 
     /// Re-décode GREEDY quelques tokens sur chaque survivant — uniquement en

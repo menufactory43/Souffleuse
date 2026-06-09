@@ -96,18 +96,14 @@ final class ModelRuntime {
     /// COÛT connu (spike) : un 2ᵉ chargement du même GGUF (poids ~1 Go dupliqués) ;
     /// acceptable derrière le flag, optimisable plus tard en partageant le model
     /// handle (un seul `llama_model`, deux contextes).
-    let beamEngine = BeamGhostEngine(config: .ghostCoreDefault)
+    let beamEngine = BeamGhostEngine(config: .ghostCore())
+
+    /// Largeur K effective du beam (env-aware via `ghostCore()`), pour le mid-mot.
+    private let beamWidth = BeamConfig.ghostCore().maxSearchWidth
 
     /// True once the GGUF is loaded into the beam engine (only attempted when
     /// `beamCoreEnabled`). Gates `generateGhostBeam`.
     private(set) var beamReady = false
-
-    /// La queue (`userTail`) à laquelle la RÉSERVE du beam est actuellement
-    /// attachée. Vide ⇒ pas de réserve vivante (prochain ghost = re-seed froid).
-    /// Mis à jour par `generateGhostBeam` à chaque appel (avant le `await`), remis
-    /// à "" par `clearBeamReserve`. C'est la source de vérité du reuse HIT/MISS :
-    /// une frappe = extension d'UN char de cette queue ⇒ `advance`, sinon re-seed.
-    private var beamReserveTail: String = ""
 
     /// Plancher dico mid-mot (flag `MW_DICO_FLOOR`). `NSSpellChecker` via
     /// `WordCompleter` : complète le mot EN COURS quand le gradient d'engagement
@@ -269,7 +265,6 @@ final class ModelRuntime {
         if beamReady {
             await beamEngine.unload()
             beamReady = false
-            beamReserveTail = ""
         }
         let ok = await llamaEngine.load(modelPath: ggufPath, contextTokens: 4096)
         llamaReady = ok
@@ -320,7 +315,6 @@ final class ModelRuntime {
         // sinon le contexte beam pointerait un modèle déjà libéré.
         await beamEngine.unload()
         beamReady = false
-        beamReserveTail = ""
         await llamaEngine.unload()
         llamaReady = false
         // Drop le container MLX : seul son tokenizer sert (au rebuild n-gram /
@@ -834,83 +828,84 @@ final class ModelRuntime {
     ///   perd en cohérence). Le `routeInstant` reste DEVANT pour le rappel.
     ///
     /// Post-filtré par `beamPostFilter` (singleLine, dédup, séparateur, écho
-    /// positionnel, coupe-clause, word-cap) — la même garde de sortie que le
-    /// long-ghost. Réutilise `MidWordEscalationResult` pour un call-site PVM
-    /// commun (show/word/reason).
+    /// positionnel, word-cap) puis par les deux gardes de phrase. Réutilise
+    /// `MidWordEscalationResult` pour un call-site PVM commun (show/word/reason).
     ///
-    /// **Reuse (HIT/REFILL/MISS).** `beamReserveTail` = la queue à laquelle la
-    /// RÉSERVE du moteur est attachée. Si la frappe courante est une extension
-    /// d'UN caractère de cette queue → `advance(typedChar:)` (HIT = avance de
-    /// pointeur, **0 décode** ; REFILL = top-up court ; MISS = re-beam). Sinon
-    /// (1ᵉʳ paint, saut, backspace, frappe interleavée par un hit instant) →
-    /// `ghostWithReserve` (re-seed froid). `beamReserveTail` est réécrit AVANT le
-    /// `await` : deux frappes consécutives s'enchaînent dans l'ordre (advance n,
-    /// puis f) et tout skip/cancel retombe proprement sur le re-seed froid (la
-    /// réserve du moteur se re-synchronise alors via `seq_rm(-1)` au seed).
-    /// **Hold-stale** : le re-beam MISS se fait À L'INTÉRIEUR de `advance`, donc
-    /// l'ancien ghost reste affiché pendant les ~237 ms (PVM ne blanke pas avant),
-    /// puis swap — pas de flicker.
+    /// **Génération fraîche glissante** (décision UX) : chaque frappe (débouncée)
+    /// régénère une fenêtre de `maxWords` mots DEPUIS tout le texte tapé — pas de
+    /// réserve pré-calculée. La fenêtre glisse en avant et reste TOUJOURS
+    /// conditionnée sur ce que l'utilisateur a réellement tapé. (Le reuse
+    /// HIT/REFILL/MISS de la réserve n'amortissait quasi pas en frappe libre — 13 %
+    /// de HIT — et n'allongeait pas le ghost ni ne re-conditionnait sur le tapé ;
+    /// abandonné ici, le code moteur reste dormant sous le flag.)
+    ///
+    /// Deux gardes de PHRASE :
+    ///  • **G1 (fin de phrase)** : si le ghost contient un `.` `!` `?`, on NE
+    ///    propose RIEN — on ne met pas la fin de phrase dans la bouche de
+    ///    l'utilisateur (géré dans `beamPostFilter`).
+    ///  • **G2 (reprise après le point)** : tant que la PHRASE EN COURS (texte
+    ///    après le dernier `.!?`) a moins de `beamMinSentenceLetters` lettres, on
+    ///    se tait. Juste après un point ⇒ silence ; on reprend dès que l'utilisateur
+    ///    a amorcé la nouvelle phrase (le modèle a alors un vrai contexte).
     func generateGhostBeam(request: PredictRequest) async -> MidWordEscalationResult? {
         guard beamReady else { return nil }
         let userTail = request.userTail
+
+        // G2 — reprise après le point : pas de proposition tant que la phrase en
+        // cours n'est pas amorcée (≥ beamMinSentenceLetters lettres après le dernier
+        // terminateur). Couvre « on reprend quand l'utilisateur a retapé quelques
+        // lettres après le point » SANS coût LLM.
+        guard Self.currentSentenceLetterCount(userTail) >= Self.beamMinSentenceLetters else {
+            return MidWordEscalationResult(show: false, word: "", reason: "beam-newsentence")
+        }
+
         let partial = OutputFilter.trailingPartialWord(userTail)
         let isBoundary = partial.isEmpty
             || SuggestionPolicy.defaultPartialWordIsComplete(userTail)
         let requiredPrefix = isBoundary ? "" : partial
         // Mid-mot → K plein (la contrainte trie) ; frontière → K=1 (≡ greedy).
-        let width = isBoundary ? 1 : BeamConfig.ghostCoreDefault.maxSearchWidth
+        let width = isBoundary ? 1 : beamWidth
 
-        // La frappe est-elle une extension d'UN caractère de la queue de la réserve ?
-        let isAdvance = !beamReserveTail.isEmpty
-            && userTail.count == beamReserveTail.count + 1
-            && userTail.hasPrefix(beamReserveTail)
-        let typedChar = userTail.last
-        // Attache la réserve à CETTE queue (sync, avant toute suspension `await`).
-        beamReserveTail = userTail
-
+        // Prompt = contexte PROSE (« Contexte: » persona + ctxPrefix app/fenêtre/OCR,
+        // prose que le base/PT CONTINUE bien) + tout le texte avant curseur. EXCLUS :
+        // exemples few-shot (pollueur prouvé), annotation `Champ:`, FIM. `system` /
+        // `afterCursor` sont ignorés par le builder.
         let prompt = ModelRuntime.buildLlamaPrompt(
-            system: request.systemMessage,
-            customInstr: request.customInstr,
-            ctxPrefix: request.ctxPrefix,
-            fieldContext: request.fieldContextSlot,
-            afterCursor: request.afterCursorSlot,
-            beforeCursor: request.llmTail,
-            examples: request.examplesBlock
+            system: "", customInstr: request.customInstr, ctxPrefix: request.ctxPrefix,
+            fieldContext: "", afterCursor: "", beforeCursor: request.llmTail
         )
 
         // GPU gate (parité translation, TRANSLATION-SPEC §2.9) autour du beam.
         GpuGate.shared.ghostBegan()
-        let rawGhost: String
-        let kindReason: String
-        if isAdvance, let ch = typedChar {
-            let r = await beamEngine.advance(
-                typedChar: ch, requiredPrefixForMiss: requiredPrefix, missWidth: width)
-            rawGhost = r.ghost
-            kindReason = "beam-\(r.kind)"   // beam-hit / beam-refill / beam-miss
-        } else {
-            let res = await beamEngine.ghostWithReserve(
-                prompt: prompt, requiredPrefix: requiredPrefix, maxWidth: width)
-            rawGhost = res.best?.ghost ?? ""
-            kindReason = "beam-seed"
-        }
+        let result = await beamEngine.ghost(prompt: prompt, requiredPrefix: requiredPrefix, maxWidth: width)
         GpuGate.shared.ghostEnded()
         if Task.isCancelled { return nil }
+        Log.info(.predictor, "ghost_beam_seed_ms", count: result.elapsedMillis)
 
         let caretAfterSpace = request.llmTail.last == " " || request.llmTail.last == "\t"
         let ghost = Self.beamPostFilter(
-            rawGhost: rawGhost, isBoundary: isBoundary, caretAfterSpace: caretAfterSpace,
+            rawGhost: result.best?.ghost ?? "", isBoundary: isBoundary, caretAfterSpace: caretAfterSpace,
             userTail: userTail, maxWords: request.maxWords)
+        Log.info(.predictor, "ghost_beam_words",
+                 count: ghost.split(whereSeparator: { $0.isWhitespace }).count)
         return MidWordEscalationResult(show: !ghost.isEmpty, word: ghost,
-                                       reason: ghost.isEmpty ? "\(kindReason)-gated" : kindReason)
+                                       reason: ghost.isEmpty ? "beam-gated" : "beam")
     }
 
-    /// Vide la réserve du beam et oublie sa queue d'attache → le prochain ghost
-    /// re-seed froid. À appeler quand on abandonne une session de frappe (unload,
-    /// swap de modèle). Sûr hors flag (no-op si rien chargé).
-    func clearBeamReserve() async {
-        await beamEngine.clearReserve()
-        beamReserveTail = ""
+    /// Nombre de lettres de la PHRASE EN COURS = depuis le dernier terminateur de
+    /// phrase (`.` `!` `?`) jusqu'à la fin du texte. Pilote G2 : juste après un
+    /// point ⇒ 0 ⇒ silence ; on reprend dès quelques lettres de la nouvelle phrase.
+    nonisolated static func currentSentenceLetterCount(_ text: String) -> Int {
+        var count = 0
+        for ch in text.reversed() {
+            if ".!?".contains(ch) { break }
+            if ch.isLetter { count += 1 }
+        }
+        return count
     }
+
+    /// « Quelques lettres » de G2 — seuil d'amorce d'une nouvelle phrase.
+    nonisolated static let beamMinSentenceLetters = 3
 
     /// Garde de sortie du ghost beam — MIROIR des post-filtres du long-ghost
     /// (singleLine, dédup mot répété, séparateur d'espace, écho positionnel,
@@ -939,7 +934,11 @@ final class ModelRuntime {
             let run = OutputFilter.longestVerbatimRunWords(ghost: result, tail: userTail)
             if run >= SuggestionPolicy.Tuning.echoMinVerbatimRunWords { return "" }
         }
-        // Coupe à la 1ʳᵉ frontière de clause (newline . ! ? ; :), bornes incluses.
+        // Coupe à la 1ʳᵉ frontière de clause/phrase (newline . ! ? ; :), bornes
+        // INCLUSES — exactement « comme d'hab » (long-ghost) : on montre la suite
+        // jusqu'à la fin de phrase comprise, on ne va pas AU-DELÀ. Ne pas proposer
+        // la phrase SUIVANTE est le rôle de G2 (reprise après le point), pas de
+        // supprimer la complétion en cours.
         if let idx = result.firstIndex(where: { "\n.!?;:".contains($0) }) {
             result = String(result[...idx])
         }
