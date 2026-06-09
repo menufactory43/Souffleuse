@@ -877,11 +877,11 @@ final class PredictorViewModel {
                         self.suggestion = word
                         self.predictedForPrefix = forPrefix
                         self.suggestionSource = .llm
-                        // Living ghost : sous le beam-core, c'est le REFILL natif de
-                        // la réserve (advance → top-up) qui prolonge le ghost, PAS le
-                        // rolling-refill greedy. On le COUPE (`false`) pour qu'il
-                        // n'appende pas du texte greedy par-dessus le ghost beam.
-                        self.ghostRollingAllowed = false
+                        // Living ghost : le rolling refill est AUTORISÉ sous beam-core
+                        // — il passe désormais par le BEAM (`extendGhostBeam`), pas le
+                        // greedy, donc cohérent avec le ghost beam. C'est lui qui
+                        // recharge la fenêtre pendant la consommation (le « live »).
+                        self.ghostRollingAllowed = true
                         // Alimente le CompletionCache (couche instant + undo-as-ghost),
                         // comme le fait le long-ghost.
                         self.cache.store(prefix: userTail, suggestion: word)
@@ -1289,7 +1289,12 @@ final class PredictorViewModel {
             basePromptText: llmTail
         )
 
-        let extension_ = await runtime.extendGhost(request: request, maxWords: maxWords)
+        // Sous le beam-core, le refill passe par le BEAM (continuation fraîche
+        // conditionnée sur tout le texte visible), pas le greedy — cohérent avec le
+        // ghost beam et c'est lui qui garde le living ghost vivant pendant la conso.
+        let extension_ = SuggestionPolicy.Tuning.beamCoreEnabled
+            ? await runtime.extendGhostBeam(request: request, maxWords: maxWords)
+            : await runtime.extendGhost(request: request, maxWords: maxWords)
         // NOTE : on ne re-checke PLUS `planner.isCurrent(myGeneration)` ici. Ce garde
         // jetait des refills VALIDES : dès que tu finis de consommer un mot, `predict()`
         // bumpe le compteur de génération → l'extension (pourtant pour le bon bord droit)

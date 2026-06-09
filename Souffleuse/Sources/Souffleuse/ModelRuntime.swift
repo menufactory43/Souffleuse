@@ -1052,6 +1052,32 @@ final class ModelRuntime {
     /// (singleLine, coupe à la 1ʳᵉ frontière de clause, cap à `maxWords` mots
     /// entiers, espace de tête préservé pour se concaténer proprement sur le
     /// reste). Renvoie `nil`/vide si rien d'exploitable.
+    /// Variante BEAM du refill glissant (sous `SOUFFLEUSE_BEAM_CORE`) : régénère la
+    /// continuation DEPUIS le texte visible courant (`committed + remainder`, porté
+    /// par `request.llmTail`) — donc conditionnée sur TOUT ce qui est tapé/affiché,
+    /// pas un top-up greedy stale. Décode libre K=1 (continuation après une
+    /// frontière propre = la fin du reste), post-filtré comme le ghost beam (G1
+    /// coupe-clause inclusive → ne dépasse pas la fin de phrase ; espace de tête
+    /// pour la concaténation). C'est ce refill qui MAINTIENT le living ghost vivant
+    /// pendant la consommation (sinon la fenêtre fond à zéro → « pas live »).
+    /// Renvoie le texte à APPENDRE au reste, ou nil si rien d'exploitable.
+    func extendGhostBeam(request: PredictRequest, maxWords: Int) async -> String? {
+        guard beamReady else { return nil }
+        let prompt = BeamGhostShaper.buildPrompt(
+            customInstr: request.customInstr, ctxPrefix: request.ctxPrefix, llmTail: request.llmTail)
+        GpuGate.shared.ghostBegan()
+        let result = await beamEngine.ghost(prompt: prompt, requiredPrefix: "", maxWidth: 1)
+        GpuGate.shared.ghostEnded()
+        if Task.isCancelled { return nil }
+        var ext = BeamGhostShaper.beamPostFilter(
+            rawGhost: result.best?.ghost ?? "", isBoundary: true, caretAfterSpace: false,
+            userTail: request.userTail, maxWords: maxWords)
+        guard !ext.isEmpty else { return nil }
+        if ext.first != " " { ext = " " + ext }   // espace de tête pour se concaténer au reste
+        Log.info(.predictor, "ghost_beam_refill_ms", count: result.elapsedMillis)
+        return ext
+    }
+
     func extendGhost(request: PredictRequest, maxWords: Int) async -> String? {
         guard llamaReady else { return nil }
         let prompt = ModelRuntime.buildLlamaPrompt(
