@@ -14,6 +14,8 @@ let package = Package(
         .executable(name: "SouffleuseOCRAblation", targets: ["SouffleuseOCRAblation"]),
         .executable(name: "SouffleuseMidwordEval", targets: ["SouffleuseMidwordEval"]),
         .executable(name: "SouffleuseIntentionEval", targets: ["SouffleuseIntentionEval"]),
+        .executable(name: "SouffleuseBeamWidthSweepEval", targets: ["SouffleuseBeamWidthSweepEval"]),
+        .executable(name: "SouffleuseAfterSpaceEval", targets: ["SouffleuseAfterSpaceEval"]),
         .executable(name: "SouffleuseRecallEval", targets: ["SouffleuseRecallEval"]),
         .executable(name: "SouffleuseInjectionEval", targets: ["SouffleuseInjectionEval"]),
         .executable(name: "SouffleuseAXProbe", targets: ["SouffleuseAXProbe"]),
@@ -354,6 +356,24 @@ let package = Package(
         ),
         .executableTarget(
             name: "SouffleuseIntentionEval",
+            dependencies: [
+                "SouffleuseCore",
+                "SouffleuseLlama",
+                "SouffleuseLog",
+                "SouffleuseTyping",
+            ]
+        ),
+        .executableTarget(
+            name: "SouffleuseBeamWidthSweepEval",
+            dependencies: [
+                "SouffleuseCore",
+                "SouffleuseLlama",
+                "SouffleuseLog",
+                "SouffleuseTyping",
+            ]
+        ),
+        .executableTarget(
+            name: "SouffleuseAfterSpaceEval",
             dependencies: [
                 "SouffleuseCore",
                 "SouffleuseLlama",
