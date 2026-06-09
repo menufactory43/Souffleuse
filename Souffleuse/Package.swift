@@ -15,6 +15,7 @@ let package = Package(
         .executable(name: "SouffleuseMidwordEval", targets: ["SouffleuseMidwordEval"]),
         .executable(name: "SouffleuseIntentionEval", targets: ["SouffleuseIntentionEval"]),
         .executable(name: "SouffleuseBeamGhostProbe", targets: ["SouffleuseBeamGhostProbe"]),
+        .executable(name: "SouffleuseParityEval", targets: ["SouffleuseParityEval"]),
         .executable(name: "SouffleuseAfterSpaceEval", targets: ["SouffleuseAfterSpaceEval"]),
         .executable(name: "SouffleuseRecallEval", targets: ["SouffleuseRecallEval"]),
         .executable(name: "SouffleuseInjectionEval", targets: ["SouffleuseInjectionEval"]),
@@ -365,6 +366,15 @@ let package = Package(
         ),
         .executableTarget(
             name: "SouffleuseBeamGhostProbe",
+            dependencies: [
+                "SouffleuseCore",
+                "SouffleuseLlama",
+                "SouffleuseLog",
+                "SouffleuseTyping",
+            ]
+        ),
+        .executableTarget(
+            name: "SouffleuseParityEval",
             dependencies: [
                 "SouffleuseCore",
                 "SouffleuseLlama",
