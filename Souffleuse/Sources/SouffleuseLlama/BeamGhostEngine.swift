@@ -73,37 +73,49 @@ public struct BeamConfig: Sendable {
         maxWords: 4
     )
 
-    /// Config du **cœur de génération de prod** (`SOUFFLEUSE_BEAM_CORE`). Seule
-    /// différence avec `cotypistDefault` : K=3 au lieu de 9. Le sweep
-    /// `SouffleuseBeamWidthSweepEval` a prouvé un plateau dès K=3 (75 % intention,
-    /// accord 9/10, cold-lat 237 ms) — K≥4 paie la latence pour ~0 gain, et la
-    /// contrainte `requiredPrefix` fait l'essentiel (K=1 = 70 %). On garde
+    /// Config du **cœur de génération de prod** (`SOUFFLEUSE_BEAM_CORE`).
+    /// K=2 · maxTokens=12 · maxWords=3 — mesuré par SouffleuseParityEval
+    /// (PARITY-FINDINGS.md §5, 1087 frappes, après le fix de routage mid-mot) :
+    ///
+    ///   | config            | lat moy/p50 | KTC ≤1/≤3 | jamais | word-accept |
+    ///   | K=3·tok14·mots4   | 216 / 209   | 55 / 85 % | 7 %    | 52 %        |
+    ///   | K=2·tok12·mots3   | 125 / 114   | 58 / 82 % | 8 %    | 51 %        |
+    ///
+    /// → latence −42 % pour −3,5 % relatif de KTC≤3 et −1,9 % de word-accept
+    /// (dans le budget « ≤5 % de validité ») ; le hit à 1 lettre MONTE même de
+    /// 3 pts (moins de branches = moins de candidats exotiques en tête). La
+    /// contrainte `requiredPrefix` fait l'essentiel du travail, K n'affine que
+    /// le ranking (sweep : K=1 70 %, K=2 72 %, K=3 75 % en one-shot). On garde
     /// `cotypistDefault` (K=9) INTACT comme reconstruction fidèle + baseline des
     /// evals ; ce profil-ci est celui que `ModelRuntime` charge en prod.
     public static let ghostCoreDefault = BeamConfig(
-        maxSearchWidth: 3,
-        maxResultWidth: 3,
+        maxSearchWidth: 2,
+        maxResultWidth: 2,
         minBranchProbability: 0.05,
         relativeCutoff: 1e-10,
         // Normalisation par longueur. À 0.0 le score = somme PURE des log-probs →
         // chaque token ajouté rend le score plus négatif → le ranking pénalise
         // mécaniquement les continuations longues (le beam préfère le court/tronqué).
         // L'eval ne mesurait que le hit@1 du MOT (court, insensible) ; la suite
-        // 2-4 mots a besoin de length-norm pour être classée équitablement. 0.7 =
+        // 2-3 mots a besoin de length-norm pour être classée équitablement. 0.7 =
         // milieu classique (façon GNMT). Override live via `SOUFFLEUSE_BEAM_EXP`.
         positionExponent: 0.7,
-        maxTokens: 14,
-        maxWords: 4
+        maxTokens: 12,
+        maxWords: 3
     )
 
     /// Config du cœur de prod avec overrides d'ENVIRONNEMENT (A/B sans rebuild) :
-    /// `SOUFFLEUSE_BEAM_EXP` (Double, length-norm) et `SOUFFLEUSE_BEAM_K` (Int). Part
-    /// de `ghostCoreDefault`. Lu une fois par `ModelRuntime` au lancement.
+    /// `SOUFFLEUSE_BEAM_EXP` (Double, length-norm), `SOUFFLEUSE_BEAM_K` (Int),
+    /// `SOUFFLEUSE_BEAM_MAXTOK` (Int, budget tokens/candidat) et
+    /// `SOUFFLEUSE_BEAM_MAXWORDS` (Int, cap mots du ghost). Part de
+    /// `ghostCoreDefault`. Lu une fois par `ModelRuntime` au lancement.
     public static func ghostCore() -> BeamConfig {
         var c = ghostCoreDefault
         let env = ProcessInfo.processInfo.environment
         if let s = env["SOUFFLEUSE_BEAM_EXP"], let v = Double(s) { c.positionExponent = v }
         if let s = env["SOUFFLEUSE_BEAM_K"], let v = Int(s), v > 0 { c.maxSearchWidth = v; c.maxResultWidth = v }
+        if let s = env["SOUFFLEUSE_BEAM_MAXTOK"], let v = Int(s), v > 0 { c.maxTokens = v }
+        if let s = env["SOUFFLEUSE_BEAM_MAXWORDS"], let v = Int(s), v > 0 { c.maxWords = v }
         return c
     }
 
