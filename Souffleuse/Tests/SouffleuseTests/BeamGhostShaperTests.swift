@@ -60,6 +60,29 @@ struct BeamGhostShaperTests {
         #expect(c.width == 1)
     }
 
+    @Test func config_dicoValidFragmentStaysConstrained() {
+        // « co » est un mot valide pour isValidWord (permissif FR+EN), mais
+        // l'utilisateur vise « confirme » : la contrainte ne doit PAS céder au
+        // juge dico (PARITY-FINDINGS : 41 % des frappes mid-mot misroutées,
+        // « proc » → « proc édure », dérive de langue sur « Je vo »).
+        for tail in ["Je vous co", "Je vo", "mardi proc", "votre dispo"] {
+            let c = BeamGhostShaper.beamConfigChoice(userTail: tail, beamWidth: 3)
+            #expect(c.isBoundary == false, "\(tail) doit rester contraint")
+            #expect(c.requiredPrefix == OutputFilter.trailingPartialWord(tail))
+            #expect(c.width == 3)
+        }
+    }
+
+    @Test func config_completeWordKeepsConstraintToo() {
+        // Mot réellement complet (« confirmer ») : contraint AUSSI — le beam
+        // peut terminer le mot par un espace (« confirmer le… »), la contrainte
+        // interdit seulement d'abandonner le fragment tapé.
+        let c = BeamGhostShaper.beamConfigChoice(userTail: "Je vais confirmer", beamWidth: 3)
+        #expect(c.isBoundary == false)
+        #expect(c.requiredPrefix == "confirmer")
+        #expect(c.width == 3)
+    }
+
     // MARK: - Prompt : slots PROSE, pas de few-shot / FIM / Champ
 
     @Test func prompt_slotsAreProseOnly() {
