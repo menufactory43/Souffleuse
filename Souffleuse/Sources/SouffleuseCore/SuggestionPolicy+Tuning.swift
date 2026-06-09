@@ -307,6 +307,19 @@ extension SuggestionPolicy {
             ProcessInfo.processInfo.environment["SOUFFLEUSE_BEAM_CORE"] != nil
         }
 
+        /// `SOUFFLEUSE_BEAM_RESERVE` — par-dessus `SOUFFLEUSE_BEAM_CORE` : active
+        /// la **réserve de branches** entre frappes (`ghostWithReserve` +
+        /// `advance(typedChar:)`). La frappe qui suit la tête du ghost devient un
+        /// HIT (avance de pointeur, 0 décode, ~0 ms) ; une divergence re-beame
+        /// (MISS, coût froid). Mesuré post-fix-routage : 74-76 % de HIT, coût
+        /// amorti ~58 ms/frappe vs ~125 régénérés (SouffleuseBeamAmortizedEval +
+        /// PARITY-FINDINGS). ABSENT (défaut) ⇒ génération fraîche glissante
+        /// actuelle, byte-identique.
+        public static var beamReserveEnabled: Bool {
+            beamCoreEnabled
+                && ProcessInfo.processInfo.environment["SOUFFLEUSE_BEAM_RESERVE"] != nil
+        }
+
         /// `SOUFFLEUSE_GHOST_STREAM` — peint le longghost AU FIL des tokens (TTFT ~20 ms)
         /// au lieu d'attendre la génération complète (~300 ms, que la frappe suivante
         /// annulerait). OFF par défaut ⇒ one-shot d'origine, byte-identique.
