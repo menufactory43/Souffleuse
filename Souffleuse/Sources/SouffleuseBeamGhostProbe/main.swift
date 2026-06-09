@@ -63,13 +63,14 @@ func resolveGGUF() -> String? {
 // ── Scénarios de frappe FR réalistes (mid-mot, après-espace, multi-phrases) ──
 // Choisis pour exercer : complétions mid-mot longues, frontières après-espace,
 // ENCHAÎNEMENTS de phrases (G2 après un point), et glissement sur 2-3 phrases.
-let scenarios: [String] = [
+let scenarios: [String] = (env["PROBE_PHRASE"].map { [$0] }) ?? [
     "Je vous confirme la disponibilité du produit pour la livraison de mardi prochain.",
     "Bonjour Madame, suite à notre échange je me permets de revenir vers vous.",
     "Merci beaucoup pour hier soir. C'était vraiment une super soirée.",
     "Le calcul de la plus-value tient compte de votre prix total d'acquisition.",
     "Pensez à déclarer vos transactions avant la date limite. Le formulaire est en ligne.",
     "On se voit demain devant le cinéma. N'oublie pas les billets.",
+    "Le ghost s'est présenté comme un technicien de l'entreprise.",
 ]
 // Les 4 phrases « représentatives » pour le balayage (couvrent les 4 registres).
 let sweepScenarios = Array(scenarios.prefix(4))

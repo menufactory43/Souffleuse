@@ -703,6 +703,13 @@ public actor BeamGhostEngine {
     /// est ≥ `minProb` (les graines de branche), triés par log-prob décroissante,
     /// bornés à `maxSearchWidth` (jamais plus de fan-out que K). EOG inclus tel
     /// quel (un EOG très probable terminera la branche dans `extend`).
+    ///
+    /// **Plancher top-1** : si AUCUN token n'atteint `minProb` (distribution
+    /// étalée — typique après une virgule : « et/il/qui/mais… » chacun < 5 %), on
+    /// renvoie quand même le MEILLEUR token (décode greedy). Sinon la continuation
+    /// LIBRE (au-delà du `requiredPrefix`) mourrait de faim et le ghost s'arrêterait
+    /// au 1ᵉʳ mot (« entreprise, » → rien) au lieu de dérouler 2-3 mots. `minProb`
+    /// ne pilote alors plus QUE le fan-out (combien de branches), pas l'arrêt.
     private func topNextTokens(logits: UnsafeMutablePointer<Float>, nVocab: Int, minProb: Double) -> [NextToken] {
         // max pour la stabilité numérique de la softmax (SIMD).
         var maxLogit: Float = -Float.greatestFiniteMagnitude
@@ -718,11 +725,19 @@ public actor BeamGhostEngine {
         // Seuil en log-prob : log(minProb). Un token passe s'il a prob ≥ minProb.
         let logThresh = log(minProb)
         var out: [NextToken] = []
+        var bestId: Int32 = -1
+        var bestLp = -Double.greatestFiniteMagnitude
         for i in 0..<nVocab {
             let l = logits[i]
             if l <= -Float.greatestFiniteMagnitude { continue }
             let lp = Double(l - maxLogit) - logZ   // log P(token)
+            if lp > bestLp { bestLp = lp; bestId = Int32(i) }   // plancher greedy
             if lp >= logThresh { out.append(NextToken(tokenId: Int32(i), logProb: lp)) }
+        }
+        // Plancher : rien au-dessus du seuil → on garde le meilleur token (greedy)
+        // pour que la continuation libre ne s'arrête pas net.
+        if out.isEmpty {
+            return bestId >= 0 ? [NextToken(tokenId: bestId, logProb: bestLp)] : []
         }
         out.sort { $0.logProb > $1.logProb }
         if out.count > config.maxSearchWidth { out.removeLast(out.count - config.maxSearchWidth) }
