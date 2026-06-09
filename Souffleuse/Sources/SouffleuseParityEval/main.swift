@@ -43,6 +43,10 @@ import SouffleuseTyping
 //   PARITY_SENTENCES     nombre de phrases (défaut toutes).
 //   PARITY_VERBOSE=1     trace par préfixe (défaut résumé seul).
 //   PARITY_JSONL         chemin de dump JSONL par step (optionnel).
+//   PARITY_BEAM_MIDWORD=force  DIAGNOSTIC (éval seulement, pas prod) : tout
+//                        partiel non vide → requiredPrefix + K plein, même si
+//                        `defaultPartialWordIsComplete` le juge « mot complet ».
+//                        Mesure le plafond de gain d'un fix du routage mid-mot.
 // ─────────────────────────────────────────────────────────────────────────────
 
 let env = ProcessInfo.processInfo.environment
@@ -320,6 +324,7 @@ guard let gguf = resolveGGUF() else {
     exit(1)
 }
 
+let forceMidword = (env["PARITY_BEAM_MIDWORD"] ?? "").lowercased() == "force"
 let beamConfig = BeamConfig.ghostCore()
 let beamWidth = beamConfig.maxSearchWidth
 let beamMaxWords = beamConfig.maxWords
@@ -340,7 +345,13 @@ func runBeamEngine() async -> [SentenceRun] {
             if !armed {
                 return Step(i: userTail.count, ghost: "", ms: 0, g2: true, boundary: partial.isEmpty)
             }
-            let choice = BeamGhostShaper.beamConfigChoice(userTail: userTail, beamWidth: beamWidth)
+            var choice = BeamGhostShaper.beamConfigChoice(userTail: userTail, beamWidth: beamWidth)
+            // DIAGNOSTIC : ne jamais céder la contrainte mid-mot au juge « mot
+            // complet » — quantifie le plafond du fix de routage (~41% des frappes
+            // mid-mot partent en décode libre K=1 + espace forcé en prod).
+            if forceMidword, !partial.isEmpty {
+                choice = (requiredPrefix: partial, width: beamWidth, isBoundary: false)
+            }
             let prompt = BeamGhostShaper.buildPrompt(customInstr: "", ctxPrefix: "", llmTail: userTail)
             let result = await beam.ghost(prompt: prompt, requiredPrefix: choice.requiredPrefix,
                                           maxWidth: choice.width)
