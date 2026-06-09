@@ -516,6 +516,15 @@ final class PredictorViewModel {
             return true
         }()
 
+        // ── Cœur LLM beam (flag SOUFFLEUSE_BEAM_CORE) ───────────────────────
+        // Le beam contraint (K=3, requiredPrefix) remplace le greedy long-ghost /
+        // l'escalade / le streaming comme SEUL chemin LLM. Calculé ici sur le
+        // MainActor pour lire `runtime.beamReady` : faux si le flag est absent OU
+        // si le beam n'a pas chargé → fallback SÛR vers le chemin actuel (jamais
+        // de ghost muet sur un échec de chargement). `routeInstant` (L0/L1) reste
+        // DEVANT et prioritaire — le beam ne tire que quand l'instant est vide.
+        let useBeamCore = SuggestionPolicy.Tuning.beamCoreEnabled && runtime.beamReady
+
         // LLM gate : need at least 3 chars of trimmed userTail AND a
         // loaded runtime container.
         guard userTail.trimmingCharacters(in: .whitespaces).count >= 3,
@@ -846,6 +855,58 @@ final class PredictorViewModel {
                 examplesBlock: examplesBlock,
                 basePromptText: basePromptText
             )
+
+            // ── Cœur LLM beam (flag SOUFFLEUSE_BEAM_CORE) ───────────────────
+            // Sous le flag, le beam est le SEUL chemin LLM : on court-circuite
+            // l'escalade / long-ghost / streaming. `routeInstant` reste devant —
+            // si un ghost instant (L0/L1) est déjà affiché (`!instantGhost.isEmpty`)
+            // on ne le clobber JAMAIS avec le LLM (parité long-ghost / §2). Sinon
+            // le beam génère (one-shot pour l'instant ; le reuse HIT/MISS viendra
+            // au commit 4). Le flag OFF (ou beam non chargé) rend `useBeamCore`
+            // faux → ce bloc est mort, chemin actuel byte-identique.
+            if useBeamCore {
+                guard instantGhost.isEmpty else { return }   // recall en avant : pas de LLM
+                let beam = await runtime.generateGhostBeam(request: request)
+                if Task.isCancelled { return }
+                await MainActor.run { [weak self] in
+                    guard let self, self.planner.isCurrent(myGeneration) else { return }
+                    if let beam, beam.show {
+                        let word = ModelRuntime.OutputFilter.normalizeFrenchTypography(beam.word)
+                        let score = SuggestionPolicy.score(source: .llm, ghost: beam.word, userTail: userTail)
+                        self.policy.applyGhost(beam.word, source: .llm, score: score, userTail: userTail)
+                        self.suggestion = word
+                        self.predictedForPrefix = forPrefix
+                        self.suggestionSource = .llm
+                        // `engagement: .plein` ⇒ rolling autorisé (living ghost).
+                        self.ghostRollingAllowed = beam.rollingAllowed
+                        // Alimente le CompletionCache (couche instant + undo-as-ghost),
+                        // comme le fait le long-ghost.
+                        self.cache.store(prefix: userTail, suggestion: word)
+                        Log.info(.predictor, "ghost_beam_core_shown", count: word.count)
+                        GhostInspector.shared.record(tail: userTail, verdict: .shown, source: .llm,
+                                                     reason: beam.reason, content: word, score: score)
+                    } else {
+                        // Rien à montrer : nettoie un ghost PÉRIMÉ d'une frappe
+                        // précédente (instantGhost est vide ici). Même garde que le
+                        // stale-clear du bloc de complétion du streaming.
+                        self.ghostRollingAllowed = true
+                        if Self.shouldClearStaleGhost(
+                            emittedGhost: false, instantGhost: instantGhost,
+                            displayedSuggestion: self.suggestion
+                        ) {
+                            Log.info(.predictor, "ghost_cleared_stale", count: self.suggestion.count)
+                            self.suggestion = ""
+                            self.predictedForPrefix = ""
+                            self.suggestionSource = .none
+                            self.policy.reset()
+                        }
+                        Log.info(.predictor, "ghost_beam_core_hidden")
+                        GhostInspector.shared.record(tail: userTail, verdict: .gated, source: .llm,
+                                                     reason: beam?.reason ?? "beam-nil", content: beam?.word ?? "(rien)")
+                    }
+                }
+                return
+            }
 
             // ── Frame C (F1) : escalade mid-mot — passe greedy + dico, HORS stream.
             // Court-circuite le streaming `onChunk` (qui referait `midword_block`) :
