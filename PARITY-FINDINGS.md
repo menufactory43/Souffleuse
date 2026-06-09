@@ -132,19 +132,50 @@ toujours disponibles (`SOUFFLEUSE_BEAM_K/MAXTOK/MAXWORDS/EXP`).
 **Diagnostic moteur** (agent d'analyse, BeamGhostEngine lu en entier) : le
 decode par étape EST bien batché en un seul `llama_decode` ; le ×3 de K=3 vs
 K=1 vient de (1) plus d'étapes (les K branches ne s'arrêtent pas ensemble),
-(2) softmax CPU scalaire O(262k) PAR branche et PAR étape (~0,9 ms/ligne),
-(3) lm_head ×K lignes, (4) overhead batch/étape. Leviers restants documentés,
-SANS perte de validité :
-- **Prefix-caching KV du prompt entre frappes** (seq 0, LCP tokens) : ~25 %
-  de gain en plus, byte-identique — mécanisme déjà validé côté greedy
-  (`KVCacheHolder`, tests KVCacheReuse).
-- **Softmax vectorisé** (`vvexpf`/`vDSP_sve`) : ~15 %, ordre du ranking
-  strictement préservé (logZ à quelques ulps près).
-- **Brancher la réserve `ghostWithReserve`/`advance`** déjà implémentée dans
-  le moteur mais non câblée par `ModelRuntime` : ~70 % amorti sur les HIT
-  (gros chantier, change le profil de fraîcheur du ghost).
+(2) softmax CPU scalaire O(262k) PAR branche et PAR étape, (3) lm_head ×K
+lignes, (4) overhead batch/étape.
 
-## 6. Artefacts
+## 6. Les trois leviers suivants — implémentés, mesurés, tranchés
+
+| levier | verdict | mesure |
+|---|---|---|
+| Softmax vectorisé Accelerate | **REJETÉ** | A/B neutre : 134/127 vs 133/125 ms — l'expf est déjà masqué par le GPU. Pas de complexité sans gain. |
+| **Prefix-caching KV du prompt** (commit `4d15e6e`) | **ADOPTÉ** (toujours actif) | ctx long (~210 tok, `PARITY_LONGCTX=1`) : 242→97 ms (−60 %) ; ctx court : −13/−18 %. Ghosts **byte-identiques** (289 frappes, 0 diff). |
+| **Réserve advance** (commit `049c1fe`, flag `SOUFFLEUSE_BEAM_RESERVE`) | **ADOPTÉ** (flag-gaté) | voir tableau ci-dessous. |
+
+**Réserve — frais vs réserve (15 phrases, 1087 frappes)** :
+
+| métrique | frais (prefix-cache) | réserve |
+|---|---|---|
+| latence moy / p50 / p95 | 106 / 91 / 218 | **44 / 0 / 164** |
+| ventilation | — | HIT 54 % à 0 ms · refill 18 % à 87 ms · miss 19 % à 101 ms · seed 2 % |
+| KTC ≤1 / ≤3 lettres | 58 / 82 % | **59 / 84 %** |
+| jamais juste | 8 % | 7 % |
+| stabilité k→k+1 | 100 % | 100 % |
+| word-accept | 51 % | 49 % (−3,9 % rel) |
+| mot entier deviné à 0 lettre (après-espace) | 31 % | **14 %** ← seul recul |
+| couverture | 95 % | 94 % |
+
+Le « 13 % de HIT » historique (cause de l'abandon en `0dd276b`) était un
+artefact du routage cassé : post-fix, le taux vérité-terrain est 76 % (43 %
+avant fix) et la machinerie en délivre 54 % de HIT purs + 18 % de refills.
+Le seul recul réel est le mot-suivant après-espace (la branche survivante
+traverse l'espace au lieu d'un re-décode frais) — si le ressenti le confirme,
+un re-seed forcé à la frappe d'espace est un petit changement local (coût :
+l'espace repasse à ~100 ms, les lettres restent à 0).
+
+**Trajectoire latence complète** (1087 frappes, vérité terrain) :
+216 ms (K=3, avant) → 125 (K=2·tok12·mots3) → 106 (prefix-cache KV) →
+**44 ms moyenne, p50 0 ms** (réserve). p95 : 440 → 164 ms.
+
+**Pour tester au clavier** :
+```bash
+launchctl setenv SOUFFLEUSE_BEAM_CORE 1
+launchctl setenv SOUFFLEUSE_BEAM_RESERVE 1
+open Souffleuse/build/Build/Products/Release/Souffleuse.app   # rebuild requis
+```
+
+## 7. Artefacts
 
 - Rapport prod : `/tmp/parity-eval-report.txt` · JSONL par frappe : `/tmp/parity-eval.jsonl`
 - Rapport diag : `/tmp/parity-eval-beamfix.txt` · JSONL : `/tmp/parity-eval-beamfix.jsonl`
