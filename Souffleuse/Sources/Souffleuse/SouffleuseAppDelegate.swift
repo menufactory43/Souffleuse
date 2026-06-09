@@ -2693,6 +2693,10 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// `partialAcceptedSoFar` inchangés, reste inchangé depuis le départ). Gardé
     /// contre les tempêtes par `ghostRefillInFlight` + une re-vérification de l'état.
     private func maybeSpawnRollingRefill(committedText: String, bundleID: String) {
+        // Sous le beam-core, le living ghost vient du REFILL natif de la réserve
+        // (advance → top-up) ; le rolling-refill GREEDY appenderait du texte greedy
+        // par-dessus le ghost beam (contamination). On le coupe entièrement.
+        guard !SuggestionPolicy.Tuning.beamCoreEnabled else { return }
         guard SuggestionPolicy.Tuning.midWordGhostRollingEnabled else { return }
         // Gradient d'engagement (flag MW_ENGAGEMENT) : le rolling ne roule que pour un
         // ghost de niveau PLEIN. PRUDENT (1 mot figé) interdit le refill. HORS flag,
