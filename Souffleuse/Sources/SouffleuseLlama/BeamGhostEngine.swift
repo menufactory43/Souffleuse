@@ -1075,7 +1075,22 @@ public actor BeamGhostEngine {
     ///
     /// `requiredPrefixForMiss` : le fragment mid-mot au moment d'un MISS (l'éval le
     /// passe ; vide en after-space).
-    public func advance(typedChar: Character, requiredPrefixForMiss: String = "") -> AdvanceResult {
+    /// Exécute `body` avec la largeur K de la config temporairement clampée à
+    /// `maxWidth` (≥1, ≤ K de chargement), puis restaurée. nil ⇒ K inchangé. Sûr
+    /// (actor sérialisé) ; le pool de seqIds dépend de `n_seq_max` au CHARGEMENT,
+    /// pas de cette largeur, donc clamper ne casse jamais le fork KV.
+    private func withConfigWidth<T>(_ maxWidth: Int?, _ body: () -> T) -> T {
+        guard let mw = maxWidth else { return body() }
+        let saved = config
+        let w = max(1, min(mw, saved.maxSearchWidth))
+        config.maxSearchWidth = w
+        config.maxResultWidth = w
+        defer { config = saved }
+        return body()
+    }
+
+    public func advance(typedChar: Character, requiredPrefixForMiss: String = "",
+                        missWidth: Int? = nil) -> AdvanceResult {
         let start = Date()
         guard handles != nil else {
             return AdvanceResult(ghost: "", kind: .miss, elapsedMillis: 0, survivors: 0)
@@ -1114,8 +1129,11 @@ public actor BeamGhostEngine {
             // Le préfixe a avancé d'un char : on re-beame sur prompt + texte tapé.
             let newPrompt = reservePrompt + reserveTypedSoFar
             resetSeqPool()
-            let r = generateBeam(prompt: newPrompt, requiredPrefix: requiredPrefixForMiss,
-                                 captureReserve: true)
+            // Re-beam à la largeur du contexte courant (mid-mot K=3, frontière K=1).
+            let r = withConfigWidth(missWidth) {
+                generateBeam(prompt: newPrompt, requiredPrefix: requiredPrefixForMiss,
+                             captureReserve: true)
+            }
             let ms = Int(Date().timeIntervalSince(start) * 1000)
             return AdvanceResult(ghost: r.best?.ghost ?? "", kind: .miss,
                                  elapsedMillis: ms, survivors: reserve.count)
@@ -1218,21 +1236,21 @@ public actor BeamGhostEngine {
     /// de chargement tient sans re-créer le contexte. La mutation de `config` est
     /// sûre (actor sérialisé) et restaurée en `defer`.
     public func ghost(prompt: String, requiredPrefix: String, maxWidth: Int) -> BeamResult {
-        let saved = config
-        let w = max(1, min(maxWidth, saved.maxSearchWidth))
-        config.maxSearchWidth = w
-        config.maxResultWidth = w
-        defer { config = saved }
-        resetSeqPool()
-        return generateBeam(prompt: prompt, requiredPrefix: requiredPrefix)
+        withConfigWidth(maxWidth) {
+            resetSeqPool()
+            return generateBeam(prompt: prompt, requiredPrefix: requiredPrefix)
+        }
     }
 
     /// Variante qui lance le beam ET capture la réserve, pour DÉMARRER une session
     /// de frappe réutilisable. Le premier appel = le « cold first-paint » ; ensuite
-    /// l'appelant utilise `advance(typedChar:)` à chaque frappe. C'est le point
-    /// d'entrée de l'éval amortie.
-    public func ghostWithReserve(prompt: String, requiredPrefix: String = "") -> BeamResult {
-        resetSeqPool()
-        return generateBeam(prompt: prompt, requiredPrefix: requiredPrefix, captureReserve: true)
+    /// l'appelant utilise `advance(typedChar:)` à chaque frappe. `maxWidth` clampe
+    /// le K pour CE seed (mid-mot K=3, frontière K=1) ; nil ⇒ K de la config.
+    public func ghostWithReserve(prompt: String, requiredPrefix: String = "",
+                                 maxWidth: Int? = nil) -> BeamResult {
+        withConfigWidth(maxWidth) {
+            resetSeqPool()
+            return generateBeam(prompt: prompt, requiredPrefix: requiredPrefix, captureReserve: true)
+        }
     }
 }
