@@ -177,10 +177,15 @@ final class ModelRuntime {
             return
         }
 
-        // Beam core (flag `SOUFFLEUSE_BEAM_CORE`) : charge le moteur beam sur le
-        // MÊME GGUF, dans son contexte dédié. Hors flag, jamais chargé (RAM intacte).
+        // Beam core (flag `SOUFFLEUSE_BEAM_CORE`) : crée le contexte multi-séquences
+        // du beam sur le MÊME `llama_model` que le ghost greedy (poids EMPRUNTÉS via
+        // `borrowModel()` — pas de 2ᵉ Go en RAM). Hors flag, jamais chargé.
         if SuggestionPolicy.Tuning.beamCoreEnabled {
-            beamReady = await beamEngine.load(modelPath: ggufPath, contextTokens: 4096)
+            if let borrowed = await llamaEngine.borrowModel() {
+                beamReady = await beamEngine.load(borrowedModel: borrowed, contextTokens: 4096)
+            } else {
+                beamReady = false
+            }
             if !beamReady { Log.error(.predictor, "model_load_failed") }
         }
 
@@ -250,6 +255,14 @@ final class ModelRuntime {
         guard id != ggufModelID else { return llamaReady }
         ggufModelID = id
         let ggufPath = resolveGGUFPath()
+        // ORDRE CRITIQUE : le beam emprunte le `llama_model` de `LlamaEngine`. Le
+        // reload ci-dessous va libérer l'ANCIEN modèle ; on décharge donc d'abord
+        // le contexte du beam (sinon il référencerait un modèle libéré), puis on
+        // le recrée sur le NOUVEAU modèle emprunté après le reload.
+        if beamReady {
+            await beamEngine.unload()
+            beamReady = false
+        }
         let ok = await llamaEngine.load(modelPath: ggufPath, contextTokens: 4096)
         llamaReady = ok
         if !ok {
@@ -258,10 +271,11 @@ final class ModelRuntime {
         } else {
             self.lastError = nil
         }
-        // Recharge le beam sur le nouveau GGUF (flag uniquement) — son contexte
-        // est recréé, KV remis à zéro par `BeamGhostEngine.load`.
-        if SuggestionPolicy.Tuning.beamCoreEnabled {
-            beamReady = await beamEngine.load(modelPath: ggufPath, contextTokens: 4096)
+        // Recrée le contexte beam sur le nouveau modèle emprunté (flag uniquement).
+        if SuggestionPolicy.Tuning.beamCoreEnabled, ok {
+            if let borrowed = await llamaEngine.borrowModel() {
+                beamReady = await beamEngine.load(borrowedModel: borrowed, contextTokens: 4096)
+            }
         }
         return ok
     }
@@ -293,11 +307,13 @@ final class ModelRuntime {
     /// `LlamaEngine` sérialise de toute façon `unload` après tout `generate` en
     /// vol.
     func unloadGhost() async {
-        await llamaEngine.unload()
-        llamaReady = false
-        // Décharge aussi le beam (libère son contexte + le 2ᵉ model handle).
+        // ORDRE CRITIQUE : le beam emprunte le modèle de `LlamaEngine`. On libère
+        // d'abord le contexte du beam, PUIS le modèle (via llamaEngine.unload) —
+        // sinon le contexte beam pointerait un modèle déjà libéré.
         await beamEngine.unload()
         beamReady = false
+        await llamaEngine.unload()
+        llamaReady = false
         // Drop le container MLX : seul son tokenizer sert (au rebuild n-gram /
         // personnalisation), jamais la génération du ghost — celle-ci passe
         // exclusivement par llama.cpp. Rechargé au prochain loadModel(). Rendre

@@ -390,6 +390,17 @@ public struct LlamaCorpusSuffixArray {
 ///
 /// All public boundary types are `Sendable`. The underlying llama.cpp
 /// pointers never escape the actor.
+/// Poignée opaque vers un `llama_model` chargé, prêtée à un SECOND moteur (le
+/// beam) pour qu'il crée son propre contexte SANS recharger les ~1 Go de poids.
+/// `@unchecked Sendable` (même idiome que `Handles`) : le pointeur ne fait que
+/// traverser la frontière d'isolation, il n'est déréférencé que dans le contexte
+/// sérialisé de l'emprunteur. Le modèle reste la PROPRIÉTÉ du prêteur — l'emprunteur
+/// ne doit JAMAIS le `llama_model_free`.
+public struct BorrowedModel: @unchecked Sendable {
+    public let model: OpaquePointer
+    public init(model: OpaquePointer) { self.model = model }
+}
+
 public actor LlamaEngine {
     /// Opaque model + context handles. `@unchecked Sendable` is safe : these
     /// pointers are only ever touched from inside the actor's serialised
@@ -583,6 +594,17 @@ public actor LlamaEngine {
         healPieceCache = nil
         Log.info(.predictor, "llama_loaded")
         return true
+    }
+
+    /// Prête le `llama_model` chargé (poids partageables) au beam, pour qu'il
+    /// crée son contexte multi-séquences dessus sans dupliquer ~1 Go en RAM.
+    /// `nil` si rien n'est chargé. Le modèle reste possédé par CE moteur :
+    /// l'emprunteur (`BeamGhostEngine.load(borrowedModel:)`) crée/free seulement
+    /// SON contexte, jamais le modèle. Conséquence d'ordonnancement : l'emprunteur
+    /// DOIT décharger son contexte AVANT que ce moteur ne `unload()` (sinon son
+    /// contexte référence un modèle libéré). Géré par `ModelRuntime`.
+    public func borrowModel() -> BorrowedModel? {
+        handles.map { BorrowedModel(model: $0.model) }
     }
 
     /// Tears down the current model + context.
