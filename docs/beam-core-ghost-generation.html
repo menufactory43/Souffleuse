@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Génération du ghost — beam core (état actuel)</title>
+<style>
+  :root{
+    --bg:#0d1017; --panel:#141925; --panel2:#1b2231; --ink:#e7ecf3; --muted:#8a96ab;
+    --line:#27303f; --accent:#5b8cff; --beam:#7c5cff; --instant:#1fb6a8; --warn:#e0a64b;
+    --bad:#e0556b; --good:#3fcf8e; --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:linear-gradient(180deg,#0b0e14,#0d1017 240px);color:var(--ink);
+    font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:980px;margin:0 auto;padding:48px 24px 120px}
+  h1{font-size:30px;margin:0 0 6px;letter-spacing:-.02em}
+  h2{font-size:21px;margin:54px 0 14px;letter-spacing:-.01em;display:flex;align-items:center;gap:10px}
+  h2 .n{font:600 13px/1 var(--mono);color:#0b0e14;background:var(--accent);border-radius:6px;padding:6px 8px}
+  h3{font-size:15px;margin:22px 0 8px;color:#cdd6e4}
+  p{margin:10px 0;color:#cfd6e2}
+  .sub{color:var(--muted);font-size:14.5px;margin-top:0}
+  code,.mono{font-family:var(--mono);font-size:.92em}
+  .pill{display:inline-block;font:600 11px/1 var(--mono);padding:5px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);background:#11151f}
+  .pill.beam{color:#cbb8ff;border-color:#3a2f63}.pill.instant{color:#8ff0e6;border-color:#1c4a45}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin:14px 0}
+  .grid{display:grid;gap:12px}
+  .flow{display:flex;flex-direction:column;gap:0}
+  .step{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px 14px 56px;margin:0 0 8px}
+  .step .b{position:absolute;left:14px;top:14px;width:28px;height:28px;border-radius:8px;display:grid;place-items:center;font:700 13px/1 var(--mono);color:#0b0e14}
+  .step.instant .b{background:var(--instant)} .step.cache .b{background:#3a93d6} .step.beam .b{background:var(--beam)}
+  .step .t{font-weight:600;margin-bottom:2px}
+  .step .d{color:var(--muted);font-size:13.5px}
+  .arrow{height:18px;width:2px;background:var(--line);margin:0 0 8px 27px}
+  .tag{font:600 11px/1 var(--mono);padding:3px 7px;border-radius:6px;background:#0f1320;border:1px solid var(--line);color:var(--muted);margin-left:6px}
+  .stop{color:var(--good)} .cont{color:var(--accent)}
+  table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13.6px}
+  th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+  th{background:#11151f;color:#aebacd;font-weight:600}
+  td.k{color:var(--muted);white-space:nowrap}
+  .avant{color:var(--bad)} .maint{color:var(--good)}
+  .trace{font-family:var(--mono);font-size:13px;background:#0a0d13;border:1px solid var(--line);border-radius:12px;padding:14px 16px;overflow:auto}
+  .trace .row{display:flex;gap:0;white-space:pre}
+  .typed{color:#e7ecf3}.ghost{color:#6f7c93}.consumed{color:#3a4760;text-decoration:none}
+  .trace .meta{color:#55617a}
+  .kbd{font:600 12px/1 var(--mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:6px;padding:3px 6px;background:#11151f;color:#cdd6e4}
+  .note{border-left:3px solid var(--accent);background:#0f1422;padding:10px 14px;border-radius:0 10px 10px 0;margin:12px 0;color:#c6d0df;font-size:14px}
+  .note.warn{border-color:var(--warn);background:#1b1710}
+  .note.bad{border-color:var(--bad);background:#1c1014}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:720px){.two{grid-template-columns:1fr}}
+  .kv{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 0}
+  .kv span{font:600 12px/1 var(--mono);background:#0f1320;border:1px solid var(--line);border-radius:7px;padding:7px 9px;color:#aebacd}
+  .kv b{color:#fff}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;color:var(--muted);font-size:13px;margin:8px 0 0}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:middle}
+  hr{border:none;border-top:1px solid var(--line);margin:36px 0}
+  .foot{color:var(--muted);font-size:12.5px;margin-top:40px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <span class="pill beam">SOUFFLEUSE_BEAM_CORE</span>
+  <h1>Génération du ghost — état actuel</h1>
+  <p class="sub">Comment le ghost est produit aujourd'hui sous le flag beam-core, et ce qui a changé par rapport à la cascade greedy et à la tentative de réserve.</p>
+
+  <div class="card">
+    <h3 style="margin-top:0">TL;DR</h3>
+    <p style="margin-bottom:6px">Le ghost est généré par un <b>beam contraint</b> qui <b>régénère en continu</b> une fenêtre de quelques mots à partir de <b>tout ce que tu as tapé</b>. Tu n'attends pas une génération par lettre : le ghost déjà affiché se <b>consomme à 0 ms</b> pendant que tu tapes dedans, et la fenêtre se <b>recharge</b> au fil de l'eau (living ghost). Il s'arrête proprement en fin de phrase et se tait juste après un point jusqu'à ce que tu amorces la suivante.</p>
+    <div class="kv">
+      <span>moteur <b>BeamGhostEngine</b></span>
+      <span>K mid-mot <b>3</b></span>
+      <span>K après-espace <b>1</b></span>
+      <span>length-norm exp <b>0.7</b></span>
+      <span>fenêtre <b>≤ 4 mots</b></span>
+      <span>froid <b>~170 ms</b></span>
+      <span>suivi (consume) <b>~0 ms</b></span>
+    </div>
+  </div>
+
+  <!-- ======================= PIPELINE ======================= -->
+  <h2><span class="n">1</span> Le chemin complet à chaque frappe</h2>
+  <p>À chaque frappe (débouncée), on descend une cascade de couches. La <b>première qui répond</b> gagne et affiche. Le beam n'est sollicité que si l'instant et le cache sont vides.</p>
+
+  <div class="flow">
+    <div class="step instant"><span class="b">1</span>
+      <div class="t">Couche INSTANT — <span class="mono">routeInstant</span> <span class="tag">0 ms</span></div>
+      <div class="d">Rappel historique (L1), lexique appris (L0), complétion dico, perso n-gram. Si ça répond → <b class="stop">affiché direct, fin</b>. C'est notre force sur les fragments courts et les tournures déjà tapées.</div>
+    </div>
+    <div class="arrow"></div>
+    <div class="step cache"><span class="b">2</span>
+      <div class="t">Couche CACHE <span class="tag">0 ms</span></div>
+      <div class="d"><span class="mono">CompletionCache</span> (même préfixe → même ghost) + « undo-as-ghost » (restaurer ce qu'on vient d'effacer). Si hit au-dessus du seuil → <b class="stop">affiché direct, fin</b>.</div>
+    </div>
+    <div class="arrow"></div>
+    <div class="step beam"><span class="b">3</span>
+      <div class="t">CŒUR LLM — <span class="mono">BeamGhostEngine</span> <span class="tag">le seul chemin LLM</span></div>
+      <div class="d">Si instant + cache vides → le beam génère une fenêtre fraîche depuis tout le texte tapé (§2). Remplace entièrement l'ancien greedy long-ghost / gradient d'engagement / plancher dico.</div>
+    </div>
+  </div>
+
+  <div class="note">Sans le flag <span class="mono">SOUFFLEUSE_BEAM_CORE</span>, le comportement est <b>byte-identique</b> à l'ancienne cascade : tout le beam-core est mort. Le flag est l'unique porte (rollback runtime trivial).</div>
+
+  <!-- ======================= BEAM ======================= -->
+  <h2><span class="n">2</span> Comment le beam génère la fenêtre</h2>
+
+  <h3>Le prompt — minimal, prose only</h3>
+  <p>On feed au modèle <b>base/PT</b> uniquement : un éventuel <span class="mono">Contexte:</span> (persona) + le contexte app/fenêtre/OCR, puis <b>tout le texte avant le curseur</b>. <b class="avant">Pas</b> d'exemples few-shot, <b class="avant">pas</b> d'annotation <span class="mono">Champ:</span>, <b class="avant">pas</b> de framing instruct — ça faisait dériver le modèle (anglais, markup, « Coucou→Bonjour »).</p>
+
+  <h3>Mid-mot vs frontière</h3>
+  <div class="two">
+    <div class="card">
+      <span class="pill beam">mid-mot · K=3</span>
+      <p style="font-size:14px">Tu es au milieu d'un mot (<span class="mono">« l'entrepri| »</span>). Le beam reçoit <span class="mono">requiredPrefix = « entrepri »</span> : il <b>guérit</b> le prompt à la frontière du mot et <b>contraint durement</b> chaque branche à compléter ce mot. 3 branches en parallèle, classées par log-prob. → le bon mot voulu (intention 64 % vs 29 %, accords « fiscal/importante »).</p>
+    </div>
+    <div class="card">
+      <span class="pill beam">frontière · K=1</span>
+      <p style="font-size:14px">Après un espace / mot complet (<span class="mono">« comme un |»</span>). Pas de contrainte → décode <b>libre</b> en largeur 1 (≡ greedy). Le beam n'aide pas là (et K&gt;1 y perd en cohérence) ; c'est <span class="mono">routeInstant</span> qui couvre l'après-espace devant.</p>
+    </div>
+  </div>
+
+  <h3>Le ranking — normalisé par longueur</h3>
+  <p>Score d'une branche = <span class="mono">Σ log P(token) / longueur^0.7</span>. Le <b>length-norm (0.7)</b> empêche le beam de préférer mécaniquement les continuations courtes → on obtient bien 2-4 mots, pas juste le mot.</p>
+
+  <div class="note warn"><b>Plancher top-1.</b> Le seuil <span class="mono">minBranchProbability = 0.05</span> ne sert qu'à <b>ouvrir des branches</b> (fan-out). S'<b>aucun</b> token ne le franchit — typique après une virgule, où « et / il / qui / mais… » sont chacun &lt; 5 % — on garde quand même le <b>meilleur token (greedy)</b>. <b>Sans ce plancher</b>, la continuation libre mourait de faim et le ghost s'arrêtait au 1<sup>er</sup> mot (le bug « <span class="mono">l'entrepri → se,</span> » et puis plus rien).</div>
+
+  <h3>Le post-filtre de sortie</h3>
+  <div class="kv">
+    <span>singleLine</span><span>dédup mot répété</span><span>séparateur d'espace</span>
+    <span>garde écho positionnel</span><span>coupe-clause <b>incluse</b> (G1)</span><span>word-cap ≤ 4</span>
+  </div>
+
+  <!-- ======================= LIVING GHOST ======================= -->
+  <h2><span class="n">3</span> Le living ghost — pourquoi c'est « live »</h2>
+  <p>C'est le point clé du ressenti. Le ghost n'est <b>pas</b> régénéré par lettre (ce serait ~170 ms à chaque touche, annulé en frappe rapide). Deux mécanismes se combinent :</p>
+
+  <div class="two">
+    <div class="card">
+      <div class="t" style="font-weight:600;color:#8ff0e6">A · Consume à 0 ms</div>
+      <p style="font-size:14px">Quand tu tapes une lettre qui correspond à la <b>tête du ghost</b>, on <b>découpe</b> simplement le suffixe déjà affiché et on repeint — <b>instantané, aucune génération</b>. C'est ce qui donne l'impression que le ghost « avance avec toi ». (Ancre <span class="mono">ghostAnchorFull</span> + slice, le predict est court-circuité.)</p>
+    </div>
+    <div class="card">
+      <div class="t" style="font-weight:600;color:#cbb8ff">B · Refill par le beam</div>
+      <p style="font-size:14px">Pendant que tu consommes, la fenêtre rétrécit. En tâche de fond, <span class="mono">extendGhostBeam</span> <b>régénère la suite</b> depuis tout le texte visible (committed + reste) et la <b>recharge</b>. Sans ce refill, le ghost fondait à zéro en 2-3 lettres → « pas live ». <b>C'est ce qu'on vient de brancher.</b></p>
+    </div>
+  </div>
+  <p class="sub">A garde le ghost <i>réactif</i> ; B le garde <i>plein et conditionné sur ce que tu tapes</i>. Ensemble = la fenêtre de 2-3 mots qui glisse en continu.</p>
+
+  <!-- ======================= SENTENCE GUARDS ======================= -->
+  <h2><span class="n">4</span> Les fins de phrase</h2>
+  <div class="two">
+    <div class="card">
+      <span class="pill">G1 · coupe en fin de phrase</span>
+      <p style="font-size:14px">Si la fenêtre atteint un <span class="mono">. ! ?</span>, on coupe <b>jusqu'au terminateur inclus</b> et pas au-delà — on montre la fin de la phrase courante, jamais la suivante. (« comme d'hab ».)</p>
+    </div>
+    <div class="card">
+      <span class="pill">G2 · reprise après le point</span>
+      <p style="font-size:14px">Tant que la <b>phrase en cours</b> (texte après le dernier <span class="mono">. ! ?</span>) fait moins de <b>3 lettres</b>, <b>silence</b>. Juste après un point → rien ; le ghost <b>reprend</b> quand tu as amorcé la nouvelle phrase (le modèle a alors un vrai contexte).</p>
+    </div>
+  </div>
+
+  <!-- ======================= EXEMPLE ======================= -->
+  <h2><span class="n">5</span> Exemple déroulé</h2>
+  <p class="sub">Frappe de « <span class="mono">…un technicien de l'entreprise.</span> ». Gris = ghost proposé. <span class="kbd">consume</span> = 0 ms, <span class="kbd">refill/seed</span> = beam ~170 ms.</p>
+  <div class="trace">
+    <div class="row"><span class="typed">…comme un technici</span><span class="ghost">en de l'entreprise.</span><span class="meta">   ← mid-mot K=3, requiredPrefix « technici »</span></div>
+    <div class="row"><span class="typed">…comme un technicie</span><span class="ghost">n de l'entreprise.</span><span class="meta">   ← <b style="color:#8ff0e6">consume</b> (tu tapes la tête du ghost)</span></div>
+    <div class="row"><span class="typed">…comme un technicien</span><span class="ghost"> de l'entreprise.</span><span class="meta">   ← <b style="color:#8ff0e6">consume</b></span></div>
+    <div class="row"><span class="typed">…un technicien de</span><span class="ghost"> l'entreprise.</span><span class="meta">   ← <b style="color:#cbb8ff">refill</b> recharge la fenêtre depuis le tapé</span></div>
+    <div class="row"><span class="typed">…technicien de l'entreprise</span><span class="ghost">.</span><span class="meta">   ← G1 : coupe au point, on ne va pas au-delà</span></div>
+    <div class="row"><span class="typed">…l'entreprise.</span><span class="ghost"></span><span class="meta">          ← G2 : silence après le point</span></div>
+    <div class="row"><span class="typed">…l'entreprise. Il</span><span class="ghost"> est arrivé à</span><span class="meta">   ← G2 levée (≥3 lettres) → nouvelle fenêtre</span></div>
+  </div>
+
+  <!-- ======================= DIFFERENCES ======================= -->
+  <h2><span class="n">6</span> Ce qui a changé</h2>
+  <table>
+    <tr><th>Dimension</th><th>Avant — cascade / long-ghost greedy</th><th>Tentative — réserve / reuse</th><th>Maintenant — beam core</th></tr>
+    <tr><td class="k">Moteur</td><td class="avant">1 passe greedy + gradient d'engagement + plancher dico</td><td>beam + branches KV pré-calculées consommées</td><td class="maint">beam contraint, fenêtre fraîche</td></tr>
+    <tr><td class="k">Mid-mot</td><td>greedy + healing, devine souvent le mauvais mot</td><td>requiredPrefix (bon) mais réserve figée</td><td class="maint">requiredPrefix K=3, le mot <b>voulu</b></td></tr>
+    <tr><td class="k">Continuation</td><td>greedy, post-traité</td><td class="avant">ne s'allongeait pas, non conditionnée sur le tapé</td><td class="maint">régénérée en continu depuis tout le tapé + plancher top-1</td></tr>
+    <tr><td class="k">« Live »</td><td>rolling refill greedy</td><td class="avant">HIT 0 ms mais 13 % seulement → mort de la fenêtre</td><td class="maint">consume 0 ms + refill beam → fenêtre vivante</td></tr>
+    <tr><td class="k">Fins de phrase</td><td>coupe-clause</td><td>—</td><td class="maint">G1 coupe incluse + G2 reprise après le point</td></tr>
+    <tr><td class="k">Latence froide</td><td>~313 ms</td><td>~237 ms (mais beaucoup de re-beam)</td><td class="maint">~170 ms (Release)</td></tr>
+  </table>
+
+  <div class="note bad"><b>Pourquoi la réserve a été abandonnée.</b> Le modèle « pré-calcule K branches, on les consomme » suppose que tu <b>suis</b> la prédiction. En frappe libre tu tapes <b>tes</b> mots → 87 % de divergence (MISS) → re-beam quand même, et la fenêtre ne se rechargeait pas. Le modèle « régénère une fenêtre fraîche conditionnée sur le tapé » colle au vrai usage.</div>
+
+  <div class="legend">
+    <span><i class="dot" style="background:var(--instant)"></i>instant (0 ms)</span>
+    <span><i class="dot" style="background:#3a93d6"></i>cache (0 ms)</span>
+    <span><i class="dot" style="background:var(--beam)"></i>beam (~170 ms froid)</span>
+    <span><i class="dot" style="background:#6f7c93"></i>ghost proposé</span>
+  </div>
+
+  <hr>
+  <p class="foot">Souffleuse / Cocotypist · branche <span class="mono">feat/beam-llm-core</span> · cœur <span class="mono">BeamGhostEngine</span> + <span class="mono">BeamGhostShaper</span>, orchestré par <span class="mono">PredictorViewModel.predict()</span>. Réglages live : <span class="mono">SOUFFLEUSE_BEAM_EXP</span> (length-norm). Probe corpus-free : <span class="mono">swift run -c release SouffleuseBeamGhostProbe</span>.</p>
+
+</div>
+</body>
+</html>
