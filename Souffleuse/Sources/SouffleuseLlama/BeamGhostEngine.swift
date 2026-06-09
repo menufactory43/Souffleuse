@@ -200,6 +200,10 @@ public actor BeamGhostEngine {
         let nCtx: Int32
         let nVocab: Int32
         let nSeqMax: Int32
+        /// Le moteur POSSÈDE-t-il `model` (donc doit le `llama_model_free`) ? Faux
+        /// quand le modèle est EMPRUNTÉ à `LlamaEngine` (poids partagés) : on ne
+        /// libère alors QUE le contexte ; le prêteur free le modèle.
+        let ownsModel: Bool
     }
 
     private var handles: Handles?
@@ -247,7 +251,29 @@ public actor BeamGhostEngine {
             Log.error(.predictor, "beam_load_failed")
             return false
         }
+        // On possède ce modèle (chargé ici) → ownsModel: true.
+        return makeContext(model: model, contextTokens: contextTokens, ownsModel: true)
+    }
 
+    /// Charge en EMPRUNTANT un `llama_model` déjà résident (typiquement celui de
+    /// `LlamaEngine`, via `borrowModel()`). Ne charge PAS de poids : crée seulement
+    /// le contexte multi-séquences (`n_seq_max = K+1`) sur le modèle partagé →
+    /// surcoût RAM = juste le KV (quelques Mo), pas un 2ᵉ Go de poids. `ownsModel:
+    /// false` ⇒ `unload`/`deinit` ne libèrent QUE le contexte. INVARIANT d'ordre :
+    /// l'appelant doit `unload()` CE moteur AVANT de libérer/recharger le modèle
+    /// prêteur (sinon ce contexte référencerait un modèle libéré). Géré par
+    /// `ModelRuntime` (beam déchargé avant tout reload de `LlamaEngine`).
+    @discardableResult
+    public func load(borrowedModel: BorrowedModel, contextTokens: UInt32 = 4096) -> Bool {
+        _ = BeamGhostEngine.backendOnce
+        unload()
+        return makeContext(model: borrowedModel.model, contextTokens: contextTokens, ownsModel: false)
+    }
+
+    /// Crée le contexte multi-séquences dédié sur `model` et publie les `Handles`.
+    /// Partagé par les deux `load` (modèle possédé vs emprunté). En cas d'échec,
+    /// ne libère le modèle QUE si on le possède (`ownsModel`).
+    private func makeContext(model: OpaquePointer, contextTokens: UInt32, ownsModel: Bool) -> Bool {
         let nSeqMax = Int32(config.maxSearchWidth + 1)
         var ctxParams = llama_context_default_params()
         ctxParams.n_ctx = contextTokens
@@ -261,17 +287,21 @@ public actor BeamGhostEngine {
         ctxParams.n_threads_batch = Int32(max(1, cores - 1))
 
         guard let context = llama_init_from_model(model, ctxParams) else {
-            llama_model_free(model); Log.error(.predictor, "beam_load_failed"); return false
+            if ownsModel { llama_model_free(model) }
+            Log.error(.predictor, "beam_load_failed"); return false
         }
         guard let vocab = llama_model_get_vocab(model) else {
-            llama_free(context); llama_model_free(model); Log.error(.predictor, "beam_load_failed"); return false
+            llama_free(context)
+            if ownsModel { llama_model_free(model) }
+            Log.error(.predictor, "beam_load_failed"); return false
         }
 
         handles = Handles(
             model: model, context: context, vocab: vocab,
             nCtx: Int32(llama_n_ctx(context)),
             nVocab: llama_vocab_n_tokens(vocab),
-            nSeqMax: nSeqMax
+            nSeqMax: nSeqMax,
+            ownsModel: ownsModel
         )
         surfacePieceCache = nil   // nouveau vocab → cache surface à rebâtir
         firstCharIndex = nil      // idem pour l'index 1er-char
@@ -282,7 +312,7 @@ public actor BeamGhostEngine {
     public func unload() {
         if let h = handles {
             llama_free(h.context)
-            llama_model_free(h.model)
+            if h.ownsModel { llama_model_free(h.model) }
         }
         handles = nil
     }
@@ -290,7 +320,7 @@ public actor BeamGhostEngine {
     deinit {
         if let h = handles {
             llama_free(h.context)
-            llama_model_free(h.model)
+            if h.ownsModel { llama_model_free(h.model) }
         }
     }
 
