@@ -1180,6 +1180,23 @@ public actor BeamGhostEngine {
         return generateBeam(prompt: prompt, requiredPrefix: requiredPrefix)
     }
 
+    /// One-shot à largeur EXPLICITE pour CET appel (override du K de la config).
+    /// C'est le point d'entrée du cœur de prod : le mid-mot tourne au K plein
+    /// (3 — la contrainte trie les complétions), l'après-espace à K=1 (≡ greedy,
+    /// le beam n'aide pas là-bas et K>1 y PERD en cohérence, cf. handoff §e). Le
+    /// contexte est chargé à `n_seq_max = configK + 1`, donc tout `maxWidth` ≤ K
+    /// de chargement tient sans re-créer le contexte. La mutation de `config` est
+    /// sûre (actor sérialisé) et restaurée en `defer`.
+    public func ghost(prompt: String, requiredPrefix: String, maxWidth: Int) -> BeamResult {
+        let saved = config
+        let w = max(1, min(maxWidth, saved.maxSearchWidth))
+        config.maxSearchWidth = w
+        config.maxResultWidth = w
+        defer { config = saved }
+        resetSeqPool()
+        return generateBeam(prompt: prompt, requiredPrefix: requiredPrefix)
+    }
+
     /// Variante qui lance le beam ET capture la réserve, pour DÉMARRER une session
     /// de frappe réutilisable. Le premier appel = le « cold first-paint » ; ensuite
     /// l'appelant utilise `advance(typedChar:)` à chaque frappe. C'est le point

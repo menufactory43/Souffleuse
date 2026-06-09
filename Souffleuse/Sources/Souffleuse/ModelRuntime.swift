@@ -89,6 +89,19 @@ final class ModelRuntime {
     /// (`rebuildPersonalization`) ; all ghost text comes from `llamaEngine`.
     let llamaEngine = LlamaEngine()
 
+    /// Moteur **beam contraint** — le cœur LLM unifié sous `SOUFFLEUSE_BEAM_CORE`
+    /// (K=3, `requiredPrefix` mid-mot). Chargé À CÔTÉ du `llamaEngine` (contexte
+    /// dédié `n_seq_max = K+1`, cf. BeamGhostEngine §POURQUOI) UNIQUEMENT quand le
+    /// flag est posé — sinon jamais touché, RAM intacte, chemin byte-identique.
+    /// COÛT connu (spike) : un 2ᵉ chargement du même GGUF (poids ~1 Go dupliqués) ;
+    /// acceptable derrière le flag, optimisable plus tard en partageant le model
+    /// handle (un seul `llama_model`, deux contextes).
+    let beamEngine = BeamGhostEngine(config: .ghostCoreDefault)
+
+    /// True once the GGUF is loaded into the beam engine (only attempted when
+    /// `beamCoreEnabled`). Gates `generateGhostBeam`.
+    private(set) var beamReady = false
+
     /// Plancher dico mid-mot (flag `MW_DICO_FLOOR`). `NSSpellChecker` via
     /// `WordCompleter` : complète le mot EN COURS quand le gradient d'engagement
     /// s'abstient, pour qu'un ghost valide apparaisse à chaque lettre. Tenu ici
@@ -162,6 +175,13 @@ final class ModelRuntime {
             Log.error(.predictor, "model_load_failed")
             self.lastError = "load_failed: gguf"
             return
+        }
+
+        // Beam core (flag `SOUFFLEUSE_BEAM_CORE`) : charge le moteur beam sur le
+        // MÊME GGUF, dans son contexte dédié. Hors flag, jamais chargé (RAM intacte).
+        if SuggestionPolicy.Tuning.beamCoreEnabled {
+            beamReady = await beamEngine.load(modelPath: ggufPath, contextTokens: 4096)
+            if !beamReady { Log.error(.predictor, "model_load_failed") }
         }
 
         // Best-effort MLX container load — used solely by
@@ -238,6 +258,11 @@ final class ModelRuntime {
         } else {
             self.lastError = nil
         }
+        // Recharge le beam sur le nouveau GGUF (flag uniquement) — son contexte
+        // est recréé, KV remis à zéro par `BeamGhostEngine.load`.
+        if SuggestionPolicy.Tuning.beamCoreEnabled {
+            beamReady = await beamEngine.load(modelPath: ggufPath, contextTokens: 4096)
+        }
         return ok
     }
 
@@ -270,6 +295,9 @@ final class ModelRuntime {
     func unloadGhost() async {
         await llamaEngine.unload()
         llamaReady = false
+        // Décharge aussi le beam (libère son contexte + le 2ᵉ model handle).
+        await beamEngine.unload()
+        beamReady = false
         // Drop le container MLX : seul son tokenizer sert (au rebuild n-gram /
         // personnalisation), jamais la génération du ghost — celle-ci passe
         // exclusivement par llama.cpp. Rechargé au prochain loadModel(). Rendre
@@ -766,6 +794,101 @@ final class ModelRuntime {
 
         return MidWordEscalationResult(show: !result.isEmpty, word: result,
                                        reason: result.isEmpty ? "longghost-\(why)" : "longghost")
+    }
+
+    /// **Cœur LLM beam (flag `SOUFFLEUSE_BEAM_CORE`).** Génère le ghost via le
+    /// `BeamGhostEngine` contraint — le SEUL chemin LLM sous le flag, en
+    /// remplacement du greedy long-ghost / engagement / plancher dico.
+    ///
+    /// - **Mid-mot incomplet** (`partial` non vide, pas un mot complet du dico)
+    ///   → beam avec `requiredPrefix = partial`, largeur K=3. La contrainte force
+    ///   à compléter le mot tapé ; le ranking log-prob tranche l'accord (handoff
+    ///   §a/§b : intention 64 % vs 29 %, accord 9/10 vs 4/10).
+    /// - **Frontière / après-espace** (`partial` vide ou mot complet) → décode
+    ///   LIBRE à K=1 (≡ greedy, §4A : le beam n'aide pas après-espace et K>1 y
+    ///   perd en cohérence). Le `routeInstant` reste DEVANT pour le rappel.
+    ///
+    /// Post-filtré par `beamPostFilter` (singleLine, dédup, séparateur, écho
+    /// positionnel, coupe-clause, word-cap) — la même garde de sortie que le
+    /// long-ghost. Réutilise `MidWordEscalationResult` pour un call-site PVM
+    /// commun (show/word/reason ; `engagement` reste `.plein` ⇒ rolling autorisé).
+    /// `nil` si le moteur n'est pas prêt ou la tâche est annulée.
+    func generateGhostBeam(request: PredictRequest) async -> MidWordEscalationResult? {
+        guard beamReady else { return nil }
+        let userTail = request.userTail
+        let partial = OutputFilter.trailingPartialWord(userTail)
+        let isBoundary = partial.isEmpty
+            || SuggestionPolicy.defaultPartialWordIsComplete(userTail)
+        let requiredPrefix = isBoundary ? "" : partial
+        // Mid-mot → K plein (la contrainte trie) ; frontière → K=1 (≡ greedy).
+        let width = isBoundary ? 1 : BeamConfig.ghostCoreDefault.maxSearchWidth
+
+        let prompt = ModelRuntime.buildLlamaPrompt(
+            system: request.systemMessage,
+            customInstr: request.customInstr,
+            ctxPrefix: request.ctxPrefix,
+            fieldContext: request.fieldContextSlot,
+            afterCursor: request.afterCursorSlot,
+            beforeCursor: request.llmTail,
+            examples: request.examplesBlock
+        )
+
+        // GPU gate (parité translation, TRANSLATION-SPEC §2.9) autour du beam.
+        GpuGate.shared.ghostBegan()
+        let result = await beamEngine.ghost(prompt: prompt, requiredPrefix: requiredPrefix, maxWidth: width)
+        GpuGate.shared.ghostEnded()
+        if Task.isCancelled { return nil }
+
+        guard let best = result.best else {
+            return MidWordEscalationResult(show: false, word: "", reason: "beam-empty")
+        }
+        let caretAfterSpace = request.llmTail.last == " " || request.llmTail.last == "\t"
+        let ghost = Self.beamPostFilter(
+            rawGhost: best.ghost, isBoundary: isBoundary, caretAfterSpace: caretAfterSpace,
+            userTail: userTail, maxWords: request.maxWords)
+        return MidWordEscalationResult(show: !ghost.isEmpty, word: ghost,
+                                       reason: ghost.isEmpty ? "beam-gated" : "beam-core")
+    }
+
+    /// Garde de sortie du ghost beam — MIROIR des post-filtres du long-ghost
+    /// (singleLine, dédup mot répété, séparateur d'espace, écho positionnel,
+    /// coupe-clause, word-cap), appliquée au suffixe brut renvoyé par le beam.
+    /// `nonisolated static` (pures fonctions OutputFilter/SuggestionPolicy).
+    nonisolated static func beamPostFilter(
+        rawGhost: String, isBoundary: Bool, caretAfterSpace: Bool,
+        userTail: String, maxWords: Int
+    ) -> String {
+        var result = OutputFilter.singleLine(rawGhost)
+        if result.isEmpty { return "" }
+        // Dédup d'un mot répété en tête (le beam peut re-émettre le dernier mot tapé).
+        result = SuggestionPolicy.dedupLeadingRepeat(ghost: result, userTail: userTail)
+        if result.isEmpty { return "" }
+        // Séparateur : le beam strippe déjà l'espace de tête après-espace
+        // (ghostText, requiredPrefixLen==0). À une frontière NON précédée d'un
+        // espace (« message.| »), on rétablit un séparateur ; le mid-mot reste
+        // collé (complétion de mot, pas de séparateur).
+        if isBoundary, !caretAfterSpace, let f = result.first, f != " ", f != "\t" {
+            result = " " + result
+        }
+        // Écho positionnel : tue les vraies boucles (run verbatim ≥ seuil), garde
+        // la réutilisation de vocabulaire — même garde que midWordLongGhost.
+        let echo = OutputFilter.echoScore(ghost: result, tail: userTail)
+        if echo >= OutputFilter.continuationEchoThreshold {
+            let run = OutputFilter.longestVerbatimRunWords(ghost: result, tail: userTail)
+            if run >= SuggestionPolicy.Tuning.echoMinVerbatimRunWords { return "" }
+        }
+        // Coupe à la 1ʳᵉ frontière de clause (newline . ! ? ; :), bornes incluses.
+        if let idx = result.firstIndex(where: { "\n.!?;:".contains($0) }) {
+            result = String(result[...idx])
+        }
+        // Cap à maxWords mots entiers, espace de tête préservé.
+        let words = result.split(whereSeparator: { $0.isWhitespace })
+        if words.count > max(1, maxWords) {
+            let hadLeadingSpace = result.first == " "
+            result = words.prefix(max(1, maxWords)).joined(separator: " ")
+            if hadLeadingSpace, result.first != " ", !result.isEmpty { result = " " + result }
+        }
+        return OutputFilter.singleLine(result)
     }
 
     /// **Gradient d'engagement mi-mot (flag MW_ENGAGEMENT).** À partir du greedy
