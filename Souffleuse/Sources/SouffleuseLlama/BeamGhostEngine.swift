@@ -513,6 +513,11 @@ public actor BeamGhostEngine {
         // Les séquences de branches (1..K) d'un appel précédent sont effacées ;
         // les tokens de branche logés en seq 0 (1ᵉʳ survivant « en place ») le
         // sont aussi par la coupe (positions ≥ ancien promptLen ≥ lcp).
+        // Toute réserve antérieure devient INVALIDE ici : on efface les séquences
+        // de branches juste en dessous — un `advance` ultérieur sur ces seqIds
+        // refillerait dans du KV vide. `buildReserve` la reconstruit en sortie
+        // quand `captureReserve` est posé.
+        reserve = []
         var lcp = 0
         let maxShared = min(cachedPromptTokens.count, promptTokens.count - 1)
         while lcp < maxShared, cachedPromptTokens[lcp] == promptTokens[lcp] { lcp += 1 }
@@ -1135,6 +1140,20 @@ public actor BeamGhostEngine {
             .sorted { reserveScore($0) > reserveScore($1) }
         if reserve.count > config.maxResultWidth { reserve.removeLast(reserve.count - config.maxResultWidth) }
         reservePrompt = prompt
+        reserveTypedSoFar = ""
+    }
+
+    /// La réserve a-t-elle des branches exploitables par `advance` ?
+    public var hasReserve: Bool { !reserve.isEmpty }
+
+    /// Abandonne la réserve SANS toucher au KV : les séquences de branches sont
+    /// recyclées par le prochain `generateBeam` (qui les efface), et le
+    /// prefix-cache du prompt (seq 0) reste exploitable. À préférer à
+    /// `clearReserve` entre deux sessions de frappe — `clearReserve` wipe TOUT
+    /// le KV et perd le bénéfice du prefix-caching.
+    public func dropReserve() {
+        reserve = []
+        reservePrompt = ""
         reserveTypedSoFar = ""
     }
 

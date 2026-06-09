@@ -50,6 +50,11 @@ import SouffleuseTyping
 //   PARITY_LONGCTX=1     DIAGNOSTIC : injecte un ctxPrefix réaliste (~150 mots,
 //                        type contexte app/OCR/persona de prod) dans le prompt
 //                        beam — mesure le poids du re-prefill par frappe.
+//   PARITY_RESERVE=1     mode RÉSERVE (miroir de SOUFFLEUSE_BEAM_RESERVE) :
+//                        seed ghostWithReserve puis advance(typedChar:) par
+//                        frappe — HIT ~0 ms, MISS re-beam. Mesure la qualité
+//                        des ghosts réellement AFFICHÉS sous la réserve et la
+//                        latence amortie sur le corpus vérité-terrain.
 // ─────────────────────────────────────────────────────────────────────────────
 
 let env = ProcessInfo.processInfo.environment
@@ -159,6 +164,7 @@ struct Step: Sendable {
     let ms: Int
     let g2: Bool           // silence G2 (beam seulement).
     let boundary: Bool     // frontière / après-espace (pas de fragment mid-mot).
+    var kind: String = ""  // mode réserve : seed / hit / refill / miss.
 }
 
 struct SentenceRun: Sendable {
@@ -211,6 +217,7 @@ struct Scorecard {
     var latAll: [Int] = []
     var latMid: [Int] = []
     var latBoundary: [Int] = []
+    var latByKind: [String: [Int]] = [:]   // mode réserve : seed/hit/refill/miss.
 }
 
 func score(_ runs: [SentenceRun], name: String) -> Scorecard {
@@ -229,6 +236,7 @@ func score(_ runs: [SentenceRun], name: String) -> Scorecard {
             if !st.ghost.isEmpty { sc.stepsNonEmpty += 1 }
             sc.latAll.append(st.ms)
             if st.boundary { sc.latBoundary.append(st.ms) } else { sc.latMid.append(st.ms) }
+            if !st.kind.isEmpty { sc.latByKind[st.kind, default: []].append(st.ms) }
         }
 
         // ── KTC + stabilité par mot. ──
@@ -349,19 +357,26 @@ let beamWidth = beamConfig.maxSearchWidth
 let beamMaxWords = beamConfig.maxWords
 let minLetters = BeamGhostShaper.beamMinSentenceLetters
 
+let reserveMode = (env["PARITY_RESERVE"] ?? "") == "1"
+
 func runBeamEngine() async -> [SentenceRun] {
     let beam = BeamGhostEngine(config: beamConfig)
-    err("[parity] loading GGUF (beam-core, K=\(beamWidth)): \(gguf)")
+    err("[parity] loading GGUF (beam-core, K=\(beamWidth)\(reserveMode ? ", RESERVE" : "")): \(gguf)")
     guard await beam.load(modelPath: gguf, contextTokens: 4096) else {
         err("FATAL: GGUF load failed (beam)"); exit(1)
     }
     var runs: [SentenceRun] = []
     for (si, s) in scenarios.enumerated() {
+        // Session réserve : continuité de tail entre frappes (miroir de
+        // `ModelRuntime.beamSessionTail`). Reset entre scénarios.
+        var sessionTail: String?
+        await beam.dropReserve()
         let run = await replay(s) { userTail in
             let t0 = Date()
             let armed = BeamGhostShaper.sentenceArmed(userTail: userTail, minLetters: minLetters)
             let partial = OutputFilter.trailingPartialWord(userTail)
             if !armed {
+                sessionTail = nil
                 return Step(i: userTail.count, ghost: "", ms: 0, g2: true, boundary: partial.isEmpty)
             }
             var choice = BeamGhostShaper.beamConfigChoice(userTail: userTail, beamWidth: beamWidth)
@@ -372,14 +387,41 @@ func runBeamEngine() async -> [SentenceRun] {
                 choice = (requiredPrefix: partial, width: beamWidth, isBoundary: false)
             }
             let prompt = BeamGhostShaper.buildPrompt(customInstr: "", ctxPrefix: longCtx, llmTail: userTail)
-            let result = await beam.ghost(prompt: prompt, requiredPrefix: choice.requiredPrefix,
-                                          maxWidth: choice.width)
+            var raw = ""
+            var kind = ""
+            if reserveMode {
+                // Miroir de ModelRuntime.generateGhostBeam sous SOUFFLEUSE_BEAM_RESERVE.
+                if let prev = sessionTail, userTail.count == prev.count + 1,
+                   userTail.hasPrefix(prev), await beam.hasReserve {
+                    let a = await beam.advance(typedChar: userTail.last!,
+                                               requiredPrefixForMiss: choice.requiredPrefix,
+                                               missWidth: choice.width)
+                    raw = a.ghost
+                    switch a.kind {
+                    case .hit: kind = "hit"
+                    case .refill: kind = "refill"
+                    case .miss: kind = "miss"
+                    }
+                } else {
+                    let r = await beam.ghostWithReserve(prompt: prompt,
+                                                        requiredPrefix: choice.requiredPrefix,
+                                                        maxWidth: choice.width)
+                    raw = r.best?.ghost ?? ""
+                    kind = "seed"
+                }
+                sessionTail = userTail
+            } else {
+                let result = await beam.ghost(prompt: prompt, requiredPrefix: choice.requiredPrefix,
+                                              maxWidth: choice.width)
+                raw = result.best?.ghost ?? ""
+            }
             let caretAfterSpace = userTail.last == " " || userTail.last == "\t"
             let ghost = BeamGhostShaper.beamPostFilter(
-                rawGhost: result.best?.ghost ?? "", isBoundary: choice.isBoundary,
+                rawGhost: raw, isBoundary: choice.isBoundary,
                 caretAfterSpace: caretAfterSpace, userTail: userTail, maxWords: beamMaxWords)
             let ms = Int(Date().timeIntervalSince(t0) * 1000)
-            return Step(i: userTail.count, ghost: ghost, ms: ms, g2: false, boundary: choice.isBoundary)
+            return Step(i: userTail.count, ghost: ghost, ms: ms, g2: false,
+                        boundary: choice.isBoundary, kind: kind)
         }
         runs.append(run)
         err("[parity] beam \(si + 1)/\(scenarios.count)")
@@ -726,6 +768,17 @@ row("  moyenne / p50", cards.map { "\(mean($0.latAll)) / \(percentile($0.latAll,
 row("  p95 / max", cards.map { "\(percentile($0.latAll, 0.95)) / \($0.latAll.max() ?? 0)" })
 row("  mid-mot p50", cards.map { "\(percentile($0.latMid, 0.5))" })
 row("  frontière/après-espace p50", cards.map { "\(percentile($0.latBoundary, 0.5))" })
+if cards.contains(where: { !$0.latByKind.isEmpty }) {
+    print("")
+    row("RÉSERVE par type de frappe (n · p50 ms)", cards.map { _ in "" })
+    for kind in ["hit", "refill", "miss", "seed"] {
+        row("  \(kind)", cards.map { c in
+            guard let xs = c.latByKind[kind], !xs.isEmpty else { return "–" }
+            let share = c.stepsTotal == 0 ? 0 : xs.count * 100 / c.stepsTotal
+            return "\(xs.count) (\(share)%) · \(percentile(xs, 0.5))"
+        })
+    }
+}
 
 print("")
 print("  steps jugés : " + cards.map { "\($0.name)=\($0.stepsTotal)" }.joined(separator: " · "))
