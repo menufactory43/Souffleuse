@@ -1134,12 +1134,13 @@ final class ModelRuntime {
     /// Renvoie le texte à APPENDRE au reste, ou nil si rien d'exploitable.
     func extendGhostBeam(request: PredictRequest, maxWords: Int) async -> String? {
         guard beamReady else { return nil }
-        // Sous SOUFFLEUSE_BEAM_RESERVE, le refill vit DANS la réserve (advance →
-        // REFILL incrémental sur les survivants). Lancer ce refill-ci passerait
-        // par `generateBeam` qui recycle les seqs de branches → réserve tuée à
-        // chaque rallonge. On le neutralise ; le living ghost est maintenu par
-        // les advance ~0 ms à chaque frappe.
-        guard !SuggestionPolicy.Tuning.beamReserveEnabled else { return nil }
+        // NB réserve (SOUFFLEUSE_BEAM_RESERVE) : ce refill passe par `generateBeam`
+        // qui recycle les seqs de branches → la réserve est droppée à chaque
+        // rallonge. C'est VOULU : pendant la consommation live, `predict()` ne
+        // tourne pas (l'AppDelegate slice le reste et appelle CE refill) — la
+        // réserve ne peut donc pas maintenir la fenêtre ; la neutraliser ici
+        // vidait le living ghost (régression constatée au clavier). La réserve
+        // ne sert que le chemin predict (divergences courtes).
         let prompt = BeamGhostShaper.buildPrompt(
             customInstr: request.customInstr, ctxPrefix: request.ctxPrefix, llmTail: request.llmTail)
         GpuGate.shared.ghostBegan()
