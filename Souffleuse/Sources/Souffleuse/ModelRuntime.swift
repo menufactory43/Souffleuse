@@ -105,6 +105,13 @@ final class ModelRuntime {
     /// `beamCoreEnabled`). Gates `generateGhostBeam`.
     private(set) var beamReady = false
 
+    /// `userTail` au moment du dernier seed/advance de la session réserve
+    /// (`SOUFFLEUSE_BEAM_RESERVE`). La CONTINUITÉ — le nouveau tail prolonge
+    /// l'ancien de 1-3 chars — est l'UNIQUE critère de validité de la réserve :
+    /// backspace, Tab accepté, changement de champ/app, repositionnement du
+    /// caret cassent tous le préfixe → re-seed automatique. nil = pas de session.
+    private var beamSessionTail: String?
+
     /// Plancher dico mid-mot (flag `MW_DICO_FLOOR`). `NSSpellChecker` via
     /// `WordCompleter` : complète le mot EN COURS quand le gradient d'engagement
     /// s'abstient, pour qu'un ghost valide apparaisse à chaque lettre. Tenu ici
@@ -859,6 +866,9 @@ final class ModelRuntime {
         // terminateur). Couvre « on reprend quand l'utilisateur a retapé quelques
         // lettres après le point » SANS coût LLM.
         guard BeamGhostShaper.sentenceArmed(userTail: userTail) else {
+            // Silence G2 : la session réserve de la phrase précédente est morte
+            // (le ghost repartira d'un seed frais à la reprise).
+            beamSessionTail = nil
             return MidWordEscalationResult(show: false, word: "", reason: "beam-newsentence")
         }
 
@@ -876,9 +886,67 @@ final class ModelRuntime {
         let prompt = BeamGhostShaper.buildPrompt(
             customInstr: request.customInstr, ctxPrefix: request.ctxPrefix, llmTail: request.llmTail)
 
+        // ── Réserve (flag SOUFFLEUSE_BEAM_RESERVE) : HIT/REFILL/MISS ─────────
+        // Si le nouveau tail PROLONGE l'ancien de 1-3 chars et qu'une réserve
+        // vit, on AVANCE char par char dans les branches pré-décodées : frappe
+        // qui suit le ghost = HIT, 0 décode, ~0 ms. Divergence = MISS, re-beam
+        // (avec capture d'une réserve fraîche) DANS `advance`. Toute rupture de
+        // continuité (backspace, accept, changement de champ, llmTail ≠ userTail
+        // après heal) tombe dans le seed frais ci-dessous.
+        let reserveOn = SuggestionPolicy.Tuning.beamReserveEnabled
+        if reserveOn,
+           let prev = beamSessionTail,
+           request.llmTail == userTail,           // pas de correction typo en vol
+           userTail.count > prev.count,
+           userTail.count - prev.count <= 3,      // debounce : au plus quelques chars
+           userTail.hasPrefix(prev),
+           await beamEngine.hasReserve {
+            var advanced: AdvanceResult?
+            var tail = prev
+            GpuGate.shared.ghostBegan()
+            for ch in userTail.dropFirst(prev.count) {
+                tail.append(ch)
+                let c = BeamGhostShaper.beamConfigChoice(userTail: tail, beamWidth: beamWidth)
+                advanced = await beamEngine.advance(typedChar: ch,
+                                                    requiredPrefixForMiss: c.requiredPrefix,
+                                                    missWidth: c.width)
+                if Task.isCancelled { break }
+            }
+            GpuGate.shared.ghostEnded()
+            if Task.isCancelled { return nil }
+            beamSessionTail = userTail
+            if let a = advanced {
+                Log.info(.predictor, "ghost_beam_advance_ms", count: a.elapsedMillis)
+                let caretAfterSpace = request.llmTail.last == " " || request.llmTail.last == "\t"
+                let ghost = BeamGhostShaper.beamPostFilter(
+                    rawGhost: a.ghost, isBoundary: isBoundary, caretAfterSpace: caretAfterSpace,
+                    userTail: userTail, maxWords: request.maxWords)
+                let reason: String
+                switch a.kind {
+                case .hit: reason = "beam-hit"
+                case .refill: reason = "beam-refill"
+                case .miss: reason = "beam-miss"
+                }
+                return MidWordEscalationResult(show: !ghost.isEmpty, word: ghost,
+                                               reason: ghost.isEmpty ? "beam-gated" : reason)
+            }
+            // advanced nil (dropFirst vide — ne devrait pas arriver) → seed frais.
+        }
+
         // GPU gate (parité translation, TRANSLATION-SPEC §2.9) autour du beam.
         GpuGate.shared.ghostBegan()
-        let result = await beamEngine.ghost(prompt: prompt, requiredPrefix: requiredPrefix, maxWidth: width)
+        let result: BeamResult
+        if reserveOn {
+            // Seed de session : beam + CAPTURE de la réserve pour les frappes
+            // suivantes. La rupture de continuité a déjà invalidé l'ancienne
+            // réserve (les seqs sont recyclées par `generateBeam`).
+            result = await beamEngine.ghostWithReserve(prompt: prompt,
+                                                       requiredPrefix: requiredPrefix,
+                                                       maxWidth: width)
+            beamSessionTail = userTail
+        } else {
+            result = await beamEngine.ghost(prompt: prompt, requiredPrefix: requiredPrefix, maxWidth: width)
+        }
         GpuGate.shared.ghostEnded()
         if Task.isCancelled { return nil }
         Log.info(.predictor, "ghost_beam_seed_ms", count: result.elapsedMillis)
@@ -1066,6 +1134,12 @@ final class ModelRuntime {
     /// Renvoie le texte à APPENDRE au reste, ou nil si rien d'exploitable.
     func extendGhostBeam(request: PredictRequest, maxWords: Int) async -> String? {
         guard beamReady else { return nil }
+        // Sous SOUFFLEUSE_BEAM_RESERVE, le refill vit DANS la réserve (advance →
+        // REFILL incrémental sur les survivants). Lancer ce refill-ci passerait
+        // par `generateBeam` qui recycle les seqs de branches → réserve tuée à
+        // chaque rallonge. On le neutralise ; le living ghost est maintenu par
+        // les advance ~0 ms à chaque frappe.
+        guard !SuggestionPolicy.Tuning.beamReserveEnabled else { return nil }
         let prompt = BeamGhostShaper.buildPrompt(
             customInstr: request.customInstr, ctxPrefix: request.ctxPrefix, llmTail: request.llmTail)
         GpuGate.shared.ghostBegan()
