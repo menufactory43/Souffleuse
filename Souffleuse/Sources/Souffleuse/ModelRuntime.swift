@@ -819,13 +819,16 @@ final class ModelRuntime {
     /// `BeamGhostEngine` contraint — le SEUL chemin LLM sous le flag, en
     /// remplacement du greedy long-ghost / engagement / plancher dico.
     ///
-    /// - **Mid-mot incomplet** (`partial` non vide, pas un mot complet du dico)
-    ///   → beam avec `requiredPrefix = partial`, largeur K=3. La contrainte force
-    ///   à compléter le mot tapé ; le ranking log-prob tranche l'accord (handoff
-    ///   §a/§b : intention 64 % vs 29 %, accord 9/10 vs 4/10).
-    /// - **Frontière / après-espace** (`partial` vide ou mot complet) → décode
-    ///   LIBRE à K=1 (≡ greedy, §4A : le beam n'aide pas après-espace et K>1 y
-    ///   perd en cohérence). Le `routeInstant` reste DEVANT pour le rappel.
+    /// - **Mid-mot** (`partial` non vide, même si le fragment est un mot valide
+    ///   du dico) → beam avec `requiredPrefix = partial`, largeur K=3. La
+    ///   contrainte force à ne pas abandonner le mot tapé (elle n'empêche pas de
+    ///   le terminer) ; le ranking log-prob tranche l'accord (handoff §a/§b :
+    ///   intention 64 % vs 29 %, accord 9/10 vs 4/10 ; PARITY-FINDINGS.md :
+    ///   céder la contrainte aux fragments « mots valides » coûtait 55 → 0 % de
+    ///   mots justes à 1 lettre).
+    /// - **Vrai après-espace** (`partial` vide) → décode LIBRE à K=1 (≡ greedy,
+    ///   §4A : le beam n'aide pas après-espace et K>1 y perd en cohérence). Le
+    ///   `routeInstant` reste DEVANT pour le rappel.
     ///
     /// Post-filtré par `beamPostFilter` (singleLine, dédup, séparateur, écho
     /// positionnel, word-cap) puis par les deux gardes de phrase. Réutilise

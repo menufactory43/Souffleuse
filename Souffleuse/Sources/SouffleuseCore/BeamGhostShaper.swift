@@ -52,12 +52,23 @@ public enum BeamGhostShaper {
 
     // MARK: - Choix de config beam : requiredPrefix + largeur (mid-mot vs frontière)
 
-    /// Décision de config du beam pour CE préfixe, identique à l'inline de
-    /// `generateGhostBeam` :
-    ///  - mid-mot incomplet (partiel non vide, pas un mot complet du dico) →
-    ///    `requiredPrefix = partial`, largeur K plein (la contrainte trie).
-    ///  - frontière / après-espace (partiel vide ou mot complet) → `requiredPrefix = ""`,
-    ///    largeur 1 (décode libre ≡ greedy ; le beam n'aide pas après-espace).
+    /// Décision de config du beam pour CE préfixe :
+    ///  - partiel NON VIDE (caret dans un mot, même si le fragment est un mot
+    ///    valide du dico) → `requiredPrefix = partial`, largeur K plein. La
+    ///    contrainte n'empêche PAS le mot de se terminer : le beam peut émettre
+    ///    un espace juste après le partiel (« la » → « la bonne ») — elle
+    ///    interdit seulement d'ABANDONNER le fragment tapé.
+    ///  - VRAI après-espace (partiel vide) → `requiredPrefix = ""`, largeur 1
+    ///    (décode libre ≡ greedy ; le beam n'aide pas après-espace).
+    ///
+    /// HISTORIQUE : la première version cédait aussi la contrainte quand
+    /// `defaultPartialWordIsComplete` jugeait le fragment « mot complet ».
+    /// `isValidWord` (permissif FR+EN) acceptant « d », « vo », « co »,
+    /// « dispo »…, ~41 % des frappes réellement mid-mot partaient en décode
+    /// libre K=1 + espace forcé du post-filtre (« proc » → « proc édure »).
+    /// Mesuré par SouffleuseParityEval (PARITY-FINDINGS.md) : avec la contrainte
+    /// systématique, mot juste à ≤1 lettre 0 % → 55 %, médiane 4 → 1 lettre,
+    /// stabilité k→k+1 66 % → 100 %.
     ///
     /// `beamWidth` = le K plein de la config (typiquement 3). Tuple nommé, style maison.
     public nonisolated static func beamConfigChoice(
@@ -65,7 +76,6 @@ public enum BeamGhostShaper {
     ) -> (requiredPrefix: String, width: Int, isBoundary: Bool) {
         let partial = OutputFilter.trailingPartialWord(userTail)
         let isBoundary = partial.isEmpty
-            || SuggestionPolicy.defaultPartialWordIsComplete(userTail)
         let requiredPrefix = isBoundary ? "" : partial
         let width = isBoundary ? 1 : beamWidth
         return (requiredPrefix, width, isBoundary)
