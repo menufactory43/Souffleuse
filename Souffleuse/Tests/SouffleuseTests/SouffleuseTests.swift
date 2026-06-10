@@ -95,6 +95,25 @@ import Testing
 }
 
 @MainActor
+@Test func overlayPillFrameTypedFragmentShiftsLeftAndWidens() {
+    // Le fragment du mot en cours (`typed`) est mesuré DANS la largeur et décale
+    // la pill vers la gauche de sa propre largeur : le fragment se lit sous ses
+    // glyphes, la suggestion reste alignée sous le caret.
+    let font = NSFont.systemFont(ofSize: 15)
+    let caret = CGRect(x: 120, y: 200, width: 1, height: 18)
+    let bare = OverlayWindow.pillFrame(belowCaret: caret, text: "he demain", font: font)
+    let withTyped = OverlayWindow.pillFrame(belowCaret: caret, text: "he demain", typed: "couc", font: font)
+    let typedWidth = ceil(("couc" as NSString).size(withAttributes: [.font: font]).width)
+    let fullWidth = ceil(("couche demain" as NSString).size(withAttributes: [.font: font]).width)
+    #expect(withTyped.width == fullWidth + PillView.hPad * 2)
+    #expect(withTyped.origin.x == bare.origin.x - typedWidth)
+    // Toujours clampé au bord gauche de l'écran.
+    let clamped = OverlayWindow.pillFrame(belowCaret: CGRect(x: 3, y: 200, width: 1, height: 18),
+                                          text: "he", typed: "couc", font: font)
+    #expect(clamped.origin.x == 0)
+}
+
+@MainActor
 @Test func overlayPillFrameHangsBelowCaretLine() {
     // Quartz Y grows downward; a caret one line lower (greater maxY) drops the
     // pill's AppKit y by exactly the same delta — the pill tracks the caret line.

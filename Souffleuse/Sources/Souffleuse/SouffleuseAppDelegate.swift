@@ -2692,7 +2692,10 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// si l'état est resté cohérent (même bundle, `partialAcceptedAtPrefix`/
     /// `partialAcceptedSoFar` inchangés, reste inchangé depuis le départ). Gardé
     /// contre les tempêtes par `ghostRefillInFlight` + une re-vérification de l'état.
-    private func maybeSpawnRollingRefill(committedText: String, bundleID: String) {
+    /// `afterCaret` (mid-line uniquement, nil sinon) : texte qui suit le caret,
+    /// propagé jusqu'à la coupe anti-recopie du refill beam — la pill mid-line
+    /// rechargée ne doit pas re-proposer les mots déjà tapés à droite.
+    private func maybeSpawnRollingRefill(committedText: String, bundleID: String, afterCaret: String? = nil) {
         // Sous le beam-core, `PVM.extendGhost` route vers le BEAM (continuation
         // fraîche conditionnée sur le tapé), donc le refill N'est PLUS greedy : il
         // est cohérent avec le ghost beam et c'est lui qui MAINTIENT le living ghost
@@ -2732,7 +2735,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             let extension_ = await self.predictor.extendGhost(
                 committedText: committedText,
                 currentRemainder: remainder,
-                maxWords: wantWords
+                maxWords: wantWords,
+                axTextAfterCaret: afterCaret
             )
             if Task.isCancelled { return }
             guard let extension_, !extension_.isEmpty else { return }
@@ -2826,10 +2830,13 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// too: after a Tab partial accept the owed `partialRemainder` is re-rendered
     /// in the pill (which visibly shrinks) instead of as an inline ghost — the
     /// inline partial-remainder block in `tick()` is unreachable behind the
-    /// mid-line gate, so the sync check is mirrored here. Deliberately bypasses
-    /// the typo and mid-word-rolling machinery — mid-line is a plain continuation
-    /// à la Cotypist. The debounce/predict block mirrors the end-of-line path so
-    /// cancel-on-keystroke still holds.
+    /// mid-line gate, so the sync check is mirrored here. The pill is VIVANTE
+    /// (même principe que le ghost inline) : live-consume à la frappe (un char
+    /// qui matche fait fondre le reste, zéro re-predict) + rolling refill qui
+    /// recharge la fenêtre à droite — coupé contre le texte après-caret pour ne
+    /// jamais re-proposer les mots déjà tapés à droite. Bypasses the typo
+    /// machinery — mid-line is a plain continuation à la Cotypist. The debounce/
+    /// predict block mirrors the end-of-line path so cancel-on-keystroke holds.
     @MainActor
     private func runMidLineGhost(prefix: String, rect: CGRect, text: String, caretIndex: Int, snap: AXSnapshot, font: NSFont?) {
         // Mid-line never shows a typo strike or a rolling mid-word ghost: clear
@@ -2837,17 +2844,49 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         currentTypo = nil
         typoSettleKey = nil
 
-        // Word-by-word: while a Tab-accept remainder is owed AND the AX text still
-        // matches exactly what we injected, render the SHRINKING remainder in the
-        // pill and skip prediction. Each subsequent Tab consumes the next word
-        // (handleKey's partial-accept path), and this re-renders the smaller
-        // remainder on the next tick.
+        // Texte qui suit le caret (cap 500, comme la capture AX du snapshot) :
+        // alimente la coupe anti-recopie du refill beam — la fenêtre rechargée ne
+        // doit pas re-proposer les mots déjà tapés à droite du curseur.
+        let afterCaret = String(text.dropFirst(caretIndex).prefix(500))
+        let bundleID = snap.bundleID ?? ""
+        // Fragment du mot EN COURS de frappe (vide à une frontière) : la pill le
+        // rend dans une couleur distincte DEVANT la suggestion, pour qu'on voie
+        // « où on en est » dans le mot pendant qu'on le tape (parité Cotypist).
+        let typedFragment = OutputFilter.trailingPartialWord(prefix)
+
+        // ── LIVE-CONSUME, promotion (parité ghost inline, tick() end-of-line) ──
+        // Une suggestion fraîche est affichée et l'utilisateur vient de taper des
+        // caractères qui en matchent le début → on bascule en partialRemainder
+        // (consommation char par char, ZÉRO re-predict) au lieu de relancer une
+        // génération à chaque frappe. C'est ce qui rend la pill « vivante » :
+        // la petite fenêtre fond à gauche pendant la frappe et le rolling refill
+        // ci-dessous la recharge à droite. Divergence → on nettoie et on laisse
+        // le predict gate régénérer (anti-flicker : pas de hide en mode rolling).
+        if partialRemainder.isEmpty,
+           !predictor.suggestion.isEmpty,
+           let basePrefix = lastPredictedPrefix,
+           predictor.predictedForPrefix == basePrefix,
+           prefix.count > basePrefix.count,
+           prefix.hasPrefix(basePrefix) {
+            let typedSince = String(prefix.dropFirst(basePrefix.count))
+            if Self.isLiveConsumeMatch(ghost: predictor.suggestion, typedSince: typedSince) {
+                partialAcceptedAtPrefix = basePrefix
+                partialAcceptedSoFar = typedSince
+                partialAcceptedAtBundleID = snap.bundleID
+                partialRemainder = String(predictor.suggestion.dropFirst(typedSince.count))
+                predictor.cancel()
+            } else {
+                clearStaleGhostOnDivergence()
+            }
+        }
+
+        // Word-by-word: while a Tab-accept remainder is owed (or live-consume is
+        // active) AND the AX text still matches what we injected/consumed, render
+        // the SHRINKING remainder in the pill and skip prediction. Each Tab
+        // consumes the next word (handleKey's partial-accept path) ; each typed
+        // matching char shrinks it here.
         if !partialRemainder.isEmpty {
             let expected = partialAcceptedAtPrefix + partialAcceptedSoFar
-            // Synced — or the async chunk inject hasn't fully landed yet, so the
-            // AX prefix is still a prefix of what we expect. Either way keep the
-            // remainder painted and skip predict; a real keystroke that diverges
-            // falls through below.
             // STRICT equality only. A `partialRemainder` is the tail of a walk
             // anchored at one exact caret position; it must render ONLY when the
             // AX prefix is exactly where the walk left it. The earlier
@@ -2859,16 +2898,56 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             // equality holds across a normal Tab walk; anything else is a real
             // move and must regenerate.
             if prefix == expected {
-                overlay.showPill(text: partialRemainder, at: rect, hostText: text, caretIndex: caretIndex, hostFont: font)
+                overlay.showPill(text: partialRemainder, typed: typedFragment, at: rect, hostText: text, caretIndex: caretIndex, hostFont: font)
                 interceptor.setActive(true)
+                // ── ROLLING REFILL (même principe que le ghost inline) : si le
+                // reste passe sous le plancher de mots, on régénère les mots
+                // suivants à droite pendant la consommation à gauche → la petite
+                // fenêtre ne se vide jamais. La coupe anti-recopie (afterCaret)
+                // garantit que la recharge n'est pas un doublon du texte à droite.
+                maybeSpawnRollingRefill(committedText: expected, bundleID: bundleID, afterCaret: afterCaret)
                 return
             }
-            // Moved off the walk (navigation or divergent typing): drop the stale
-            // remainder and fall through to a fresh prediction for THIS position.
-            partialRemainder = ""
-            partialAcceptedSoFar = ""
-            partialAcceptedAtPrefix = ""
-            partialAcceptedAtBundleID = nil
+            // Le préfixe a DÉPASSÉ expected : consommation live de la suite du
+            // reste (frappe qui matche) ou divergence (frappe hors-chemin) —
+            // miroir exact du bloc partial-remainder end-of-line du tick().
+            if prefix.hasPrefix(expected), prefix.count > expected.count {
+                let typedSince = String(prefix.dropFirst(expected.count))
+                if Self.isLiveConsumeMatch(ghost: partialRemainder, typedSince: typedSince) {
+                    partialAcceptedSoFar += typedSince
+                    partialRemainder = String(partialRemainder.dropFirst(typedSince.count))
+                    if !partialRemainder.isEmpty {
+                        overlay.showPill(text: partialRemainder, typed: typedFragment, at: rect, hostText: text, caretIndex: caretIndex, hostFont: font)
+                        interceptor.setActive(true)
+                        maybeSpawnRollingRefill(
+                            committedText: partialAcceptedAtPrefix + partialAcceptedSoFar,
+                            bundleID: bundleID, afterCaret: afterCaret)
+                        return
+                    }
+                    // Reste entièrement consommé à la frappe — enregistre + reset,
+                    // et on laisse le predict gate repartir sur le préfixe neuf.
+                    recordPartialAcceptanceToHistoryIfAllowed()
+                    partialAcceptedSoFar = ""
+                    partialAcceptedAtPrefix = ""
+                    partialAcceptedAtBundleID = nil
+                } else {
+                    // Divergence : enregistre ce qui a été consommé, reset, et
+                    // laisse le predict gate régénérer pour CE préfixe.
+                    recordPartialAcceptanceToHistoryIfAllowed()
+                    partialRemainder = ""
+                    partialAcceptedSoFar = ""
+                    partialAcceptedAtPrefix = ""
+                    partialAcceptedAtBundleID = nil
+                    clearStaleGhostOnDivergence()
+                }
+            } else {
+                // Moved off the walk (navigation, backspace): drop the stale
+                // remainder and fall through to a fresh prediction for THIS position.
+                partialRemainder = ""
+                partialAcceptedSoFar = ""
+                partialAcceptedAtPrefix = ""
+                partialAcceptedAtBundleID = nil
+            }
         }
 
         if prefix != lastPredictedPrefix {
@@ -2908,8 +2987,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         // First paint of a fresh suggestion. Tab will inject its first word and
-        // arm `partialRemainder`, which the block above then walks word-by-word.
-        overlay.showPill(text: suggestion, at: rect, hostText: text, caretIndex: caretIndex, hostFont: font)
+        // arm `partialRemainder` ; typing matching chars promotes to live-consume
+        // (block above) — both walk the pill word-by-word / char-by-char.
+        overlay.showPill(text: suggestion, typed: typedFragment, at: rect, hostText: text, caretIndex: caretIndex, hostFont: font)
         interceptor.setActive(true)
     }
 

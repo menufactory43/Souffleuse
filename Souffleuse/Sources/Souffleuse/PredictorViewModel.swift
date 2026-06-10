@@ -1215,7 +1215,11 @@ final class PredictorViewModel {
     /// d'exploitable. Les gardes de génération (`planner.isCurrent`) empêchent
     /// un refill périmé d'aboutir si une vraie `predict()` a démarré entre-temps ;
     /// le call-site (AppDelegate) re-valide en plus l'état avant d'appender.
-    func extendGhost(committedText: String, currentRemainder: String, maxWords: Int) async -> String? {
+    /// `axTextAfterCaret` (mid-line uniquement, nil sinon) : le texte qui suit le
+    /// caret, transmis pour que la coupe anti-recopie s'applique aussi au refill —
+    /// sans lui, la fenêtre rechargée re-proposait les mots déjà tapés à droite.
+    func extendGhost(committedText: String, currentRemainder: String, maxWords: Int,
+                     axTextAfterCaret: String? = nil) async -> String? {
         guard runtime.canGenerate, maxWords >= 1 else { return nil }
 
         // Texte visible complet : ce qui pilote la continuation du modèle.
@@ -1269,7 +1273,7 @@ final class PredictorViewModel {
             axSnapshotHelp: nil,
             axSnapshotRole: nil,
             axSnapshotSubrole: nil,
-            axTextAfterCaret: nil,
+            axTextAfterCaret: axTextAfterCaret,
             personalizationStrength: 0,
             maxTokens: maxTokens,
             maxWords: maxWords,
