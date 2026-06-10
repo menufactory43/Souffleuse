@@ -143,6 +143,7 @@ final class PreferencesStore {
         static let partialAcceptEnabled = "partialAcceptEnabled"
         static let acceptAllKey = "acceptAllKey"
         static let commitKey = "commitKey"
+        static let translateHotKey = "translateHotKey"
         static let targetCycleKey = "targetCycleKey"
         static let translationModel = "translationModel"
         static let trailingSpaceOnPartial = "trailingSpaceOnPartial"
@@ -232,6 +233,11 @@ final class PreferencesStore {
     var targetCycleKey: TargetCycleKey {
         didSet { UserDefaults.standard.set(targetCycleKey.rawValue, forKey: K.targetCycleKey) }
     }
+    /// Défaut ⌥⌘T ; raccourci GLOBAL (hot key système) qui traduit le champ
+    /// focus à TOUT moment — sans ghost actif ni HUD visible. `.disabled` off.
+    var translateHotKey: TranslateHotKeyOption {
+        didSet { UserDefaults.standard.set(translateHotKey.rawValue, forKey: K.translateHotKey) }
+    }
     /// Modèle utilisé pour la TRADUCTION (ghost FR inchangé). Le changer recharge
     /// paresseusement l'autre GGUF ; déchargé à l'idle (Phase 7).
     var translationModel: InstructModel {
@@ -303,6 +309,7 @@ final class PreferencesStore {
         self.partialAcceptEnabled = (d.object(forKey: K.partialAcceptEnabled) as? Bool) ?? true
         self.acceptAllKey = AcceptAllKey(rawValue: d.string(forKey: K.acceptAllKey) ?? "") ?? .rightArrow
         self.commitKey = CommitKey(rawValue: d.string(forKey: K.commitKey) ?? "") ?? .cmdReturn
+        self.translateHotKey = TranslateHotKeyOption(rawValue: d.string(forKey: K.translateHotKey) ?? "") ?? .optCmdT
         self.targetCycleKey = TargetCycleKey(rawValue: d.string(forKey: K.targetCycleKey) ?? "") ?? .cmdShiftRight
         self.translationModel = InstructModel(rawValue: d.string(forKey: K.translationModel) ?? "") ?? TranslationRuntime.defaultModel()
         self.trailingSpaceOnPartial = (d.object(forKey: K.trailingSpaceOnPartial) as? Bool) ?? true
