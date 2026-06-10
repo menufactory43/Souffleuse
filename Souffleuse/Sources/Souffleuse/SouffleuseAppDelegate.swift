@@ -2561,15 +2561,22 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// Recharge paresseusement le moteur ghost (~1 s) puis reconstruit le n-gram
     /// perso en tâche de fond (raffinement — le ghost de base fonctionne sans).
     /// Idempotent : un seul rechargement à la fois, et no-op si déjà résident.
+    /// Après un ÉCHEC de chargement, `loadModel()` retente de lui-même avec un
+    /// backoff (cf. `loadRetryBackoffSeconds`) — il renvoie `false` quand la
+    /// tentative est sautée, et on ne logue/rebuild que sur une vraie tentative
+    /// (sinon `ghost_warm_reload` spammait le log à chaque frappe pendant la
+    /// fenêtre de backoff).
     @MainActor
     private func loadGhostIfNeeded() {
         guard ghostLoadTask == nil, !predictor.isModelReady else { return }
         ghostLoadTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            await self.predictor.loadModel()
-            Log.info(.predictor, "ghost_warm_reload")
-            let entries = await self.store.history.allEntries()
-            await self.predictor.rebuildPersonalization(from: entries)
+            let attempted = await self.predictor.loadModel()
+            if attempted {
+                Log.info(.predictor, "ghost_warm_reload")
+                let entries = await self.store.history.allEntries()
+                await self.predictor.rebuildPersonalization(from: entries)
+            }
             self.ghostLoadTask = nil
         }
     }

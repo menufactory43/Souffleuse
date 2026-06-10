@@ -287,8 +287,41 @@ final class PredictorViewModel {
         cache.clearPredictCache()
     }
 
-    func loadModel() async {
-        guard case .idle = loadState else { return }
+    /// Backoff de retry après un échec de chargement. Sans retry, un échec
+    /// PONCTUEL (fichier momentanément indisponible, pression mémoire au réveil)
+    /// verrouillait le ghost jusqu'au relaunch : `loadState == .failed` ne
+    /// refranchissait jamais le guard `.idle` et l'AppDelegate bouclait sur
+    /// `ghost_warm_reload` à chaque frappe, sans jamais recharger (panne
+    /// constatée). Sans BACKOFF, un GGUF réellement absent coûterait une vraie
+    /// tentative de load (~1 s) à chaque frappe. 10 s = invisible sur un échec
+    /// transitoire, inoffensif sur un échec permanent.
+    nonisolated static let loadRetryBackoffSeconds: TimeInterval = 10
+
+    /// Horodatage du dernier échec de chargement — pilote le backoff de retry.
+    @ObservationIgnored private var lastLoadFailureAt: Date?
+
+    /// Décision PURE d'entrée de `loadModel()` : champ neuf (`.idle`) → charge ;
+    /// déjà résident / en cours → jamais ; échec antérieur → retry, mais espacé
+    /// par `loadRetryBackoffSeconds`.
+    nonisolated static func shouldAttemptLoad(state: LoadState, lastFailureAt: Date?, now: Date) -> Bool {
+        switch state {
+        case .idle:
+            return true
+        case .loading, .ready:
+            return false
+        case .failed:
+            guard let lastFailureAt else { return true }
+            return now.timeIntervalSince(lastFailureAt) >= loadRetryBackoffSeconds
+        }
+    }
+
+    /// Renvoie `true` quand une tentative de chargement a réellement eu lieu
+    /// (réussie ou non) — le call-site warmth ne logue/rebuild que dans ce cas.
+    @discardableResult
+    func loadModel() async -> Bool {
+        guard Self.shouldAttemptLoad(state: loadState, lastFailureAt: lastLoadFailureAt, now: Date()) else {
+            return false
+        }
         loadState = .loading(progress: 0)
         // ModelRuntime.loadModel owns container + lastError. We surface its
         // outcome through the PVM LoadState observable. Progress reporting is
@@ -298,9 +331,12 @@ final class PredictorViewModel {
         if let err = runtime.lastError {
             loadState = .failed(err)
             lastError = err
+            lastLoadFailureAt = Date()
         } else {
             loadState = .ready
+            lastLoadFailureAt = nil
         }
+        return true
     }
 
     /// Vrai quand le moteur ghost est résident et prêt à générer. L'AppDelegate
