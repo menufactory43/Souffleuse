@@ -164,7 +164,25 @@ rm -rf "$STAGING"; mkdir -p "$STAGING"
 cp -R "$APP_BUNDLE" "$STAGING/"
 ln -s /Applications "$STAGING/Applications"
 rm -f "$DMG_PATH"
-hdiutil create -volname "$APP_NAME" -srcfolder "$STAGING" -ov -format UDZO "$DMG_PATH"
+# Icône de volume (kit Resources/Brand). hdiutil -srcfolder ne propage PAS le
+# bit custom-icon du dossier source (vérifié) : il faut la recette classique —
+# DMG inscriptible, monter, poser le bit sur la RACINE DU VOLUME, convertir en
+# UDZO compressé. SetFile vit dans les Command Line Tools ; absent, on retombe
+# sur le create direct (DMG fonctionnel, icône de volume générique).
+if [ -f "Resources/Brand/VolumeIcon.icns" ] && command -v SetFile >/dev/null 2>&1; then
+  cp "Resources/Brand/VolumeIcon.icns" "$STAGING/.VolumeIcon.icns"
+  RW_DMG="build/$APP_NAME-rw.dmg"
+  rm -f "$RW_DMG"
+  hdiutil create -volname "$APP_NAME" -srcfolder "$STAGING" -ov -format UDRW "$RW_DMG"
+  MOUNT_POINT=$(hdiutil attach -nobrowse "$RW_DMG" | tail -1 | awk -F'\t' '{print $NF}')
+  SetFile -a C "$MOUNT_POINT"
+  hdiutil detach "$MOUNT_POINT"
+  hdiutil convert "$RW_DMG" -format UDZO -o "$DMG_PATH" -ov
+  rm -f "$RW_DMG"
+else
+  [ -f "Resources/Brand/VolumeIcon.icns" ] && echo "==> SetFile introuvable : DMG sans icône de volume."
+  hdiutil create -volname "$APP_NAME" -srcfolder "$STAGING" -ov -format UDZO "$DMG_PATH"
+fi
 rm -rf "$STAGING"
 
 echo "==> Signature du DMG..."
