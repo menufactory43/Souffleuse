@@ -171,6 +171,25 @@ import Testing
 }
 
 @MainActor
+@Test func midLineAcceptPlanDropsTrailingSeparatorBeforePunctuation() {
+    // Le cas de l'écran : « …un hom|me. » + ghost « me qui m… », Tab « me  » :
+    // « me » existe → saut pur ; l'espace de fin du chunk collé au point existant
+    // est JETÉ (pas de « homme . »), et surtout pas injecté à l'ancienne position
+    // (« hom me. »).
+    let p = SouffleuseAppDelegate.midLineAcceptPlan(chunk: "me ", afterCaret: "me.")
+    #expect(p.ops == [.skip(2)])
+    #expect(p.effective == "me")
+    // En fin de champ (rien après le mot sauté), l'espace de continuation reste.
+    let q = SouffleuseAppDelegate.midLineAcceptPlan(chunk: "me ", afterCaret: "me")
+    #expect(q.ops == [.skip(2), .inject(" ")])
+    #expect(q.effective == "me ")
+    // Entre deux mots, le séparateur reste indispensable : « qui » inséré avant
+    // le point existant garde son espace de tête, pas celui de queue.
+    let r = SouffleuseAppDelegate.midLineAcceptPlan(chunk: " qui", afterCaret: ".")
+    #expect(r.ops == [.inject(" qui")])
+}
+
+@MainActor
 @Test func midLineAcceptPlanWordBoundaryGuards() {
     // « de » ne matche PAS « demain » (le mot existant continue) : tout est
     // injecté, pas de mot existant éventré.
