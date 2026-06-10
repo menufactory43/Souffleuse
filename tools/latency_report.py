@@ -151,6 +151,10 @@ def main():
             open_gens[k]["prompt"] = e.get("i", 0)
         elif e["e"] == "seed_lcp" and k in open_gens:
             open_gens[k]["lcp"] = e.get("i", 0)
+        elif e["e"] == "seed_prefill_ms" and k in open_gens:
+            open_gens[k]["prefill"] = e.get("i", 0)
+        elif e["e"] == "seed_decode_ms" and k in open_gens:
+            open_gens[k]["decode"] = e.get("i", 0)
         elif e["e"] == "gen_end" and k in open_gens:
             g = open_gens.pop(k)
             g["dur"] = e["t"] - g["t0"]
@@ -176,6 +180,21 @@ def main():
         values = [g["dur"] for g in sel]
         med_prompt = statistics.median([g["prompt"] for g in sel]) if sel else 0
         print(f"  {b:26s} prompt~{med_prompt:4.0f} tok  {fmt(values)}")
+
+    # Décomposition INTERNE du seed (prefill vs boucle de décodage vs reste =
+    # tokenisation/queue d'actor/ranking). C'est elle qui dit OÙ le seed paie :
+    # decode qui grandit avec le contexte ↔ prefill froide ↔ attente hors moteur.
+    timed = [g for g in seeds if "prefill" in g and "decode" in g]
+    if timed:
+        print("\nDécomposition interne des seeds (gen = attente + prefill + decode + reste) :")
+        print(f"  {'prefill (llama_decode du delta prompt)':42s} {fmt([g['prefill'] for g in timed])}")
+        print(f"  {'boucle de décodage (pas-à-pas)':42s} {fmt([g['decode'] for g in timed])}")
+        print(f"  {'reste (tokenisation/ranking/attente)':42s} {fmt([g['dur'] - g['prefill'] - g['decode'] for g in timed])}")
+        # Corrélation décode ↔ taille de prompt (effet contexte sur chaque pas).
+        small = [g["decode"] for g in timed if g["prompt"] < 120]
+        large = [g["decode"] for g in timed if g["prompt"] >= 120]
+        print(f"  {'décode | prompt < 120 tok':42s} {fmt(small)}")
+        print(f"  {'décode | prompt ≥ 120 tok':42s} {fmt(large)}")
 
     # Refills : durée begin→end + delta end→paint + réutilisation du cache.
     refill_durations = []

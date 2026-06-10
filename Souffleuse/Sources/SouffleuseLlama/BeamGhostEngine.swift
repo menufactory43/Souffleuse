@@ -179,13 +179,24 @@ public struct BeamResult: Sendable {
     /// complète. 0/0 sur les early-returns (prompt vide, échec).
     public let promptTokenCount: Int
     public let reusedPrefixTokens: Int
+    /// Décomposition INTERNE du coût (mesure pure, comportement intouché) :
+    /// `prefillMillis` = le `llama_decode` du suffixe de prompt nouveau ;
+    /// `decodeMillis` = la boucle pas-à-pas (decode multi-seq + scan vocab +
+    /// expansion). Le reste d'`elapsedMillis` = tokenisation/healing/ranking.
+    /// Sert à départager « le seed est lent parce que prefill » vs « parce que
+    /// pas de décodage » (effet taille de contexte). 0 sur les early-returns.
+    public let prefillMillis: Int
+    public let decodeMillis: Int
     public init(best: BeamCandidate?, candidates: [BeamCandidate], elapsedMillis: Int,
-                promptTokenCount: Int = 0, reusedPrefixTokens: Int = 0) {
+                promptTokenCount: Int = 0, reusedPrefixTokens: Int = 0,
+                prefillMillis: Int = 0, decodeMillis: Int = 0) {
         self.best = best
         self.candidates = candidates
         self.elapsedMillis = elapsedMillis
         self.promptTokenCount = promptTokenCount
         self.reusedPrefixTokens = reusedPrefixTokens
+        self.prefillMillis = prefillMillis
+        self.decodeMillis = decodeMillis
     }
 }
 
@@ -536,11 +547,13 @@ public actor BeamGhostEngine {
         }
 
         // ── Préfill du SUFFIXE nouveau en séquence 0 (le préfixe partagé) ─────
+        let prefillStart = Date()
         guard prefill(suffix: Array(promptTokens[lcp...]), fromPos: Int32(lcp)) else {
             cachedPromptTokens = []
             if let mem { llama_memory_seq_rm(mem, -1, -1, -1) }   // KV partiel → repartir propre
             return BeamResult(best: nil, candidates: [], elapsedMillis: Int(Date().timeIntervalSince(start) * 1000))
         }
+        let prefillMs = Int(Date().timeIntervalSince(prefillStart) * 1000)
         cachedPromptTokens = promptTokens
         let promptLen = Int32(promptTokens.count)
 
@@ -557,6 +570,7 @@ public actor BeamGhostEngine {
         // ── Boucle de décodage pas-à-pas ─────────────────────────────────────
         // À chaque étape : on décode UN batch multi-séquences (un token « dernier »
         // par branche vivante), on lit les logits par séquence, on étend.
+        let decodeStart = Date()
         for _ in 0..<config.maxTokens {
             if live.isEmpty { break }
             // Cancel-on-keystroke À L'INTÉRIEUR du beam. Sans ce check, un beam
@@ -649,6 +663,7 @@ public actor BeamGhostEngine {
             finished.append(contentsOf: stopping)
             live = nextLive
         }
+        let decodeMs = Int(Date().timeIntervalSince(decodeStart) * 1000)
 
         // Finalise les branches encore vivantes au budget épuisé (suffixe valide).
         for var b in live where b.remainingRequiredPrefix.isEmpty && !b.tokens.isEmpty {
@@ -690,7 +705,8 @@ public actor BeamGhostEngine {
 
         let elapsed = Int(Date().timeIntervalSince(start) * 1000)
         return BeamResult(best: scored.first, candidates: scored, elapsedMillis: elapsed,
-                          promptTokenCount: promptTokens.count, reusedPrefixTokens: lcp)
+                          promptTokenCount: promptTokens.count, reusedPrefixTokens: lcp,
+                          prefillMillis: prefillMs, decodeMillis: decodeMs)
     }
 
     // MARK: - Étapes internes
