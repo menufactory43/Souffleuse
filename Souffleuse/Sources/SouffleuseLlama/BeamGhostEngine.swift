@@ -550,6 +550,15 @@ public actor BeamGhostEngine {
         // par branche vivante), on lit les logits par séquence, on étend.
         for _ in 0..<config.maxTokens {
             if live.isEmpty { break }
+            // Cancel-on-keystroke À L'INTÉRIEUR du beam. Sans ce check, un beam
+            // périmé courait jusqu'au bout de ses ~12 pas de décodage pendant que
+            // la frappe suivante SÉRIALISAIT derrière l'actor — mesuré en prod
+            // (trace de latence) : p50 713 ms / p95 2 s par génération vs ~240 ms
+            // au banc, et 742 ms d'attente predict→gen au p95. On rend la main au
+            // 1ᵉʳ pas suivant l'annulation : les seqs de branches sont recyclées
+            // au prochain appel et le prefix-cache (seq 0, `cachedPromptTokens`)
+            // reste valide — état cohérent, le caller jette le résultat partiel.
+            if Task.isCancelled { break }
 
             // Décode la position courante de chaque branche vivante et récupère,
             // pour chacune, l'indice logits où lire sa distribution next-token.
@@ -1318,6 +1327,11 @@ public actor BeamGhostEngine {
         let basePos = Int32(tokenize(reservePrompt, addSpecial: true).count)
 
         for _ in 0..<BeamGhostEngine.refillTokens {
+            // Même cancel-on-keystroke que la boucle de décodage du beam : un
+            // top-up périmé ne doit pas retenir l'actor (la réserve reste
+            // cohérente — les tokens déjà re-décodés sont simplement plus
+            // profonds que nécessaire).
+            if Task.isCancelled { break }
             // Indices des survivants REFILLABLES (KV vivant). Les gelés (seqId == -1)
             // n'ont pas de séquence à décoder → exclus du batch.
             let idxs = reserve.indices.filter { reserve[$0].seqId >= 0 && !reserve[$0].tokens.isEmpty }
