@@ -13,9 +13,10 @@ public final class PresenceIndicatorWindow {
     private let badge: BadgeView
 
     /// Footprint of the badge in points. The brand mark is aspect-fit inside
-    /// this square box, so the visible mark is ~22pt wide. Kept at the old
-    /// "S"-disc size so anchoring/positioning stays unchanged.
-    public static let diameter: CGFloat = 22
+    /// this square box. 28 pt (au lieu des 22 historiques du disque « S ») :
+    /// retour utilisateur 2026-06-10 — 22 trop petit, 26 essayé, 28 validé.
+    /// Les PNG du kit sont régénérés à 28/56 px (pas d'étirement).
+    public static let diameter: CGFloat = 28
 
     public init() {
         self.panel = NSPanel(
