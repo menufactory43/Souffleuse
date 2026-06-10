@@ -176,3 +176,32 @@ struct KeyInterceptorSyntheticGuardTests {
         #expect(K.resolveKey(keyCode: 124, mods: 0, commit: nil, acceptAll: bind) == .acceptAll)
     }
 }
+
+// MARK: - Politique de consommation par source d'armement
+
+/// Verrouille `shouldConsume` : armé pour un ghost, toute touche résolue est
+/// consommée (comportement historique) ; armé pour le HUD de traduction SEUL,
+/// seules .commit/.cycleTarget nous appartiennent — Tab, Esc et la touche
+/// accept-all (souvent →) restent à l'app hôte. C'est la garde qui permet
+/// d'armer le tap pendant que le panneau de traduction est visible sans voler
+/// la frappe normale (traduction sans ghost, 2026-06-10).
+@Suite("KeyInterceptor consume policy")
+struct KeyInterceptorConsumePolicyTests {
+    typealias K = KeyInterceptor
+
+    @Test("armé-ghost : tout est consommé")
+    func ghostArmedConsumesEverything() {
+        for key in [K.Key.tab, .esc, .acceptAll, .commit, .cycleTarget] {
+            #expect(K.shouldConsume(key: key, ghostArmed: true))
+        }
+    }
+
+    @Test("armé-HUD seul : seules les touches de traduction sont consommées")
+    func hudOnlyConsumesTranslationKeys() {
+        #expect(K.shouldConsume(key: .commit, ghostArmed: false))
+        #expect(K.shouldConsume(key: .cycleTarget, ghostArmed: false))
+        #expect(!K.shouldConsume(key: .tab, ghostArmed: false))
+        #expect(!K.shouldConsume(key: .esc, ghostArmed: false))
+        #expect(!K.shouldConsume(key: .acceptAll, ghostArmed: false))
+    }
+}

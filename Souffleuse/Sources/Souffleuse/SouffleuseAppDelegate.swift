@@ -107,6 +107,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// Mini Phase 4 — moteur instruct paresseux + petit panneau de traduction.
     private let translationRuntime = TranslationRuntime()
     private let translationHUD = TranslationHUDWindow()
+    /// Hotkey globale ⌥⌘T (traduction sans ghost). Nil si kill-switch posé ou
+    /// enregistrement refusé (combo déjà prise) — l'app fonctionne sans.
+    private var translationHotKey: TranslationHotKey?
     /// Fenêtre DEV d'inspection du ghost (live), créée paresseusement au clic.
     private var ghostInspectorWindow: GhostInspectorWindow?
     /// Item de menu DEV pilotant la fenêtre d'inspection (état coché = visible).
@@ -396,6 +399,22 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         interceptor.setAcceptAllKey(store.acceptAllKey)
         interceptor.setCommitKey(store.commitKey)
         interceptor.setTargetCycleKey(store.targetCycleKey)
+
+        // Traduction SANS ghost (le trou d'UX historique) — deux rampes :
+        // 1. HUD visible ⇒ tap armé : ⌘↩ / ⌘⇧→ marchent tant que le panneau est
+        //    à l'écran (fenêtre d'armement explicite, Tab/Esc/→ restent à l'hôte).
+        translationHUD.onVisibilityChanged = { [weak self] visible in
+            self?.interceptor.setHUDArmed(visible)
+        }
+        // 2. Hotkey GLOBALE ⌥⌘T : traduit le champ focus à tout moment, une frappe.
+        translationHotKey = TranslationHotKey { [weak self] in
+            guard let self else { return }
+            Log.info(.input, "translate_hotkey")
+            self.triggerTranslateCommit()
+        }
+        if TranslationHotKey.isEnabled, translationHotKey == nil {
+            Log.warn(.input, "translate_hotkey_register_failed")
+        }
         Task { await self.translationRuntime.setModel(self.store.translationModel) }
 
         predictor.maxTokens = store.completionLength.maxTokens
@@ -1967,7 +1986,15 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             }
             return (currentTypo, currentTypoTrailing, predictor.suggestion, false)
         }
-        if pending.typo == nil, pending.llm.isEmpty { return false }
+        // Les touches de TRADUCTION (.commit/.cycleTarget) n'ont pas besoin de
+        // suggestion en attente : elles fonctionnent aussi quand le tap est armé
+        // par le HUD seul (panneau visible sans ghost) ou via la hotkey globale.
+        // Les touches du ghost (Tab/Esc/accept-all), elles, exigent du pending.
+        switch key {
+        case .commit, .cycleTarget: break
+        case .tab, .esc, .acceptAll:
+            if pending.typo == nil, pending.llm.isEmpty { return false }
+        }
 
         switch key {
         case .tab:
@@ -2230,43 +2257,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                                      bundleID: bundleID, textAfterCaret: preSnap.textAfterCaret)
 
         case .commit:
-            // Vraie traduction visible. On lit le champ, on rend la main au ghost
-            // (teardown), puis on stream la traduction FR→cible dans un petit
-            // panneau et on remplace le champ. La CIBLE (P5) est résolue ici : une
-            // sélection FIXE posée à la touche de cycle l'emporte ; sinon AUTO suit
-            // la langue détectée du correspondant (capture ON) ; sinon EN. Le tap
-            // n'étant actif que pendant qu'un ghost s'affiche, ⌘↩ n'est intercepté
-            // que dans ce cas.
-            let snap = axClient.snapshot()
-            let current = snap.text ?? ""
-            let rect = snap.elementRect
-            let bundleID = snap.bundleID
-            let windowTitle = snap.windowTitle
             Log.info(.input, "translate_commit_start")
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                let selection = self.currentTargetSelection(
-                    forBundle: bundleID, windowTitle: windowTitle)
-                let context = self.lastEnrichedVisible ?? ""
-                let detected = TranslationTarget.detected(in: context)
-                let frCorrespondent = TranslationTarget.correspondentSpeaksFrench(in: context)
-                let action = selection.action(detected: detected, correspondentIsFrench: frCorrespondent)
-                self.predictor.cancel()
-                self.lastPredictedPrefix = nil
-                self.overlay.hide()
-                self.interceptor.setActive(false)
-                // Aiguillage P-relecture : si le correspondant parle français (ou si
-                // l'utilisateur a posé FR↺ au cycle) on RELIT le message FR selon le
-                // ton de l'app ; sinon on traduit vers la cible. Même panneau, même
-                // moteur instruct, même garde-fou.
-                switch action {
-                case .translate(let target):
-                    self.runTranslationCommit(frenchText: current, fieldRect: rect, target: target, bundleID: bundleID)
-                case .reformulate:
-                    let tone = self.store.tones.tone(forBundle: bundleID)
-                    self.runReformulateCommit(frenchText: current, fieldRect: rect, tone: tone, bundleID: bundleID)
-                }
-            }
+            triggerTranslateCommit()
             return true
 
         case .cycleTarget:
@@ -2289,6 +2281,46 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 self.flashTargetSelection(selection, fieldRect: rect, bundleID: bundleID)
             }
             return true
+        }
+    }
+
+    /// Vraie traduction visible — point d'entrée UNIQUE, appelable de partout :
+    /// ⌘↩ pendant un ghost (chemin historique), ⌘↩ pendant que le HUD est visible
+    /// (tap armé par `setHUDArmed`), ou la hotkey GLOBALE ⌥⌘T (sans tap, à tout
+    /// moment). On lit le champ, on rend la main au ghost (teardown), puis on
+    /// stream la traduction FR→cible dans le panneau et on remplace le champ.
+    /// La CIBLE (P5) est résolue ici : une sélection FIXE posée à la touche de
+    /// cycle l'emporte ; sinon AUTO suit la langue détectée du correspondant
+    /// (capture ON) ; sinon EN.
+    nonisolated private func triggerTranslateCommit() {
+        let snap = axClient.snapshot()
+        let current = snap.text ?? ""
+        let rect = snap.elementRect
+        let bundleID = snap.bundleID
+        let windowTitle = snap.windowTitle
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let selection = self.currentTargetSelection(
+                forBundle: bundleID, windowTitle: windowTitle)
+            let context = self.lastEnrichedVisible ?? ""
+            let detected = TranslationTarget.detected(in: context)
+            let frCorrespondent = TranslationTarget.correspondentSpeaksFrench(in: context)
+            let action = selection.action(detected: detected, correspondentIsFrench: frCorrespondent)
+            self.predictor.cancel()
+            self.lastPredictedPrefix = nil
+            self.overlay.hide()
+            self.interceptor.setActive(false)
+            // Aiguillage P-relecture : si le correspondant parle français (ou si
+            // l'utilisateur a posé FR↺ au cycle) on RELIT le message FR selon le
+            // ton de l'app ; sinon on traduit vers la cible. Même panneau, même
+            // moteur instruct, même garde-fou.
+            switch action {
+            case .translate(let target):
+                self.runTranslationCommit(frenchText: current, fieldRect: rect, target: target, bundleID: bundleID)
+            case .reformulate:
+                let tone = self.store.tones.tone(forBundle: bundleID)
+                self.runReformulateCommit(frenchText: current, fieldRect: rect, tone: tone, bundleID: bundleID)
+            }
         }
     }
 
