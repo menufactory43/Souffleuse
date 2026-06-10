@@ -341,6 +341,27 @@ public final class AXClient: @unchecked Sendable {
         }
     }
 
+    /// Marqueur posé sur le `CGEventSource` de TOUS nos événements clavier
+    /// synthétiques (flèches de `moveCaretRight`, backspaces, inserts unicode).
+    /// Les events créés sur cette source portent la valeur dans leur champ
+    /// `.eventSourceUserData` — le `KeyInterceptor` la lit pour LAISSER PASSER
+    /// nos propres événements. Sans ce marqueur, les flèches → synthétiques de
+    /// l'accept mid-line étaient résolues comme `acceptAll` (binding défaut →,
+    /// keyCode 124 sans modificateur) par notre propre tap : avalées (le caret
+    /// ne bougeait jamais) ET déclenchant des accepts en cascade qui
+    /// détruisaient le champ (reproduit dans TextEdit, 2026-06-10).
+    /// JUMEAU : `KeyInterceptor.syntheticEventUserData` (SouffleuseInput) —
+    /// les deux targets n'ont aucune dépendance commune, la constante est
+    /// dupliquée et verrouillée par un test d'égalité (SouffleuseTests).
+    public static let syntheticEventUserData: Int64 = 0x534F_5546   // "SOUF"
+
+    /// Source d'événements synthétiques MARQUÉE (voir `syntheticEventUserData`).
+    private static func makeSyntheticSource(stateID: CGEventSourceStateID) -> CGEventSource? {
+        let source = CGEventSource(stateID: stateID)
+        source?.userData = syntheticEventUserData
+        return source
+    }
+
     /// Avance le caret de `count` caractères vers la droite, et ne REND la main
     /// que lorsque le déplacement est CONFIRMÉ (lecture AX de la position).
     ///
@@ -381,7 +402,7 @@ public final class AXClient: @unchecked Sendable {
 
             // 2. Flèches → synthétiques (virtual key 124), même cadence que
             //    `backspaceAndInjectViaCGEvent`, puis poll de confirmation.
-            let source = CGEventSource(stateID: .hidSystemState)
+            let source = Self.makeSyntheticSource(stateID: .hidSystemState)
             usleep(5_000)
             for _ in 0..<count {
                 guard let down = CGEvent(keyboardEventSource: source, virtualKey: 124, keyDown: true),
@@ -434,7 +455,7 @@ public final class AXClient: @unchecked Sendable {
     }
 
     private func backspaceAndInjectViaCGEvent(count: Int, text: String) -> Bool {
-        let source = CGEventSource(stateID: .hidSystemState)
+        let source = Self.makeSyntheticSource(stateID: .hidSystemState)
         // Settle delay after the Tab key event we just consumed in the
         // CGEventTap callback. Without this, fast hosts (Brave, Electron,
         // some text fields) drop the first backspace because they're still
@@ -493,7 +514,7 @@ public final class AXClient: @unchecked Sendable {
             }
             // Private source + cleared flags → the physically-held ⌘ never bleeds
             // into our synthetic Backspace / insert events.
-            let source = CGEventSource(stateID: .privateState)
+            let source = Self.makeSyntheticSource(stateID: .privateState)
             let noFlags = CGEventFlags(rawValue: 0)
             usleep(5_000)
             for _ in 0..<max(0, deleteChars) {
@@ -526,7 +547,7 @@ public final class AXClient: @unchecked Sendable {
     }
 
     private func injectViaCGEvent(_ text: String) -> Bool {
-        let source = CGEventSource(stateID: .hidSystemState)
+        let source = Self.makeSyntheticSource(stateID: .hidSystemState)
         let utf16 = Array(text.utf16)
         guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
               let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else {
