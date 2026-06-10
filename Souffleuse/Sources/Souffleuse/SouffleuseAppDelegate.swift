@@ -289,6 +289,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// mais ne change AUCUN comportement hors flag (la branche de suppression qui
     /// le lit est gardée par le flag) ⇒ chemin byte-identique flag-OFF.
     private var lastTickPrefixForDelete: String = ""
+    /// Dernier préfixe horodaté par la trace de latence (`SOUFFLEUSE_LATENCY_TRACE`) —
+    /// borne le `tick_prefix` à UN événement par changement réel de préfixe.
+    private var latencyTracedPrefix: String = ""
     /// Bundle ID we last kicked off enrichment for; used to detect focus changes.
     private var lastEnrichedBundleID: String?
     /// Last window title we kicked off enrichment for; used to detect *intra-app*
@@ -343,6 +346,20 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // still appears effectively immediately.
         overlay = OverlayWindow()
         presence = PresenceIndicatorWindow()
+
+        // ── Trace de latence bout-en-bout (DEV, SOUFFLEUSE_LATENCY_TRACE) ──
+        // Frappe réelle (key_down, AVANT la quantization du poll 80 ms) +
+        // repaint effectif de l'overlay (paint, passé le guard anti-repaint).
+        // Les étapes intermédiaires sont marquées dans tick()/predict(). Hors
+        // flag : aucun monitor installé, hook overlay nil — zéro coût.
+        if LatencyTrace.enabled {
+            NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { _ in
+                LatencyTrace.mark("key_down")
+            }
+            overlay.onPaint = { length in
+                LatencyTrace.mark("paint", info: length)
+            }
+        }
         // Inspecteur de ghost (DEV) : moniteur live du chemin de décision —
         // affiché/gaté/dropé + motif. Créé paresseusement et basculé via le menu
         // (item présent uniquement en build Debug, cf. `toggleGhostInspector`).
@@ -1383,6 +1400,13 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
 
         // Only predict from text up to caret; cap to 2048 chars (matches predictor).
         let prefix = String(text.prefix(caretIndex))
+
+        // Trace de latence : 1ᵉʳ tick qui VOIT ce préfixe (l'écart avec le
+        // key_down précédent = la quantization du poll 80 ms).
+        if LatencyTrace.enabled, prefix != latencyTracedPrefix {
+            latencyTracedPrefix = prefix
+            LatencyTrace.mark("tick_prefix", key: LatencyTrace.key(prefix), info: prefix.count)
+        }
 
         // Ghost lifecycle ("warm while composing"): a fresh keystroke rearms the
         // idle-unload timer and wakes the model on the FIRST keystroke if it
@@ -2561,15 +2585,22 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// Recharge paresseusement le moteur ghost (~1 s) puis reconstruit le n-gram
     /// perso en tâche de fond (raffinement — le ghost de base fonctionne sans).
     /// Idempotent : un seul rechargement à la fois, et no-op si déjà résident.
+    /// Après un ÉCHEC de chargement, `loadModel()` retente de lui-même avec un
+    /// backoff (cf. `loadRetryBackoffSeconds`) — il renvoie `false` quand la
+    /// tentative est sautée, et on ne logue/rebuild que sur une vraie tentative
+    /// (sinon `ghost_warm_reload` spammait le log à chaque frappe pendant la
+    /// fenêtre de backoff).
     @MainActor
     private func loadGhostIfNeeded() {
         guard ghostLoadTask == nil, !predictor.isModelReady else { return }
         ghostLoadTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            await self.predictor.loadModel()
-            Log.info(.predictor, "ghost_warm_reload")
-            let entries = await self.store.history.allEntries()
-            await self.predictor.rebuildPersonalization(from: entries)
+            let attempted = await self.predictor.loadModel()
+            if attempted {
+                Log.info(.predictor, "ghost_warm_reload")
+                let entries = await self.store.history.allEntries()
+                await self.predictor.rebuildPersonalization(from: entries)
+            }
             self.ghostLoadTask = nil
         }
     }
