@@ -43,6 +43,10 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
     public private(set) var isPinnedByUser = false
     private var programmaticMove = false
     public var onMoved: (@MainActor (String?, CGSize) -> Void)?
+    /// Notifie l'app à chaque transition visible/caché du panneau. Branché sur
+    /// l'armement du `KeyInterceptor` : tant que le HUD est à l'écran, ⌘↩/⌘⇧→
+    /// sont interceptables SANS ghost actif (traduction hors flux de suggestion).
+    public var onVisibilityChanged: (@MainActor (Bool) -> Void)?
 
     private var autoHideTask: Task<Void, Never>?
     private var hideGeneration = 0
@@ -167,6 +171,7 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
         badgeText = ""
         applyColors()        // (ré)applique l'apparence courante + construit l'en-tête
         relayout()
+        onVisibilityChanged?(true)
         if !panel.isVisible {
             if Self.reduceMotion {
                 panel.alphaValue = 1
@@ -219,6 +224,9 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
     public func hide() {
         guard panel.isVisible else { return }
         autoHideTask?.cancel()
+        // Désarmement dès l'INTENTION de masquer (le fondu de 240 ms ne doit pas
+        // prolonger l'interception de ⌘↩ — l'utilisateur a visuellement fini).
+        onVisibilityChanged?(false)
         hideGeneration &+= 1
         let g = hideGeneration
         if Self.reduceMotion {
