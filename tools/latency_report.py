@@ -141,10 +141,13 @@ def main():
              4: "seed (réserve)", 5: "seed (sans réserve)"}
     open_gens = {}
     gens = []
+    last_len_by_key = {}
     for e in events:
         k = e.get("k", 0)
-        if e["e"] == "gen_begin":
-            open_gens[k] = {"t0": e["t"]}
+        if e["e"] == "tick_prefix":
+            last_len_by_key[k] = e.get("i", 0)
+        elif e["e"] == "gen_begin":
+            open_gens[k] = {"t0": e["t"], "len": last_len_by_key.get(k)}
         elif e["e"] == "gen_path" and k in open_gens:
             open_gens[k]["path"] = e.get("i", 0)
         elif e["e"] == "seed_prompt" and k in open_gens:
@@ -195,6 +198,35 @@ def main():
         large = [g["decode"] for g in timed if g["prompt"] >= 120]
         print(f"  {'décode | prompt < 120 tok':42s} {fmt(small)}")
         print(f"  {'décode | prompt ≥ 120 tok':42s} {fmt(large)}")
+
+    # Seeds POST-CONSOMMATION (éval 1, LATENCE-GHOST-HANDOFF §5) : un seed dont
+    # le préfixe a sauté de > 3 chars depuis la génération précédente signe une
+    # continuité cassée (userTail ≤ 3 dans generateGhostBeam) — typiquement la
+    # live-consume qui a avancé le préfixe sans predict. On ventile le saut :
+    # 4-24 chars = consommation probable ; > 24 = plutôt focus/collage.
+    ordered = sorted([g for g in gens if g.get("len") is not None],
+                     key=lambda g: g["t0"])
+    prev_len = None
+    for g in ordered:
+        g["jump"] = (g["len"] - prev_len) if prev_len is not None else None
+        prev_len = g["len"]
+    seeds_j = [g for g in ordered
+               if g.get("path") in (4, 5) and g.get("jump") is not None]
+    if seeds_j:
+        post = [g for g in seeds_j if g["jump"] > 3]
+        conso = [g for g in post if g["jump"] <= 24]
+        focus = [g for g in post if g["jump"] > 24]
+        rest = [g for g in seeds_j if g["jump"] <= 3]
+        print(f"\nSeeds post-consommation (saut de préfixe vs génération précédente) :")
+        print(f"  seeds analysés : {len(seeds_j)} (sur {len([g for g in gens if g.get('path') in (4, 5)])} seeds)")
+        print(f"  saut > 3 chars : {len(post)} ({100 * len(post) / len(seeds_j):.0f} % des seeds)")
+        print(f"  {'saut ≤ 3 (continuité attendue)':42s} {fmt([g['dur'] for g in rest])}")
+        print(f"  {'saut 4-24 (consommation probable)':42s} {fmt([g['dur'] for g in conso])}")
+        print(f"  {'saut > 24 (focus/collage probable)':42s} {fmt([g['dur'] for g in focus])}")
+        if conso:
+            jumps = sorted(g["jump"] for g in conso)
+            print(f"  sauts 4-24 : médiane {statistics.median(jumps):.0f} chars, "
+                  f"min {jumps[0]}, max {jumps[-1]}")
 
     # Refills : durée begin→end + delta end→paint + réutilisation du cache.
     refill_durations = []

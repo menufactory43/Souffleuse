@@ -294,30 +294,33 @@ extension SuggestionPolicy {
             ProcessInfo.processInfo.environment["SOUFFLEUSE_LONGGHOST_OFF"] == nil
         }
 
-        /// `SOUFFLEUSE_BEAM_CORE` — fait du **beam contraint** (`BeamGhostEngine`,
-        /// K=3) le SEUL chemin de génération LLM du ghost. ON ⇒ `predict()` route
-        /// le cœur LLM vers le beam (mid-mot = `requiredPrefix`, après-espace =
-        /// décode libre K=1 ≡ greedy) ; le greedy long-ghost + le gradient
-        /// d'engagement + le plancher dico ne sont PLUS appelés. La couche instant
-        /// (recall/lexique/cache/perso, `routeInstant`) reste DEVANT, inchangée.
-        /// ABSENT (défaut) ⇒ chemin actuel byte-identique (kill-switch trivial,
-        /// rollback runtime sans rebuild). Preuves : intention 64 % vs 29 %, accord
-        /// 9/10 vs 4/10 (cf. BEAM-LLM-CORE-HANDOFF.md §1).
+        /// Le **beam contraint** (`BeamGhostEngine`, K=2) est le SEUL chemin de
+        /// génération LLM du ghost. ON ⇒ `predict()` route le cœur LLM vers le
+        /// beam (mid-mot = `requiredPrefix`, après-espace = décode libre K=1 ≡
+        /// greedy) ; le greedy long-ghost + le gradient d'engagement + le plancher
+        /// dico ne sont PLUS appelés. La couche instant (recall/lexique/cache/
+        /// perso, `routeInstant`) reste DEVANT, inchangée.
+        /// **ON PAR DÉFAUT** (décision LATENCE-GHOST-HANDOFF §3 : les `launchctl
+        /// setenv` ne survivaient pas au reboot → ghost silencieusement en
+        /// cascade). Kill-switch `SOUFFLEUSE_BEAM_CORE_OFF` ⇒ retour cascade
+        /// sans rebuild, pattern `midWordLongGhostEnabled`. Preuves : intention
+        /// 64 % vs 29 %, accord 9/10 vs 4/10 (cf. BEAM-LLM-CORE-HANDOFF.md §1).
         public static var beamCoreEnabled: Bool {
-            ProcessInfo.processInfo.environment["SOUFFLEUSE_BEAM_CORE"] != nil
+            ProcessInfo.processInfo.environment["SOUFFLEUSE_BEAM_CORE_OFF"] == nil
         }
 
-        /// `SOUFFLEUSE_BEAM_RESERVE` — par-dessus `SOUFFLEUSE_BEAM_CORE` : active
-        /// la **réserve de branches** entre frappes (`ghostWithReserve` +
-        /// `advance(typedChar:)`). La frappe qui suit la tête du ghost devient un
-        /// HIT (avance de pointeur, 0 décode, ~0 ms) ; une divergence re-beame
-        /// (MISS, coût froid). Mesuré post-fix-routage : 74-76 % de HIT, coût
-        /// amorti ~58 ms/frappe vs ~125 régénérés (SouffleuseBeamAmortizedEval +
-        /// PARITY-FINDINGS). ABSENT (défaut) ⇒ génération fraîche glissante
-        /// actuelle, byte-identique.
+        /// Par-dessus `beamCoreEnabled` : la **réserve de branches** entre
+        /// frappes (`ghostWithReserve` + `advance(typedChar:)`). La frappe qui
+        /// suit la tête du ghost devient un HIT (avance de pointeur, 0 décode,
+        /// ~0 ms) ; une divergence re-beame (MISS, coût froid). Mesuré post-fix-
+        /// routage : 74-76 % de HIT, coût amorti ~58 ms/frappe vs ~125 régénérés
+        /// (SouffleuseBeamAmortizedEval + PARITY-FINDINGS).
+        /// **ON PAR DÉFAUT** (même décision que `beamCoreEnabled`). Kill-switch
+        /// `SOUFFLEUSE_BEAM_RESERVE_OFF` ⇒ génération fraîche glissante,
+        /// indépendamment du kill-switch beam-core.
         public static var beamReserveEnabled: Bool {
             beamCoreEnabled
-                && ProcessInfo.processInfo.environment["SOUFFLEUSE_BEAM_RESERVE"] != nil
+                && ProcessInfo.processInfo.environment["SOUFFLEUSE_BEAM_RESERVE_OFF"] == nil
         }
 
         /// `SOUFFLEUSE_GHOST_STREAM` — peint le longghost AU FIL des tokens (TTFT ~20 ms)
