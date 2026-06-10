@@ -20,25 +20,27 @@
     <language>fr</language>
 
     <item>
-      <title>Version 0.5.0</title>
-      <pubDate>Thu, 04 Jun 2026 14:56:36 +0000</pubDate>
-      <sparkle:version>0.5.0</sparkle:version>
-      <sparkle:shortVersionString>0.5.0</sparkle:shortVersionString>
+      <title>Version 0.6.0</title>
+      <pubDate>Wed, 10 Jun 2026 11:52:04 +0000</pubDate>
+      <sparkle:version>0.6.0</sparkle:version>
+      <sparkle:shortVersionString>0.6.0</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
       <description><![CDATA[
-        <h2>Souffleuse 0.5.0</h2>
+        <h2>Souffleuse 0.6.0</h2>
         <ul>
-          <li><b>Souffle au milieu d'une ligne.</b> Quand le curseur est posé à l'intérieur d'un texte (et plus seulement à la fin), la suggestion s'affiche dans une bulle sous la ligne. Tab la pose mot à mot ; la bulle rétrécit à chaque mot accepté.</li>
-          <li>À activer dans Réglages → « Souffler au milieu d'une ligne ».</li>
+          <li><b>Nouveau moteur de souffle.</b> Les suggestions sont générées par un moteur repensé (recherche en faisceau + réserve de continuations) : plus pertinentes, et quasi instantanées — la latence frappe→affichage est divisée par 4.</li>
+          <li><b>Bulle vivante au milieu d'une ligne.</b> La bulle se recharge pendant que vous tapez dedans, accepte mot à mot, et ne recopie plus le texte déjà présent après le curseur.</li>
+          <li><b>Accept plus malin.</b> Tab fusionne la suggestion avec le texte existant : seuls les caractères manquants sont insérés.</li>
+          <li>Le modèle se recharge automatiquement après un échec ponctuel de chargement.</li>
         </ul>
         <p>macOS 14+ · Apple Silicon · 100 % on-device.</p>
       ]]></description>
-      <!-- Signé le 2026-06-04 (build Developer ID avec Sparkle, non notarisé). -->
+      <!-- Signé le 2026-06-10 (build Developer ID avec Sparkle, non notarisé). -->
       <!-- Régénérer à chaque release : deploy/make-appcast-entry.sh website/Souffleuse.dmg -->
       <enclosure
         url="https://souffleuse.app/Souffleuse.dmg"
-        sparkle:edSignature="ZZvBMy6QTJEvm25HOTLu5thK+Ru5WJl04uVpij2BWR15SK7Q54OSuhzbXu9UfGE7HiQuGr5ihvkxuFNtqj8qCg=="
-        length="20688950"
+        sparkle:edSignature="+JnkQPc1xLyQR3qxNCn8m8wvJF7GwjpsT6soCW6UQ9VNm2zbu68ISCY5XmwHHr0gsgOeWvdg52V6gw9rpsw8Aw=="
+        length="20816360"
         type="application/octet-stream" />
     </item>
 
