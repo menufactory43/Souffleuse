@@ -314,12 +314,14 @@ try drawAppIcon(
     size: 32,
     output: outputURL.appendingPathComponent("favicon-32.png")
 )
+// 28 px (au lieu de 22) : retour utilisateur 2026-06-10, le badge 22 px était
+// « légèrement trop petit » (26 essayé, 28 validé). `PresenceIndicatorWindow.diameter` = 28.
 try drawPresence(
-    size: 22,
+    size: 28,
     output: outputURL.appendingPathComponent("PresenceMark.png")
 )
 try drawPresence(
-    size: 44,
+    size: 56,
     output: outputURL.appendingPathComponent("PresenceMark@2x.png")
 )
 try drawPresence(
