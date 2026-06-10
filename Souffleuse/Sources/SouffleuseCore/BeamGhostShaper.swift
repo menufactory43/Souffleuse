@@ -107,6 +107,122 @@ public enum BeamGhostShaper {
             fieldContext: s.fieldContext, afterCursor: s.afterCursor, beforeCursor: s.beforeCursor)
     }
 
+    // MARK: - Mid-line : coupe anti-recopie du texte après le curseur
+
+    /// Le texte qui suit le caret, restreint à la LIGNE COURANTE. `nil` quand il
+    /// n'y a rien à recopier (caret en fin de ligne, ou seulement du blanc avant
+    /// le prochain retour) — c'est le gate qui garde le chemin end-of-line
+    /// byte-identique : un `textAfterCaret` qui ne contient que les paragraphes
+    /// SUIVANTS (« \nSuite… ») ne déclenche pas la coupe.
+    public nonisolated static func sameLineAfterCaret(_ afterCaret: String?) -> String? {
+        guard let after = afterCaret, !after.isEmpty else { return nil }
+        let line = String(after.prefix(while: { $0 != "\n" && $0 != "\r" }))
+        guard line.contains(where: { !$0.isWhitespace }) else { return nil }
+        return line
+    }
+
+    /// Mot normalisé pour la comparaison de recopie : casse pliée, ponctuation
+    /// d'extrémité ignorée (« content, » ≍ « content »). L'intérieur est préservé
+    /// (« l'ai » reste « l'ai »).
+    private nonisolated static func normalizedWord(_ w: Substring) -> String {
+        w.lowercased().trimmingCharacters(in: .punctuationCharacters)
+    }
+
+    /// **Coupe anti-recopie mid-line.** Quand le caret est au MILIEU d'une ligne,
+    /// le modèle (qui ne voit que le préfixe) prédit très souvent… les mots qui
+    /// suivent déjà le caret — l'utilisateur les avait tapés après ce même
+    /// préfixe. La pill proposait alors d'insérer un doublon (« je |suis là » →
+    /// ghost « suis là »). Deux formes de recopie, traitées mot à mot
+    /// (case-insensitive, ponctuation d'extrémité ignorée) :
+    ///
+    ///  • **Écho de QUEUE** : un suffixe du ghost == le début du texte après
+    ///    caret → on coupe la queue, la tête reste insérable proprement
+    ///    (« vraiment suis là » avant « suis là » → « vraiment »). Le cas
+    ///    « ghost entier == début d'après-caret » en est le dégénéré → vide.
+    ///    Couvre aussi le mid-mot : « couc|ou » + ghost « ou » → vide (le reste
+    ///    du mot est déjà là).
+    ///  • **Écho de TÊTE** : le ghost COMMENCE par re-taper ≥ 2 mots du texte
+    ///    qui suit puis continue autrement (« le 12 et plus » avant
+    ///    « le 12 mars ») → tout le ghost s'insérerait avant sa propre copie ;
+    ///    abstention. (1 seul mot de tête commun reste légitime : « le rapport »
+    ///    inséré avant « le 12 mars » lit bien.)
+    ///
+    /// Hors mid-line (`sameLineAfterCaret == nil`) ou ghost vide : retour inchangé.
+    public nonisolated static func afterCaretEchoCut(ghost: String, afterCaret: String?) -> String {
+        guard !ghost.isEmpty, let line = sameLineAfterCaret(afterCaret) else { return ghost }
+        let afterWords = line.split(whereSeparator: { $0.isWhitespace })
+            .map(normalizedWord).filter { !$0.isEmpty }
+        guard !afterWords.isEmpty else { return ghost }
+
+        // Mots du ghost + index de DÉBUT de chacun dans la chaîne brute, pour
+        // couper en conservant l'espacement original (espace de tête compris).
+        var words: [String] = []
+        var starts: [String.Index] = []
+        var i = ghost.startIndex
+        while i < ghost.endIndex {
+            if ghost[i].isWhitespace { i = ghost.index(after: i); continue }
+            let start = i
+            while i < ghost.endIndex, !ghost[i].isWhitespace { i = ghost.index(after: i) }
+            let norm = normalizedWord(ghost[start..<i])
+            if !norm.isEmpty {
+                words.append(norm)
+                starts.append(start)
+            }
+        }
+        guard !words.isEmpty else { return ghost }
+
+        // Écho de TÊTE (≥ 2 mots communs en ouverture) → abstention totale.
+        var headRun = 0
+        while headRun < min(words.count, afterWords.count), words[headRun] == afterWords[headRun] {
+            headRun += 1
+        }
+        if headRun >= 2 { return "" }
+
+        // Écho de QUEUE : premier index de coupe tel que words[cut...] recopie
+        // le début d'afterWords. cut == 0 = recopie intégrale → vide.
+        for cut in 0..<words.count {
+            let runLen = words.count - cut
+            guard runLen <= afterWords.count else { continue }
+            var matches = true
+            for j in 0..<runLen where words[cut + j] != afterWords[j] {
+                matches = false
+                break
+            }
+            if matches {
+                if cut == 0 { return "" }
+                var head = String(ghost[..<starts[cut]])
+                while head.last?.isWhitespace == true { head.removeLast() }
+                return head
+            }
+        }
+        return ghost
+    }
+
+    /// Sélection du ghost parmi les K candidats du beam (triés par score, best en
+    /// tête). Hors mid-line : comportement HISTORIQUE byte-identique — seul le
+    /// 1ᵉʳ candidat (best) compte, post-filtré. Mid-line : on prend le PREMIER
+    /// candidat qui survit au post-filtre ET à la coupe anti-recopie — c'est
+    /// exactement ce que la largeur K achète ici (le best recopie souvent le
+    /// texte existant ; un rang 2/3 propose autre chose).
+    public nonisolated static func selectGhost(
+        rawCandidates: [String], isBoundary: Bool, caretAfterSpace: Bool,
+        userTail: String, maxWords: Int, afterCaret: String?
+    ) -> String {
+        guard sameLineAfterCaret(afterCaret) != nil else {
+            return beamPostFilter(
+                rawGhost: rawCandidates.first ?? "", isBoundary: isBoundary,
+                caretAfterSpace: caretAfterSpace, userTail: userTail, maxWords: maxWords)
+        }
+        for raw in rawCandidates {
+            let filtered = beamPostFilter(
+                rawGhost: raw, isBoundary: isBoundary,
+                caretAfterSpace: caretAfterSpace, userTail: userTail, maxWords: maxWords)
+            let cut = afterCaretEchoCut(ghost: filtered, afterCaret: afterCaret)
+            if !cut.isEmpty { return cut }
+        }
+        return ""
+    }
+
     // MARK: - Post-filtre de sortie
 
     /// Garde de sortie du ghost beam — MIROIR des post-filtres du long-ghost

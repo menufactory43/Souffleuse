@@ -1992,6 +1992,13 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 } else {
                     let rest = String(suggestion.dropFirst(chunk.count))
                     let isLast = rest.isEmpty
+                    // Mid-line : le chunk est FUSIONNÉ avec le texte existant après
+                    // le caret — les segments déjà là sont sautés (flèche →), seul
+                    // le neuf est injecté. « p|our » + Tab ne fait pas « pourour » ;
+                    // « m'ai|der  trouver » + « der à trouver » n'insère que « à ».
+                    let plan = Self.midLineAcceptPlan(
+                        chunk: chunk, afterCaret: preSnap.textAfterCaret ?? "")
+                    let effectiveChunk = plan.effective
                     // handleKey is dispatched onto the main thread (the tap now
                     // runs on a dedicated thread and hops here via
                     // `DispatchQueue.main.async`), so this whole body runs as
@@ -2005,11 +2012,11 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                     MainActor.assumeIsolated {
                         self.ledger.recordAccepted(charsSaved: chunk.count - 1)
                         if isPartialContinuation {
-                            self.partialAcceptedSoFar += chunk
+                            self.partialAcceptedSoFar += effectiveChunk
                         } else {
                             self.partialAcceptedAtPrefix = prePrefix
                             self.partialAcceptedAtBundleID = bundleID
-                            self.partialAcceptedSoFar = chunk
+                            self.partialAcceptedSoFar = effectiveChunk
                         }
                         if isLast {
                             // Dernier chunk = ligne entièrement acceptée. Garde la
@@ -2038,11 +2045,11 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                             // prefix so even if AX races and `partialRemainder`
                             // somehow gets cleared before tick sees it, the
                             // predict gate still won't fire on the same input.
-                            self.lastPredictedPrefix = prePrefix + chunk
+                            self.lastPredictedPrefix = prePrefix + effectiveChunk
                         }
                     }
                     DispatchQueue.global(qos: .userInitiated).async { [axClient] in
-                        axClient.inject(chunk)
+                        Self.applyMidLineAcceptPlan(plan, axClient: axClient)
                         if isLast {
                             let snap = axClient.snapshot()
                             DispatchQueue.main.async { [weak self] in
@@ -2090,8 +2097,13 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                     await predictorRef.ingestAccepted(entry)
                 }
             }
+            // Mid-line : fusion de la suggestion avec le texte existant après le
+            // caret — sauts (flèche →) sur l'existant, injection du neuf seulement.
+            let fullPlan = Self.midLineAcceptPlan(
+                chunk: suggestion, afterCaret: preSnap.textAfterCaret ?? "")
+            let effectiveSuggestion = fullPlan.effective
             DispatchQueue.global(qos: .userInitiated).async { [axClient] in
-                axClient.inject(suggestion)
+                Self.applyMidLineAcceptPlan(fullPlan, axClient: axClient)
                 // Re-read AX state after the host applies the inject, then
                 // mark that text as "dismissed" so we don't immediately re-suggest
                 // off the freshly-extended text — that's the double-Tab bug
@@ -2105,9 +2117,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 self.ledger.recordAccepted(charsSaved: suggestion.count - 1)
                 // Accept Tab plein : garde la borne gauche, étend `ghostAnchorFull`
-                // au texte committé (`prePrefix + suggestion`) pour qu'un effacement
-                // restaure encore la ligne. Ne PAS avancer la base sur Tab.
-                self.extendGhostAnchorOnAccept(committedFullText: prePrefix + suggestion, bundleID: bundleID)
+                // au texte committé pour qu'un effacement restaure encore la ligne.
+                // Texte committé EFFECTIF (chars sautés à leur casse existante).
+                self.extendGhostAnchorOnAccept(committedFullText: prePrefix + effectiveSuggestion, bundleID: bundleID)
                 self.predictor.cancel()
                 self.lastPredictedPrefix = nil
                 self.overlay.hide()
@@ -2190,7 +2202,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 self.partialAcceptedAtBundleID = nil
             }
             Log.info(.input, "ghost_accepted_full")
-            return performFullAccept(suggestion: suggestion, prePrefix: prePrefix, bundleID: bundleID)
+            return performFullAccept(suggestion: suggestion, prePrefix: prePrefix,
+                                     bundleID: bundleID, textAfterCaret: preSnap.textAfterCaret)
 
         case .commit:
             // Vraie traduction visible. On lit le champ, on rend la main au ghost
@@ -2297,7 +2310,10 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// Injects the ENTIRE `suggestion` at once, records it to personalization
     /// (opt-in, gated exactly like the Tab full-accept), and tears down the
     /// ghost. Used by the configurable accept-all key. Returns true (consumed).
-    nonisolated private func performFullAccept(suggestion: String, prePrefix: String, bundleID: String?) -> Bool {
+    /// `textAfterCaret` (mid-line) : permet de SAUTER les lettres de la suggestion
+    /// déjà présentes après le caret au lieu de les ré-injecter (cf. Tab).
+    nonisolated private func performFullAccept(suggestion: String, prePrefix: String,
+                                               bundleID: String?, textAfterCaret: String? = nil) -> Bool {
         let recordPersonalization: Bool = MainActor.assumeIsolated {
             guard store.personalizationEnabled, let bid = bundleID else { return false }
             if bundleBlocklist.contains(bid) { return false }
@@ -2324,8 +2340,11 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 await predictorRef.ingestAccepted(entry)
             }
         }
+        // Mid-line : fusion de la suggestion avec le texte existant après le caret.
+        let plan = Self.midLineAcceptPlan(chunk: suggestion, afterCaret: textAfterCaret ?? "")
+        let effectiveSuggestion = plan.effective
         DispatchQueue.global(qos: .userInitiated).async { [axClient] in
-            axClient.inject(suggestion)
+            Self.applyMidLineAcceptPlan(plan, axClient: axClient)
             let snap = axClient.snapshot()
             DispatchQueue.main.async { [weak self] in
                 self?.dismissedForText = snap.text ?? ""
@@ -2335,8 +2354,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             self.ledger.recordAccepted(charsSaved: suggestion.count - 1)
             // acceptAll = ligne entière acceptée. Garde la borne gauche, étend
-            // `ghostAnchorFull` au texte committé pour qu'un effacement la restaure.
-            self.extendGhostAnchorOnAccept(committedFullText: prePrefix + suggestion, bundleID: bundleID)
+            // `ghostAnchorFull` au texte committé EFFECTIF pour qu'un effacement
+            // la restaure.
+            self.extendGhostAnchorOnAccept(committedFullText: prePrefix + effectiveSuggestion, bundleID: bundleID)
             self.predictor.cancel()
             self.lastPredictedPrefix = nil
             self.overlay.hide()
@@ -2692,7 +2712,10 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// si l'état est resté cohérent (même bundle, `partialAcceptedAtPrefix`/
     /// `partialAcceptedSoFar` inchangés, reste inchangé depuis le départ). Gardé
     /// contre les tempêtes par `ghostRefillInFlight` + une re-vérification de l'état.
-    private func maybeSpawnRollingRefill(committedText: String, bundleID: String) {
+    /// `afterCaret` (mid-line uniquement, nil sinon) : texte qui suit le caret,
+    /// propagé jusqu'à la coupe anti-recopie du refill beam — la pill mid-line
+    /// rechargée ne doit pas re-proposer les mots déjà tapés à droite.
+    private func maybeSpawnRollingRefill(committedText: String, bundleID: String, afterCaret: String? = nil) {
         // Sous le beam-core, `PVM.extendGhost` route vers le BEAM (continuation
         // fraîche conditionnée sur le tapé), donc le refill N'est PLUS greedy : il
         // est cohérent avec le ghost beam et c'est lui qui MAINTIENT le living ghost
@@ -2732,7 +2755,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             let extension_ = await self.predictor.extendGhost(
                 committedText: committedText,
                 currentRemainder: remainder,
-                maxWords: wantWords
+                maxWords: wantWords,
+                axTextAfterCaret: afterCaret
             )
             if Task.isCancelled { return }
             guard let extension_, !extension_.isEmpty else { return }
@@ -2802,6 +2826,166 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         ghost.lowercased().hasPrefix(typedSince.lowercased())
     }
 
+    /// Plan d'exécution d'un accept mid-line : alternance de sauts (flèche → par-
+    /// dessus le texte EXISTANT) et d'injections (le texte NOUVEAU seulement).
+    /// `effective` = la croissance réelle du préfixe (caractères existants à leur
+    /// casse réelle + injections) — l'égalité stricte `prefix == expected` du
+    /// walk de la pill en dépend.
+    struct MidLineAcceptPlan: Sendable {
+        enum Op: Sendable, Equatable {
+            case skip(Int)
+            case inject(String)
+        }
+        let ops: [Op]
+        let effective: String
+    }
+
+    /// Plan PUR d'un accept (Tab / accept-all) qui FUSIONNE le texte accepté avec
+    /// ce qui existe déjà après le caret (mid-line). Le ghost mid-line « tisse » :
+    /// il complète le mot en cours, insère des mots nouveaux ET se ré-ancre sur
+    /// des mots déjà présents — « m'ai|der  trouver » + ghost « der à trouver » :
+    /// seul « à » manque. Ré-injecter les parties existantes dupliquerait
+    /// (« pourour », un espace à la place du « à ») ; le plan SAUTE l'existant et
+    /// n'injecte que le neuf :
+    ///  • MOT : sauté s'il est au caret (case-insensitive) ET se termine à une
+    ///    vraie frontière côté texte existant (« de » ne matche pas « demain ») ;
+    ///    sinon injecté.
+    ///  • BLANC : si le mot SUIVANT du chunk matche après le run de blancs
+    ///    existant, on saute le run entier (le séparateur existant sert) ; en fin
+    ///    de chunk on fusionne 1-pour-1 (le « espace après chaque mot » du Tab ne
+    ///    double pas l'espace existant) ; un séparateur FINAL collé à de la
+    ///    ponctuation existante est JETÉ (« hom|me. » : pas d'espace avant le
+    ///    point) ; sinon on apparie 1 blanc — la re-synchro se fait plus loin.
+    ///  • COUTURE : si le plan finit sur une injection alphanumérique collée à un
+    ///    caractère alphanumérique existant, on injecte un espace séparateur.
+    /// Hors mid-line (`afterCaret` vide / commence par un retour) : une seule
+    /// injection du chunk entier — byte-identique au comportement historique.
+    nonisolated static func midLineAcceptPlan(chunk: String, afterCaret: String) -> MidLineAcceptPlan {
+        let t = Array(chunk)
+        let e = Array(afterCaret)
+        var ops: [MidLineAcceptPlan.Op] = []
+        var effective = ""
+        var pendingSkip = 0
+        var lastWasInject = false
+        var j = 0
+
+        func isWordChar(_ c: Character) -> Bool { c.isLetter || c.isNumber }
+        func flushSkip() {
+            if pendingSkip > 0 {
+                ops.append(.skip(pendingSkip))
+                pendingSkip = 0
+            }
+        }
+        func inject(_ s: String) {
+            guard !s.isEmpty else { return }
+            flushSkip()
+            if case .inject(let prev)? = ops.last {
+                ops[ops.count - 1] = .inject(prev + s)
+            } else {
+                ops.append(.inject(s))
+            }
+            effective += s
+            lastWasInject = true
+        }
+        func skip(_ n: Int) {
+            guard n > 0 else { return }
+            effective += String(e[j..<(j + n)])
+            pendingSkip += n
+            j += n
+            lastWasInject = false
+        }
+        // Le mot `w` est-il présent à la position `pos` du texte existant, à une
+        // vraie frontière de mot derrière (pas un préfixe d'un mot plus long) ?
+        func wordMatches(_ w: [Character], at pos: Int) -> Bool {
+            guard !w.isEmpty, pos + w.count <= e.count else { return false }
+            for (k, c) in w.enumerated() {
+                guard isWordChar(e[pos + k]),
+                      String(c).lowercased() == String(e[pos + k]).lowercased() else { return false }
+            }
+            let after = pos + w.count
+            return after >= e.count || !isWordChar(e[after])
+        }
+        func whitespaceRun(at pos: Int) -> Int {
+            var n = 0
+            while pos + n < e.count, e[pos + n].isWhitespace { n += 1 }
+            return n
+        }
+
+        // Segments alternés mot / blanc du chunk.
+        var segments: [(isWord: Bool, chars: [Character])] = []
+        var i = 0
+        while i < t.count {
+            let isWs = t[i].isWhitespace
+            var run: [Character] = []
+            while i < t.count, t[i].isWhitespace == isWs {
+                run.append(t[i])
+                i += 1
+            }
+            segments.append((isWord: !isWs, chars: run))
+        }
+
+        for (idx, seg) in segments.enumerated() {
+            if seg.isWord {
+                if wordMatches(seg.chars, at: j) {
+                    skip(seg.chars.count)
+                } else {
+                    inject(String(seg.chars))
+                }
+                continue
+            }
+            // Segment blanc.
+            let nextWord = segments[(idx + 1)...].first(where: { $0.isWord })?.chars
+            guard j < e.count, e[j].isWhitespace else {
+                // Séparateur de FIN de chunk collé à de la PONCTUATION existante
+                // (« hom|me. » + Tab « me  » : pas d'espace avant le point) → on
+                // le JETTE. Entre deux mots, ou devant un mot existant, ou en fin
+                // de champ, on l'injecte normalement.
+                if nextWord == nil, j < e.count, !isWordChar(e[j]) {
+                    continue
+                }
+                inject(String(seg.chars))
+                continue
+            }
+            let run = whitespaceRun(at: j)
+            if let nextWord, wordMatches(nextWord, at: j + run) {
+                skip(run)                           // le séparateur existant sert
+            } else if nextWord == nil {
+                skip(min(seg.chars.count, run))     // fin de chunk : fusion 1-pour-1
+                if seg.chars.count > run {
+                    inject(String(seg.chars.dropFirst(run)))
+                }
+            } else {
+                skip(1)                             // apparie 1 blanc, re-synchro plus loin
+                if seg.chars.count > 1 {
+                    inject(String(seg.chars.dropFirst()))
+                }
+            }
+        }
+        // Couture : injection alphanumérique collée au texte existant → séparateur.
+        if lastWasInject, let lastC = effective.last, isWordChar(lastC),
+           j < e.count, isWordChar(e[j]) {
+            inject(" ")
+        }
+        flushSkip()
+        return MidLineAcceptPlan(ops: ops, effective: effective)
+    }
+
+    /// Exécute le plan d'accept côté AX : flèches → pour les sauts (les glyphes
+    /// existants restent en place), injection pour le texte nouveau.
+    nonisolated private static func applyMidLineAcceptPlan(_ plan: MidLineAcceptPlan, axClient: AXClient) {
+        for op in plan.ops {
+            switch op {
+            case .skip(let n):
+                // `moveCaretRight` ne REND la main qu'après confirmation (lecture
+                // AX) du déplacement — l'injection suivante part de la bonne
+                // position, pas de l'ancienne (le bug « hom me. »).
+                axClient.moveCaretRight(by: n)
+            case .inject(let s):
+                axClient.inject(s)
+            }
+        }
+    }
+
     /// Pure render-gate decision: may the overlay paint `suggestion` right now?
     ///
     /// True only when there IS a suggestion AND it was generated for the LIVE
@@ -2826,10 +3010,13 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// too: after a Tab partial accept the owed `partialRemainder` is re-rendered
     /// in the pill (which visibly shrinks) instead of as an inline ghost — the
     /// inline partial-remainder block in `tick()` is unreachable behind the
-    /// mid-line gate, so the sync check is mirrored here. Deliberately bypasses
-    /// the typo and mid-word-rolling machinery — mid-line is a plain continuation
-    /// à la Cotypist. The debounce/predict block mirrors the end-of-line path so
-    /// cancel-on-keystroke still holds.
+    /// mid-line gate, so the sync check is mirrored here. The pill is VIVANTE
+    /// (même principe que le ghost inline) : live-consume à la frappe (un char
+    /// qui matche fait fondre le reste, zéro re-predict) + rolling refill qui
+    /// recharge la fenêtre à droite — coupé contre le texte après-caret pour ne
+    /// jamais re-proposer les mots déjà tapés à droite. Bypasses the typo
+    /// machinery — mid-line is a plain continuation à la Cotypist. The debounce/
+    /// predict block mirrors the end-of-line path so cancel-on-keystroke holds.
     @MainActor
     private func runMidLineGhost(prefix: String, rect: CGRect, text: String, caretIndex: Int, snap: AXSnapshot, font: NSFont?) {
         // Mid-line never shows a typo strike or a rolling mid-word ghost: clear
@@ -2837,17 +3024,49 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         currentTypo = nil
         typoSettleKey = nil
 
-        // Word-by-word: while a Tab-accept remainder is owed AND the AX text still
-        // matches exactly what we injected, render the SHRINKING remainder in the
-        // pill and skip prediction. Each subsequent Tab consumes the next word
-        // (handleKey's partial-accept path), and this re-renders the smaller
-        // remainder on the next tick.
+        // Texte qui suit le caret (cap 500, comme la capture AX du snapshot) :
+        // alimente la coupe anti-recopie du refill beam — la fenêtre rechargée ne
+        // doit pas re-proposer les mots déjà tapés à droite du curseur.
+        let afterCaret = String(text.dropFirst(caretIndex).prefix(500))
+        let bundleID = snap.bundleID ?? ""
+        // Fragment du mot EN COURS de frappe (vide à une frontière) : la pill le
+        // rend dans une couleur distincte DEVANT la suggestion, pour qu'on voie
+        // « où on en est » dans le mot pendant qu'on le tape (parité Cotypist).
+        let typedFragment = OutputFilter.trailingPartialWord(prefix)
+
+        // ── LIVE-CONSUME, promotion (parité ghost inline, tick() end-of-line) ──
+        // Une suggestion fraîche est affichée et l'utilisateur vient de taper des
+        // caractères qui en matchent le début → on bascule en partialRemainder
+        // (consommation char par char, ZÉRO re-predict) au lieu de relancer une
+        // génération à chaque frappe. C'est ce qui rend la pill « vivante » :
+        // la petite fenêtre fond à gauche pendant la frappe et le rolling refill
+        // ci-dessous la recharge à droite. Divergence → on nettoie et on laisse
+        // le predict gate régénérer (anti-flicker : pas de hide en mode rolling).
+        if partialRemainder.isEmpty,
+           !predictor.suggestion.isEmpty,
+           let basePrefix = lastPredictedPrefix,
+           predictor.predictedForPrefix == basePrefix,
+           prefix.count > basePrefix.count,
+           prefix.hasPrefix(basePrefix) {
+            let typedSince = String(prefix.dropFirst(basePrefix.count))
+            if Self.isLiveConsumeMatch(ghost: predictor.suggestion, typedSince: typedSince) {
+                partialAcceptedAtPrefix = basePrefix
+                partialAcceptedSoFar = typedSince
+                partialAcceptedAtBundleID = snap.bundleID
+                partialRemainder = String(predictor.suggestion.dropFirst(typedSince.count))
+                predictor.cancel()
+            } else {
+                clearStaleGhostOnDivergence()
+            }
+        }
+
+        // Word-by-word: while a Tab-accept remainder is owed (or live-consume is
+        // active) AND the AX text still matches what we injected/consumed, render
+        // the SHRINKING remainder in the pill and skip prediction. Each Tab
+        // consumes the next word (handleKey's partial-accept path) ; each typed
+        // matching char shrinks it here.
         if !partialRemainder.isEmpty {
             let expected = partialAcceptedAtPrefix + partialAcceptedSoFar
-            // Synced — or the async chunk inject hasn't fully landed yet, so the
-            // AX prefix is still a prefix of what we expect. Either way keep the
-            // remainder painted and skip predict; a real keystroke that diverges
-            // falls through below.
             // STRICT equality only. A `partialRemainder` is the tail of a walk
             // anchored at one exact caret position; it must render ONLY when the
             // AX prefix is exactly where the walk left it. The earlier
@@ -2859,16 +3078,56 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             // equality holds across a normal Tab walk; anything else is a real
             // move and must regenerate.
             if prefix == expected {
-                overlay.showPill(text: partialRemainder, at: rect, hostText: text, caretIndex: caretIndex, hostFont: font)
+                overlay.showPill(text: partialRemainder, typed: typedFragment, at: rect, hostText: text, caretIndex: caretIndex, hostFont: font)
                 interceptor.setActive(true)
+                // ── ROLLING REFILL (même principe que le ghost inline) : si le
+                // reste passe sous le plancher de mots, on régénère les mots
+                // suivants à droite pendant la consommation à gauche → la petite
+                // fenêtre ne se vide jamais. La coupe anti-recopie (afterCaret)
+                // garantit que la recharge n'est pas un doublon du texte à droite.
+                maybeSpawnRollingRefill(committedText: expected, bundleID: bundleID, afterCaret: afterCaret)
                 return
             }
-            // Moved off the walk (navigation or divergent typing): drop the stale
-            // remainder and fall through to a fresh prediction for THIS position.
-            partialRemainder = ""
-            partialAcceptedSoFar = ""
-            partialAcceptedAtPrefix = ""
-            partialAcceptedAtBundleID = nil
+            // Le préfixe a DÉPASSÉ expected : consommation live de la suite du
+            // reste (frappe qui matche) ou divergence (frappe hors-chemin) —
+            // miroir exact du bloc partial-remainder end-of-line du tick().
+            if prefix.hasPrefix(expected), prefix.count > expected.count {
+                let typedSince = String(prefix.dropFirst(expected.count))
+                if Self.isLiveConsumeMatch(ghost: partialRemainder, typedSince: typedSince) {
+                    partialAcceptedSoFar += typedSince
+                    partialRemainder = String(partialRemainder.dropFirst(typedSince.count))
+                    if !partialRemainder.isEmpty {
+                        overlay.showPill(text: partialRemainder, typed: typedFragment, at: rect, hostText: text, caretIndex: caretIndex, hostFont: font)
+                        interceptor.setActive(true)
+                        maybeSpawnRollingRefill(
+                            committedText: partialAcceptedAtPrefix + partialAcceptedSoFar,
+                            bundleID: bundleID, afterCaret: afterCaret)
+                        return
+                    }
+                    // Reste entièrement consommé à la frappe — enregistre + reset,
+                    // et on laisse le predict gate repartir sur le préfixe neuf.
+                    recordPartialAcceptanceToHistoryIfAllowed()
+                    partialAcceptedSoFar = ""
+                    partialAcceptedAtPrefix = ""
+                    partialAcceptedAtBundleID = nil
+                } else {
+                    // Divergence : enregistre ce qui a été consommé, reset, et
+                    // laisse le predict gate régénérer pour CE préfixe.
+                    recordPartialAcceptanceToHistoryIfAllowed()
+                    partialRemainder = ""
+                    partialAcceptedSoFar = ""
+                    partialAcceptedAtPrefix = ""
+                    partialAcceptedAtBundleID = nil
+                    clearStaleGhostOnDivergence()
+                }
+            } else {
+                // Moved off the walk (navigation, backspace): drop the stale
+                // remainder and fall through to a fresh prediction for THIS position.
+                partialRemainder = ""
+                partialAcceptedSoFar = ""
+                partialAcceptedAtPrefix = ""
+                partialAcceptedAtBundleID = nil
+            }
         }
 
         if prefix != lastPredictedPrefix {
@@ -2908,8 +3167,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         // First paint of a fresh suggestion. Tab will inject its first word and
-        // arm `partialRemainder`, which the block above then walks word-by-word.
-        overlay.showPill(text: suggestion, at: rect, hostText: text, caretIndex: caretIndex, hostFont: font)
+        // arm `partialRemainder` ; typing matching chars promotes to live-consume
+        // (block above) — both walk the pill word-by-word / char-by-char.
+        overlay.showPill(text: suggestion, typed: typedFragment, at: rect, hostText: text, caretIndex: caretIndex, hostFont: font)
         interceptor.setActive(true)
     }
 

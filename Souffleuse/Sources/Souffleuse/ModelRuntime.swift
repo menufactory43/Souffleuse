@@ -918,9 +918,14 @@ final class ModelRuntime {
             if let a = advanced {
                 Log.info(.predictor, "ghost_beam_advance_ms", count: a.elapsedMillis)
                 let caretAfterSpace = request.llmTail.last == " " || request.llmTail.last == "\t"
-                let ghost = BeamGhostShaper.beamPostFilter(
-                    rawGhost: a.ghost, isBoundary: isBoundary, caretAfterSpace: caretAfterSpace,
-                    userTail: userTail, maxWords: request.maxWords)
+                // Coupe anti-recopie mid-line : la réserve ne livre qu'UNE branche
+                // (pas d'alternatives à itérer) — si elle recopie le texte après
+                // caret, on la coupe/abstient ; le prochain seed re-proposera.
+                let ghost = BeamGhostShaper.afterCaretEchoCut(
+                    ghost: BeamGhostShaper.beamPostFilter(
+                        rawGhost: a.ghost, isBoundary: isBoundary, caretAfterSpace: caretAfterSpace,
+                        userTail: userTail, maxWords: request.maxWords),
+                    afterCaret: request.axTextAfterCaret)
                 let reason: String
                 switch a.kind {
                 case .hit: reason = "beam-hit"
@@ -952,9 +957,16 @@ final class ModelRuntime {
         Log.info(.predictor, "ghost_beam_seed_ms", count: result.elapsedMillis)
 
         let caretAfterSpace = request.llmTail.last == " " || request.llmTail.last == "\t"
-        let ghost = BeamGhostShaper.beamPostFilter(
-            rawGhost: result.best?.ghost ?? "", isBoundary: isBoundary, caretAfterSpace: caretAfterSpace,
-            userTail: userTail, maxWords: request.maxWords)
+        // Mid-line (texte non-blanc sur la ligne après le caret) : `selectGhost`
+        // itère les K candidats et prend le premier qui ne RECOPIE pas ce qui est
+        // déjà tapé après le curseur. Hors mid-line, il post-filtre le best seul —
+        // byte-identique à l'historique.
+        let rawCandidates = result.candidates.isEmpty
+            ? [result.best?.ghost ?? ""]
+            : result.candidates.map(\.ghost)
+        let ghost = BeamGhostShaper.selectGhost(
+            rawCandidates: rawCandidates, isBoundary: isBoundary, caretAfterSpace: caretAfterSpace,
+            userTail: userTail, maxWords: request.maxWords, afterCaret: request.axTextAfterCaret)
         Log.info(.predictor, "ghost_beam_words",
                  count: ghost.split(whereSeparator: { $0.isWhitespace }).count)
         return MidWordEscalationResult(show: !ghost.isEmpty, word: ghost,
@@ -1150,6 +1162,10 @@ final class ModelRuntime {
         var ext = BeamGhostShaper.beamPostFilter(
             rawGhost: result.best?.ghost ?? "", isBoundary: true, caretAfterSpace: false,
             userTail: request.userTail, maxWords: maxWords)
+        // Mid-line : un refill qui recopie le texte après le caret réintroduirait
+        // la duplication que `selectGhost` vient d'éviter au seed — même coupe.
+        // `axTextAfterCaret` est nil sur le chemin end-of-line → no-op.
+        ext = BeamGhostShaper.afterCaretEchoCut(ghost: ext, afterCaret: request.axTextAfterCaret)
         guard !ext.isEmpty else { return nil }
         if ext.first != " " { ext = " " + ext }   // espace de tête pour se concaténer au reste
         Log.info(.predictor, "ghost_beam_refill_ms", count: result.elapsedMillis)
