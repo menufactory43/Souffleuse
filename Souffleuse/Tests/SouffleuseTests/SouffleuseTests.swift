@@ -123,45 +123,67 @@ import Testing
     #expect(abs((a.origin.y - b.origin.y) - 40) < 0.001)
 }
 
-// MARK: - SouffleuseAppDelegate mid-line accept split (saut des lettres existantes)
+// MARK: - SouffleuseAppDelegate mid-line accept plan (fusion avec l'existant)
 
 @MainActor
-@Test func midLineAcceptSplitSkipsExistingWordLetters() {
-    // « p|our » + accept « our votre rapport » : les lettres « our » existent déjà
-    // après le caret → on les SAUTE (flèche →) et on n'injecte que la suite.
-    let s = SouffleuseAppDelegate.midLineAcceptSplit(chunk: "our votre rapport", afterCaret: "our reste")
-    #expect(s.skip == 3)
-    #expect(s.inject == " votre rapport")
-    // Chunk entièrement déjà présent (Tab partiel « our ») → saut pur + reliquat.
-    let t = SouffleuseAppDelegate.midLineAcceptSplit(chunk: "our", afterCaret: "our reste")
-    #expect(t.skip == 3)
-    #expect(t.inject == "")
+@Test func midLineAcceptPlanSkipsExistingWordLetters() {
+    // « p|our » + Tab « our » : les lettres existent déjà → saut pur, zéro injection.
+    let t = SouffleuseAppDelegate.midLineAcceptPlan(chunk: "our", afterCaret: "our reste")
+    #expect(t.ops == [.skip(3)])
+    #expect(t.effective == "our")
+    // Avec « espace après chaque mot » (Tab partiel « our ») : l'espace du chunk
+    // FUSIONNE avec l'espace existant (pas de double espace).
+    let u = SouffleuseAppDelegate.midLineAcceptPlan(chunk: "our ", afterCaret: "our reste")
+    #expect(u.ops == [.skip(4)])
+    #expect(u.effective == "our ")
 }
 
 @MainActor
-@Test func midLineAcceptSplitBoundaryIsByteIdentical() {
-    // Frontière : chunk avec espace de tête, ou blanc après le caret → aucun saut,
-    // l'insertion est légitime (l'espace existant sert de séparateur droit).
-    let a = SouffleuseAppDelegate.midLineAcceptSplit(chunk: " votre", afterCaret: " reste")
-    #expect(a.skip == 0 && a.inject == " votre")
-    let b = SouffleuseAppDelegate.midLineAcceptSplit(chunk: "votre", afterCaret: " reste")
-    #expect(b.skip == 0 && b.inject == "votre")
-    // End-of-line (rien après le caret) → inchangé.
-    let c = SouffleuseAppDelegate.midLineAcceptSplit(chunk: "our suite", afterCaret: "")
-    #expect(c.skip == 0 && c.inject == "our suite")
+@Test func midLineAcceptPlanWeavesNewWordIntoExistingText() {
+    // Le cas de l'écran : « m'ai|der  trouver mon rapport fiscal. » + ghost
+    // « der à trouver » — « der » et « trouver » existent déjà, seul « à »
+    // manque. Le plan saute l'existant et n'injecte QUE le « à », en réutilisant
+    // les deux espaces existants comme séparateurs.
+    let p = SouffleuseAppDelegate.midLineAcceptPlan(
+        chunk: "der à trouver", afterCaret: "der  trouver mon rapport fiscal.")
+    #expect(p.ops == [.skip(4), .inject("à"), .skip(8)])
+    #expect(p.effective == "der à trouver")
+    // Le même en walk Tab mot-par-mot : chaque chunk replanifie sur l'AX frais.
+    let t1 = SouffleuseAppDelegate.midLineAcceptPlan(chunk: "der ", afterCaret: "der  trouver mon")
+    #expect(t1.ops == [.skip(4)])      // « der » + 1 espace fusionné
+    let t2 = SouffleuseAppDelegate.midLineAcceptPlan(chunk: "à ", afterCaret: " trouver mon")
+    #expect(t2.ops == [.inject("à"), .skip(1)])
+    let t3 = SouffleuseAppDelegate.midLineAcceptPlan(chunk: "trouver", afterCaret: "trouver mon")
+    #expect(t3.ops == [.skip(7)])
 }
 
 @MainActor
-@Test func midLineAcceptSplitCaseInsensitiveAndDivergence() {
-    // Casse pliée : « Our » sauté devant « our… » (les glyphes EXISTANTS restent).
-    let a = SouffleuseAppDelegate.midLineAcceptSplit(chunk: "Our suite", afterCaret: "our reste")
-    #expect(a.skip == 3 && a.inject == " suite")
-    // Divergence dès la 1ʳᵉ lettre → pas de saut (cas dégénéré inchangé).
-    let b = SouffleuseAppDelegate.midLineAcceptSplit(chunk: "ropose", afterCaret: "our reste")
-    #expect(b.skip == 0 && b.inject == "ropose")
-    // Le saut s'arrête au premier non-alphanumérique (jamais d'espace sauté).
-    let c = SouffleuseAppDelegate.midLineAcceptSplit(chunk: "our reste", afterCaret: "our reste")
-    #expect(c.skip == 3 && c.inject == " reste")
+@Test func midLineAcceptPlanBoundaryAndEndOfLine() {
+    // End-of-line (rien après le caret) → une seule injection, byte-identique.
+    let c = SouffleuseAppDelegate.midLineAcceptPlan(chunk: "our suite", afterCaret: "")
+    #expect(c.ops == [.inject("our suite")])
+    #expect(c.effective == "our suite")
+    // Frontière « word| reste » + ghost « votre… » : insertion, avec la couture
+    // qui rétablit le séparateur devant le mot existant.
+    let a = SouffleuseAppDelegate.midLineAcceptPlan(chunk: " votre", afterCaret: " reste")
+    #expect(a.ops == [.skip(1), .inject("votre ")])
+    #expect(a.effective == " votre ")
+}
+
+@MainActor
+@Test func midLineAcceptPlanWordBoundaryGuards() {
+    // « de » ne matche PAS « demain » (le mot existant continue) : tout est
+    // injecté, pas de mot existant éventré.
+    let b = SouffleuseAppDelegate.midLineAcceptPlan(chunk: "de quoi ", afterCaret: "demain")
+    #expect(b.effective == "de quoi ")
+    #expect(b.ops == [.inject("de quoi ")])
+    // Casse pliée : « Our » saute devant « our… » et le préfixe effectif garde la
+    // casse EXISTANTE (l'égalité stricte du walk en dépend).
+    let d = SouffleuseAppDelegate.midLineAcceptPlan(chunk: "Our suite", afterCaret: "our reste")
+    #expect(d.effective.hasPrefix("our"))
+    // Divergence dès la 1ʳᵉ lettre → injection (+ couture séparatrice).
+    let e = SouffleuseAppDelegate.midLineAcceptPlan(chunk: "ropose", afterCaret: "our reste")
+    #expect(e.ops == [.inject("ropose ")])
 }
 
 // MARK: - SouffleuseAppDelegate mid-text suppression

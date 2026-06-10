@@ -1992,15 +1992,13 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 } else {
                     let rest = String(suggestion.dropFirst(chunk.count))
                     let isLast = rest.isEmpty
-                    // Mid-line, caret DANS un mot : les lettres du chunk déjà
-                    // présentes après le caret sont SAUTÉES (flèche →), pas
-                    // ré-injectées — « p|our » + Tab ne doit pas faire « pourour ».
-                    // La comptabilité du walk utilise les caractères EXISTANTS
-                    // (leur casse réelle) + le reste injecté, pour que l'égalité
-                    // stricte `prefix == expected` du tick tienne après le saut.
-                    let split = Self.midLineAcceptSplit(
+                    // Mid-line : le chunk est FUSIONNÉ avec le texte existant après
+                    // le caret — les segments déjà là sont sautés (flèche →), seul
+                    // le neuf est injecté. « p|our » + Tab ne fait pas « pourour » ;
+                    // « m'ai|der  trouver » + « der à trouver » n'insère que « à ».
+                    let plan = Self.midLineAcceptPlan(
                         chunk: chunk, afterCaret: preSnap.textAfterCaret ?? "")
-                    let effectiveChunk = String((preSnap.textAfterCaret ?? "").prefix(split.skip)) + split.inject
+                    let effectiveChunk = plan.effective
                     // handleKey is dispatched onto the main thread (the tap now
                     // runs on a dedicated thread and hops here via
                     // `DispatchQueue.main.async`), so this whole body runs as
@@ -2051,12 +2049,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                         }
                     }
                     DispatchQueue.global(qos: .userInitiated).async { [axClient] in
-                        if split.skip > 0 {
-                            axClient.moveCaretRight(by: split.skip)
-                        }
-                        if !split.inject.isEmpty {
-                            axClient.inject(split.inject)
-                        }
+                        Self.applyMidLineAcceptPlan(plan, axClient: axClient)
                         if isLast {
                             let snap = axClient.snapshot()
                             DispatchQueue.main.async { [weak self] in
@@ -2104,18 +2097,13 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                     await predictorRef.ingestAccepted(entry)
                 }
             }
-            // Mid-line, caret DANS un mot : sauter (flèche →) les lettres du début
-            // de la suggestion déjà présentes après le caret, injecter le reste.
-            let fullSplit = Self.midLineAcceptSplit(
+            // Mid-line : fusion de la suggestion avec le texte existant après le
+            // caret — sauts (flèche →) sur l'existant, injection du neuf seulement.
+            let fullPlan = Self.midLineAcceptPlan(
                 chunk: suggestion, afterCaret: preSnap.textAfterCaret ?? "")
-            let effectiveSuggestion = String((preSnap.textAfterCaret ?? "").prefix(fullSplit.skip)) + fullSplit.inject
+            let effectiveSuggestion = fullPlan.effective
             DispatchQueue.global(qos: .userInitiated).async { [axClient] in
-                if fullSplit.skip > 0 {
-                    axClient.moveCaretRight(by: fullSplit.skip)
-                }
-                if !fullSplit.inject.isEmpty {
-                    axClient.inject(fullSplit.inject)
-                }
+                Self.applyMidLineAcceptPlan(fullPlan, axClient: axClient)
                 // Re-read AX state after the host applies the inject, then
                 // mark that text as "dismissed" so we don't immediately re-suggest
                 // off the freshly-extended text — that's the double-Tab bug
@@ -2352,16 +2340,11 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 await predictorRef.ingestAccepted(entry)
             }
         }
-        // Mid-line, caret DANS un mot : saut des lettres déjà présentes à droite.
-        let split = Self.midLineAcceptSplit(chunk: suggestion, afterCaret: textAfterCaret ?? "")
-        let effectiveSuggestion = String((textAfterCaret ?? "").prefix(split.skip)) + split.inject
+        // Mid-line : fusion de la suggestion avec le texte existant après le caret.
+        let plan = Self.midLineAcceptPlan(chunk: suggestion, afterCaret: textAfterCaret ?? "")
+        let effectiveSuggestion = plan.effective
         DispatchQueue.global(qos: .userInitiated).async { [axClient] in
-            if split.skip > 0 {
-                axClient.moveCaretRight(by: split.skip)
-            }
-            if !split.inject.isEmpty {
-                axClient.inject(split.inject)
-            }
+            Self.applyMidLineAcceptPlan(plan, axClient: axClient)
             let snap = axClient.snapshot()
             DispatchQueue.main.async { [weak self] in
                 self?.dismissedForText = snap.text ?? ""
@@ -2843,33 +2826,159 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         ghost.lowercased().hasPrefix(typedSince.lowercased())
     }
 
-    /// Découpe PURE d'un accept (Tab / accept-all) quand le caret est DANS un mot
-    /// dont la suite existe déjà à droite (« p|our ») : la complétion re-tape les
-    /// lettres « our » déjà présentes — les injecter produirait « pourour ».
-    ///
-    /// Renvoie `(skip, inject)` : `skip` = nombre de caractères ALPHANUMÉRIQUES en
-    /// tête du chunk qui matchent (case-insensitive) le début du texte après caret
-    /// → le caret SAUTE par-dessus (flèche →, les glyphes existants restent) ;
-    /// `inject` = le reste du chunk, injecté après le saut.
-    ///
-    /// Strictement lettres/chiffres : à une frontière (le chunk commence par un
-    /// espace, ou le texte après caret commence par un blanc/ponctuation), une
-    /// insertion est légitime et on ne saute RIEN — `(0, chunk)`, chemin
-    /// byte-identique. On ne saute jamais d'espace : l'espace existant sert de
-    /// séparateur droit à l'insertion (« pour votre rapport| reste »).
-    nonisolated static func midLineAcceptSplit(chunk: String, afterCaret: String) -> (skip: Int, inject: String) {
-        var skip = 0
-        var ci = chunk.startIndex
-        var ai = afterCaret.startIndex
-        while ci < chunk.endIndex, ai < afterCaret.endIndex {
-            let c = chunk[ci], a = afterCaret[ai]
-            guard c.isLetter || c.isNumber, a.isLetter || a.isNumber,
-                  String(c).lowercased() == String(a).lowercased() else { break }
-            skip += 1
-            ci = chunk.index(after: ci)
-            ai = afterCaret.index(after: ai)
+    /// Plan d'exécution d'un accept mid-line : alternance de sauts (flèche → par-
+    /// dessus le texte EXISTANT) et d'injections (le texte NOUVEAU seulement).
+    /// `effective` = la croissance réelle du préfixe (caractères existants à leur
+    /// casse réelle + injections) — l'égalité stricte `prefix == expected` du
+    /// walk de la pill en dépend.
+    struct MidLineAcceptPlan: Sendable {
+        enum Op: Sendable, Equatable {
+            case skip(Int)
+            case inject(String)
         }
-        return (skip, String(chunk[ci...]))
+        let ops: [Op]
+        let effective: String
+    }
+
+    /// Plan PUR d'un accept (Tab / accept-all) qui FUSIONNE le texte accepté avec
+    /// ce qui existe déjà après le caret (mid-line). Le ghost mid-line « tisse » :
+    /// il complète le mot en cours, insère des mots nouveaux ET se ré-ancre sur
+    /// des mots déjà présents — « m'ai|der  trouver » + ghost « der à trouver » :
+    /// seul « à » manque. Ré-injecter les parties existantes dupliquerait
+    /// (« pourour », un espace à la place du « à ») ; le plan SAUTE l'existant et
+    /// n'injecte que le neuf :
+    ///  • MOT : sauté s'il est au caret (case-insensitive) ET se termine à une
+    ///    vraie frontière côté texte existant (« de » ne matche pas « demain ») ;
+    ///    sinon injecté.
+    ///  • BLANC : si le mot SUIVANT du chunk matche après le run de blancs
+    ///    existant, on saute le run entier (le séparateur existant sert) ; en fin
+    ///    de chunk on fusionne 1-pour-1 (le « espace après chaque mot » du Tab ne
+    ///    double pas l'espace existant) ; sinon on apparie 1 blanc — la
+    ///    re-synchro se fait sur un segment suivant.
+    ///  • COUTURE : si le plan finit sur une injection alphanumérique collée à un
+    ///    caractère alphanumérique existant, on injecte un espace séparateur.
+    /// Hors mid-line (`afterCaret` vide / commence par un retour) : une seule
+    /// injection du chunk entier — byte-identique au comportement historique.
+    nonisolated static func midLineAcceptPlan(chunk: String, afterCaret: String) -> MidLineAcceptPlan {
+        let t = Array(chunk)
+        let e = Array(afterCaret)
+        var ops: [MidLineAcceptPlan.Op] = []
+        var effective = ""
+        var pendingSkip = 0
+        var lastWasInject = false
+        var j = 0
+
+        func isWordChar(_ c: Character) -> Bool { c.isLetter || c.isNumber }
+        func flushSkip() {
+            if pendingSkip > 0 {
+                ops.append(.skip(pendingSkip))
+                pendingSkip = 0
+            }
+        }
+        func inject(_ s: String) {
+            guard !s.isEmpty else { return }
+            flushSkip()
+            if case .inject(let prev)? = ops.last {
+                ops[ops.count - 1] = .inject(prev + s)
+            } else {
+                ops.append(.inject(s))
+            }
+            effective += s
+            lastWasInject = true
+        }
+        func skip(_ n: Int) {
+            guard n > 0 else { return }
+            effective += String(e[j..<(j + n)])
+            pendingSkip += n
+            j += n
+            lastWasInject = false
+        }
+        // Le mot `w` est-il présent à la position `pos` du texte existant, à une
+        // vraie frontière de mot derrière (pas un préfixe d'un mot plus long) ?
+        func wordMatches(_ w: [Character], at pos: Int) -> Bool {
+            guard !w.isEmpty, pos + w.count <= e.count else { return false }
+            for (k, c) in w.enumerated() {
+                guard isWordChar(e[pos + k]),
+                      String(c).lowercased() == String(e[pos + k]).lowercased() else { return false }
+            }
+            let after = pos + w.count
+            return after >= e.count || !isWordChar(e[after])
+        }
+        func whitespaceRun(at pos: Int) -> Int {
+            var n = 0
+            while pos + n < e.count, e[pos + n].isWhitespace { n += 1 }
+            return n
+        }
+
+        // Segments alternés mot / blanc du chunk.
+        var segments: [(isWord: Bool, chars: [Character])] = []
+        var i = 0
+        while i < t.count {
+            let isWs = t[i].isWhitespace
+            var run: [Character] = []
+            while i < t.count, t[i].isWhitespace == isWs {
+                run.append(t[i])
+                i += 1
+            }
+            segments.append((isWord: !isWs, chars: run))
+        }
+
+        for (idx, seg) in segments.enumerated() {
+            if seg.isWord {
+                if wordMatches(seg.chars, at: j) {
+                    skip(seg.chars.count)
+                } else {
+                    inject(String(seg.chars))
+                }
+                continue
+            }
+            // Segment blanc.
+            guard j < e.count, e[j].isWhitespace else {
+                inject(String(seg.chars))
+                continue
+            }
+            let run = whitespaceRun(at: j)
+            let nextWord = segments[(idx + 1)...].first(where: { $0.isWord })?.chars
+            if let nextWord, wordMatches(nextWord, at: j + run) {
+                skip(run)                           // le séparateur existant sert
+            } else if nextWord == nil {
+                skip(min(seg.chars.count, run))     // fin de chunk : fusion 1-pour-1
+                if seg.chars.count > run {
+                    inject(String(seg.chars.dropFirst(run)))
+                }
+            } else {
+                skip(1)                             // apparie 1 blanc, re-synchro plus loin
+                if seg.chars.count > 1 {
+                    inject(String(seg.chars.dropFirst()))
+                }
+            }
+        }
+        // Couture : injection alphanumérique collée au texte existant → séparateur.
+        if lastWasInject, let lastC = effective.last, isWordChar(lastC),
+           j < e.count, isWordChar(e[j]) {
+            inject(" ")
+        }
+        flushSkip()
+        return MidLineAcceptPlan(ops: ops, effective: effective)
+    }
+
+    /// Exécute le plan d'accept côté AX : flèches → pour les sauts (les glyphes
+    /// existants restent en place), injection pour le texte nouveau.
+    nonisolated private static func applyMidLineAcceptPlan(_ plan: MidLineAcceptPlan, axClient: AXClient) {
+        for (idx, op) in plan.ops.enumerated() {
+            switch op {
+            case .skip(let n):
+                axClient.moveCaretRight(by: n)
+                // Les flèches sont des CGEvents ASYNCHRONES ; l'op suivante (write
+                // AX synchrone) doit voir le caret déjà déplacé. On laisse la
+                // runloop de l'hôte drainer les événements avant de continuer.
+                if idx + 1 < plan.ops.count {
+                    usleep(30_000)
+                }
+            case .inject(let s):
+                axClient.inject(s)
+            }
+        }
     }
 
     /// Pure render-gate decision: may the overlay paint `suggestion` right now?
