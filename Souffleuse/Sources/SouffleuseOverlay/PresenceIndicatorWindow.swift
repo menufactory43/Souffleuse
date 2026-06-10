@@ -67,38 +67,22 @@ public final class PresenceIndicatorWindow {
     }
 }
 
-/// Custom view that paints the brand mark on a small cream medallion: a soft
-/// cream disc (the mark's native background colour) with a thin light border,
-/// and the transparent `PresenceMark` PNG aspect-fit and centred on top. The
-/// disc keeps the navy waves legible over both light and dark text fields.
+/// Custom view that paints the brand mark — the « s » + point oxblood sur son
+/// médaillon papier (kit `Resources/Brand`, 2026-06). Le PNG embarque DÉJÀ le
+/// disque, sa bordure et son ombre, dessinés à la taille du badge (22 px + @2x
+/// Retina, ajustements optiques inclus) : la vue se contente de l'aspect-fit
+/// plein cadre — plus de médaillon programmatique (il doublait la bordure et
+/// rétrécissait la marque).
 private final class BadgeView: NSView {
-    /// Loaded once: the detoured, transparent brand mark (cream background
-    /// stripped). Bundled as a package resource via `Bundle.module`.
+    /// Loaded once via `Bundle.module` ; `image(forResource:)` apparie le @2x
+    /// automatiquement selon le backing scale de l'écran.
     private static let mark: NSImage? = Bundle.module.image(forResource: "PresenceMark")
 
-    /// Cream backing — the mark's native canvas colour (#FBF7F1).
-    private static let discColor = NSColor(srgbRed: 251 / 255, green: 247 / 255, blue: 241 / 255, alpha: 1.0)
-    private static let discStroke = NSColor.white.withAlphaComponent(0.35)
-
     override func draw(_ dirtyRect: NSRect) {
-        // Cream medallion behind the mark, inset to leave room for the stroke.
-        let disc = NSBezierPath(ovalIn: bounds.insetBy(dx: 0.5, dy: 0.5))
-        Self.discColor.setFill()
-        disc.fill()
-        Self.discStroke.setStroke()
-        disc.lineWidth = 1
-        disc.stroke()
-
         guard let mark = Self.mark else { return }
-
-        // High-quality downscale from the source PNG to the tiny badge size.
         NSGraphicsContext.current?.imageInterpolation = .high
-
-        // Aspect-fit the mark inside the disc with enough inset that the wide
-        // wave tips stay clear of the circular edge.
-        let box = bounds.insetBy(dx: 2.5, dy: 2.5)
         let imageSize = mark.size
-        let scale = min(box.width / imageSize.width, box.height / imageSize.height)
+        let scale = min(bounds.width / imageSize.width, bounds.height / imageSize.height)
         let drawSize = NSSize(width: imageSize.width * scale, height: imageSize.height * scale)
         let drawRect = NSRect(
             x: bounds.midX - drawSize.width / 2,
