@@ -406,13 +406,15 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         translationHUD.onVisibilityChanged = { [weak self] visible in
             self?.interceptor.setHUDArmed(visible)
         }
-        // 2. Hotkey GLOBALE ⌥⌘T : traduit le champ focus à tout moment, une frappe.
+        // 2. Hotkey GLOBALE (pref `translateHotKey`, défaut ⌥⌘T) : traduit le
+        //    champ focus à tout moment, une frappe. Ré-appliquée au changement
+        //    de pref (handlePreferenceChange).
         translationHotKey = TranslationHotKey { [weak self] in
             guard let self else { return }
             Log.info(.input, "translate_hotkey")
             self.triggerTranslateCommit()
         }
-        if TranslationHotKey.isEnabled, translationHotKey == nil {
+        if translationHotKey?.apply(store.translateHotKey) == false {
             Log.warn(.input, "translate_hotkey_register_failed")
         }
         Task { await self.translationRuntime.setModel(self.store.translationModel) }
@@ -668,6 +670,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             _ = store.prefixCorrectionEnabled
             _ = store.acceptAllKey
             _ = store.commitKey
+            _ = store.translateHotKey
         } onChange: { [weak self] in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
@@ -701,6 +704,10 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         interceptor.setAcceptAllKey(store.acceptAllKey)
         interceptor.setCommitKey(store.commitKey)
         interceptor.setTargetCycleKey(store.targetCycleKey)
+        // `apply` est idempotent (no-op si la combinaison n'a pas changé).
+        if translationHotKey?.apply(store.translateHotKey) == false {
+            Log.warn(.input, "translate_hotkey_register_failed")
+        }
         Task { await self.translationRuntime.setModel(self.store.translationModel) }
         if store.captureEnabled != previous.captureEnabled {
             applyCaptureToggle(store.captureEnabled, requestPermissionIfNeeded: true)
