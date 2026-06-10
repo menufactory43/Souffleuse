@@ -133,17 +133,88 @@ def main():
         values = [v for v in values if v is not None and v >= 0]
         print(f"  {label:42s} {fmt(values)}")
 
-    # Refills : durée begin→end + delta end→paint (adjacence temporelle).
+    # Ventilation des générations par CHEMIN servi (gen_path) et, pour les
+    # seeds, par RÉUTILISATION du prefix-cache (seed_lcp / seed_prompt). C'est
+    # la mesure qui départage « queue lourde = re-prefill post-wipe » (LCP ≈ 0
+    # sur gros prompt) d'une autre cause.
+    PATHS = {1: "advance HIT", 2: "advance REFILL", 3: "advance MISS",
+             4: "seed (réserve)", 5: "seed (sans réserve)"}
+    open_gens = {}
+    gens = []
+    for e in events:
+        k = e.get("k", 0)
+        if e["e"] == "gen_begin":
+            open_gens[k] = {"t0": e["t"]}
+        elif e["e"] == "gen_path" and k in open_gens:
+            open_gens[k]["path"] = e.get("i", 0)
+        elif e["e"] == "seed_prompt" and k in open_gens:
+            open_gens[k]["prompt"] = e.get("i", 0)
+        elif e["e"] == "seed_lcp" and k in open_gens:
+            open_gens[k]["lcp"] = e.get("i", 0)
+        elif e["e"] == "seed_prefill_ms" and k in open_gens:
+            open_gens[k]["prefill"] = e.get("i", 0)
+        elif e["e"] == "seed_decode_ms" and k in open_gens:
+            open_gens[k]["decode"] = e.get("i", 0)
+        elif e["e"] == "gen_end" and k in open_gens:
+            g = open_gens.pop(k)
+            g["dur"] = e["t"] - g["t0"]
+            gens.append(g)
+
+    print("\nGénérations par chemin :")
+    for code, label in PATHS.items():
+        values = [g["dur"] for g in gens if g.get("path") == code]
+        print(f"  {label:42s} {fmt(values)}")
+    cancelled = [g["dur"] for g in gens if "path" not in g]
+    print(f"  {'annulées / gatées (pas de chemin)':42s} {fmt(cancelled)}")
+
+    def lcp_bucket(g):
+        ratio = g.get("lcp", 0) / max(1, g.get("prompt", 0))
+        if ratio < 0.1:
+            return "froid (<10 % réutilisé)"
+        return "chaud (≥90 % réutilisé)" if ratio >= 0.9 else "partiel"
+
+    seeds = [g for g in gens if g.get("path") in (4, 5) and g.get("prompt", 0) > 0]
+    print("\nSeeds par réutilisation du prefix-cache :")
+    for b in ("froid (<10 % réutilisé)", "partiel", "chaud (≥90 % réutilisé)"):
+        sel = [g for g in seeds if lcp_bucket(g) == b]
+        values = [g["dur"] for g in sel]
+        med_prompt = statistics.median([g["prompt"] for g in sel]) if sel else 0
+        print(f"  {b:26s} prompt~{med_prompt:4.0f} tok  {fmt(values)}")
+
+    # Décomposition INTERNE du seed (prefill vs boucle de décodage vs reste =
+    # tokenisation/queue d'actor/ranking). C'est elle qui dit OÙ le seed paie :
+    # decode qui grandit avec le contexte ↔ prefill froide ↔ attente hors moteur.
+    timed = [g for g in seeds if "prefill" in g and "decode" in g]
+    if timed:
+        print("\nDécomposition interne des seeds (gen = attente + prefill + decode + reste) :")
+        print(f"  {'prefill (llama_decode du delta prompt)':42s} {fmt([g['prefill'] for g in timed])}")
+        print(f"  {'boucle de décodage (pas-à-pas)':42s} {fmt([g['decode'] for g in timed])}")
+        print(f"  {'reste (tokenisation/ranking/attente)':42s} {fmt([g['dur'] - g['prefill'] - g['decode'] for g in timed])}")
+        # Corrélation décode ↔ taille de prompt (effet contexte sur chaque pas).
+        small = [g["decode"] for g in timed if g["prompt"] < 120]
+        large = [g["decode"] for g in timed if g["prompt"] >= 120]
+        print(f"  {'décode | prompt < 120 tok':42s} {fmt(small)}")
+        print(f"  {'décode | prompt ≥ 120 tok':42s} {fmt(large)}")
+
+    # Refills : durée begin→end + delta end→paint + réutilisation du cache.
     refill_durations = []
     refill_to_paint = []
+    refills = []
     open_refills = {}
     for e in events:
+        k = e.get("k", 0)
         if e["e"] == "refill_begin":
-            open_refills[e.get("k", 0)] = e["t"]
+            open_refills[k] = {"t0": e["t"]}
+        elif e["e"] == "refill_prompt" and k in open_refills:
+            open_refills[k]["prompt"] = e.get("i", 0)
+        elif e["e"] == "refill_lcp" and k in open_refills:
+            open_refills[k]["lcp"] = e.get("i", 0)
         elif e["e"] == "refill_end":
-            t0 = open_refills.pop(e.get("k", 0), None)
-            if t0 is not None:
-                refill_durations.append(e["t"] - t0)
+            r = open_refills.pop(k, None)
+            if r is not None:
+                r["dur"] = e["t"] - r["t0"]
+                refills.append(r)
+                refill_durations.append(r["dur"])
                 j = bisect.bisect_left(paints, e["t"])
                 if j < len(paints) and paints[j] - e["t"] <= PAINT_WINDOW_MS:
                     refill_to_paint.append(paints[j] - e["t"])
@@ -151,6 +222,13 @@ def main():
     print("\nRefill vivant :")
     print(f"  {'génération (refill_begin → end)':42s} {fmt(refill_durations)}")
     print(f"  {'refill_end → paint':42s} {fmt(refill_to_paint)}")
+    print("Refills par réutilisation du prefix-cache :")
+    with_lcp = [r for r in refills if r.get("prompt", 0) > 0]
+    for b in ("froid (<10 % réutilisé)", "partiel", "chaud (≥90 % réutilisé)"):
+        sel = [r for r in with_lcp if lcp_bucket(r) == b]
+        values = [r["dur"] for r in sel]
+        med_prompt = statistics.median([r["prompt"] for r in sel]) if sel else 0
+        print(f"  {b:26s} prompt~{med_prompt:4.0f} tok  {fmt(values)}")
 
     # Cycles sans paint (gating/abstention) — le « ghost muet ».
     no_paint = sum(1 for c in cycles if "set" in c and "paint" not in c)
