@@ -362,6 +362,10 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // still appears effectively immediately.
         overlay = OverlayWindow()
         presence = PresenceIndicatorWindow()
+        // Applique l'apparence du souffle choisie (Préférences › Apparence) dès la
+        // création — sinon le label garde son gris/opacité par défaut jusqu'au
+        // premier changement de pref.
+        applyGhostAppearance()
 
         // ── Trace de latence bout-en-bout (DEV, SOUFFLEUSE_LATENCY_TRACE) ──
         // Frappe réelle (key_down, AVANT la quantization du poll 80 ms) +
@@ -684,6 +688,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             _ = store.acceptAllKey
             _ = store.commitKey
             _ = store.translateHotKey
+            _ = store.ghostOpacity
+            _ = store.ghostColorStyle
         } onChange: { [weak self] in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
@@ -742,7 +748,18 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             // disable+reenable cycle anyway (user expectation: starting fresh).
             predictor.clearPredictCache()
         }
+        applyGhostAppearance()
         refreshStatusItem()
+    }
+
+    /// Pousse couleur + opacité du souffle (Préférences › Apparence) vers
+    /// l'overlay. Idempotent et bon marché — appelé au lancement et à chaque
+    /// changement de pref, sans garde de diff (l'overlay ne fait qu'écrire deux
+    /// propriétés). Mappe l'enum de pref `GhostColorStyle` sur le `GhostTint`
+    /// du module overlay (qui ne connaît pas la couche prefs).
+    private func applyGhostAppearance() {
+        let tint: OverlayWindow.GhostTint = store.ghostColorStyle == .sangDeBoeuf ? .brand : .neutral
+        overlay.applyGhostAppearance(tint: tint, opacity: store.ghostOpacity)
     }
 
     private func applyOCRLangsIfNeeded() {
