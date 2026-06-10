@@ -1,6 +1,7 @@
 import CoreGraphics
 import Testing
 @testable import SouffleuseInput
+import SouffleuseAX
 
 // MARK: - KeyInterceptorMappingTests
 
@@ -139,5 +140,39 @@ struct KeyInterceptorMappingTests {
         #expect(TargetCycleKey.optionRight.requiredFlagsRaw == CGEventFlags.maskAlternate.rawValue)
         #expect(TargetCycleKey.disabled.keyCode == nil)
         #expect(TargetCycleKey.allCases.count == 4)
+    }
+}
+
+// MARK: - Garde anti-auto-interception des événements synthétiques
+
+/// Verrouille la mécanique qui empêche le tap d'avaler les événements clavier
+/// SYNTHÉTIQUES de l'app elle-même (flèches → de `AXClient.moveCaretRight`,
+/// backspaces, inserts). Bug d'origine (2026-06-10, TextEdit) : la flèche →
+/// synthétique de l'accept mid-line partage keyCode 124 sans modificateur avec
+/// le binding accept-all par défaut → avalée par notre propre tap + accepts en
+/// cascade, champ détruit.
+@Suite("KeyInterceptor synthetic-event guard")
+struct KeyInterceptorSyntheticGuardTests {
+    typealias K = KeyInterceptor
+
+    @Test("le marqueur synthétique est reconnu, une frappe matérielle (0) non")
+    func syntheticMarkerRecognition() {
+        #expect(K.isOwnSyntheticEvent(userData: K.syntheticEventUserData))
+        #expect(!K.isOwnSyntheticEvent(userData: 0))
+        #expect(!K.isOwnSyntheticEvent(userData: 1))
+    }
+
+    @Test("constantes JUMELLES AXClient/KeyInterceptor identiques (pas de dépendance commune)")
+    func twinConstantsLocked() {
+        #expect(K.syntheticEventUserData == AXClient.syntheticEventUserData)
+    }
+
+    @Test("→ matériel (userData 0) reste résolu acceptAll — la feature survit à la garde")
+    func hardwareRightArrowStillAcceptAll() {
+        let bind = AcceptAllKey.rightArrow.keyCode.map {
+            (code: $0, flagsRaw: AcceptAllKey.rightArrow.requiredFlagsRaw)
+        }
+        #expect(!K.isOwnSyntheticEvent(userData: 0))
+        #expect(K.resolveKey(keyCode: 124, mods: 0, commit: nil, acceptAll: bind) == .acceptAll)
     }
 }
