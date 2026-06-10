@@ -336,12 +336,19 @@ private struct TranslationTab: View {
             }
 
             Section {
+                Picker("Traduire à tout moment avec", selection: $store.translateHotKey) {
+                    ForEach(TranslateHotKeyOption.allCases, id: \.self) { key in
+                        Text(key.label).tag(key)
+                    }
+                }
+                Text("Raccourci global : traduit le champ en cours d'écriture, même sans souffle affiché. Une frappe, d'une main.")
+                    .font(.callout).foregroundStyle(.secondary)
                 Picker("Valider la traduction avec", selection: $store.commitKey) {
                     ForEach(CommitKey.allCases, id: \.self) { key in
                         Text(key.label).tag(key)
                     }
                 }
-                Text("La touche qui envoie la réplique dans la langue cible.")
+                Text("La touche qui envoie la réplique dans la langue cible — active quand un souffle ou le panneau de traduction est affiché.")
                     .font(.callout).foregroundStyle(.secondary)
                 Picker("Changer la langue cible avec", selection: $store.targetCycleKey) {
                     ForEach(TargetCycleKey.allCases, id: \.self) { key in
