@@ -538,6 +538,63 @@ public enum OutputFilter {
         return Double(overlap) / Double(gWords.count)
     }
 
+    /// **De-écho (couture).** Retire du `ghost` le plus long préfixe-mot qui
+    /// DUPLIQUE la fin de la dernière phrase du `tail` — la zone où le modèle a
+    /// recraché ce que tu venais de taper avant de (peut-être) continuer. Renvoie
+    /// ce qui RESTE : vide ⇒ écho pur ; non-vide ⇒ continuation que le sac-de-mots
+    /// `echoScore` condamne en bloc. Word-aware, insensible à la casse. Pur.
+    public nonisolated static func deEchoRemainder(ghost: String, tail: String) -> String {
+        let lastSentence = tail.split(whereSeparator: { ".?!…".contains($0) }).last.map(String.init) ?? tail
+        let tailWords = lastSentence.split(separator: " ").map(String.init)
+        let ghostWords = ghost.split(separator: " ").map(String.init)
+        guard !ghostWords.isEmpty, !tailWords.isEmpty else { return ghost }
+        var bestK = 0
+        for k in 1...min(ghostWords.count, tailWords.count) {
+            if ghostWords.prefix(k).map({ $0.lowercased() }) == tailWords.suffix(k).map({ $0.lowercased() }) {
+                bestK = k
+            }
+        }
+        guard bestK > 0 else { return ghost }
+        return ghostWords.dropFirst(bestK).joined(separator: " ")
+    }
+
+    /// **Discriminateur d'écho POSITIONNEL.** Longueur (en mots) du plus long
+    /// segment CONTIGU du `ghost` qui apparaît VERBATIM dans le `tail`. Distingue
+    /// une vraie boucle (le modèle recrache un long bout de phrase tel quel →
+    /// run long) d'une simple réutilisation de vocabulaire (« le serveur » réutilisé
+    /// dans une suite neuve → run court). Là où `echoScore` (sac de mots) confond
+    /// les deux, ce run sépare : un seuil (~4 mots) ne gate que les vraies
+    /// répétitions verbatim. Insensible à la casse. Pur/testable.
+    public nonisolated static func longestVerbatimRunWords(ghost: String, tail: String) -> Int {
+        let g = ghost.split(separator: " ").map { $0.lowercased() }
+        let t = tail.split(separator: " ").map { $0.lowercased() }
+        guard !g.isEmpty, !t.isEmpty else { return 0 }
+        var best = 0
+        for i in 0..<g.count {
+            for j in 0..<t.count where t[j] == g[i] {
+                var run = 0
+                while i + run < g.count, j + run < t.count, g[i + run] == t[j + run] { run += 1 }
+                if run > best { best = run }
+            }
+        }
+        return best
+    }
+
+    /// **De-écho « malin ».** Comme `deEchoRemainder`, mais coupe AUSSI le reste à
+    /// la première frontière de clause (`. ? ! ; :` ou retour ligne) — pour ne
+    /// garder que la VRAIE suite avant que le modèle ne reboucle sur ta phrase
+    /// (« et de la science. Je suis un fan… » → « et de la science »). Si le reste
+    /// n'a pas de frontière, il est renvoyé tel quel. Pur.
+    public nonisolated static func smartDeEcho(ghost: String, tail: String) -> String {
+        let rem = deEchoRemainder(ghost: ghost, tail: tail)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rem.isEmpty else { return rem }
+        if let idx = rem.firstIndex(where: { ".?!;:\n".contains($0) }) {
+            return String(rem[..<idx]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return rem
+    }
+
     /// True quand la langue détectée du `ghost` DIFFÈRE de `expected` (le base
     /// model a dérapé dans une autre langue). Fail-open (false) si le ghost est
     /// trop court (`< languageGuardMinChars`), si la confiance est sous le seuil,

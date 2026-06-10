@@ -89,6 +89,36 @@ final class ModelRuntime {
     /// (`rebuildPersonalization`) ; all ghost text comes from `llamaEngine`.
     let llamaEngine = LlamaEngine()
 
+    /// Moteur **beam contraint** — le cœur LLM unifié sous `SOUFFLEUSE_BEAM_CORE`
+    /// (K=3, `requiredPrefix` mid-mot). Chargé À CÔTÉ du `llamaEngine` (contexte
+    /// dédié `n_seq_max = K+1`, cf. BeamGhostEngine §POURQUOI) UNIQUEMENT quand le
+    /// flag est posé — sinon jamais touché, RAM intacte, chemin byte-identique.
+    /// COÛT connu (spike) : un 2ᵉ chargement du même GGUF (poids ~1 Go dupliqués) ;
+    /// acceptable derrière le flag, optimisable plus tard en partageant le model
+    /// handle (un seul `llama_model`, deux contextes).
+    let beamEngine = BeamGhostEngine(config: .ghostCore())
+
+    /// Largeur K effective du beam (env-aware via `ghostCore()`), pour le mid-mot.
+    private let beamWidth = BeamConfig.ghostCore().maxSearchWidth
+
+    /// True once the GGUF is loaded into the beam engine (only attempted when
+    /// `beamCoreEnabled`). Gates `generateGhostBeam`.
+    private(set) var beamReady = false
+
+    /// `userTail` au moment du dernier seed/advance de la session réserve
+    /// (`SOUFFLEUSE_BEAM_RESERVE`). La CONTINUITÉ — le nouveau tail prolonge
+    /// l'ancien de 1-3 chars — est l'UNIQUE critère de validité de la réserve :
+    /// backspace, Tab accepté, changement de champ/app, repositionnement du
+    /// caret cassent tous le préfixe → re-seed automatique. nil = pas de session.
+    private var beamSessionTail: String?
+
+    /// Plancher dico mid-mot (flag `MW_DICO_FLOOR`). `NSSpellChecker` via
+    /// `WordCompleter` : complète le mot EN COURS quand le gradient d'engagement
+    /// s'abstient, pour qu'un ghost valide apparaisse à chaque lettre. Tenu ici
+    /// (pas recréé par souffle) ; `@unchecked Sendable`, appelé sur le MainActor
+    /// (ModelRuntime) comme dans PVM, donc sûr.
+    private let dicoFloorCompleter = WordCompleter()
+
     /// NSSpellChecker wrapper, reused for the mid-word coherence guard
     /// (`OutputFilter.midWordCandidate` + `isValidWord`). Process-wide and
     /// thread-safe behind its own `@unchecked Sendable` declaration, so it can
@@ -157,6 +187,18 @@ final class ModelRuntime {
             return
         }
 
+        // Beam core (flag `SOUFFLEUSE_BEAM_CORE`) : crée le contexte multi-séquences
+        // du beam sur le MÊME `llama_model` que le ghost greedy (poids EMPRUNTÉS via
+        // `borrowModel()` — pas de 2ᵉ Go en RAM). Hors flag, jamais chargé.
+        if SuggestionPolicy.Tuning.beamCoreEnabled {
+            if let borrowed = await llamaEngine.borrowModel() {
+                beamReady = await beamEngine.load(borrowedModel: borrowed, contextTokens: 4096)
+            } else {
+                beamReady = false
+            }
+            if !beamReady { Log.error(.predictor, "model_load_failed") }
+        }
+
         // Best-effort MLX container load — used solely by
         // `rebuildPersonalization` for tokenizing history into the n-gram
         // model. Personalization defaults to off (strength 0), so a failure
@@ -223,6 +265,14 @@ final class ModelRuntime {
         guard id != ggufModelID else { return llamaReady }
         ggufModelID = id
         let ggufPath = resolveGGUFPath()
+        // ORDRE CRITIQUE : le beam emprunte le `llama_model` de `LlamaEngine`. Le
+        // reload ci-dessous va libérer l'ANCIEN modèle ; on décharge donc d'abord
+        // le contexte du beam (sinon il référencerait un modèle libéré), puis on
+        // le recrée sur le NOUVEAU modèle emprunté après le reload.
+        if beamReady {
+            await beamEngine.unload()
+            beamReady = false
+        }
         let ok = await llamaEngine.load(modelPath: ggufPath, contextTokens: 4096)
         llamaReady = ok
         if !ok {
@@ -230,6 +280,12 @@ final class ModelRuntime {
             self.lastError = "load_failed: gguf"
         } else {
             self.lastError = nil
+        }
+        // Recrée le contexte beam sur le nouveau modèle emprunté (flag uniquement).
+        if SuggestionPolicy.Tuning.beamCoreEnabled, ok {
+            if let borrowed = await llamaEngine.borrowModel() {
+                beamReady = await beamEngine.load(borrowedModel: borrowed, contextTokens: 4096)
+            }
         }
         return ok
     }
@@ -261,6 +317,11 @@ final class ModelRuntime {
     /// `LlamaEngine` sérialise de toute façon `unload` après tout `generate` en
     /// vol.
     func unloadGhost() async {
+        // ORDRE CRITIQUE : le beam emprunte le modèle de `LlamaEngine`. On libère
+        // d'abord le contexte du beam, PUIS le modèle (via llamaEngine.unload) —
+        // sinon le contexte beam pointerait un modèle déjà libéré.
+        await beamEngine.unload()
+        beamReady = false
         await llamaEngine.unload()
         llamaReady = false
         // Drop le container MLX : seul son tokenizer sert (au rebuild n-gram /
@@ -340,6 +401,21 @@ final class ModelRuntime {
         let show: Bool
         let word: String
         let reason: String     // "fast-accept" / "fast-reject" / "branch agree=0.75"
+        /// Niveau d'engagement quand le gradient `MW_ENGAGEMENT` est actif (sinon
+        /// `.plein` par défaut — comportement long-ghost statique inchangé, le
+        /// rolling reste autorisé comme aujourd'hui hors flag).
+        let engagement: SuggestionPolicy.MidWordEngagement
+        /// Le rolling refill est-il autorisé pour ce souffle ? Hors gradient =
+        /// toujours `true` (byte-identique). Sous gradient = vrai en PLEIN seulement.
+        var rollingAllowed: Bool { engagement.rollingAllowed }
+
+        init(show: Bool, word: String, reason: String,
+             engagement: SuggestionPolicy.MidWordEngagement = .plein) {
+            self.show = show
+            self.word = word
+            self.reason = reason
+            self.engagement = engagement
+        }
     }
 
     /// **Frame C — escalade mid-mot.** Appelée par `PredictorViewModel.predict`
@@ -573,6 +649,12 @@ final class ModelRuntime {
         GpuGate.shared.ghostBegan()
         defer { GpuGate.shared.ghostEnded() }
 
+        // Gradient d'engagement (flag MW_ENGAGEMENT) : sous le flag on capte la
+        // confiance top-1 du greedy (epsilon, n'aborte jamais → sortie inchangée)
+        // pour pouvoir trancher le niveau PLEIN/PRUDENT/ZÉRO en aval. Hors flag,
+        // `minFirstTokenProb: 0` → chemin et sortie byte-identiques à aujourd'hui.
+        let engagementOn = SuggestionPolicy.Tuning.midWordEngagementEnabled
+
         // ── UNE passe greedy healed (même profil de bans que l'escalade, mais
         // SANS minFirstTokenProb : pas de gating de confiance, on montre la sortie).
         final class Acc: @unchecked Sendable {
@@ -580,7 +662,7 @@ final class ModelRuntime {
             var tokens = 0
         }
         let acc = Acc()
-        _ = await llamaEngine.generate(
+        let greedyMetrics = await llamaEngine.generate(
             prompt: prompt,
             maxTokens: cap,
             sampling: LlamaSampling(
@@ -592,7 +674,8 @@ final class ModelRuntime {
                 banMarkup: true,
                 banDigitsLeading: true,
                 banEmoji: true,
-                minFirstTokenProb: 0,
+                minFirstTokenProb: engagementOn
+                    ? Float(SuggestionPolicy.Tuning.escFirstTokenProbEpsilon) : 0,
                 // À une frontière on NE heale PAS (on veut le mot SUIVANT, pas une
                 // extension du mot complet « une ») ; mid-mot incomplet → on heale le partiel.
                 healPrefix: isBoundary ? nil : (partial.isEmpty ? nil : partial)
@@ -677,11 +760,23 @@ final class ModelRuntime {
         // Raison granulaire du gate (visible dans l'inspecteur) : pourquoi rien affiché.
         var why = result.isEmpty ? "emptygen" : "ok"
 
-        // Exit-guard ÉCHO (gardé : le modèle ne doit pas répéter ce que tu tapes).
-        if !result.isEmpty,
-           OutputFilter.echoScore(ghost: result, tail: request.userTail)
-            >= OutputFilter.continuationEchoThreshold {
-            result = ""; why = "echo"
+        // Exit-guard ÉCHO POSITIONNEL (le modèle ne doit pas RECRACHER ta phrase —
+        // mais il a le droit de réutiliser du vocabulaire). Le sac-de-mots
+        // `echoScore` seul tuait ~50% de bons ghosts (« lancer le serveur »,
+        // « m'organiser ») : il confond « répéter verbatim » et « réutiliser des
+        // mots ». On exige donc AUSSI un run VERBATIM ≥ `echoMinVerbatimRunWords`
+        // mots recopié du tail — seules les vraies boucles (« à savoir si la
+        // radioactivité » recrachée) le franchissent. Calibré + validé par
+        // `SouffleuseEchoEval` (récupère 3/6 gatés, garde 3/3 boucles).
+        if !result.isEmpty {
+            let echo = OutputFilter.echoScore(ghost: result, tail: request.userTail)
+            if echo >= OutputFilter.continuationEchoThreshold {
+                let run = OutputFilter.longestVerbatimRunWords(ghost: result, tail: request.userTail)
+                if run >= SuggestionPolicy.Tuning.echoMinVerbatimRunWords {
+                    why = "echo(s=\(Self.fmt2(echo)) run=\(run))"
+                    result = ""
+                }
+            }
         }
         // Garde LANGUE : DÉSACTIVÉE par défaut sur le chemin simple. La détection
         // de langue est peu fiable sur 2-3 mots et vidait la majorité des ghosts
@@ -707,8 +802,345 @@ final class ModelRuntime {
         result = OutputFilter.singleLine(result)
         if result.isEmpty, why == "ok" { why = "trim" }
 
+        // ── Gradient d'engagement (flag MW_ENGAGEMENT). Hors flag → return d'origine
+        // (byte-identique : engagement = .plein par défaut, rolling autorisé comme
+        // aujourd'hui). Sous flag, on module la PROFONDEUR du souffle selon
+        // l'incertitude de la cascade escalate EXISTANTE (P1 fast-accept + accord
+        // des k branches), SANS nouveau signal moteur.
+        // Le gradient ne s'applique QU'AU MID-MOT incomplet GLUÉ (complétion du mot
+        // courant). À une FRONTIÈRE, ou si le modèle produit un mot NEUF (ghost à
+        // espace de tête, ex. « Elon » → «  Musk »), la garde « prolonge le partiel »
+        // n'a aucun sens → on garde le long-ghost plein + rolling (living ghost).
+        if engagementOn, !isBoundary, result.first != " " {
+            return await midWordEngagementResult(
+                prompt: prompt, partial: partial, request: request,
+                greedyFullLine: acc.text, greedyP1: greedyMetrics.firstTokenProb,
+                fullContinuation: result, why: why)
+        }
+
         return MidWordEscalationResult(show: !result.isEmpty, word: result,
                                        reason: result.isEmpty ? "longghost-\(why)" : "longghost")
+    }
+
+    /// **Cœur LLM beam (flag `SOUFFLEUSE_BEAM_CORE`).** Génère le ghost via le
+    /// `BeamGhostEngine` contraint — le SEUL chemin LLM sous le flag, en
+    /// remplacement du greedy long-ghost / engagement / plancher dico.
+    ///
+    /// - **Mid-mot** (`partial` non vide, même si le fragment est un mot valide
+    ///   du dico) → beam avec `requiredPrefix = partial`, largeur K=3. La
+    ///   contrainte force à ne pas abandonner le mot tapé (elle n'empêche pas de
+    ///   le terminer) ; le ranking log-prob tranche l'accord (handoff §a/§b :
+    ///   intention 64 % vs 29 %, accord 9/10 vs 4/10 ; PARITY-FINDINGS.md :
+    ///   céder la contrainte aux fragments « mots valides » coûtait 55 → 0 % de
+    ///   mots justes à 1 lettre).
+    /// - **Vrai après-espace** (`partial` vide) → décode LIBRE à K=1 (≡ greedy,
+    ///   §4A : le beam n'aide pas après-espace et K>1 y perd en cohérence). Le
+    ///   `routeInstant` reste DEVANT pour le rappel.
+    ///
+    /// Post-filtré par `beamPostFilter` (singleLine, dédup, séparateur, écho
+    /// positionnel, word-cap) puis par les deux gardes de phrase. Réutilise
+    /// `MidWordEscalationResult` pour un call-site PVM commun (show/word/reason).
+    ///
+    /// **Génération fraîche glissante** (décision UX) : chaque frappe (débouncée)
+    /// régénère une fenêtre de `maxWords` mots DEPUIS tout le texte tapé — pas de
+    /// réserve pré-calculée. La fenêtre glisse en avant et reste TOUJOURS
+    /// conditionnée sur ce que l'utilisateur a réellement tapé. (Le reuse
+    /// HIT/REFILL/MISS de la réserve n'amortissait quasi pas en frappe libre — 13 %
+    /// de HIT — et n'allongeait pas le ghost ni ne re-conditionnait sur le tapé ;
+    /// abandonné ici, le code moteur reste dormant sous le flag.)
+    ///
+    /// Deux gardes de PHRASE :
+    ///  • **G1 (fin de phrase)** : si le ghost contient un `.` `!` `?`, on NE
+    ///    propose RIEN — on ne met pas la fin de phrase dans la bouche de
+    ///    l'utilisateur (géré dans `beamPostFilter`).
+    ///  • **G2 (reprise après le point)** : tant que la PHRASE EN COURS (texte
+    ///    après le dernier `.!?`) a moins de `beamMinSentenceLetters` lettres, on
+    ///    se tait. Juste après un point ⇒ silence ; on reprend dès que l'utilisateur
+    ///    a amorcé la nouvelle phrase (le modèle a alors un vrai contexte).
+    func generateGhostBeam(request: PredictRequest) async -> MidWordEscalationResult? {
+        guard beamReady else { return nil }
+        let userTail = request.userTail
+
+        // G2 — reprise après le point : pas de proposition tant que la phrase en
+        // cours n'est pas amorcée (≥ beamMinSentenceLetters lettres après le dernier
+        // terminateur). Couvre « on reprend quand l'utilisateur a retapé quelques
+        // lettres après le point » SANS coût LLM.
+        guard BeamGhostShaper.sentenceArmed(userTail: userTail) else {
+            // Silence G2 : la session réserve de la phrase précédente est morte
+            // (le ghost repartira d'un seed frais à la reprise).
+            beamSessionTail = nil
+            return MidWordEscalationResult(show: false, word: "", reason: "beam-newsentence")
+        }
+
+        // Choix de config beam (mid-mot → requiredPrefix + K plein ; frontière →
+        // décode libre K=1). Logique de mise en forme PURE → `BeamGhostShaper`.
+        let choice = BeamGhostShaper.beamConfigChoice(userTail: userTail, beamWidth: beamWidth)
+        let requiredPrefix = choice.requiredPrefix
+        let isBoundary = choice.isBoundary
+        let width = choice.width
+
+        // Prompt = contexte PROSE (« Contexte: » persona + ctxPrefix app/fenêtre/OCR,
+        // prose que le base/PT CONTINUE bien) + tout le texte avant curseur. EXCLUS :
+        // exemples few-shot (pollueur prouvé), annotation `Champ:`, FIM. Slots choisis
+        // par `BeamGhostShaper.promptSlots` (mise en forme partagée avec la probe).
+        let prompt = BeamGhostShaper.buildPrompt(
+            customInstr: request.customInstr, ctxPrefix: request.ctxPrefix, llmTail: request.llmTail)
+
+        // ── Réserve (flag SOUFFLEUSE_BEAM_RESERVE) : HIT/REFILL/MISS ─────────
+        // Si le nouveau tail PROLONGE l'ancien de 1-3 chars et qu'une réserve
+        // vit, on AVANCE char par char dans les branches pré-décodées : frappe
+        // qui suit le ghost = HIT, 0 décode, ~0 ms. Divergence = MISS, re-beam
+        // (avec capture d'une réserve fraîche) DANS `advance`. Toute rupture de
+        // continuité (backspace, accept, changement de champ, llmTail ≠ userTail
+        // après heal) tombe dans le seed frais ci-dessous.
+        let reserveOn = SuggestionPolicy.Tuning.beamReserveEnabled
+        if reserveOn,
+           let prev = beamSessionTail,
+           request.llmTail == userTail,           // pas de correction typo en vol
+           userTail.count > prev.count,
+           userTail.count - prev.count <= 3,      // debounce : au plus quelques chars
+           userTail.hasPrefix(prev),
+           await beamEngine.hasReserve {
+            var advanced: AdvanceResult?
+            var tail = prev
+            GpuGate.shared.ghostBegan()
+            for ch in userTail.dropFirst(prev.count) {
+                tail.append(ch)
+                let c = BeamGhostShaper.beamConfigChoice(userTail: tail, beamWidth: beamWidth)
+                advanced = await beamEngine.advance(typedChar: ch,
+                                                    requiredPrefixForMiss: c.requiredPrefix,
+                                                    missWidth: c.width)
+                if Task.isCancelled { break }
+            }
+            GpuGate.shared.ghostEnded()
+            if Task.isCancelled { return nil }
+            beamSessionTail = userTail
+            if let a = advanced {
+                Log.info(.predictor, "ghost_beam_advance_ms", count: a.elapsedMillis)
+                // Trace de latence : chemin servi (1 hit / 2 refill / 3 miss).
+                switch a.kind {
+                case .hit: LatencyTrace.mark("gen_path", key: LatencyTrace.key(request.prefix), info: 1)
+                case .refill: LatencyTrace.mark("gen_path", key: LatencyTrace.key(request.prefix), info: 2)
+                case .miss: LatencyTrace.mark("gen_path", key: LatencyTrace.key(request.prefix), info: 3)
+                }
+                let caretAfterSpace = request.llmTail.last == " " || request.llmTail.last == "\t"
+                // Coupe anti-recopie mid-line : la réserve ne livre qu'UNE branche
+                // (pas d'alternatives à itérer) — si elle recopie le texte après
+                // caret, on la coupe/abstient ; le prochain seed re-proposera.
+                let ghost = BeamGhostShaper.afterCaretEchoCut(
+                    ghost: BeamGhostShaper.beamPostFilter(
+                        rawGhost: a.ghost, isBoundary: isBoundary, caretAfterSpace: caretAfterSpace,
+                        userTail: userTail, maxWords: request.maxWords),
+                    afterCaret: request.axTextAfterCaret)
+                let reason: String
+                switch a.kind {
+                case .hit: reason = "beam-hit"
+                case .refill: reason = "beam-refill"
+                case .miss: reason = "beam-miss"
+                }
+                return MidWordEscalationResult(show: !ghost.isEmpty, word: ghost,
+                                               reason: ghost.isEmpty ? "beam-gated" : reason)
+            }
+            // advanced nil (dropFirst vide — ne devrait pas arriver) → seed frais.
+        }
+
+        // GPU gate (parité translation, TRANSLATION-SPEC §2.9) autour du beam.
+        GpuGate.shared.ghostBegan()
+        let result: BeamResult
+        if reserveOn {
+            // Seed de session : beam + CAPTURE de la réserve pour les frappes
+            // suivantes. La rupture de continuité a déjà invalidé l'ancienne
+            // réserve (les seqs sont recyclées par `generateBeam`).
+            result = await beamEngine.ghostWithReserve(prompt: prompt,
+                                                       requiredPrefix: requiredPrefix,
+                                                       maxWidth: width)
+            beamSessionTail = userTail
+        } else {
+            result = await beamEngine.ghost(prompt: prompt, requiredPrefix: requiredPrefix, maxWidth: width)
+        }
+        GpuGate.shared.ghostEnded()
+        if Task.isCancelled { return nil }
+        Log.info(.predictor, "ghost_beam_seed_ms", count: result.elapsedMillis)
+        // Trace de latence : seed (4 avec capture de réserve / 5 sans), taille du
+        // prompt en tokens et part RÉUTILISÉE du prefix-cache — c'est la mesure
+        // qui départage « la queue lourde = re-prefill post-wipe » (LCP ≈ 0 sur
+        // gros prompt) d'une autre cause.
+        LatencyTrace.mark("gen_path", key: LatencyTrace.key(request.prefix), info: reserveOn ? 4 : 5)
+        LatencyTrace.mark("seed_prompt", key: LatencyTrace.key(request.prefix), info: result.promptTokenCount)
+        LatencyTrace.mark("seed_lcp", key: LatencyTrace.key(request.prefix), info: result.reusedPrefixTokens)
+        // Décomposition interne du seed : prefill vs boucle de décodage — c'est
+        // elle qui dira si le seed lent paie le contexte (decode qui grandit avec
+        // le KV) ou la prefill (cache froid).
+        LatencyTrace.mark("seed_prefill_ms", key: LatencyTrace.key(request.prefix), info: result.prefillMillis)
+        LatencyTrace.mark("seed_decode_ms", key: LatencyTrace.key(request.prefix), info: result.decodeMillis)
+
+        let caretAfterSpace = request.llmTail.last == " " || request.llmTail.last == "\t"
+        // Mid-line (texte non-blanc sur la ligne après le caret) : `selectGhost`
+        // itère les K candidats et prend le premier qui ne RECOPIE pas ce qui est
+        // déjà tapé après le curseur. Hors mid-line, il post-filtre le best seul —
+        // byte-identique à l'historique.
+        let rawCandidates = result.candidates.isEmpty
+            ? [result.best?.ghost ?? ""]
+            : result.candidates.map(\.ghost)
+        let ghost = BeamGhostShaper.selectGhost(
+            rawCandidates: rawCandidates, isBoundary: isBoundary, caretAfterSpace: caretAfterSpace,
+            userTail: userTail, maxWords: request.maxWords, afterCaret: request.axTextAfterCaret)
+        Log.info(.predictor, "ghost_beam_words",
+                 count: ghost.split(whereSeparator: { $0.isWhitespace }).count)
+        return MidWordEscalationResult(show: !ghost.isEmpty, word: ghost,
+                                       reason: ghost.isEmpty ? "beam-gated" : "beam")
+    }
+
+    // La logique de mise en forme PURE du cœur beam (seuil de phrase G2,
+    // `currentSentenceLetterCount`, choix requiredPrefix/largeur, slots de prompt,
+    // post-filtre de sortie) vit désormais dans `BeamGhostShaper` (SouffleuseCore),
+    // pour être IMPORTABLE par la probe `SouffleuseBeamGhostProbe` (le target
+    // exécutable `Souffleuse` ne l'est pas). `generateGhostBeam` ci-dessus appelle
+    // directement le shaper — comportement byte-identique (extrait verbatim).
+
+    /// **Gradient d'engagement mi-mot (flag MW_ENGAGEMENT).** À partir du greedy
+    /// long-ghost DÉJÀ généré (`fullContinuation` = la continuation pleinement
+    /// gatée, `greedyP1` = sa confiance top-1), décide un niveau PLEIN/PRUDENT/ZÉRO
+    /// en RÉUTILISANT la cascade escalate existante (mêmes branches `runEscalationPass`
+    /// + `midWordBranchDecision` + `midWordEngagementLevel`, mêmes seuils que F1/F2).
+    ///
+    /// - **PLEIN**   : on garde la continuation greedy complète (~maxWords) ;
+    ///   rolling refill autorisé (living ghost).
+    /// - **PRUDENT** : on RÉDUIT à 1 mot (le modal greedy défragmenté, FIGÉ) ;
+    ///   rolling INTERDIT.
+    /// - **ZÉRO**    : abstention (`show: false`).
+    ///
+    /// DECISION : pour obtenir l'accord des branches sur le chemin long-ghost SANS
+    /// dupliquer le vote, on relance les MÊMES branches que l'escalade via le helper
+    /// `runEscalationPass` existant (cap court `escBranchMaxTokens`), puis on passe
+    /// par `midWordBranchDecision` pour l'accord [0,1]. Le greedy déjà généré compte
+    /// comme 1 vote (mot de tête défragmenté). On ne régénère JAMAIS la continuation —
+    /// PLEIN réutilise `fullContinuation`, PRUDENT n'en garde que le 1ᵉʳ mot.
+    private func midWordEngagementResult(
+        prompt: String, partial: String, request: PredictRequest,
+        greedyFullLine: String, greedyP1: Double?, fullContinuation: String, why: String
+    ) async -> MidWordEscalationResult {
+        // Mot de tête défragmenté du greedy (le modal greedy, gardien du vote).
+        let greedyLead = SuggestionPolicy.midWordLeadWordDefrag(
+            OutputFilter.singleLine(greedyFullLine), partial: partial)
+
+        // Dégénéré STRUCTUREL (le mot de tête ne prolonge pas le partiel) ⇒ ZÉRO
+        // direct, on évite le coût des branches. Garde structurelle, PAS dico : ne
+        // recale plus les OOV légitimes (marques, noms, anglais, jargon).
+        guard SuggestionPolicy.midWordExtendsStructurally(partial: partial, modal: greedyLead) else {
+            // Le LLM ne prolonge même pas le mot tapé (« docu » → dérive) : c'est
+            // PRÉCISÉMENT là que le dico est le plus utile. Plancher avant de rendre
+            // le vide.
+            return dicoFloorResult(partial: partial, greedyLead: greedyLead, why: "structdegen")
+                ?? MidWordEscalationResult(show: false, word: fullContinuation,
+                                           reason: "longghost-engage:zero(\(why))",
+                                           engagement: .zero)
+        }
+
+        // Fast-accept (mêmes seuils que `midWordFastDecision`) ⇒ PLEIN sans brancher.
+        let isFastAccept = (greedyP1 ?? 0) >= SuggestionPolicy.Tuning.escFastP1
+            && partial.count >= SuggestionPolicy.Tuning.escMinFastLen
+
+        var agreement = 1.0   // fast-accept : accord implicite (pas de branches lancées)
+        if !isFastAccept {
+            // Branches stochastiques EXISTANTES (mêmes seeds/cap/temp que l'escalade),
+            // pour mesurer l'accord. Early-exit dès la majorité (comme `midWordEscalate`).
+            let k = SuggestionPolicy.Tuning.escBranchKRuntime
+            if k > 0 {
+                let branchCap = min(request.maxTokens, SuggestionPolicy.Tuning.escBranchMaxTokens)
+                var leads = [greedyLead]
+                let needed = Int((SuggestionPolicy.Tuning.escAgreeThreshRuntime
+                                  * Double(k + 1)).rounded(.up))
+                for i in 0..<k {
+                    if Task.isCancelled {
+                        return MidWordEscalationResult(show: false, word: fullContinuation,
+                                                       reason: "longghost-engage:zero(cancel)",
+                                                       engagement: .zero)
+                    }
+                    let b = await runEscalationPass(
+                        prompt: prompt, partial: partial, cap: branchCap,
+                        temperature: SuggestionPolicy.Tuning.escBranchTempRuntime,
+                        seed: UInt32(i + 1), captureP1: false)
+                    leads.append(b.lead)
+                    let counts = Dictionary(leads.map { ($0.lowercased(), 1) }, uniquingKeysWith: +)
+                    if let top = counts.values.max(), top >= needed { break }
+                }
+                agreement = SuggestionPolicy.midWordBranchDecision(
+                    partial: partial, greedyModal: greedyLead,
+                    branchLeads: Array(leads.dropFirst())).agreement
+            } else {
+                agreement = 0   // k=0 (override DEV) → pas de signal d'accord → PRUDENT/ZÉRO
+            }
+        }
+
+        let level = SuggestionPolicy.midWordEngagementLevel(
+            partial: partial, greedyLeadWord: greedyLead,
+            firstTokenProb: greedyP1, agreement: agreement)
+        let agreeStr = String(format: "%.2f", agreement)
+
+        switch level {
+        case .zero:
+            // Branches lancées, accord trop faible (fin de phrase divergente) :
+            // le LLM s'abstient, mais on complète quand même le mot EN COURS via le
+            // dico → un mot valide à chaque lettre, plutôt que du vide.
+            return dicoFloorResult(partial: partial, greedyLead: greedyLead, why: "agree=\(agreeStr)")
+                ?? MidWordEscalationResult(show: false, word: fullContinuation,
+                                           reason: "longghost-engage:zero(agree=\(agreeStr))",
+                                           engagement: .zero)
+        case .prudent:
+            // 1 mot (le modal greedy), FIGÉ : on réduit la continuation à son
+            // PREMIER mot entier, en préservant l'éventuel espace de tête.
+            let prudent = Self.firstWholeWord(of: fullContinuation)
+            return MidWordEscalationResult(show: !prudent.isEmpty, word: prudent,
+                                           reason: "longghost-engage:prudent(agree=\(agreeStr))",
+                                           engagement: .prudent)
+        case .plein:
+            return MidWordEscalationResult(show: !fullContinuation.isEmpty, word: fullContinuation,
+                                           reason: "longghost-engage:plein(agree=\(agreeStr))",
+                                           engagement: .plein)
+        }
+    }
+
+    /// **Plancher dico mid-mot (flag `MW_DICO_FLOOR`, ON par défaut).** Renvoie un
+    /// souffle FIGÉ qui complète le mot EN COURS quand le gradient d'engagement
+    /// allait rendre du vide (`.zero`). La complétion vient de `NSSpellChecker`
+    /// (`WordCompleter.completion`) : le meilleur candidat qui PROLONGE réellement
+    /// le préfixe tapé (jamais un mot qui obligerait à reculer). Comme la complétion
+    /// se ré-évalue à chaque frappe, une approximation à 3 lettres se précise en
+    /// avançant — d'où « un mot valide à chaque lettre tant que le mot n'est pas
+    /// fini ». `engagement: .prudent` ⇒ ghost figé, rolling interdit : le plancher
+    /// REMPLIT le vide, il ne déclenche jamais le living ghost. `nil` (→ abstention
+    /// d'origine) si le flag est coupé, le mot trop court (< 3, `minPartialLength`),
+    /// ou aucun candidat ne prolonge. À une frontière (fin de phrase) on n'arrive
+    /// jamais ici (chemin gardé par `!isBoundary` + mot partiel en amont).
+    private func dicoFloorResult(partial: String, greedyLead: String, why: String) -> MidWordEscalationResult? {
+        guard SuggestionPolicy.Tuning.midWordDicoFloorEnabled else { return nil }
+        // Orienté par le greedy : NSSpellChecker est context-blind (« mange » →
+        // « manger »), mais le mot que le LLM penchait à produire (« mangeons »
+        // après « nous ») désambiguïse la conjugaison/forme sans qu'on régénère
+        // rien. Si le greedy est vide / parti en vrille (cas dégénéré structurel),
+        // la surcharge retombe d'elle-même sur le 1ᵉʳ candidat aveugle.
+        guard let suffix = dicoFloorCompleter.completion(for: partial, preferring: greedyLead),
+              !suffix.isEmpty else { return nil }
+        return MidWordEscalationResult(show: true, word: suffix,
+                                       reason: "longghost-engage:floor-dico(\(why))",
+                                       engagement: .prudent)
+    }
+
+    /// Format court 2 décimales sans `String(format:)` localisé ( for logs/inspecteur).
+    nonisolated static func fmt2(_ x: Double) -> String {
+        let n = Int((x * 100).rounded())
+        return "\(n / 100).\(String(format: "%02d", n % 100))"
+    }
+
+    /// Réduit un ghost à son PREMIER mot entier (niveau PRUDENT), en préservant
+    /// l'éventuel espace de tête (séparateur) — miroir du word-cap de `midWordLongGhost`.
+    nonisolated static func firstWholeWord(of ghost: String) -> String {
+        let hadLeadingSpace = ghost.first == " "
+        let words = ghost.split(whereSeparator: { $0.isWhitespace })
+        guard let first = words.first else { return ghost }
+        let one = String(first)
+        return hadLeadingSpace ? " " + one : one
     }
 
     /// **Rolling-refill : prolonge le ghost affiché** (mode sliding-window,
@@ -721,6 +1153,49 @@ final class ModelRuntime {
     /// (singleLine, coupe à la 1ʳᵉ frontière de clause, cap à `maxWords` mots
     /// entiers, espace de tête préservé pour se concaténer proprement sur le
     /// reste). Renvoie `nil`/vide si rien d'exploitable.
+    /// Variante BEAM du refill glissant (sous `SOUFFLEUSE_BEAM_CORE`) : régénère la
+    /// continuation DEPUIS le texte visible courant (`committed + remainder`, porté
+    /// par `request.llmTail`) — donc conditionnée sur TOUT ce qui est tapé/affiché,
+    /// pas un top-up greedy stale. Décode libre K=1 (continuation après une
+    /// frontière propre = la fin du reste), post-filtré comme le ghost beam (G1
+    /// coupe-clause inclusive → ne dépasse pas la fin de phrase ; espace de tête
+    /// pour la concaténation). C'est ce refill qui MAINTIENT le living ghost vivant
+    /// pendant la consommation (sinon la fenêtre fond à zéro → « pas live »).
+    /// Renvoie le texte à APPENDRE au reste, ou nil si rien d'exploitable.
+    func extendGhostBeam(request: PredictRequest, maxWords: Int) async -> String? {
+        guard beamReady else { return nil }
+        // NB réserve (SOUFFLEUSE_BEAM_RESERVE) : ce refill passe par `generateBeam`
+        // qui recycle les seqs de branches → la réserve est droppée à chaque
+        // rallonge. C'est VOULU : pendant la consommation live, `predict()` ne
+        // tourne pas (l'AppDelegate slice le reste et appelle CE refill) — la
+        // réserve ne peut donc pas maintenir la fenêtre ; la neutraliser ici
+        // vidait le living ghost (régression constatée au clavier). La réserve
+        // ne sert que le chemin predict (divergences courtes).
+        let prompt = BeamGhostShaper.buildPrompt(
+            customInstr: request.customInstr, ctxPrefix: request.ctxPrefix, llmTail: request.llmTail)
+        GpuGate.shared.ghostBegan()
+        let result = await beamEngine.ghost(prompt: prompt, requiredPrefix: "", maxWidth: 1)
+        GpuGate.shared.ghostEnded()
+        if Task.isCancelled { return nil }
+        // Trace de latence : prompt/LCP du refill — symétrique des marques seed,
+        // pour mesurer la guerre de prefix-cache entre les deux chemins.
+        LatencyTrace.mark("refill_prompt", key: LatencyTrace.key(request.prefix), info: result.promptTokenCount)
+        LatencyTrace.mark("refill_lcp", key: LatencyTrace.key(request.prefix), info: result.reusedPrefixTokens)
+        LatencyTrace.mark("refill_prefill_ms", key: LatencyTrace.key(request.prefix), info: result.prefillMillis)
+        LatencyTrace.mark("refill_decode_ms", key: LatencyTrace.key(request.prefix), info: result.decodeMillis)
+        var ext = BeamGhostShaper.beamPostFilter(
+            rawGhost: result.best?.ghost ?? "", isBoundary: true, caretAfterSpace: false,
+            userTail: request.userTail, maxWords: maxWords)
+        // Mid-line : un refill qui recopie le texte après le caret réintroduirait
+        // la duplication que `selectGhost` vient d'éviter au seed — même coupe.
+        // `axTextAfterCaret` est nil sur le chemin end-of-line → no-op.
+        ext = BeamGhostShaper.afterCaretEchoCut(ghost: ext, afterCaret: request.axTextAfterCaret)
+        guard !ext.isEmpty else { return nil }
+        if ext.first != " " { ext = " " + ext }   // espace de tête pour se concaténer au reste
+        Log.info(.predictor, "ghost_beam_refill_ms", count: result.elapsedMillis)
+        return ext
+    }
+
     func extendGhost(request: PredictRequest, maxWords: Int) async -> String? {
         guard llamaReady else { return nil }
         let prompt = ModelRuntime.buildLlamaPrompt(

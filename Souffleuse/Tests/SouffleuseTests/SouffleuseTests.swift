@@ -95,6 +95,25 @@ import Testing
 }
 
 @MainActor
+@Test func overlayPillFrameTypedFragmentShiftsLeftAndWidens() {
+    // Le fragment du mot en cours (`typed`) est mesuré DANS la largeur et décale
+    // la pill vers la gauche de sa propre largeur : le fragment se lit sous ses
+    // glyphes, la suggestion reste alignée sous le caret.
+    let font = NSFont.systemFont(ofSize: 15)
+    let caret = CGRect(x: 120, y: 200, width: 1, height: 18)
+    let bare = OverlayWindow.pillFrame(belowCaret: caret, text: "he demain", font: font)
+    let withTyped = OverlayWindow.pillFrame(belowCaret: caret, text: "he demain", typed: "couc", font: font)
+    let typedWidth = ceil(("couc" as NSString).size(withAttributes: [.font: font]).width)
+    let fullWidth = ceil(("couche demain" as NSString).size(withAttributes: [.font: font]).width)
+    #expect(withTyped.width == fullWidth + PillView.hPad * 2)
+    #expect(withTyped.origin.x == bare.origin.x - typedWidth)
+    // Toujours clampé au bord gauche de l'écran.
+    let clamped = OverlayWindow.pillFrame(belowCaret: CGRect(x: 3, y: 200, width: 1, height: 18),
+                                          text: "he", typed: "couc", font: font)
+    #expect(clamped.origin.x == 0)
+}
+
+@MainActor
 @Test func overlayPillFrameHangsBelowCaretLine() {
     // Quartz Y grows downward; a caret one line lower (greater maxY) drops the
     // pill's AppKit y by exactly the same delta — the pill tracks the caret line.
@@ -102,6 +121,88 @@ import Testing
     let a = OverlayWindow.pillFrame(belowCaret: CGRect(x: 50, y: 100, width: 1, height: 18), text: "abc", font: font)
     let b = OverlayWindow.pillFrame(belowCaret: CGRect(x: 50, y: 140, width: 1, height: 18), text: "abc", font: font)
     #expect(abs((a.origin.y - b.origin.y) - 40) < 0.001)
+}
+
+// MARK: - SouffleuseAppDelegate mid-line accept plan (fusion avec l'existant)
+
+@MainActor
+@Test func midLineAcceptPlanSkipsExistingWordLetters() {
+    // « p|our » + Tab « our » : les lettres existent déjà → saut pur, zéro injection.
+    let t = SouffleuseAppDelegate.midLineAcceptPlan(chunk: "our", afterCaret: "our reste")
+    #expect(t.ops == [.skip(3)])
+    #expect(t.effective == "our")
+    // Avec « espace après chaque mot » (Tab partiel « our ») : l'espace du chunk
+    // FUSIONNE avec l'espace existant (pas de double espace).
+    let u = SouffleuseAppDelegate.midLineAcceptPlan(chunk: "our ", afterCaret: "our reste")
+    #expect(u.ops == [.skip(4)])
+    #expect(u.effective == "our ")
+}
+
+@MainActor
+@Test func midLineAcceptPlanWeavesNewWordIntoExistingText() {
+    // Le cas de l'écran : « m'ai|der  trouver mon rapport fiscal. » + ghost
+    // « der à trouver » — « der » et « trouver » existent déjà, seul « à »
+    // manque. Le plan saute l'existant et n'injecte QUE le « à », en réutilisant
+    // les deux espaces existants comme séparateurs.
+    let p = SouffleuseAppDelegate.midLineAcceptPlan(
+        chunk: "der à trouver", afterCaret: "der  trouver mon rapport fiscal.")
+    #expect(p.ops == [.skip(4), .inject("à"), .skip(8)])
+    #expect(p.effective == "der à trouver")
+    // Le même en walk Tab mot-par-mot : chaque chunk replanifie sur l'AX frais.
+    let t1 = SouffleuseAppDelegate.midLineAcceptPlan(chunk: "der ", afterCaret: "der  trouver mon")
+    #expect(t1.ops == [.skip(4)])      // « der » + 1 espace fusionné
+    let t2 = SouffleuseAppDelegate.midLineAcceptPlan(chunk: "à ", afterCaret: " trouver mon")
+    #expect(t2.ops == [.inject("à"), .skip(1)])
+    let t3 = SouffleuseAppDelegate.midLineAcceptPlan(chunk: "trouver", afterCaret: "trouver mon")
+    #expect(t3.ops == [.skip(7)])
+}
+
+@MainActor
+@Test func midLineAcceptPlanBoundaryAndEndOfLine() {
+    // End-of-line (rien après le caret) → une seule injection, byte-identique.
+    let c = SouffleuseAppDelegate.midLineAcceptPlan(chunk: "our suite", afterCaret: "")
+    #expect(c.ops == [.inject("our suite")])
+    #expect(c.effective == "our suite")
+    // Frontière « word| reste » + ghost « votre… » : insertion, avec la couture
+    // qui rétablit le séparateur devant le mot existant.
+    let a = SouffleuseAppDelegate.midLineAcceptPlan(chunk: " votre", afterCaret: " reste")
+    #expect(a.ops == [.skip(1), .inject("votre ")])
+    #expect(a.effective == " votre ")
+}
+
+@MainActor
+@Test func midLineAcceptPlanDropsTrailingSeparatorBeforePunctuation() {
+    // Le cas de l'écran : « …un hom|me. » + ghost « me qui m… », Tab « me  » :
+    // « me » existe → saut pur ; l'espace de fin du chunk collé au point existant
+    // est JETÉ (pas de « homme . »), et surtout pas injecté à l'ancienne position
+    // (« hom me. »).
+    let p = SouffleuseAppDelegate.midLineAcceptPlan(chunk: "me ", afterCaret: "me.")
+    #expect(p.ops == [.skip(2)])
+    #expect(p.effective == "me")
+    // En fin de champ (rien après le mot sauté), l'espace de continuation reste.
+    let q = SouffleuseAppDelegate.midLineAcceptPlan(chunk: "me ", afterCaret: "me")
+    #expect(q.ops == [.skip(2), .inject(" ")])
+    #expect(q.effective == "me ")
+    // Entre deux mots, le séparateur reste indispensable : « qui » inséré avant
+    // le point existant garde son espace de tête, pas celui de queue.
+    let r = SouffleuseAppDelegate.midLineAcceptPlan(chunk: " qui", afterCaret: ".")
+    #expect(r.ops == [.inject(" qui")])
+}
+
+@MainActor
+@Test func midLineAcceptPlanWordBoundaryGuards() {
+    // « de » ne matche PAS « demain » (le mot existant continue) : tout est
+    // injecté, pas de mot existant éventré.
+    let b = SouffleuseAppDelegate.midLineAcceptPlan(chunk: "de quoi ", afterCaret: "demain")
+    #expect(b.effective == "de quoi ")
+    #expect(b.ops == [.inject("de quoi ")])
+    // Casse pliée : « Our » saute devant « our… » et le préfixe effectif garde la
+    // casse EXISTANTE (l'égalité stricte du walk en dépend).
+    let d = SouffleuseAppDelegate.midLineAcceptPlan(chunk: "Our suite", afterCaret: "our reste")
+    #expect(d.effective.hasPrefix("our"))
+    // Divergence dès la 1ʳᵉ lettre → injection (+ couture séparatrice).
+    let e = SouffleuseAppDelegate.midLineAcceptPlan(chunk: "ropose", afterCaret: "our reste")
+    #expect(e.ops == [.inject("ropose ")])
 }
 
 // MARK: - SouffleuseAppDelegate mid-text suppression
@@ -456,6 +557,30 @@ import Testing
 }
 
 // MARK: - PredictorViewModel prefix→suggestion cache
+
+// MARK: - PredictorViewModel : retry de chargement après échec (anti-verrou .failed)
+
+@MainActor
+@Test func loadModelRetriesFromFailedStateAfterBackoff() {
+    // Panne constatée : un échec ponctuel de chargement posait `.failed` que le
+    // guard `.idle` de loadModel() ne refranchissait jamais → ghost mort jusqu'au
+    // relaunch, AppDelegate en boucle `ghost_warm_reload`. La décision d'entrée
+    // doit retenter depuis `.failed`, espacée par le backoff.
+    let now = Date()
+    // Champ neuf → charge ; résident / en cours → jamais.
+    #expect(PredictorViewModel.shouldAttemptLoad(state: .idle, lastFailureAt: nil, now: now))
+    #expect(!PredictorViewModel.shouldAttemptLoad(state: .ready, lastFailureAt: nil, now: now))
+    #expect(!PredictorViewModel.shouldAttemptLoad(state: .loading(progress: 0.5), lastFailureAt: nil, now: now))
+    // Échec RÉCENT → silence (un GGUF absent ne coûte pas un load par frappe).
+    #expect(!PredictorViewModel.shouldAttemptLoad(
+        state: .failed("load_failed: gguf"),
+        lastFailureAt: now.addingTimeInterval(-2), now: now))
+    // Échec plus vieux que le backoff, ou horodatage perdu → retry.
+    #expect(PredictorViewModel.shouldAttemptLoad(
+        state: .failed("load_failed: gguf"),
+        lastFailureAt: now.addingTimeInterval(-PredictorViewModel.loadRetryBackoffSeconds - 1), now: now))
+    #expect(PredictorViewModel.shouldAttemptLoad(state: .failed("load_failed: gguf"), lastFailureAt: nil, now: now))
+}
 
 @MainActor
 @Test func predictCacheStoresAndRetrievesEntry() {

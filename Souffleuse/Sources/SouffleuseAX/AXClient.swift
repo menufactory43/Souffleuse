@@ -341,6 +341,79 @@ public final class AXClient: @unchecked Sendable {
         }
     }
 
+    /// Avance le caret de `count` caractères vers la droite, et ne REND la main
+    /// que lorsque le déplacement est CONFIRMÉ (lecture AX de la position).
+    ///
+    /// Utilisé par l'accept mid-line : les segments de la complétion qui existent
+    /// déjà après le caret sont SAUTÉS au lieu d'être ré-injectés (« p|our » +
+    /// accept « our… » ne doit pas produire « pourour »). L'injection qui SUIT le
+    /// saut est un write AX synchrone — sans confirmation, elle part de
+    /// l'ANCIENNE position (constaté : « hom|me. » + Tab → « hom me. », l'espace
+    /// injecté avant que les flèches soient traitées).
+    ///
+    /// Stratégie : (1) write direct de `kAXSelectedTextRangeAttribute`, relu pour
+    /// vérification — des hôtes (Notes / RichTextEdit) répondent `.success` puis
+    /// IGNORENT ; (2) fallback flèches → synthétiques (universelles), PUIS poll
+    /// de la position jusqu'à confirmation (~200 ms max) ; (3) hôte sans caret
+    /// lisible : flèches + settle aveugle.
+    @discardableResult
+    public func moveCaretRight(by count: Int) -> Bool {
+        guard count > 0 else { return true }
+        return queue.sync {
+            let element: AXUIElement? = {
+                guard let appEl = focusedAppElement() else { return nil }
+                var focusedRef: AnyObject?
+                guard AXUIElementCopyAttributeValue(appEl, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
+                      let focused = focusedRef else { return nil }
+                return (focused as! AXUIElement)
+            }()
+            let caretBefore = element.flatMap { readCaretLocation($0) }
+
+            // 1. Write AX direct (instantané quand l'hôte l'honore), vérifié.
+            if let el = element, let before = caretBefore {
+                var target = CFRange(location: before + count, length: 0)
+                if let value = AXValueCreate(.cfRange, &target) {
+                    AXUIElementSetAttributeValue(el, kAXSelectedTextRangeAttribute as CFString, value)
+                    usleep(20_000)
+                    if readCaretLocation(el) == before + count { return true }
+                }
+            }
+
+            // 2. Flèches → synthétiques (virtual key 124), même cadence que
+            //    `backspaceAndInjectViaCGEvent`, puis poll de confirmation.
+            let source = CGEventSource(stateID: .hidSystemState)
+            usleep(5_000)
+            for _ in 0..<count {
+                guard let down = CGEvent(keyboardEventSource: source, virtualKey: 124, keyDown: true),
+                      let up = CGEvent(keyboardEventSource: source, virtualKey: 124, keyDown: false) else {
+                    return false
+                }
+                down.post(tap: .cghidEventTap)
+                up.post(tap: .cghidEventTap)
+                usleep(2_000)
+            }
+            if let el = element, let before = caretBefore {
+                for _ in 0..<20 {   // ~200 ms max
+                    if readCaretLocation(el) == before + count { return true }
+                    usleep(10_000)
+                }
+                return false
+            }
+            // 3. Pas de caret lisible : settle aveugle généreux.
+            usleep(80_000)
+            return true
+        }
+    }
+
+    /// Position courante du caret (location du `kAXSelectedTextRangeAttribute`),
+    /// lue pour vérifier qu'un déplacement a bien été appliqué par l'hôte.
+    private func readCaretLocation(_ element: AXUIElement) -> Int? {
+        guard let rangeRef = copyAttr(element, kAXSelectedTextRangeAttribute) else { return nil }
+        var range = CFRange(location: 0, length: 0)
+        guard AXValueGetValue(rangeRef as! AXValue, .cfRange, &range) else { return nil }
+        return range.location
+    }
+
     /// Replace the last `deleteChars` characters before the caret with `text`.
     /// Used by typo correction and emoji expansion.
     ///

@@ -88,6 +88,15 @@ public final class OverlayWindow {
     /// line width and rendering the ghost so the ghost visually matches the typed text.
     private var lastFrame: CGRect = .zero
     private var lastText: String = ""
+    /// Dernier fragment `typed` peint dans la pill — partie du guard anti-repaint
+    /// de `showPill` (le fragment change à chaque frappe, pas toujours le frame).
+    private var lastPillTyped: String = ""
+
+    /// Hook DEV (trace de latence bout-en-bout) : appelé à chaque REPAINT
+    /// effectif (un appel qui a passé le guard anti-repaint), avec la longueur
+    /// du texte peint. Nil en prod — l'overlay reste sans dépendance ; c'est
+    /// l'app qui le branche quand `SOUFFLEUSE_LATENCY_TRACE` est posé.
+    public var onPaint: ((Int) -> Void)?
 
     public func show(text: String, at caretRectQuartz: CGRect, hostText: String?, caretIndex: Int?, hostFont: NSFont?) {
         // Safety net: a ghost must never contain a hard line break. A newline
@@ -146,6 +155,7 @@ public final class OverlayWindow {
         }
         lastFrame = frame
         lastText = text
+        onPaint?(text.count)
     }
 
     /// Paint the **mid-line** ghost as a rounded pill floated just below the caret
@@ -155,7 +165,12 @@ public final class OverlayWindow {
     /// any host text. `caretRectQuartz` is the caret rect; `hostText`/`caretIndex`
     /// correct the caret X for apps that return line rects (Notes); `hostFont`
     /// sizes the pill text to roughly match the host.
-    public func showPill(text: String, at caretRectQuartz: CGRect, hostText: String?, caretIndex: Int?, hostFont: NSFont?) {
+    /// `typed` : fragment du mot EN COURS de frappe (ce que l'utilisateur a déjà
+    /// tapé du mot que la suggestion complète). Rendu DEVANT la suggestion dans
+    /// une couleur distincte (accent), pour qu'on voie « où on en est » dans le
+    /// mot pendant que la pill fond/se recharge — parité avec la bulle mid-line
+    /// de Cotypist. Vide à une frontière de mot → pill suggestion seule.
+    public func showPill(text: String, typed: String = "", at caretRectQuartz: CGRect, hostText: String?, caretIndex: Int?, hostFont: NSFont?) {
         let text = text
             .replacingOccurrences(of: "\r\n", with: " ")
             .replacingOccurrences(of: "\n", with: " ")
@@ -166,12 +181,14 @@ public final class OverlayWindow {
             ?? label.font
             ?? .systemFont(ofSize: 15)
         let correctedRect = Self.correctCaretRect(caretRectQuartz, hostText: hostText, caretIndex: caretIndex, font: renderFont)
-        let frame = Self.pillFrame(belowCaret: correctedRect, text: text, font: renderFont)
+        let frame = Self.pillFrame(belowCaret: correctedRect, text: text, typed: typed, font: renderFont)
 
         // Same redundant-repaint guard as the inline ghost: the 80 ms poll
         // re-calls this ~12×/s with identical content, and the caret rect can
         // jitter a pixel on Electron hosts. Only repaint on a real change.
-        if panel.isVisible, !pillView.isHidden, text == lastText, frame == lastFrame {
+        // `typed` fait partie du guard : pendant la frappe le fragment change
+        // alors que le frame peut rester identique au pixel près.
+        if panel.isVisible, !pillView.isHidden, text == lastText, typed == lastPillTyped, frame == lastFrame {
             return
         }
 
@@ -179,21 +196,26 @@ public final class OverlayWindow {
         label.stringValue = ""
         correctionView.isHidden = true
         pillView.isHidden = false
-        pillView.configure(text: text, font: renderFont)
+        pillView.configure(typed: typed, suggestion: text, font: renderFont)
         panel.setFrame(frame, display: true)
         if !panel.isVisible {
             panel.orderFrontRegardless()
         }
         lastFrame = frame
         lastText = text
+        lastPillTyped = typed
+        onPaint?(text.count)
     }
 
     /// AppKit frame for the mid-line pill: a padded rounded box whose TOP sits a
     /// few points below the caret line (`caret.maxY` in Quartz = line bottom), left
     /// edge aligned so the pill text starts under the caret X. Clamped to the left
     /// screen edge so it never clips off-screen at the start of a line.
-    static func pillFrame(belowCaret caret: CGRect, text: String, font: NSFont) -> CGRect {
-        let textSize = (text as NSString).size(withAttributes: [.font: font])
+    /// `typed` (fragment du mot en cours) est mesuré DANS la largeur et DÉCALE la
+    /// pill vers la gauche : le fragment se lit sous ses propres glyphes et la
+    /// suggestion reste alignée sous le caret.
+    static func pillFrame(belowCaret caret: CGRect, text: String, typed: String = "", font: NSFont) -> CGRect {
+        let textSize = ((typed + text) as NSString).size(withAttributes: [.font: font])
         let width = ceil(textSize.width) + PillView.hPad * 2
         let height = ceil(textSize.height) + PillView.vPad * 2
 
@@ -204,7 +226,10 @@ public final class OverlayWindow {
         let quartzPillBottom = caret.maxY + PillView.gapBelow + height
         let appKitY = primaryHeight - quartzPillBottom
         // Align the pill's text (inset by hPad) under the caret X; clamp ≥ 0.
-        let appKitX = max(0, caret.origin.x - PillView.hPad)
+        let typedWidth = typed.isEmpty
+            ? 0
+            : ceil((typed as NSString).size(withAttributes: [.font: font]).width)
+        let appKitX = max(0, caret.origin.x - PillView.hPad - typedWidth)
 
         return CGRect(x: appKitX, y: appKitY, width: width, height: height)
     }
@@ -321,6 +346,7 @@ public final class OverlayWindow {
         correctionView.isHidden = true
         pillView.isHidden = true
         lastText = ""
+        lastPillTyped = ""
         lastFrame = .zero
         if panel.isVisible {
             panel.orderOut(nil)
@@ -491,14 +517,18 @@ final class PillView: NSView {
     /// Vertical gap between the caret line's bottom and the pill's top.
     static let gapBelow: CGFloat = 4
 
+    /// Fragment du mot EN COURS de frappe, rendu en couleur d'accent devant la
+    /// suggestion — on voit littéralement le mot se remplir pendant qu'on le tape.
+    private var typed: String = ""
     private var text: String = ""
     private var font: NSFont = .systemFont(ofSize: 15)
 
     override var isOpaque: Bool { false }
     override var isFlipped: Bool { false }
 
-    func configure(text: String, font: NSFont) {
-        self.text = text
+    func configure(typed: String, suggestion: String, font: NSFont) {
+        self.typed = typed
+        self.text = suggestion
         self.font = font
         needsDisplay = true
     }
@@ -518,14 +548,28 @@ final class PillView: NSView {
         NSColor.separatorColor.setStroke()
         path.stroke()
 
-        // Suggestion text, muted, vertically centred and inset by hPad.
-        let attrs: [NSAttributedString.Key: Any] = [
+        // Deux runs : le fragment déjà TAPÉ du mot en cours (accent — « c'est toi
+        // qui l'as écrit ») suivi de la suggestion en gris. Centrage vertical sur
+        // la hauteur du run combiné, inset hPad.
+        let suggestionAttrs: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: NSColor.secondaryLabelColor,
         ]
+        var x = Self.hPad
+        if !typed.isEmpty {
+            let typedAttrs: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: NSColor.controlAccentColor,
+            ]
+            let typedNS = typed as NSString
+            let typedSize = typedNS.size(withAttributes: typedAttrs)
+            typedNS.draw(at: CGPoint(x: x, y: (bounds.height - typedSize.height) / 2),
+                         withAttributes: typedAttrs)
+            x += typedSize.width
+        }
         let ns = text as NSString
-        let size = ns.size(withAttributes: attrs)
+        let size = ns.size(withAttributes: suggestionAttrs)
         let textY = (bounds.height - size.height) / 2
-        ns.draw(at: CGPoint(x: Self.hPad, y: textY), withAttributes: attrs)
+        ns.draw(at: CGPoint(x: x, y: textY), withAttributes: suggestionAttrs)
     }
 }
