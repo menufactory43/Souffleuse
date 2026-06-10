@@ -958,8 +958,20 @@ private struct ToneTab: View {
                 }
             ) {
                 Table(store.tones.rules, selection: $selection) {
-                    TableColumn("Bundle ID") { rule in
-                        Text(rule.bundleID).font(.system(.body, design: .monospaced))
+                    TableColumn("Application") { rule in
+                        // Nom + icône résolus depuis le bundle ID ; une app
+                        // introuvable (désinstallée) retombe sur l'ID brut.
+                        if let app = AppCatalog.entry(forBundleID: rule.bundleID) {
+                            HStack(spacing: 6) {
+                                Image(nsImage: app.icon)
+                                    .resizable()
+                                    .frame(width: 16, height: 16)
+                                Text(app.name)
+                            }
+                            .help(rule.bundleID)
+                        } else {
+                            Text(rule.bundleID).font(.system(.callout, design: .monospaced))
+                        }
                     }
                     TableColumn("Ton") { rule in
                         Text(rule.tone.displayName)
@@ -979,16 +991,64 @@ private struct ToneTab: View {
     }
 }
 
+/// Éditeur d'exception de ton. L'app se choisit par son NOM et son icône dans
+/// la liste des apps installées/ouvertes (recherche au clavier) — plus de
+/// champ « Bundle ID » en premier plan, que personne ne connaît. Le champ brut
+/// survit replié en « Avancé » pour les cas hors catalogue.
 private struct ToneRuleEditor: View {
     @State var rule: ToneRule
     let onSave: (ToneRule) -> Void
     let onCancel: () -> Void
 
+    @State private var apps: [AppEntry] = []
+    @State private var filter = ""
+    @State private var showAdvanced = false
+
+    private var filteredApps: [AppEntry] {
+        let needle = filter.trimmingCharacters(in: .whitespaces)
+        guard !needle.isEmpty else { return apps }
+        return apps.filter { $0.name.localizedCaseInsensitiveContains(needle) }
+    }
+
     var body: some View {
-        Form {
-            TextField("Bundle ID", text: $rule.bundleID, prompt: Text("com.tinyspeck.slackmacgap"))
+        VStack(alignment: .leading, spacing: 12) {
+            TextField("Rechercher une application…", text: $filter)
                 .textFieldStyle(.roundedBorder)
-                .font(.system(.body, design: .monospaced))
+
+            List(filteredApps, selection: Binding(
+                get: { rule.bundleID.isEmpty ? nil : rule.bundleID },
+                set: { rule.bundleID = $0 ?? "" }
+            )) { app in
+                HStack(spacing: 8) {
+                    Image(nsImage: app.icon)
+                        .resizable()
+                        .frame(width: 18, height: 18)
+                    Text(app.name)
+                    Spacer()
+                    if app.bundleID == rule.bundleID {
+                        Image(systemName: "checkmark")
+                            .foregroundStyle(.tint)
+                    }
+                }
+                .tag(app.bundleID)
+            }
+            .frame(height: 220)
+            .overlay {
+                if apps.isEmpty {
+                    ProgressView()
+                } else if filteredApps.isEmpty {
+                    Text("Aucune application ne correspond — voir « Avancé ».")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+            }
+
+            DisclosureGroup("Avancé — identifiant d'application", isExpanded: $showAdvanced) {
+                TextField("Bundle ID", text: $rule.bundleID, prompt: Text("com.tinyspeck.slackmacgap"))
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+            }
+            .font(.callout)
+
             Picker("Ton", selection: $rule.tone) {
                 ForEach(Tone.allCases, id: \.self) { t in
                     Text(t.displayName).tag(t)
@@ -1004,7 +1064,15 @@ private struct ToneRuleEditor: View {
             }
         }
         .padding(20)
-        .frame(width: 420)
+        .frame(width: 460)
+        .onAppear {
+            apps = AppCatalog.entries()
+            // Édition d'une règle hors catalogue (app désinstallée, ID manuel) :
+            // ouvre l'avancé pour que l'ID reste visible et modifiable.
+            if !rule.bundleID.isEmpty, !apps.contains(where: { $0.bundleID == rule.bundleID }) {
+                showAdvanced = true
+            }
+        }
     }
 }
 
