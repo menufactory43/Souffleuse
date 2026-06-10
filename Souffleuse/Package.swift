@@ -149,6 +149,10 @@ let package = Package(
             dependencies: ["SouffleuseLlama"]
         ),
         .executableTarget(
+            name: "SouffleuseSpellEngineEval",
+            dependencies: ["SouffleuseTyping"]
+        ),
+        .executableTarget(
             name: "SouffleuseTTFTBench",
             dependencies: ["SouffleuseLlama"]
         ),

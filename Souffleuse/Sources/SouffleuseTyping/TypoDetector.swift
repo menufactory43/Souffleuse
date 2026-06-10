@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import NaturalLanguage
 
 public struct TypoSuggestion: Sendable, Equatable {
     /// The misspelled word, copied verbatim from the user's text.
@@ -39,78 +40,223 @@ public final class TypoDetector: @unchecked Sendable {
     public func checkLastWord(in text: String, caretIndex: Int) -> TypoSuggestion? {
         guard let (range, word) = Self.lastWord(in: text, before: caretIndex) else { return nil }
         guard word.count >= Self.minWordLength else { return nil }
-        guard let best = bestGuess(forWord: word), best != word else { return nil }
+        let contextLanguage = Self.contextLanguage(String(text.prefix(caretIndex)))
+        guard let best = bestGuess(forWord: word, contextLanguage: contextLanguage),
+              best != word else { return nil }
         return TypoSuggestion(original: word, suggestion: best, range: range)
     }
+
+    /// Verdict d'UNE langue sur un mot — porte la distance du meilleur candidat
+    /// même en cas d'abstention, pour que `bestGuess` puisse refuser d'adopter
+    /// le candidat PLUS LOINTAIN d'une autre langue (« etait » → « eat »).
+    enum LanguageVerdict: Equatable {
+        /// La langue accepte le mot → pas une coquille pour elle.
+        case accepted
+        /// Rejeté, mais aucun guess exploitable (≤ maxLevenshtein).
+        case flaggedNoCandidate
+        /// Rejeté, top-2 équidistants non départagés → abstention à
+        /// `bestDistance`, en gardant les ex æquo : un candidat IDENTIQUE
+        /// venu d'une autre langue les départagera (accord inter-dicos).
+        case flaggedAmbiguous(bestDistance: Double, tied: [String])
+        case candidate(String, distance: Double)
+    }
+
+    /// La préséance de la langue du contexte vaut UNE UNITÉ d'édition pleine :
+    /// un candidat étranger ne détrône le candidat (ou le plancher
+    /// d'abstention) de la langue du contexte que s'il est meilleur d'au moins
+    /// un edit entier. Sans cette marge, le rabais transposition (0.85) suffit
+    /// à un mot anglais pour voler une correction française (« problme » →
+    /// « problem » 0.85 contre « problème » 1.0).
+    static let foreignWinMargin = 1.0
+
+    /// Distance attribuée à une restitution d'accents pure (« deja » → « déjà »).
+    /// Sous tout candidat réel (≥ transpositionCost) : la variante accentuée du
+    /// mot tapé gagne dans sa langue ET face aux candidats des autres langues.
+    static let accentRestorationDistance = 0.25
 
     /// Try FR then EN explicitly — `automaticallyIdentifiesLanguages` can't
     /// classify a single short word reliably and tends to default to the
     /// system primary language, missing typos in the other.
     ///
-    /// A word is treated as a typo only when EVERY checked language flags it.
-    /// If any language accepts it (e.g. `viens` is valid French), we bail out
-    /// — otherwise FR-valid words would get "corrected" into EN look-alikes
-    /// (`viens` → `views`) the moment one dictionary doesn't recognise them.
-    /// This mirrors `currentWordLooksSuspect`'s rule.
-    private func bestGuess(forWord word: String) -> String? {
+    /// Politique (revue 2026-06-11, mesurée par `SouffleuseSpellEngineEval`) :
+    /// - Un mot accepté par AU MOINS une langue n'est pas corrigé (`viens` valide
+    ///   FR ne doit pas devenir `views`) — SAUF l'exception diacritiques : en
+    ///   contexte FRANÇAIS, si le candidat FR ne diffère du mot tapé que par ses
+    ///   accents (« meme » → « même », « tres » → « très »), on corrige même si
+    ///   l'anglais accepte le mot. Un mot français désaccentué n'est jamais
+    ///   l'intention de l'utilisateur ; le gate contexte-français protège la
+    ///   frappe anglaise (« the » ne devient pas « thé »).
+    /// - La LANGUE DU CONTEXTE a préséance : son candidat gagne à distance
+    ///   égale (l'ambiguïté « poubelle » de l'autre langue ne met pas de veto :
+    ///   « mesage » → « message » même si l'anglais hésite) ; un candidat
+    ///   étranger ne la détrône que s'il est STRICTEMENT plus proche.
+    /// - Quand la langue du contexte rejette mais S'ABSTIENT (top-2
+    ///   équidistants), elle pose un PLANCHER : le candidat d'une autre langue
+    ///   ne gagne que s'il est STRICTEMENT plus proche. Avant, l'abstention du
+    ///   français laissait l'anglais/l'allemand « corriger » du français :
+    ///   « etait » → « eat », « apres » → « pares », « apelle » → « Kapelle ».
+    /// - Contexte indéterminé → conservateur : tout plancher s'applique à tous.
+    private func bestGuess(forWord word: String, contextLanguage: String? = nil) -> String? {
         let languages = ["fr", "en"]
-        var candidates: [String] = []
+        var candidates: [(cand: String, dist: Double, lang: String)] = []
+        var acceptedSomewhere = false
+        var floors: [String: (dist: Double, tied: [String])] = [:]
         for language in languages {
-            switch candidateGuesses(forWord: word, language: language) {
-            case .none:
-                // Word accepted by this language → not a typo.
-                return nil
-            case .some(.none):
-                // Flagged but no single best candidate from this language.
-                continue
-            case .some(.some(let candidate)):
-                candidates.append(candidate)
+            switch verdict(forWord: word, language: language) {
+            case .accepted:
+                acceptedSomewhere = true
+            case .flaggedNoCandidate:
+                break
+            case .flaggedAmbiguous(let d, let tied):
+                floors[language] = (d, tied)
+            case .candidate(let c, let d):
+                candidates.append((c, d, language))
             }
         }
-        // All languages flagged. Pick the closest candidate by the typo-aware
-        // distance (transposition-preferring). Tie between distinct candidates →
-        // ambiguous, skip.
-        let scored = candidates.map { ($0, Self.typoDistance($0, word)) }
-            .sorted { $0.1 < $1.1 }
-        guard let first = scored.first else { return nil }
-        if scored.count > 1, scored[1].1 == first.1, scored[1].0 != first.0 {
-            return nil
+        if acceptedSomewhere {
+            // Exception diacritiques (contexte français uniquement).
+            guard contextLanguage == "fr",
+                  let accentFix = candidates.first(where: {
+                      $0.lang == "fr" && Self.isDiacriticOnlyVariant($0.cand, of: word)
+                  })
+            else { return nil }
+            return accentFix.cand
         }
-        return first.0
+        // Toutes les langues rejettent.
+        if let pref = contextLanguage {
+            let own = candidates.filter { $0.lang == pref }.min { $0.dist < $1.dist }
+            let foreign = candidates.filter { $0.lang != pref }.min { $0.dist < $1.dist }
+            if let own {
+                // Préséance du contexte : l'étranger doit gagner d'une unité
+                // d'édition PLEINE — et jamais quand les deux candidats ne
+                // diffèrent que par les accents (« reunion » ne bat pas
+                // « réunion » en contexte français).
+                if let foreign,
+                   own.dist - foreign.dist >= Self.foreignWinMargin,
+                   !Self.isDiacriticOnlyVariant(own.cand, of: foreign.cand) {
+                    return foreign.cand
+                }
+                return own.cand
+            }
+            if let floor = floors[pref] {
+                // La langue du contexte s'est abstenue sur des ex æquo. Trois
+                // sorties, par ordre de confiance :
+                // 1. ACCORD candidat-contre-tie : l'autre langue a un candidat
+                //    CLAIR qui est l'un des ex æquo → les deux dicos votent lui.
+                if let foreign,
+                   let agreed = floor.tied.first(where: {
+                       $0.caseInsensitiveCompare(foreign.cand) == .orderedSame
+                   }) {
+                    return agreed
+                }
+                // 2. ACCORD d'ambiguïtés : les DEUX langues hésitent, mais leurs
+                //    listes d'ex æquo n'ont qu'UN candidat commun (« mesage » :
+                //    fr {message, pesage, Lesage} ∩ en {message, menage,
+                //    me-sage, me sage} = {message}). Capé à 4 ex æquo par
+                //    langue : 5 = la totalité des guesses considérés, un tie
+                //    aussi large n'a plus de signal (« wich » : with/wish/
+                //    which/rich/wick tous équidistants → abstention).
+                if floor.tied.count <= 4 {
+                    for (lang, other) in floors where lang != pref && other.tied.count <= 4 {
+                        let common = floor.tied.filter { t in
+                            other.tied.contains { $0.caseInsensitiveCompare(t) == .orderedSame }
+                        }
+                        if common.count == 1 { return common[0] }
+                    }
+                }
+                // 3. Sinon l'étranger doit battre le plancher d'une unité pleine.
+                guard let foreign, floor.dist - foreign.dist >= Self.foreignWinMargin else { return nil }
+                return foreign.cand
+            }
+            // La langue du contexte n'a rien proposé du tout : les candidats
+            // étrangers se départagent entre eux (comportement historique).
+            return Self.resolveTie(candidates)
+        }
+        // Contexte indéterminé : conservateur — le plancher le plus bas
+        // s'applique à toutes les langues.
+        let floor = floors.values.map(\.dist).min() ?? .infinity
+        return Self.resolveTie(candidates.filter { $0.dist < floor })
     }
 
-    /// Returns: nil if the language doesn't flag the word at all (so we
-    /// shouldn't penalize it via Levenshtein on noise), Optional(nil) if
-    /// flagged but no clear single suggestion, Optional(.some(s)) for a
-    /// clear correction.
-    private func candidateGuesses(forWord word: String, language: String) -> String?? {
+    /// Plus proche candidat ; égalité entre deux candidats DISTINCTS → nil
+    /// (ambigu, on s'abstient). Extrait pour les deux branches de `bestGuess`.
+    private static func resolveTie(_ candidates: [(cand: String, dist: Double, lang: String)]) -> String? {
+        let scored = candidates.sorted { $0.dist < $1.dist }
+        guard let first = scored.first else { return nil }
+        if scored.count > 1, scored[1].dist == first.dist, scored[1].cand != first.cand {
+            return nil
+        }
+        return first.cand
+    }
+
+    /// Verdict d'une langue : accepté / rejeté-sans-candidat / candidat clair /
+    /// ambigu (avec distance). Les égalités top-2 sont d'abord départagées par
+    /// la variante diacritique : si UN SEUL des ex æquo ne diffère du mot tapé
+    /// que par ses accents, c'est lui (« etait » : « était » bat « étai » —
+    /// l'utilisateur a tapé exactement ces lettres-là, accents en moins).
+    private func verdict(forWord word: String, language: String) -> LanguageVerdict {
         let nsword = word as NSString
         let range = checker.checkSpelling(
             of: word, startingAt: 0, language: language, wrap: false,
             inSpellDocumentWithTag: 0, wordCount: nil
         )
         guard range.location != NSNotFound, range.length == nsword.length else {
-            return nil  // not flagged → not a typo in this language
+            return .accepted  // not flagged → not a typo in this language
         }
         guard let guesses = checker.guesses(
             forWordRange: NSRange(location: 0, length: nsword.length),
             in: word, language: language, inSpellDocumentWithTag: 0
         ), !guesses.isEmpty else {
-            return .some(nil)
+            return .flaggedNoCandidate
         }
         let close = guesses.prefix(5).filter { Self.levenshtein($0, word) <= Self.maxLevenshtein }
+        // Restitution d'accents PRIORITAIRE : un candidat qui n'est que le mot
+        // tapé avec ses accents (« deja » → « déjà ») bat tout candidat plus
+        // « proche » en distance brute (« dej », d1) — chaque accent coûte
+        // artificiellement 1 edit alors que taper sans accents est la norme
+        // clavier. Plusieurs variantes (« apres » → après/âpres) : l'ordre des
+        // guesses du checker est son prior de vraisemblance, le premier gagne.
+        // Distance basse pour qu'un candidat d'une autre langue ne le détrône pas.
+        if let accentFix = close.first(where: { Self.isDiacriticOnlyVariant($0, of: word) }) {
+            return .candidate(accentFix, distance: Self.accentRestorationDistance)
+        }
         // Rank by the typo-aware distance (transposition-preferring) rather than
         // the spell-checker's own order, so "sius" → "suis" beats "sous".
         let ranked = close.sorted { Self.typoDistance($0, word) < Self.typoDistance($1, word) }
-        guard let best = ranked.first else { return .some(nil) }
-        // Ambiguous (top two candidates equidistant) → skip.
-        if ranked.count > 1,
-           Self.typoDistance(ranked[0], word) == Self.typoDistance(ranked[1], word),
-           ranked[0] != ranked[1]
-        {
-            return .some(nil)
+        guard let best = ranked.first else { return .flaggedNoCandidate }
+        let bestDistance = Self.typoDistance(best, word)
+        // `close` (ordre des guesses NSSpell) et non `ranked` : les ex æquo
+        // gardent l'ordre du checker pour l'accord inter-dictionnaires.
+        let tied = close.filter { Self.typoDistance($0, word) == bestDistance }
+        if Set(tied).count > 1 {
+            return .flaggedAmbiguous(bestDistance: bestDistance, tied: Array(Set(tied)))
         }
-        return .some(best)
+        return .candidate(best, distance: bestDistance)
+    }
+
+    /// `candidate` n'est-il que `typed` avec ses accents restitués ? Comparaison
+    /// insensible à la casse, pliage des diacritiques (é→e, ç→c, ô→o…).
+    static func isDiacriticOnlyVariant(_ candidate: String, of typed: String) -> Bool {
+        guard candidate.lowercased() != typed.lowercased() else { return false }
+        let locale = Locale(identifier: "fr_FR")
+        return candidate.lowercased().folding(options: .diacriticInsensitive, locale: locale)
+            == typed.lowercased().folding(options: .diacriticInsensitive, locale: locale)
+    }
+
+    /// Langue dominante du contexte de frappe — `"fr"`, `"en"`, ou nil quand le
+    /// texte est trop court / d'une autre langue pour être classé avec
+    /// confiance (→ politique conservatrice, comportement historique). Fenêtre
+    /// courte : 120 derniers chars, plancher 12 chars.
+    static func contextLanguage(_ text: String) -> String? {
+        let tail = String(text.suffix(120))
+        guard tail.count >= 12 else { return nil }
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(tail)
+        switch recognizer.dominantLanguage {
+        case .french: return "fr"
+        case .english: return "en"
+        default: return nil
+        }
     }
 
     public func ignore(word: String) {
