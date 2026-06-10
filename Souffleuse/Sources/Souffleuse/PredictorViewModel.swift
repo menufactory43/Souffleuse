@@ -740,6 +740,12 @@ final class PredictorViewModel {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let ctxPrefix = contextPrefix
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        // Mémorisés pour le refill vivant : son prompt doit partager sa TÊTE
+        // token-pour-token avec celui-ci, sinon chaque alternance predict↔refill
+        // wipe le prefix-cache KV du beam (mesuré par la trace de latence :
+        // seed froid 1,3 s vs chaud 0,4 s ; refill froid 362 ms vs chaud 113 ms).
+        lastPromptCustomInstr = customInstr
+        lastPromptCtxPrefix = ctxPrefix
         // ── Phase 2: fieldContext slot body (D-15c French annotation) ──
         let fieldContextSlot: String = {
             guard let snap = axSnapshot else { return "" }
@@ -1261,6 +1267,13 @@ final class PredictorViewModel {
     /// d'exploitable. Les gardes de génération (`planner.isCurrent`) empêchent
     /// un refill périmé d'aboutir si une vraie `predict()` a démarré entre-temps ;
     /// le call-site (AppDelegate) re-valide en plus l'état avant d'appender.
+    /// Slots de tête (persona + contexte, déjà trimmés) du DERNIER prompt predict —
+    /// repris par le refill vivant pour que les deux prompts partagent leur tête
+    /// token-pour-token et que le prefix-cache KV du beam survive à l'alternance
+    /// predict↔refill (sinon LCP = 0 dès le token 0 → re-prefill complète).
+    @ObservationIgnored private var lastPromptCustomInstr = ""
+    @ObservationIgnored private var lastPromptCtxPrefix = ""
+
     /// `axTextAfterCaret` (mid-line uniquement, nil sinon) : le texte qui suit le
     /// caret, transmis pour que la coupe anti-recopie s'applique aussi au refill —
     /// sans lui, la fenêtre rechargée re-proposait les mots déjà tapés à droite.
@@ -1311,10 +1324,20 @@ final class PredictorViewModel {
             }
         }
 
+        // Tête de prompt ALIGNÉE sur le dernier predict (beam-core uniquement —
+        // hors flag, le refill greedy historique garde ses slots vides, byte-
+        // identique) : même persona + même contexte → les deux chemins partagent
+        // la tête de leur prompt, le prefix-cache KV du beam tient à travers
+        // l'alternance et le refill ne pré-fill que sa queue. Bonus qualité : la
+        // recharge est conditionnée comme le ghost initial (elle « n'oublie »
+        // plus la persona en cours de phrase).
+        let refillCustomInstr = SuggestionPolicy.Tuning.beamCoreEnabled ? lastPromptCustomInstr : ""
+        let refillCtxPrefix = SuggestionPolicy.Tuning.beamCoreEnabled ? lastPromptCtxPrefix : ""
+
         let request = PredictRequest(
             prefix: fullVisible,
-            contextPrefix: "",
-            customInstructions: "",
+            contextPrefix: refillCtxPrefix,
+            customInstructions: refillCustomInstr,
             axSnapshotPlaceholder: nil,
             axSnapshotHelp: nil,
             axSnapshotRole: nil,
@@ -1330,8 +1353,8 @@ final class PredictorViewModel {
             isInstructModel: isInstructModel,
             systemMessage: systemMessage,
             baseSystem: baseSystemPrompt,
-            customInstr: "",
-            ctxPrefix: "",
+            customInstr: refillCustomInstr,
+            ctxPrefix: refillCtxPrefix,
             fieldContextSlot: "",
             afterCursorSlot: "",
             basePreamble: "",
