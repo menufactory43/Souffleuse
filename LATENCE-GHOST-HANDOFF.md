@@ -78,17 +78,20 @@ Refill vivant : p50 27 ms (chaud 27/103)
 4. Vérifier l'historique avant de proposer un levier (PARITY-FINDINGS §6,
    BEAM-LLM-CORE-HANDOFF, ce fichier).
 
-## 3. État runtime (à reposer après reboot !)
+## 3. État runtime
+
+**Beam-core + réserve sont le DÉFAUT CODE depuis 2026-06-10** (décision actée,
+pattern `midWordLongGhostEnabled`) : plus aucun `launchctl setenv` requis, le
+reboot ne fait plus retomber le ghost en cascade. Kill-switches runtime :
+`SOUFFLEUSE_BEAM_CORE_OFF` (retour cascade) et `SOUFFLEUSE_BEAM_RESERVE_OFF`
+(beam frais sans réserve). Les anciennes variables `SOUFFLEUSE_BEAM_CORE`/
+`SOUFFLEUSE_BEAM_RESERVE` sont désormais ignorées (inoffensives si encore
+posées en launchctl).
 
 ```bash
-launchctl setenv SOUFFLEUSE_BEAM_CORE 1
-launchctl setenv SOUFFLEUSE_BEAM_RESERVE 1
 launchctl setenv SOUFFLEUSE_LATENCY_TRACE 1   # seulement pour mesurer
 open Souffleuse/build/Build/Products/Release/Souffleuse.app
 ```
-`launchctl setenv` NE survit PAS au reboot → ghost silencieusement en cascade.
-Décision en attente : basculer beam-core/réserve en défaut code (kill-switch
-`SOUFFLEUSE_BEAM_CORE_OFF`, pattern `midWordGhostRollingEnabled`).
 
 ## 4. Le prochain gisement (ANALYSÉ, PAS CODÉ, PAS QUANTIFIÉ)
 
