@@ -5,6 +5,7 @@ import SouffleuseAX
 import SouffleuseContext
 import SouffleuseCore
 import SouffleuseInput
+import SouffleuseLlama
 import SouffleuseLog
 import SouffleuseOverlay
 import SouffleuseCorpus
@@ -2562,116 +2563,137 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
-    /// Vraie traduction visible : affiche un petit panneau, charge le moteur
-    /// instruct (paresseux, 1er appel ~1-2 s), stream FR→`target` dedans, puis
-    /// remplace le champ via `replaceForCommit` (chemin validé Electron/AZERTY).
-    /// La cible est résolue en amont (sélection fixe / AUTO détecté / EN) ; le
-    /// panneau drag/persistance reste Phase 3b.
-    private func runTranslationCommit(frenchText: String, fieldRect: CGRect?, target: TranslationTarget, bundleID: String?) {
-        let text = frenchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+    /// Mode d'application du résultat d'un commit instruct (chaîne commune
+    /// `runInstructCommit`).
+    private enum InstructApplyMode {
+        /// Remplace le champ dès la fin du stream — comportement HISTORIQUE de la
+        /// traduction ⌥⌘T et de la relecture (préservé à l'identique).
+        case immediate(deleteChars: Int)
+    }
+
+    /// Chaîne COMMUNE des commits instruct — extraite de `runTranslationCommit` /
+    /// `runReformulateCommit` (deux copies quasi identiques) : garde texte vide,
+    /// annulation du déchargement-idle, HUD streaming, `cleanCompletion`,
+    /// garde-fou C (`TermSurvivalGuard`), application selon `applyMode`,
+    /// auto-hide, re-programmation de l'idle-unload. Paramétrée par la fabrique
+    /// de stream (`stream`) et le mode d'application. Les events de log restent
+    /// des `StaticString` jusque dans la signature — l'invariant privacy par le
+    /// type system est conservé.
+    @discardableResult
+    private func runInstructCommit(
+        sourceText: String,
+        fieldRect: CGRect?,
+        bundleID: String?,
+        hud: TranslationHUDWindow,
+        header: String,
+        unavailableBody: String,
+        guardEvent: StaticString,
+        doneEvent: StaticString,
+        applyMode: InstructApplyMode,
+        record: @escaping @MainActor () -> Void,
+        stream: @escaping @MainActor (_ onToken: @escaping @Sendable (String) -> Bool) async -> LlamaMetrics?
+    ) -> Task<Void, Never>? {
+        let text = sourceText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
         // On va réutiliser le moteur instruct : annule un déchargement-idle en
         // attente pour ne pas le libérer en plein usage (Phase 7).
         translationIdleUnloadTask?.cancel()
         // `show` ci-dessous annule déjà l'auto-masquage d'un flash de cible en
-        // attente : le panneau appartient désormais à la traduction.
+        // attente : le panneau appartient désormais à ce commit.
         let anchor = fieldRect ?? .zero
-        translationHUD.show(at: anchor, header: "FR → \(target.code) · traduction…", body: "…",
-                            savedOffset: hudSavedOffset(forBundle: bundleID), bundleID: bundleID)
-        // Priorité basse : la traduction « a le droit de traîner », elle ne doit
-        // pas voler un thread/priorité au ghost FR (§2.9).
-        Task(priority: .utility) { @MainActor [weak self] in
+        hud.show(at: anchor, header: header, body: "…",
+                 savedOffset: hudSavedOffset(forBundle: bundleID), bundleID: bundleID)
+        // Priorité basse : la génération instruct « a le droit de traîner », elle
+        // ne doit pas voler un thread/priorité au ghost FR (§2.9).
+        return Task(priority: .utility) { @MainActor [weak self] in
             guard let self else { return }
             final class Acc: @unchecked Sendable { var s = "" }
             let acc = Acc()
-            let metrics = await self.translationRuntime.translate(text, into: target) { piece in
+            let metrics = await stream { piece in
                 acc.s += piece
                 let partial = GemmaChatPrompt.cleanCompletion(acc.s)
-                Task { @MainActor in self.translationHUD.update(partial) }
+                Task { @MainActor in hud.update(partial) }
                 return true
             }
             let output = GemmaChatPrompt.cleanCompletion(acc.s)
             guard metrics != nil, !output.isEmpty else {
-                self.translationHUD.update("⚠︎ modèle de traduction indisponible")
-                self.translationHUD.scheduleAutoHide(after: 3)
+                hud.update(unavailableBody)
+                hud.scheduleAutoHide(after: 3)
                 return
             }
-            self.translationHUD.update(output)
+            hud.update(output)
             // Garde-fou C : signale les tokens durs (chiffres, montants, termes,
-            // noms propres) disparus dans la traduction — zéro appel LLM.
+            // noms propres) disparus dans la sortie — zéro appel LLM.
             let missing = TermSurvivalGuard.missingTokens(source: text, translation: output)
             if let summary = TermSurvivalGuard.badgeSummary(for: missing) {
-                self.translationHUD.setBadge("⚠︎ à vérifier : \(summary)")
-                Log.info(.input, "translate_guard_flagged")
+                hud.setBadge("⚠︎ à vérifier : \(summary)")
+                Log.info(.input, guardEvent)
             }
-            // Remplace le champ entier par la traduction.
-            let axClient = self.axClient
-            let deleteCount = frenchText.count
-            DispatchQueue.global(qos: .userInitiated).async {
-                axClient.replaceForCommit(deleteChars: deleteCount, with: output)
-                let s = axClient.snapshot()
-                DispatchQueue.main.async { [weak self] in self?.dismissedForText = s.text ?? "" }
+            switch applyMode {
+            case .immediate(let deleteChars):
+                // Remplace le champ entier par la sortie (octets identiques au
+                // chemin historique : delete du texte NON trimé, inject du clean).
+                let axClient = self.axClient
+                DispatchQueue.global(qos: .userInitiated).async {
+                    axClient.replaceForCommit(deleteChars: deleteChars, with: output)
+                    let s = axClient.snapshot()
+                    DispatchQueue.main.async { [weak self] in self?.dismissedForText = s.text ?? "" }
+                }
+                Log.info(.input, doneEvent)
+                record()
+                // Le panneau reste affiché ~6 s (réglable), en fondu — assez pour
+                // lire et pour le saisir/déplacer. Le survol souris suspend le
+                // compte ; un déplacement l'épingle. Toute la logique vit dans le
+                // panneau.
+                hud.scheduleAutoHide(after: SuggestionPolicy.Tuning.translationHUDVisibleSeconds)
+                // Programme le déchargement mémoire du moteur instruct après une
+                // période d'inactivité (Phase 7) : en régime « pas d'usage » la
+                // RAM du 2e moteur retombe à zéro sur la machine 8 Go.
+                self.scheduleTranslationIdleUnload()
             }
-            Log.info(.input, "translate_commit_done")
-            self.ledger.recordTranslation()
-            // Le panneau reste affiché ~6 s (réglable), en fondu — assez pour lire
-            // et pour le saisir/déplacer. Le survol souris suspend le compte ; un
-            // déplacement l'épingle. Toute la logique vit dans le panneau.
-            self.translationHUD.scheduleAutoHide(after: SuggestionPolicy.Tuning.translationHUDVisibleSeconds)
-            // Programme le déchargement mémoire du moteur instruct après une
-            // période d'inactivité (Phase 7) : en régime « pas de traduction » la
-            // RAM du 2e moteur retombe à zéro sur la machine 8 Go.
-            self.scheduleTranslationIdleUnload()
         }
     }
 
-    /// Relecture FR→FR visible : même chemin que `runTranslationCommit`, mais le
+    /// Vraie traduction visible : affiche un petit panneau, charge le moteur
+    /// instruct (paresseux, 1er appel ~1-2 s), stream FR→`target` dedans, puis
+    /// remplace le champ via `replaceForCommit` (chemin validé Electron/AZERTY).
+    /// La cible est résolue en amont (sélection fixe / AUTO détecté / EN).
+    /// Fidélité : `deleteChars = frenchText.count` (texte NON trimé) alors que le
+    /// moteur reçoit le texte trimé — couple historique reproduit à l'identique.
+    private func runTranslationCommit(frenchText: String, fieldRect: CGRect?, target: TranslationTarget, bundleID: String?) {
+        runInstructCommit(
+            sourceText: frenchText, fieldRect: fieldRect, bundleID: bundleID,
+            hud: translationHUD,
+            header: "FR → \(target.code) · traduction…",
+            unavailableBody: "⚠︎ modèle de traduction indisponible",
+            guardEvent: "translate_guard_flagged", doneEvent: "translate_commit_done",
+            applyMode: .immediate(deleteChars: frenchText.count),
+            record: { [ledger] in ledger.recordTranslation() },
+            stream: { [translationRuntime] onToken in
+                await translationRuntime.translate(
+                    frenchText.trimmingCharacters(in: .whitespacesAndNewlines),
+                    into: target, onToken: onToken)
+            })
+    }
+
+    /// Relecture FR→FR visible : même chaîne que `runTranslationCommit`, mais le
     /// moteur instruct RÉÉCRIT le message français selon le `tone` de l'app au lieu
     /// de traduire. Panneau, garde-fou, remplacement de champ et déchargement-idle
     /// strictement identiques.
     private func runReformulateCommit(frenchText: String, fieldRect: CGRect?, tone: Tone, bundleID: String?) {
-        let text = frenchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        translationIdleUnloadTask?.cancel()
-        let anchor = fieldRect ?? .zero
-        translationHUD.show(at: anchor, header: "FR ↺ relecture · \(tone.displayName)…", body: "…",
-                            savedOffset: hudSavedOffset(forBundle: bundleID), bundleID: bundleID)
-        Task(priority: .utility) { @MainActor [weak self] in
-            guard let self else { return }
-            final class Acc: @unchecked Sendable { var s = "" }
-            let acc = Acc()
-            let metrics = await self.translationRuntime.reformulate(text, tone: tone) { piece in
-                acc.s += piece
-                let partial = GemmaChatPrompt.cleanCompletion(acc.s)
-                Task { @MainActor in self.translationHUD.update(partial) }
-                return true
-            }
-            let output = GemmaChatPrompt.cleanCompletion(acc.s)
-            guard metrics != nil, !output.isEmpty else {
-                self.translationHUD.update("⚠︎ modèle de relecture indisponible")
-                self.translationHUD.scheduleAutoHide(after: 3)
-                return
-            }
-            self.translationHUD.update(output)
-            // Garde-fou C : même réécriture FR→FR ne doit pas perdre un chiffre,
-            // un montant ou un nom propre — zéro appel LLM.
-            let missing = TermSurvivalGuard.missingTokens(source: text, translation: output)
-            if let summary = TermSurvivalGuard.badgeSummary(for: missing) {
-                self.translationHUD.setBadge("⚠︎ à vérifier : \(summary)")
-                Log.info(.input, "reformulate_guard_flagged")
-            }
-            let axClient = self.axClient
-            let deleteCount = frenchText.count
-            DispatchQueue.global(qos: .userInitiated).async {
-                axClient.replaceForCommit(deleteChars: deleteCount, with: output)
-                let s = axClient.snapshot()
-                DispatchQueue.main.async { [weak self] in self?.dismissedForText = s.text ?? "" }
-            }
-            Log.info(.input, "reformulate_commit_done")
-            self.ledger.recordReformulation()
-            self.translationHUD.scheduleAutoHide(after: SuggestionPolicy.Tuning.translationHUDVisibleSeconds)
-            self.scheduleTranslationIdleUnload()
-        }
+        runInstructCommit(
+            sourceText: frenchText, fieldRect: fieldRect, bundleID: bundleID,
+            hud: translationHUD,
+            header: "FR ↺ relecture · \(tone.displayName)…",
+            unavailableBody: "⚠︎ modèle de relecture indisponible",
+            guardEvent: "reformulate_guard_flagged", doneEvent: "reformulate_commit_done",
+            applyMode: .immediate(deleteChars: frenchText.count),
+            record: { [ledger] in ledger.recordReformulation() },
+            stream: { [translationRuntime] onToken in
+                await translationRuntime.reformulate(
+                    frenchText.trimmingCharacters(in: .whitespacesAndNewlines),
+                    tone: tone, onToken: onToken)
+            })
     }
 
     /// (Re)programme la libération du moteur instruct après
