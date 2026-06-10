@@ -191,4 +191,113 @@ struct BeamGhostShaperTests {
         // Le mot « confirmer » dupliqué ne doit pas réapparaître en tête.
         #expect(!out.hasPrefix("confirmer"))
     }
+
+    // MARK: - Mid-line : sameLineAfterCaret (gate de la coupe anti-recopie)
+
+    @Test func midline_sameLineGateRequiresNonBlankSameLine() {
+        // Rien après le caret / nil → pas mid-line.
+        #expect(BeamGhostShaper.sameLineAfterCaret(nil) == nil)
+        #expect(BeamGhostShaper.sameLineAfterCaret("") == nil)
+        // Caret en FIN de ligne, paragraphes suivants seulement → pas mid-line
+        // (c'est le cas end-of-line standard : la coupe doit rester un no-op).
+        #expect(BeamGhostShaper.sameLineAfterCaret("\nParagraphe suivant") == nil)
+        #expect(BeamGhostShaper.sameLineAfterCaret("   \nSuite") == nil)
+        // Texte non-blanc sur la même ligne → mid-line, cappé à la 1ʳᵉ ligne.
+        #expect(BeamGhostShaper.sameLineAfterCaret(" suis là\nAutre ligne") == " suis là")
+        #expect(BeamGhostShaper.sameLineAfterCaret("ou est-ce") == "ou est-ce")
+    }
+
+    // MARK: - Mid-line : afterCaretEchoCut (anti-recopie du texte après curseur)
+
+    @Test func midline_cut_noopWithoutAfterCaret() {
+        // Hors mid-line le ghost passe inchangé — chemin end-of-line byte-identique.
+        #expect(BeamGhostShaper.afterCaretEchoCut(ghost: " suis là", afterCaret: nil) == " suis là")
+        #expect(BeamGhostShaper.afterCaretEchoCut(ghost: " suis là", afterCaret: "\nAilleurs") == " suis là")
+    }
+
+    @Test func midline_cut_fullEchoYieldsEmpty() {
+        // « je |suis là » : le modèle re-prédit exactement ce qui suit → abstention.
+        let out = BeamGhostShaper.afterCaretEchoCut(ghost: " suis là", afterCaret: " suis là pour toi")
+        #expect(out == "")
+    }
+
+    @Test func midline_cut_tailEchoKeepsInsertableHead() {
+        // La queue du ghost dérive dans le texte existant : on coupe la queue,
+        // la tête (« vraiment ») reste insérable proprement avant « suis là ».
+        let out = BeamGhostShaper.afterCaretEchoCut(ghost: " vraiment suis là", afterCaret: " suis là pour toi")
+        #expect(out == " vraiment")
+    }
+
+    @Test func midline_cut_singleTailWordJoinsCleanly() {
+        // « Bonjour |que veux-tu » + ghost « je pense que » : couper le « que »
+        // final fait lire l'insertion proprement (« je pense que veux-tu »).
+        let out = BeamGhostShaper.afterCaretEchoCut(ghost: " je pense que", afterCaret: "que veux-tu")
+        #expect(out == " je pense")
+    }
+
+    @Test func midline_cut_midWordRemainderEcho() {
+        // Caret DANS un mot : « couc|ou » — le ghost qui complète par « ou »
+        // re-tape les lettres déjà là → vide (le candidat suivant prendra le relais).
+        let out = BeamGhostShaper.afterCaretEchoCut(ghost: "ou", afterCaret: "ou est-ce ?")
+        #expect(out == "")
+    }
+
+    @Test func midline_cut_headEchoTwoWordsAbstains() {
+        // Écho de TÊTE : le ghost re-tape ≥ 2 mots du texte qui suit PUIS continue
+        // (« le 12 et plus » avant « le 12 mars ») → tout s'insérerait avant sa
+        // propre copie ; abstention totale.
+        let out = BeamGhostShaper.afterCaretEchoCut(ghost: " le 12 et plus", afterCaret: " le 12 mars")
+        #expect(out == "")
+    }
+
+    @Test func midline_cut_singleCommonHeadWordIsLegit() {
+        // UN seul mot de tête commun reste légitime : « Je termine |le 12 mars » +
+        // ghost « le rapport » → « Je termine le rapport le 12 mars » lit bien.
+        let out = BeamGhostShaper.afterCaretEchoCut(ghost: " le rapport", afterCaret: "le 12 mars")
+        #expect(out == " le rapport")
+    }
+
+    @Test func midline_cut_caseAndPunctuationInsensitive() {
+        // La comparaison plie la casse et ignore la ponctuation d'extrémité.
+        let out = BeamGhostShaper.afterCaretEchoCut(ghost: " Suis là.", afterCaret: " suis là, promis")
+        #expect(out == "")
+    }
+
+    @Test func midline_cut_unrelatedGhostUntouched() {
+        let out = BeamGhostShaper.afterCaretEchoCut(ghost: " demain matin", afterCaret: " suis là pour toi")
+        #expect(out == " demain matin")
+    }
+
+    // MARK: - Mid-line : selectGhost (itération des K candidats)
+
+    @Test func midline_select_skipsEchoingBestTakesNextCandidate() {
+        // Le best recopie le texte après caret ; le rang 2 propose autre chose →
+        // c'est lui qui sort. (C'est exactement ce que la largeur K achète ici.)
+        let out = BeamGhostShaper.selectGhost(
+            rawCandidates: ["suis là", "vraiment heureux"],
+            isBoundary: true, caretAfterSpace: true,
+            userTail: "Bonjour je ", maxWords: 4,
+            afterCaret: "suis là pour toi")
+        #expect(out == "vraiment heureux")
+    }
+
+    @Test func midline_select_allEchoingAbstains() {
+        let out = BeamGhostShaper.selectGhost(
+            rawCandidates: ["suis là", "suis là pour"],
+            isBoundary: true, caretAfterSpace: true,
+            userTail: "Bonjour je ", maxWords: 4,
+            afterCaret: "suis là pour toi")
+        #expect(out == "")
+    }
+
+    @Test func midline_select_endOfLineByteIdenticalToBestOnly() {
+        // Hors mid-line (afterCaret nil) : seul le 1ᵉʳ candidat compte, même si
+        // un rang 2 existe — comportement historique préservé.
+        let out = BeamGhostShaper.selectGhost(
+            rawCandidates: ["", "rang deux"],
+            isBoundary: true, caretAfterSpace: true,
+            userTail: "Bonjour je ", maxWords: 4,
+            afterCaret: nil)
+        #expect(out == "")
+    }
 }
