@@ -226,6 +226,23 @@ public final class KeyInterceptor: @unchecked Sendable {
     static let relevantFlags: UInt64 = CGEventFlags.maskCommand.rawValue | CGEventFlags.maskShift.rawValue
         | CGEventFlags.maskAlternate.rawValue | CGEventFlags.maskControl.rawValue
 
+    /// Marqueur des événements clavier SYNTHÉTIQUES de l'app elle-même (posés
+    /// par `AXClient` : flèches de saut mid-line, backspaces, inserts unicode).
+    /// Ils DOIVENT traverser le tap sans être résolus : la flèche → synthétique
+    /// de `moveCaretRight` a le même keyCode 124 sans modificateur que le
+    /// binding accept-all par défaut — sans cette garde, notre propre tap
+    /// l'avalait (caret immobile) et re-déclenchait un accept en cascade
+    /// (champ détruit, reproduit dans TextEdit 2026-06-10).
+    /// JUMEAU : `AXClient.syntheticEventUserData` (SouffleuseAX) — aucune
+    /// dépendance commune entre les deux targets, constante dupliquée et
+    /// verrouillée par un test d'égalité (SouffleuseTests).
+    public static let syntheticEventUserData: Int64 = 0x534F_5546   // "SOUF"
+
+    /// Pure decision seam : l'événement porte-t-il notre marqueur synthétique ?
+    static func isOwnSyntheticEvent(userData: Int64) -> Bool {
+        userData == syntheticEventUserData
+    }
+
     /// Pure keyCode + modifier → `Key` resolution, extracted from `handle` so it
     /// is unit-testable without a live CGEventTap. `commit` est testé AVANT
     /// `acceptAll` (priorité à l'action de traduction) ; un binding configuré
@@ -259,6 +276,11 @@ public final class KeyInterceptor: @unchecked Sendable {
             return Unmanaged.passUnretained(event)
         }
         guard type == .keyDown else {
+            return Unmanaged.passUnretained(event)
+        }
+        // Nos propres événements synthétiques (AXClient) passent sans résolution
+        // — voir `syntheticEventUserData`. Les frappes matérielles portent 0.
+        if Self.isOwnSyntheticEvent(userData: event.getIntegerValueField(.eventSourceUserData)) {
             return Unmanaged.passUnretained(event)
         }
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
