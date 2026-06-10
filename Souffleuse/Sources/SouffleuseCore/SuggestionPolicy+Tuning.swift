@@ -16,6 +16,21 @@ extension SuggestionPolicy {
         public static let gateFloor: Float = 0.25
         public static let replacementBar: Float = 1.15
 
+        /// `MW_ECHO_RUN` — longueur min (en mots) d'un run VERBATIM recopié du tail
+        /// pour qu'un ghost soit jugé « écho/boucle » et gaté. **Défaut 4** (calibré
+        /// par `SouffleuseEchoEval`, 2026-06-08). Le garde sac-de-mots seul
+        /// (`echoScore ≥ continuationEchoThreshold`) tuait ~50% de BONS ghosts qui
+        /// réutilisent simplement du vocabulaire du contexte (« lancer le serveur »,
+        /// « m'organiser », « beurre » à s=1.00) ; ce 2ᵉ critère POSITIONNEL ne gate
+        /// que les vraies répétitions verbatim (≥4 mots contigus, ex. la boucle
+        /// « à savoir si la radioactivité » recrachée telle quelle), récupérant les
+        /// bons ghosts sans laisser passer une seule boucle (3/3 contrôles). Mettre
+        /// `MW_ECHO_RUN=0` ⇒ comportement d'origine (gate sur le seul sac-de-mots).
+        public static var echoMinVerbatimRunWords: Int {
+            if let s = ProcessInfo.processInfo.environment["MW_ECHO_RUN"], let v = Int(s) { return max(0, v) }
+            return 4
+        }
+
         // MARK: - D-08 Routing thresholds
         ///
         /// Tightening pass 2026-05-26 (post 04-07 empirical validation):
@@ -279,6 +294,35 @@ extension SuggestionPolicy {
             ProcessInfo.processInfo.environment["SOUFFLEUSE_LONGGHOST_OFF"] == nil
         }
 
+        /// Le **beam contraint** (`BeamGhostEngine`, K=2) est le SEUL chemin de
+        /// génération LLM du ghost. ON ⇒ `predict()` route le cœur LLM vers le
+        /// beam (mid-mot = `requiredPrefix`, après-espace = décode libre K=1 ≡
+        /// greedy) ; le greedy long-ghost + le gradient d'engagement + le plancher
+        /// dico ne sont PLUS appelés. La couche instant (recall/lexique/cache/
+        /// perso, `routeInstant`) reste DEVANT, inchangée.
+        /// **ON PAR DÉFAUT** (décision LATENCE-GHOST-HANDOFF §3 : les `launchctl
+        /// setenv` ne survivaient pas au reboot → ghost silencieusement en
+        /// cascade). Kill-switch `SOUFFLEUSE_BEAM_CORE_OFF` ⇒ retour cascade
+        /// sans rebuild, pattern `midWordLongGhostEnabled`. Preuves : intention
+        /// 64 % vs 29 %, accord 9/10 vs 4/10 (cf. BEAM-LLM-CORE-HANDOFF.md §1).
+        public static var beamCoreEnabled: Bool {
+            ProcessInfo.processInfo.environment["SOUFFLEUSE_BEAM_CORE_OFF"] == nil
+        }
+
+        /// Par-dessus `beamCoreEnabled` : la **réserve de branches** entre
+        /// frappes (`ghostWithReserve` + `advance(typedChar:)`). La frappe qui
+        /// suit la tête du ghost devient un HIT (avance de pointeur, 0 décode,
+        /// ~0 ms) ; une divergence re-beame (MISS, coût froid). Mesuré post-fix-
+        /// routage : 74-76 % de HIT, coût amorti ~58 ms/frappe vs ~125 régénérés
+        /// (SouffleuseBeamAmortizedEval + PARITY-FINDINGS).
+        /// **ON PAR DÉFAUT** (même décision que `beamCoreEnabled`). Kill-switch
+        /// `SOUFFLEUSE_BEAM_RESERVE_OFF` ⇒ génération fraîche glissante,
+        /// indépendamment du kill-switch beam-core.
+        public static var beamReserveEnabled: Bool {
+            beamCoreEnabled
+                && ProcessInfo.processInfo.environment["SOUFFLEUSE_BEAM_RESERVE_OFF"] == nil
+        }
+
         /// `SOUFFLEUSE_GHOST_STREAM` — peint le longghost AU FIL des tokens (TTFT ~20 ms)
         /// au lieu d'attendre la génération complète (~300 ms, que la frappe suivante
         /// annulerait). OFF par défaut ⇒ one-shot d'origine, byte-identique.
@@ -307,6 +351,61 @@ extension SuggestionPolicy {
         public static var midWordLongGhostMaxWords: Int {
             if let s = ProcessInfo.processInfo.environment["MW_LG_MAXWORDS"], let v = Int(s) { return max(1, v) }
             return 4
+        }
+
+        // MARK: - Gradient d'engagement mi-mot (flag OFF) — 3 niveaux pilotés par
+        // la cascade escalate EXISTANTE (P1 fast-accept + accord des k branches).
+        //
+        // Au lieu d'un long-ghost binaire montre/cache, on module la PROFONDEUR du
+        // souffle selon l'incertitude du modèle, RÉUTILISÉE telle quelle depuis
+        // `midWordFastDecision`/`midWordBranchDecision` (PAS d'entropie, PAS de
+        // nouveau signal moteur) :
+        //   PLEIN   : greedy ~maxWords + rolling refill autorisé (living ghost).
+        //   PRUDENT : 1 mot (le modal), FIGÉ, rolling INTERDIT.
+        //   ZÉRO    : abstient (rien montré).
+        // Le gradient ne s'active QUE sous le flag ci-dessous ET à l'intérieur de la
+        // branche long-ghost (`midWordLongGhostEnabled` ON). Flag ABSENT ⇒ chemin
+        // long-ghost byte-identique à aujourd'hui (zéro changement de chemin).
+
+        /// `MW_ENGAGEMENT` — active le gradient d'engagement mi-mot à 3 niveaux.
+        /// **OFF par défaut** (env absente) ⇒ le long-ghost reste binaire montre/
+        /// cache, byte-identique à aujourd'hui. Présent ⇒ le niveau d'engagement
+        /// (PLEIN/PRUDENT/ZÉRO) est décidé par la cascade escalate sur le chemin
+        /// long-ghost. Pattern identique aux autres flags d'A/B (`!= nil`).
+        public static var midWordEngagementEnabled: Bool {
+            ProcessInfo.processInfo.environment["MW_ENGAGEMENT"] != nil
+        }
+
+        /// `MW_ENG_PLEIN` — accord inter-branches minimal pour le niveau PLEIN
+        /// (greedy ~maxWords + rolling). Défaut 0.8 : forte convergence des branches
+        /// ⇒ on a confiance pour dérouler le souffle long ET le laisser rouler.
+        public static var midWordEngagementPleinThresh: Double {
+            if let s = ProcessInfo.processInfo.environment["MW_ENG_PLEIN"], let v = Double(s) { return v }
+            return 0.8
+        }
+
+        /// `MW_ENG_PRUDENT` — accord inter-branches minimal pour le niveau PRUDENT
+        /// (1 mot modal FIGÉ, rolling interdit). Défaut 0.5 : convergence moyenne ⇒
+        /// on montre juste le mot modal, sans s'engager sur une suite ni rouler.
+        /// Sous ce seuil ⇒ ZÉRO (abstention). Doit rester < `…PleinThresh`.
+        public static var midWordEngagementPrudentThresh: Double {
+            if let s = ProcessInfo.processInfo.environment["MW_ENG_PRUDENT"], let v = Double(s) { return v }
+            return 0.5
+        }
+
+        /// `MW_DICO_FLOOR_OFF` — **plancher dico mid-mot. ON par défaut.** Quand le
+        /// gradient d'engagement s'abstient (`.zero`) ALORS qu'un mot est EN COURS,
+        /// on ne montre pas du vide : on complète le mot courant via NSSpellChecker
+        /// (`WordCompleter.completion`, meilleur candidat qui PROLONGE le préfixe
+        /// tapé). Garantit l'invariant « un mot valide à chaque lettre tant que le
+        /// mot n'est pas fini » — la complétion se ré-évalue à chaque frappe, donc
+        /// une approximation à 3 lettres se précise à 4+. Déterministe (<1ms, dico
+        /// système), ghost FIGÉ (rolling interdit), et il ne fait que REMPLIR LE
+        /// VIDE : jamais il ne remplace un souffle LLM PLEIN/PRUDENT. À une frontière
+        /// (fin de phrase / pas de mot partiel) il ne se déclenche pas. Coupé par
+        /// `MW_DICO_FLOOR_OFF` (retour à l'abstention pure du gradient).
+        public static var midWordDicoFloorEnabled: Bool {
+            ProcessInfo.processInfo.environment["MW_DICO_FLOOR_OFF"] == nil
         }
 
         // MARK: - Ghost ROLLING REFILL (sliding window, flag OFF) — parité Cotypist

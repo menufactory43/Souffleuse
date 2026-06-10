@@ -13,6 +13,10 @@ let package = Package(
         .executable(name: "SouffleuseEnrichmentBench", targets: ["SouffleuseEnrichmentBench"]),
         .executable(name: "SouffleuseOCRAblation", targets: ["SouffleuseOCRAblation"]),
         .executable(name: "SouffleuseMidwordEval", targets: ["SouffleuseMidwordEval"]),
+        .executable(name: "SouffleuseIntentionEval", targets: ["SouffleuseIntentionEval"]),
+        .executable(name: "SouffleuseBeamGhostProbe", targets: ["SouffleuseBeamGhostProbe"]),
+        .executable(name: "SouffleuseParityEval", targets: ["SouffleuseParityEval"]),
+        .executable(name: "SouffleuseAfterSpaceEval", targets: ["SouffleuseAfterSpaceEval"]),
         .executable(name: "SouffleuseRecallEval", targets: ["SouffleuseRecallEval"]),
         .executable(name: "SouffleuseInjectionEval", targets: ["SouffleuseInjectionEval"]),
         .executable(name: "SouffleuseAXProbe", targets: ["SouffleuseAXProbe"]),
@@ -308,6 +312,92 @@ let package = Package(
                 "SouffleuseCore",
                 "SouffleuseLlama",
                 "SouffleuseLog",
+            ]
+        ),
+        .executableTarget(
+            name: "SouffleuseAmorceEval",
+            dependencies: [
+                "SouffleuseCore",
+                "SouffleuseLlama",
+                "SouffleuseLog",
+            ]
+        ),
+        .executableTarget(
+            name: "SouffleuseEchoEval",
+            dependencies: [
+                "SouffleuseCore",
+                "SouffleuseLlama",
+                "SouffleuseLog",
+            ]
+        ),
+        .executableTarget(
+            name: "SouffleuseBeamEval",
+            dependencies: [
+                "SouffleuseCore",
+                "SouffleuseLlama",
+                "SouffleuseLog",
+            ]
+        ),
+        .executableTarget(
+            name: "SouffleuseBeamAmortizedEval",
+            dependencies: [
+                "SouffleuseCore",
+                "SouffleuseLlama",
+                "SouffleuseLog",
+            ]
+        ),
+        .executableTarget(
+            name: "SouffleuseCascadeVsBeamEval",
+            dependencies: [
+                "SouffleuseCore",
+                "SouffleuseLlama",
+                "SouffleuseLog",
+                "SouffleuseTyping",
+            ]
+        ),
+        .executableTarget(
+            name: "SouffleuseIntentionEval",
+            dependencies: [
+                "SouffleuseCore",
+                "SouffleuseLlama",
+                "SouffleuseLog",
+                "SouffleuseTyping",
+            ]
+        ),
+        .executableTarget(
+            name: "SouffleuseBeamGhostProbe",
+            dependencies: [
+                "SouffleuseCore",
+                "SouffleuseLlama",
+                "SouffleuseLog",
+                "SouffleuseTyping",
+            ]
+        ),
+        .executableTarget(
+            name: "SouffleuseParityEval",
+            dependencies: [
+                "SouffleuseCore",
+                "SouffleuseLlama",
+                "SouffleuseLog",
+                "SouffleuseTyping",
+            ]
+        ),
+        .executableTarget(
+            name: "SouffleuseAfterSpaceEval",
+            dependencies: [
+                "SouffleuseCore",
+                "SouffleuseLlama",
+                "SouffleuseLog",
+                "SouffleuseTyping",
+            ]
+        ),
+        .executableTarget(
+            name: "SouffleuseAmortizedTypingEval",
+            dependencies: [
+                "SouffleuseCore",
+                "SouffleuseLlama",
+                "SouffleuseLog",
+                "SouffleuseTyping",
             ]
         ),
         .executableTarget(
