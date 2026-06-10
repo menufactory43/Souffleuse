@@ -917,6 +917,12 @@ final class ModelRuntime {
             beamSessionTail = userTail
             if let a = advanced {
                 Log.info(.predictor, "ghost_beam_advance_ms", count: a.elapsedMillis)
+                // Trace de latence : chemin servi (1 hit / 2 refill / 3 miss).
+                switch a.kind {
+                case .hit: LatencyTrace.mark("gen_path", key: LatencyTrace.key(request.prefix), info: 1)
+                case .refill: LatencyTrace.mark("gen_path", key: LatencyTrace.key(request.prefix), info: 2)
+                case .miss: LatencyTrace.mark("gen_path", key: LatencyTrace.key(request.prefix), info: 3)
+                }
                 let caretAfterSpace = request.llmTail.last == " " || request.llmTail.last == "\t"
                 // Coupe anti-recopie mid-line : la réserve ne livre qu'UNE branche
                 // (pas d'alternatives à itérer) — si elle recopie le texte après
@@ -955,6 +961,13 @@ final class ModelRuntime {
         GpuGate.shared.ghostEnded()
         if Task.isCancelled { return nil }
         Log.info(.predictor, "ghost_beam_seed_ms", count: result.elapsedMillis)
+        // Trace de latence : seed (4 avec capture de réserve / 5 sans), taille du
+        // prompt en tokens et part RÉUTILISÉE du prefix-cache — c'est la mesure
+        // qui départage « la queue lourde = re-prefill post-wipe » (LCP ≈ 0 sur
+        // gros prompt) d'une autre cause.
+        LatencyTrace.mark("gen_path", key: LatencyTrace.key(request.prefix), info: reserveOn ? 4 : 5)
+        LatencyTrace.mark("seed_prompt", key: LatencyTrace.key(request.prefix), info: result.promptTokenCount)
+        LatencyTrace.mark("seed_lcp", key: LatencyTrace.key(request.prefix), info: result.reusedPrefixTokens)
 
         let caretAfterSpace = request.llmTail.last == " " || request.llmTail.last == "\t"
         // Mid-line (texte non-blanc sur la ligne après le caret) : `selectGhost`
@@ -1159,6 +1172,10 @@ final class ModelRuntime {
         let result = await beamEngine.ghost(prompt: prompt, requiredPrefix: "", maxWidth: 1)
         GpuGate.shared.ghostEnded()
         if Task.isCancelled { return nil }
+        // Trace de latence : prompt/LCP du refill — symétrique des marques seed,
+        // pour mesurer la guerre de prefix-cache entre les deux chemins.
+        LatencyTrace.mark("refill_prompt", key: LatencyTrace.key(request.prefix), info: result.promptTokenCount)
+        LatencyTrace.mark("refill_lcp", key: LatencyTrace.key(request.prefix), info: result.reusedPrefixTokens)
         var ext = BeamGhostShaper.beamPostFilter(
             rawGhost: result.best?.ghost ?? "", isBoundary: true, caretAfterSpace: false,
             userTail: request.userTail, maxWords: maxWords)

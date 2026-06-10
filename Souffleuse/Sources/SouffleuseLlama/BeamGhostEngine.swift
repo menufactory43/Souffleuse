@@ -173,10 +173,19 @@ public struct BeamResult: Sendable {
     public let candidates: [BeamCandidate]
     /// Latence totale de l'appel en millisecondes (observabilité d'éval).
     public let elapsedMillis: Int
-    public init(best: BeamCandidate?, candidates: [BeamCandidate], elapsedMillis: Int) {
+    /// Observabilité du prefix-cache KV : taille du prompt en TOKENS et part
+    /// RÉUTILISÉE depuis le cache (LCP avec l'appel précédent). Un appel « tout
+    /// froid » a `reusedPrefixTokens ≈ 0` — c'est lui qui paie la re-prefill
+    /// complète. 0/0 sur les early-returns (prompt vide, échec).
+    public let promptTokenCount: Int
+    public let reusedPrefixTokens: Int
+    public init(best: BeamCandidate?, candidates: [BeamCandidate], elapsedMillis: Int,
+                promptTokenCount: Int = 0, reusedPrefixTokens: Int = 0) {
         self.best = best
         self.candidates = candidates
         self.elapsedMillis = elapsedMillis
+        self.promptTokenCount = promptTokenCount
+        self.reusedPrefixTokens = reusedPrefixTokens
     }
 }
 
@@ -680,7 +689,8 @@ public actor BeamGhostEngine {
             .sorted { $0.score > $1.score }
 
         let elapsed = Int(Date().timeIntervalSince(start) * 1000)
-        return BeamResult(best: scored.first, candidates: scored, elapsedMillis: elapsed)
+        return BeamResult(best: scored.first, candidates: scored, elapsedMillis: elapsed,
+                          promptTokenCount: promptTokens.count, reusedPrefixTokens: lcp)
     }
 
     // MARK: - Étapes internes
