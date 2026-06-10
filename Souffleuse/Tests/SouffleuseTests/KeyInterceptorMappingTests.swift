@@ -131,6 +131,31 @@ struct KeyInterceptorMappingTests {
         #expect(key == nil)
     }
 
+    // MARK: - Rangée 1–9 du picker emoji
+
+    @Test("rangée physique 1–9 nue → .digit quand le picker est armé")
+    func digitRowResolvesWhenPickerArmed() {
+        // KeyCodes ANSI positionnels — y compris le désordre matériel 5↔6.
+        let expected: [Int64: Int] = [18: 1, 19: 2, 20: 3, 21: 4, 23: 5, 22: 6, 26: 7, 28: 8, 25: 9]
+        for (code, n) in expected {
+            #expect(K.resolveKey(keyCode: code, mods: 0, commit: nil, acceptAll: nil,
+                                 pickerArmed: true) == .digit(n))
+        }
+    }
+
+    @Test("picker non armé : la rangée 1–9 n'est PAS résolue (frappe normale)")
+    func digitRowPassesWhenPickerNotArmed() {
+        #expect(K.resolveKey(keyCode: 18, mods: 0, commit: nil, acceptAll: nil) == nil)
+        #expect(K.resolveKey(keyCode: 18, mods: 0, commit: nil, acceptAll: nil,
+                             pickerArmed: false) == nil)
+    }
+
+    @Test("⇧ + rangée 1–9 passe même picker armé — le vrai chiffre AZERTY reste à l'hôte")
+    func shiftedDigitRowPasses() {
+        #expect(K.resolveKey(keyCode: 18, mods: mask(.maskShift), commit: nil, acceptAll: nil,
+                             pickerArmed: true) == nil)
+    }
+
     @Test("presets TargetCycleKey exposent keyCode + flags")
     func cycleKeyPresets() {
         #expect(TargetCycleKey.cmdShiftRight.keyCode == 124)
@@ -203,5 +228,20 @@ struct KeyInterceptorConsumePolicyTests {
         #expect(!K.shouldConsume(key: .tab, ghostArmed: false))
         #expect(!K.shouldConsume(key: .esc, ghostArmed: false))
         #expect(!K.shouldConsume(key: .acceptAll, ghostArmed: false))
+    }
+
+    @Test("armé-picker seul : digits + Esc consommés, le reste passe à l'hôte")
+    func pickerOnlyConsumesDigitsAndEsc() {
+        #expect(K.shouldConsume(key: .digit(1), ghostArmed: false, pickerArmed: true))
+        #expect(K.shouldConsume(key: .digit(9), ghostArmed: false, pickerArmed: true))
+        #expect(K.shouldConsume(key: .esc, ghostArmed: false, pickerArmed: true))
+        #expect(!K.shouldConsume(key: .tab, ghostArmed: false, pickerArmed: true))
+        #expect(!K.shouldConsume(key: .acceptAll, ghostArmed: false, pickerArmed: true))
+    }
+
+    @Test("picker non armé : un .digit résolu ailleurs n'est jamais consommé")
+    func digitNeverConsumedWithoutPicker() {
+        #expect(!K.shouldConsume(key: .digit(1), ghostArmed: true, pickerArmed: false))
+        #expect(!K.shouldConsume(key: .digit(1), ghostArmed: false, pickerArmed: false))
     }
 }

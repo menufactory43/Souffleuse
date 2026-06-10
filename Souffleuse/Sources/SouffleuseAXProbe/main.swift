@@ -147,9 +147,9 @@ if overlayMode {
             // Runs on the CGEventTap thread.
             guard suggestionActive else { return false }
             switch key {
-            case .cycleTarget:
-                // Le probe ne traduit pas : la touche de cycle de cible n'a pas de
-                // sens ici, on la laisse passer sans la consommer.
+            case .cycleTarget, .digit:
+                // Le probe ne traduit pas et n'a pas de picker emoji : ces touches
+                // n'ont pas de sens ici, on les laisse passer sans les consommer.
                 return false
             case .tab, .acceptAll, .commit:
                 // Inject on a background thread so we don't block the tap. Returning
