@@ -20,22 +20,17 @@
     <language>fr</language>
 
     <item>
-      <title>Version 0.6.1</title>
-      <pubDate>Wed, 10 Jun 2026 12:42:00 +0000</pubDate>
-      <sparkle:version>0.6.1</sparkle:version>
-      <sparkle:shortVersionString>0.6.1</sparkle:shortVersionString>
+      <title>Version 0.6.2</title>
+      <pubDate>Wed, 10 Jun 2026 15:18:00 +0000</pubDate>
+      <sparkle:version>0.6.2</sparkle:version>
+      <sparkle:shortVersionString>0.6.2</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
       <description><![CDATA[
-        <h2>Souffleuse 0.6.1</h2>
+        <h2>Souffleuse 0.6.2</h2>
         <ul>
-          <li><b>Correctif critique.</b> Accepter une suggestion au milieu d'une ligne pouvait détruire le texte après le curseur et bloquer la frappe tant qu'une suggestion s'affichait. Mettez à jour dès que possible si vous êtes en 0.6.0.</li>
-        </ul>
-        <h2>Rappel — Souffleuse 0.6.0</h2>
-        <ul>
-          <li><b>Nouveau moteur de souffle.</b> Les suggestions sont générées par un moteur repensé (recherche en faisceau + réserve de continuations) : plus pertinentes, et quasi instantanées — la latence frappe→affichage est divisée par 4.</li>
-          <li><b>Bulle vivante au milieu d'une ligne.</b> La bulle se recharge pendant que vous tapez dedans, accepte mot à mot, et ne recopie plus le texte déjà présent après le curseur.</li>
-          <li><b>Accept plus malin.</b> Tab fusionne la suggestion avec le texte existant : seuls les caractères manquants sont insérés.</li>
-          <li>Le modèle se recharge automatiquement après un échec ponctuel de chargement.</li>
+          <li><b>Traduire à tout moment.</b> Plus besoin qu'une suggestion soit affichée : ⌥⌘T traduit le champ en cours d'écriture, d'une frappe (raccourci configurable dans Réglages → Traduction). Et tant que le panneau de traduction est visible, ⌘↩ re-traduit et ⌘⇧→ change la langue cible.</li>
+          <li><b>Ton par application, sans jargon.</b> Les exceptions de ton se choisissent désormais dans une liste d'applications par nom et icône, avec recherche — fini l'identifiant technique à recopier.</li>
+          <li><b>Nouvelle identité visuelle.</b> Nouvelle icône d'application, badge de présence redessiné (et un peu plus lisible), icône du volume d'installation.</li>
         </ul>
         <p>macOS 14+ · Apple Silicon · 100 % on-device.</p>
       ]]></description>
@@ -43,8 +38,8 @@
       <!-- Régénérer à chaque release : deploy/make-appcast-entry.sh website/Souffleuse.dmg -->
       <enclosure
         url="https://souffleuse.app/Souffleuse.dmg"
-        sparkle:edSignature="/RmxfDrnaaXanxdCViYE1AWwtqTZ1y2qNSQ980Ffn9rwQrWRWtFt/scy/HaO/vS+kD9pxYSm3pyK20drzrSfDw=="
-        length="20827736"
+        sparkle:edSignature="z+H5neLyzEo4H3m+4YIG1cKX3Jtm4ENR8Tzw2jWz0f0/Byoz4EH1hmzHPNqPo6YzJ5C8iMxqZigmOL2WngBmAg=="
+        length="18742306"
         type="application/octet-stream" />
     </item>
 
