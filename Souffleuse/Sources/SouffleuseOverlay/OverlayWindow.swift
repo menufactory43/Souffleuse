@@ -92,6 +92,12 @@ public final class OverlayWindow {
     /// de `showPill` (le fragment change à chaque frappe, pas toujours le frame).
     private var lastPillTyped: String = ""
 
+    /// Hook DEV (trace de latence bout-en-bout) : appelé à chaque REPAINT
+    /// effectif (un appel qui a passé le guard anti-repaint), avec la longueur
+    /// du texte peint. Nil en prod — l'overlay reste sans dépendance ; c'est
+    /// l'app qui le branche quand `SOUFFLEUSE_LATENCY_TRACE` est posé.
+    public var onPaint: ((Int) -> Void)?
+
     public func show(text: String, at caretRectQuartz: CGRect, hostText: String?, caretIndex: Int?, hostFont: NSFont?) {
         // Safety net: a ghost must never contain a hard line break. A newline
         // (e.g. a prose corpus entry stored as "…Bitcoin.\n") renders the
@@ -149,6 +155,7 @@ public final class OverlayWindow {
         }
         lastFrame = frame
         lastText = text
+        onPaint?(text.count)
     }
 
     /// Paint the **mid-line** ghost as a rounded pill floated just below the caret
@@ -197,6 +204,7 @@ public final class OverlayWindow {
         lastFrame = frame
         lastText = text
         lastPillTyped = typed
+        onPaint?(text.count)
     }
 
     /// AppKit frame for the mid-line pill: a padded rounded box whose TOP sits a
