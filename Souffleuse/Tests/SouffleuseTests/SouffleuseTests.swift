@@ -558,6 +558,30 @@ import Testing
 
 // MARK: - PredictorViewModel prefix→suggestion cache
 
+// MARK: - PredictorViewModel : retry de chargement après échec (anti-verrou .failed)
+
+@MainActor
+@Test func loadModelRetriesFromFailedStateAfterBackoff() {
+    // Panne constatée : un échec ponctuel de chargement posait `.failed` que le
+    // guard `.idle` de loadModel() ne refranchissait jamais → ghost mort jusqu'au
+    // relaunch, AppDelegate en boucle `ghost_warm_reload`. La décision d'entrée
+    // doit retenter depuis `.failed`, espacée par le backoff.
+    let now = Date()
+    // Champ neuf → charge ; résident / en cours → jamais.
+    #expect(PredictorViewModel.shouldAttemptLoad(state: .idle, lastFailureAt: nil, now: now))
+    #expect(!PredictorViewModel.shouldAttemptLoad(state: .ready, lastFailureAt: nil, now: now))
+    #expect(!PredictorViewModel.shouldAttemptLoad(state: .loading(progress: 0.5), lastFailureAt: nil, now: now))
+    // Échec RÉCENT → silence (un GGUF absent ne coûte pas un load par frappe).
+    #expect(!PredictorViewModel.shouldAttemptLoad(
+        state: .failed("load_failed: gguf"),
+        lastFailureAt: now.addingTimeInterval(-2), now: now))
+    // Échec plus vieux que le backoff, ou horodatage perdu → retry.
+    #expect(PredictorViewModel.shouldAttemptLoad(
+        state: .failed("load_failed: gguf"),
+        lastFailureAt: now.addingTimeInterval(-PredictorViewModel.loadRetryBackoffSeconds - 1), now: now))
+    #expect(PredictorViewModel.shouldAttemptLoad(state: .failed("load_failed: gguf"), lastFailureAt: nil, now: now))
+}
+
 @MainActor
 @Test func predictCacheStoresAndRetrievesEntry() {
     let p = PredictorViewModel()
