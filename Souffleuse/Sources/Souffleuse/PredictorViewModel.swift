@@ -416,6 +416,9 @@ final class PredictorViewModel {
         ].joined(separator: "|")
         cache.updateContextFingerprint(contextFingerprint)
         PredictDebug.log("predict_called", "userTail=\(userTail.debugDescription)")
+        // Trace de latence : entrée du predict (l'écart avec tick_prefix = le
+        // debounce AppDelegate + la capture du contexte).
+        LatencyTrace.mark("predict_begin", key: LatencyTrace.key(forPrefix), info: prefix.count)
 
         // Cluster de registre de l'app focus (P1.2). Résolu UNE fois ici et
         // partagé par le recall L1 (routeInstant) et le few-shot L2
@@ -492,6 +495,7 @@ final class PredictorViewModel {
                 GhostInspector.shared.record(
                     tail: userTail, verdict: .shown, source: route.source,
                     reason: "instant", content: instantGhost, score: route.score)
+                LatencyTrace.mark("suggestion_set", key: LatencyTrace.key(forPrefix), info: 1)
             } else {
                 Log.info(.predictor, "ghost_keep_stable", count: suggestion.count)
                 PredictDebug.log("ghost_keep_stable", "current=\(suggestion.debugDescription) candidate=\(instantGhost.debugDescription)")
@@ -590,6 +594,7 @@ final class PredictorViewModel {
                     predictedForPrefix = forPrefix
                     suggestionSource = .cache
                     planner.cancel()
+                    LatencyTrace.mark("suggestion_set", key: LatencyTrace.key(forPrefix), info: 2)
                     Log.info(.predictor, "cache_hit", count: Int(score.value * 100))
                     PredictDebug.log("cache_hit", "cached=\(cached.debugDescription) score=\(score.value)")
                     return
@@ -628,6 +633,7 @@ final class PredictorViewModel {
                     suggestion = ModelRuntime.OutputFilter.singleLine(capped)
                     predictedForPrefix = forPrefix
                     suggestionSource = .undoCache
+                    LatencyTrace.mark("suggestion_set", key: LatencyTrace.key(forPrefix), info: 3)
                     Log.info(.predictor, "cache_undo_hit", count: Int(score.value * 100))
                     PredictDebug.log("cache_undo_hit", "key=\(key.debugDescription) delta=\(delta.debugDescription) cached=\(cached.debugDescription) shown=\(suggestion.debugDescription) score=\(score.value)")
                     return
@@ -902,7 +908,10 @@ final class PredictorViewModel {
             // faux → ce bloc est mort, chemin actuel byte-identique.
             if useBeamCore {
                 guard instantGhost.isEmpty else { return }   // recall en avant : pas de LLM
+                LatencyTrace.mark("gen_begin", key: LatencyTrace.key(forPrefix))
                 let beam = await runtime.generateGhostBeam(request: request)
+                LatencyTrace.mark("gen_end", key: LatencyTrace.key(forPrefix),
+                                  info: (beam?.show == true) ? beam!.word.count : 0)
                 if Task.isCancelled { return }
                 await MainActor.run { [weak self] in
                     guard let self, self.planner.isCurrent(myGeneration) else { return }
@@ -921,6 +930,7 @@ final class PredictorViewModel {
                         // Alimente le CompletionCache (couche instant + undo-as-ghost),
                         // comme le fait le long-ghost.
                         self.cache.store(prefix: userTail, suggestion: word)
+                        LatencyTrace.mark("suggestion_set", key: LatencyTrace.key(forPrefix), info: 4)
                         Log.info(.predictor, "ghost_beam_core_shown", count: word.count)
                         GhostInspector.shared.record(tail: userTail, verdict: .shown, source: .llm,
                                                      reason: beam.reason, content: word, score: score)
@@ -1332,9 +1342,11 @@ final class PredictorViewModel {
         // Sous le beam-core, le refill passe par le BEAM (continuation fraîche
         // conditionnée sur tout le texte visible), pas le greedy — cohérent avec le
         // ghost beam et c'est lui qui garde le living ghost vivant pendant la conso.
+        LatencyTrace.mark("refill_begin", key: LatencyTrace.key(fullVisible))
         let extension_ = SuggestionPolicy.Tuning.beamCoreEnabled
             ? await runtime.extendGhostBeam(request: request, maxWords: maxWords)
             : await runtime.extendGhost(request: request, maxWords: maxWords)
+        LatencyTrace.mark("refill_end", key: LatencyTrace.key(fullVisible), info: extension_?.count ?? 0)
         // NOTE : on ne re-checke PLUS `planner.isCurrent(myGeneration)` ici. Ce garde
         // jetait des refills VALIDES : dès que tu finis de consommer un mot, `predict()`
         // bumpe le compteur de génération → l'extension (pourtant pour le bon bord droit)
