@@ -104,6 +104,19 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     private static let presenceGraceTicks = 6
     private var interceptor: KeyInterceptor!
     private let predictor = PredictorViewModel()
+    /// Picker emoji au caret — la rangée « : » numérotée ①–⑨ (parité Cotypist).
+    private let emojiPicker = EmojiPickerWindow()
+    /// Candidats actuellement affichés, lus par `handleKey(.digit)` sur le
+    /// thread du tap (via `MainActor.assumeIsolated`). Nil = panneau fermé.
+    private var emojiPickerState: EmojiPickerState?
+    /// Préfixe jusqu'au `:` d'ouverture INCLUS du panneau actuellement affiché —
+    /// capturé au show pour qu'un Esc puisse le mémoriser comme refusé.
+    private var emojiPickerAnchor: String?
+    /// Ancre refusée par Esc — tant que le même fragment reste ouvert, on ne
+    /// rouvre pas le panneau que l'utilisateur vient de refuser. Continuer à
+    /// taper dans le fragment ne rouvre pas non plus ; quitter le fragment
+    /// (espace, suppression du `:`) ré-arme.
+    private var emojiPickerDismissedAnchor: String?
     /// Mini Phase 4 — moteur instruct paresseux + petit panneau de traduction.
     private let translationRuntime = TranslationRuntime()
     private let translationHUD = TranslationHUDWindow()
@@ -1128,6 +1141,16 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Ferme le picker emoji et désarme la rangée 1–9. Idempotent — appelé sur
+    /// tous les chemins où le contexte de frappe disparaît.
+    private func hideEmojiPicker() {
+        guard emojiPickerState != nil || emojiPicker.isVisible else { return }
+        emojiPickerState = nil
+        emojiPickerAnchor = nil
+        emojiPicker.hide()
+        interceptor.setPickerArmed(false)
+    }
+
     private func tick() {
         guard store.enabled else { return }
         // Icône vivante : par défaut « pas de champ actif » ; repassé à vrai plus
@@ -1138,6 +1161,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // and avoids racing AX reads against our own SwiftUI text fields.
         if NSApp.isActive {
             overlay.hide()
+            hideEmojiPicker()
             presenceHideNow()
             interceptor.setActive(false)
             return
@@ -1146,6 +1170,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // status item stays visible so the user can see we're waiting.
         guard AXClient.isTrusted else {
             overlay.hide()
+            hideEmojiPicker()
             presenceHideNow()
             interceptor.setActive(false)
             return
@@ -1200,6 +1225,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
             overlay.hide()
+            hideEmojiPicker()
             // Échec AX transitoire (caret/elementRect nil ce tick) : on TIENT le
             // badge ancré pendant la grâce plutôt que de le faire clignoter.
             presenceHoldOrHide()
@@ -1216,6 +1242,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         let allowMode = store.allowlist.mode(forBundle: bundleID, windowTitle: snap.windowTitle)
         if allowMode == .disabled {
             overlay.hide()
+            hideEmojiPicker()
             presenceHideNow()
             interceptor.setActive(false)
             return
@@ -1744,6 +1771,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 axClient.replaceTrailing(deleteChars: expansion.deleteChars, with: expansion.insert)
             }
             Log.info(.input, "emoji_expanded")
+            // L'expansion compte comme un usage → nourrit le ranking du picker.
+            store.incrementEmojiFrequency(expansion.shortcode)
+            hideEmojiPicker()
             // Clear any pending suggestion so the LLM ghost doesn't blink.
             predictor.cancel()
             lastPredictedPrefix = nil
@@ -1751,6 +1781,43 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             interceptor.setActive(false)
             currentTypo = nil
             return
+        }
+
+        // Picker emoji — dès « : » ouvert avant le caret, une rangée de
+        // candidats numérotés ①–⑨ s'affiche au caret (parité Cotypist) ; la
+        // rangée physique 1–9 SANS Maj choisit (voir `KeyInterceptor.Key.digit`
+        // pour l'astuce AZERTY), Esc ferme, taper filtre. Pendant que le
+        // panneau est ouvert, pas de ghost LLM concurrent.
+        if store.emojiEnabled,
+           !EmojiExpander.disabledBundles.contains(bundleID),
+           let pickerState = EmojiExpander.pickerCandidates(
+               textBeforeCaret: prefix, frequency: store.emojiFrequency),
+           let rect = rectForGhost
+        {
+            // Ancre de refus : le préfixe jusqu'au `:` d'ouverture inclus. Tant
+            // qu'il n'a pas changé après un Esc, le panneau reste fermé.
+            let anchor = String(prefix.prefix(prefix.count - pickerState.fragmentLength + 1))
+            if emojiPickerDismissedAnchor != anchor {
+                emojiPickerDismissedAnchor = nil
+                if emojiPickerState == nil {
+                    Log.info(.input, "emoji_picker_shown")
+                }
+                emojiPickerState = pickerState
+                emojiPickerAnchor = anchor
+                emojiPicker.show(emojis: pickerState.candidates.map(\.emoji), at: rect)
+                interceptor.setPickerArmed(true)
+                predictor.cancel()
+                lastPredictedPrefix = nil
+                overlay.hide()
+                interceptor.setActive(false)
+                currentTypo = nil
+                return
+            }
+        } else {
+            // Plus de fragment ouvert : fermer le panneau et ré-armer le
+            // déclenchement après un éventuel refus.
+            emojiPickerDismissedAnchor = nil
+            hideEmojiPicker()
         }
 
         // Typo correction — preempts LLM ghost. Triggered only on word boundary
@@ -1993,12 +2060,31 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             }
             return (currentTypo, currentTypoTrailing, predictor.suggestion, false)
         }
+        // Picker emoji — la rangée 1–9 n'est résolue que pendant que le panneau
+        // est visible (cf. `resolveKey(pickerArmed:)`) ; un Esc pendant le picker
+        // ferme sans insérer ET mémorise le fragment refusé pour que le tick
+        // suivant ne rouvre pas le panneau immédiatement.
+        if case .digit(let n) = key {
+            return handleEmojiPickerDigit(n)
+        }
+        if key == .esc {
+            let closedPicker: Bool = MainActor.assumeIsolated {
+                guard emojiPickerState != nil else { return false }
+                emojiPickerDismissedAnchor = emojiPickerAnchor
+                hideEmojiPicker()
+                return true
+            }
+            if closedPicker {
+                Log.info(.input, "emoji_picker_dismissed")
+                return true
+            }
+        }
         // Les touches de TRADUCTION (.commit/.cycleTarget) n'ont pas besoin de
         // suggestion en attente : elles fonctionnent aussi quand le tap est armé
         // par le HUD seul (panneau visible sans ghost) ou via la hotkey globale.
         // Les touches du ghost (Tab/Esc/accept-all), elles, exigent du pending.
         switch key {
-        case .commit, .cycleTarget: break
+        case .commit, .cycleTarget, .digit: break
         case .tab, .esc, .acceptAll:
             if pending.typo == nil, pending.llm.isEmpty { return false }
         }
@@ -2288,7 +2374,38 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 self.flashTargetSelection(selection, fieldRect: rect, bundleID: bundleID)
             }
             return true
+
+        case .digit:
+            // Traité en tête de fonction (early return) — inatteignable ici.
+            return false
         }
+    }
+
+    /// Sélection d'un candidat du picker emoji par la rangée physique 1–9.
+    /// Remplace le `:fragment` tapé par l'emoji + espace, nourrit le ranking,
+    /// ferme le panneau. Position au-delà du nombre de candidats → la touche
+    /// est avalée sans effet (le tap a déjà consommé), comportement assumé.
+    nonisolated private func handleEmojiPickerDigit(_ n: Int) -> Bool {
+        let pick: (deleteChars: Int, insert: String, shortcode: String)? = MainActor.assumeIsolated {
+            guard let state = emojiPickerState,
+                  (1...state.candidates.count).contains(n) else { return nil }
+            let c = state.candidates[n - 1]
+            return (state.fragmentLength, c.emoji + " ", c.shortcode)
+        }
+        guard let pick else { return false }
+        DispatchQueue.global(qos: .userInitiated).async { [axClient] in
+            axClient.replaceTrailing(deleteChars: pick.deleteChars, with: pick.insert)
+        }
+        MainActor.assumeIsolated {
+            store.incrementEmojiFrequency(pick.shortcode)
+            hideEmojiPicker()
+            // Le champ vient de changer sous nos pieds : pas de ghost basé sur
+            // l'état intermédiaire.
+            predictor.cancel()
+            lastPredictedPrefix = nil
+        }
+        Log.info(.input, "emoji_picker_pick")
+        return true
     }
 
     /// Vraie traduction visible — point d'entrée UNIQUE, appelable de partout :

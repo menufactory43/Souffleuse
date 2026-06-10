@@ -92,6 +92,32 @@ public enum EmojiTable {
     ]
 }
 
+/// Un candidat du picker — la paire shortcode/emoji affichée avec un badge ①–⑨.
+public struct EmojiCandidate: Sendable, Equatable {
+    public let shortcode: String
+    public let emoji: String
+
+    public init(shortcode: String, emoji: String) {
+        self.shortcode = shortcode
+        self.emoji = emoji
+    }
+}
+
+/// État du picker pour un `:fragment` ouvert avant le caret. `fragmentLength`
+/// compte le `:` D'OUVERTURE + le fragment tapé — c'est exactement ce qu'il faut
+/// supprimer (`replaceTrailing`) quand l'utilisateur choisit un candidat.
+public struct EmojiPickerState: Sendable, Equatable {
+    /// Caractères avant le caret à remplacer à la sélection (`:sm` → 3).
+    public let fragmentLength: Int
+    /// Au plus 9 candidats ; la position visuelle (badge ①–⑨) = index + 1.
+    public let candidates: [EmojiCandidate]
+
+    public init(fragmentLength: Int, candidates: [EmojiCandidate]) {
+        self.fragmentLength = fragmentLength
+        self.candidates = candidates
+    }
+}
+
 public enum EmojiExpander {
     /// Detect a completed `:shortcode:<space|newline>` at the end of the text
     /// before the caret. Returns nil if no completion is present, the shortcode
@@ -132,6 +158,84 @@ public enum EmojiExpander {
 
     private static func isShortcodeChar(_ c: Character) -> Bool {
         c.isLetter || c.isNumber || c == "_" || c == "+" || c == "-"
+    }
+
+    // MARK: - Picker interactif (parité Cotypist)
+
+    /// Sélection curée pour l'état « : » nu d'un utilisateur sans historique —
+    /// les réactions universelles, dans l'esprit de la rangée par défaut de
+    /// Cotypist (👋 🙂 😀 ☀️ 😊 …). Dès que la fréquence d'usage existe, elle
+    /// prime ; cette liste ne sert que de complément.
+    public static let curatedPopular: [String] = [
+        "wave", "blush", "smile", "joy", "heart",
+        "thumbsup", "tada", "fire", "pray",
+    ]
+
+    /// État du picker pour le `:fragment` ouvert juste avant le caret, ou nil si
+    /// aucun picker ne doit s'afficher. Pur et synchrone — toute la politique de
+    /// déclenchement (gardes 14:30 / std:: / http:) vit ici pour être testable.
+    ///
+    /// Règles :
+    /// - le `:` d'ouverture doit être précédé de RIEN (début de texte) ou d'un
+    ///   caractère qui n'est ni lettre, ni chiffre, ni `:`. Ça neutralise les
+    ///   heures (« 14: »), les ports d'URL, les schémas (« http: ») et les
+    ///   namespaces C++ (« std:: ») sans liste d'exceptions.
+    /// - fragment vide (« : » nu) → top `limit` par fréquence d'usage, complété
+    ///   par `curatedPopular`.
+    /// - fragment non vide → prefix-match sur les shortcodes, trié fréquence
+    ///   décroissante puis alphabétique. Aucun match → nil (le panneau se ferme).
+    public static func pickerCandidates(
+        textBeforeCaret: String,
+        limit: Int = 9,
+        frequency: [String: Int] = [:]
+    ) -> EmojiPickerState? {
+        guard limit > 0 else { return nil }
+        // Remonte depuis le caret en n'acceptant que des chars de shortcode,
+        // jusqu'au `:` d'ouverture. Tout autre char (espace, ponctuation…)
+        // signifie qu'aucun fragment n'est ouvert.
+        var i = textBeforeCaret.endIndex
+        var fragment = ""
+        var opener: String.Index?
+        while i > textBeforeCaret.startIndex {
+            let prev = textBeforeCaret.index(before: i)
+            let c = textBeforeCaret[prev]
+            if c == ":" { opener = prev; break }
+            guard isShortcodeChar(c) else { return nil }
+            fragment = String(c) + fragment
+            i = prev
+        }
+        guard let opener else { return nil }
+        // Garde du caractère AVANT le `:` (cf. doc ci-dessus).
+        if opener > textBeforeCaret.startIndex {
+            let before = textBeforeCaret[textBeforeCaret.index(before: opener)]
+            if before.isLetter || before.isNumber || before == ":" { return nil }
+        }
+
+        let lower = fragment.lowercased()
+        let matches: [String]
+        if lower.isEmpty {
+            // « : » nu — l'usage personnel d'abord, le curé en complément.
+            let used = EmojiTable.map.keys
+                .filter { frequency[$0, default: 0] > 0 }
+                .sorted {
+                    let (fa, fb) = (frequency[$0]!, frequency[$1]!)
+                    return fa != fb ? fa > fb : $0 < $1
+                }
+            var seen = Set(used)
+            matches = used + curatedPopular.filter { seen.insert($0).inserted }
+        } else {
+            matches = EmojiTable.map.keys
+                .filter { $0.hasPrefix(lower) }
+                .sorted {
+                    let (fa, fb) = (frequency[$0, default: 0], frequency[$1, default: 0])
+                    return fa != fb ? fa > fb : $0 < $1
+                }
+        }
+        let candidates = matches.prefix(limit).compactMap { code in
+            EmojiTable.map[code].map { EmojiCandidate(shortcode: code, emoji: $0) }
+        }
+        guard !candidates.isEmpty else { return nil }
+        return EmojiPickerState(fragmentLength: 1 + fragment.count, candidates: candidates)
     }
 
     /// Apps where shortcode expansion would clash with intended syntax

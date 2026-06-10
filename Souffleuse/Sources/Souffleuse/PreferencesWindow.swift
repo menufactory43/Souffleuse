@@ -291,7 +291,7 @@ private struct SouffleTab: View {
                 Toggle("Corriger les coquilles", isOn: $store.typoEnabled)
                 Toggle("Se taire quand une coquille est en cours", isOn: $store.hideOnTypo)
                     .disabled(!store.typoEnabled)
-                Toggle("Expansion emoji (\u{003A}smile\u{003A} → 😄)", isOn: $store.emojiEnabled)
+                Toggle("Emoji — panneau dès « \u{003A} » et expansion (\u{003A}smile\u{003A} → 😄)", isOn: $store.emojiEnabled)
                 Toggle("Corriger le texte avant de souffler", isOn: $store.prefixCorrectionEnabled)
             } header: {
                 Text("Corrections").font(.headline)
