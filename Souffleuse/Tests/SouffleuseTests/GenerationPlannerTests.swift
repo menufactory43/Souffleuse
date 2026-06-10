@@ -124,16 +124,30 @@ struct GenerationPlannerTests {
 
     // MARK: - Debounce coalescing
 
+    /// Attente par POLLING avec deadline large : un sleep fixe de 80 ms
+    /// suffisait seul, mais sous la contention CPU de la suite parallèle le
+    /// task débouncé (30 ms) peut ne pas être ordonnancé à temps → flaky
+    /// (observé 2026-06-11 à l'ajout des tests NSSpellChecker).
+    private func waitForFire(_ counter: ActorCounter, deadline: TimeInterval = 2) async -> Int {
+        let end = Date().addingTimeInterval(deadline)
+        while Date() < end {
+            let n = await counter.value
+            if n >= 1 { return n }
+            try? await Task.sleep(nanoseconds: 10 * 1_000_000)
+        }
+        return await counter.value
+    }
+
     @Test func scheduleDebouncedCoalesces() async {
         let p = GenerationPlanner()
         let counter = ActorCounter()
         p.scheduleDebounced { await counter.increment() }
         p.scheduleDebounced { await counter.increment() }
         p.scheduleDebounced { await counter.increment() }
-        // Wait > debounce (30ms) + margin.
+        #expect(await waitForFire(counter) == 1)
+        // Coalescing : aucun second tir après coup.
         try? await Task.sleep(nanoseconds: 80 * 1_000_000)
-        let n = await counter.value
-        #expect(n == 1)
+        #expect(await counter.value == 1)
     }
 
     @Test func scheduleDebouncedRespectsDelay() async {
@@ -145,10 +159,7 @@ struct GenerationPlannerTests {
             elapsedAtFire = Date().timeIntervalSince(start)
             await counter.increment()
         }
-        // Wait > debounce window.
-        try? await Task.sleep(nanoseconds: 80 * 1_000_000)
-        let n = await counter.value
-        #expect(n == 1)
+        #expect(await waitForFire(counter) == 1)
         // Should fire near 30ms — accept ≥25ms (loose timing for CI).
         #expect(elapsedAtFire >= 0.025)
     }

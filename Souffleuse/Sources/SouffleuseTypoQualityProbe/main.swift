@@ -21,7 +21,10 @@ import SouffleuseLlama
 //      possible future real-word corrector.
 // ════════════════════════════════════════════════════════════════════════════
 
-let modelPath = NSString(string: "~/Library/Application Support/app.cotypist.Cotypist/Models/gemma-3-1b.i1-Q5_K_M.gguf").expandingTildeInPath
+// `SOUFFLEUSE_MODEL` prime ; sinon le GGUF de Cotypist (machine de dev — même
+// poids gemma-3-1b que notre défaut, déjà téléchargé par l'app concurrente).
+let modelPath = ProcessInfo.processInfo.environment["SOUFFLEUSE_MODEL"]
+    ?? NSString(string: "~/Library/Application Support/app.cotypist.Cotypist/Models/gemma-3-1b.i1-Q5_K_M.gguf").expandingTildeInPath
 
 let engine = LlamaEngine()
 guard await engine.load(modelPath: modelPath, contextTokens: 2048) else {
@@ -138,7 +141,9 @@ for r in results {
 let pickCases = results.filter { if case .pick = $0.c.expect { return true }; return false }
 let bailCases = results.filter { if case .bail = $0.c.expect { return true }; return false }
 let correct = pickCases.filter { r in if case .pick(let w) = r.c.expect { return r.winner == w }; return false }
-let correctMargins = correct.map { $0.margin }.sorted()
+// Les cas à candidat UNIQUE ont une marge sentinelle infinie (pas de #2) :
+// les exclure des stats de calibration, sinon max/médiane sont faussés.
+let correctMargins = correct.map { $0.margin }.filter { $0.isFinite }.sorted()
 let bailMargins = bailCases.map { $0.margin }.sorted()
 
 print("\n" + String(repeating: "═", count: 78))
