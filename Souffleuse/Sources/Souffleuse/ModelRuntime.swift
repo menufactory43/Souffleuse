@@ -968,6 +968,11 @@ final class ModelRuntime {
         LatencyTrace.mark("gen_path", key: LatencyTrace.key(request.prefix), info: reserveOn ? 4 : 5)
         LatencyTrace.mark("seed_prompt", key: LatencyTrace.key(request.prefix), info: result.promptTokenCount)
         LatencyTrace.mark("seed_lcp", key: LatencyTrace.key(request.prefix), info: result.reusedPrefixTokens)
+        // Décomposition interne du seed : prefill vs boucle de décodage — c'est
+        // elle qui dira si le seed lent paie le contexte (decode qui grandit avec
+        // le KV) ou la prefill (cache froid).
+        LatencyTrace.mark("seed_prefill_ms", key: LatencyTrace.key(request.prefix), info: result.prefillMillis)
+        LatencyTrace.mark("seed_decode_ms", key: LatencyTrace.key(request.prefix), info: result.decodeMillis)
 
         let caretAfterSpace = request.llmTail.last == " " || request.llmTail.last == "\t"
         // Mid-line (texte non-blanc sur la ligne après le caret) : `selectGhost`
@@ -1176,6 +1181,8 @@ final class ModelRuntime {
         // pour mesurer la guerre de prefix-cache entre les deux chemins.
         LatencyTrace.mark("refill_prompt", key: LatencyTrace.key(request.prefix), info: result.promptTokenCount)
         LatencyTrace.mark("refill_lcp", key: LatencyTrace.key(request.prefix), info: result.reusedPrefixTokens)
+        LatencyTrace.mark("refill_prefill_ms", key: LatencyTrace.key(request.prefix), info: result.prefillMillis)
+        LatencyTrace.mark("refill_decode_ms", key: LatencyTrace.key(request.prefix), info: result.decodeMillis)
         var ext = BeamGhostShaper.beamPostFilter(
             rawGhost: result.best?.ghost ?? "", isBoundary: true, caretAfterSpace: false,
             userTail: request.userTail, maxWords: maxWords)
