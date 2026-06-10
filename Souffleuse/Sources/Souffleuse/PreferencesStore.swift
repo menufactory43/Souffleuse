@@ -134,6 +134,7 @@ final class PreferencesStore {
         static let ocrLangES = "ocrLangES"
         static let typoEnabled = "typoEnabled"
         static let emojiEnabled = "emojiEnabled"
+        static let emojiFrequency = "emojiFrequency"
         static let completionLength = "completionLength"
         static let hideOnTypo = "hideOnTypo"
         static let personalizationEnabled = "personalizationEnabled"
@@ -180,6 +181,16 @@ final class PreferencesStore {
     var ocrLangES: Bool { didSet { UserDefaults.standard.set(ocrLangES, forKey: K.ocrLangES) } }
     var typoEnabled: Bool { didSet { UserDefaults.standard.set(typoEnabled, forKey: K.typoEnabled) } }
     var emojiEnabled: Bool { didSet { UserDefaults.standard.set(emojiEnabled, forKey: K.emojiEnabled) } }
+    /// Compteur d'usage par shortcode (picker ET expansion `:code:` classique).
+    /// Alimente le classement du picker : l'état « : » nu montre TES emoji, pas
+    /// une liste figée. Privacy : des shortcodes de la table curée, jamais du
+    /// texte utilisateur. `@ObservationIgnored` — aucune vue n'en dépend, et un
+    /// incrément ne doit pas invalider l'UI des Préférences.
+    @ObservationIgnored private(set) var emojiFrequency: [String: Int]
+    func incrementEmojiFrequency(_ shortcode: String) {
+        emojiFrequency[shortcode, default: 0] += 1
+        UserDefaults.standard.set(emojiFrequency, forKey: K.emojiFrequency)
+    }
     var completionLength: CompletionLength {
         didSet { UserDefaults.standard.set(completionLength.rawValue, forKey: K.completionLength) }
     }
@@ -296,6 +307,7 @@ final class PreferencesStore {
         self.ocrLangES = (d.object(forKey: K.ocrLangES) as? Bool) ?? false
         self.typoEnabled = (d.object(forKey: K.typoEnabled) as? Bool) ?? true
         self.emojiEnabled = (d.object(forKey: K.emojiEnabled) as? Bool) ?? true
+        self.emojiFrequency = (d.object(forKey: K.emojiFrequency) as? [String: Int]) ?? [:]
         self.completionLength = (d.string(forKey: K.completionLength).flatMap(CompletionLength.init(rawValue:))) ?? .medium
         self.hideOnTypo = (d.object(forKey: K.hideOnTypo) as? Bool) ?? true
         self.personalizationEnabled = (d.object(forKey: K.personalizationEnabled) as? Bool) ?? false
