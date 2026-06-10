@@ -64,12 +64,14 @@ final class PreferencesWindow {
             onClearPersonalization: onClearPersonalization
         )
         let host = NSHostingController(rootView: root)
-        host.view.frame = NSRect(x: 0, y: 0, width: 660, height: 520)
+        // Plus large que l'ancienne fenêtre à onglets : la sidebar prend ~200 pt,
+        // il faut laisser au moins autant au panneau de détail qu'avant.
+        host.view.frame = NSRect(x: 0, y: 0, width: 800, height: 560)
 
         let w = NSWindow(contentViewController: host)
         w.title = "Préférences"
-        w.styleMask = [.titled, .closable, .miniaturizable]
-        w.setContentSize(NSSize(width: 660, height: 520))
+        w.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        w.setContentSize(NSSize(width: 800, height: 560))
         w.isReleasedWhenClosed = false
         w.center()
         w.makeKeyAndOrderFront(nil)
@@ -78,6 +80,56 @@ final class PreferencesWindow {
     }
 }
 
+/// Les sections des Préférences, rangées par FONCTION (les piliers de l'app),
+/// pas par accumulation historique. L'ordre = l'ordre d'affichage dans la
+/// sidebar. Apparence se pose juste après Souffle : on règle ce que le souffle
+/// DIT (Souffle), puis comment il SE MONTRE (Apparence).
+private enum PrefSection: String, CaseIterable, Identifiable {
+    case souffle, apparence, traduction, ton, personnalisation, contexte, parApp, reglages, aPropos
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .souffle: return "Souffle"
+        case .apparence: return "Apparence"
+        case .traduction: return "Traduction"
+        case .ton: return "Ton"
+        case .personnalisation: return "Personnalisation"
+        case .contexte: return "Contexte"
+        case .parApp: return "Par application"
+        case .reglages: return "Réglages"
+        case .aPropos: return "À propos"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .souffle: return "wind"
+        case .apparence: return "paintpalette"
+        case .traduction: return "globe"
+        case .ton: return "textformat"
+        case .personnalisation: return "person.crop.circle.badge.checkmark"
+        case .contexte: return "doc.text.magnifyingglass"
+        case .parApp: return "list.bullet.rectangle"
+        case .reglages: return "gearshape"
+        case .aPropos: return "info.circle"
+        }
+    }
+}
+
+/// Fenêtre Préférences en layout sidebar (idiome Réglages Système, macOS 14+),
+/// en remplacement de l'ancienne barre d'onglets horizontale qui était à l'étroit
+/// à 8 entrées et n'aurait pas tenu une de plus. Le CONTENU des sections est
+/// inchangé — seul le conteneur change.
+///
+/// Pourquoi un `HStack { List + détail }` et PAS un `NavigationSplitView` :
+/// cette fenêtre est hébergée dans un `NSHostingController`/`NSWindow` créé à la
+/// main (pas un `WindowGroup`/scène SwiftUI). Dans ce contexte, le binding de
+/// sélection d'un `NavigationSplitView` ne pilote PAS le détail — la navigation
+/// se fige sur la première section et le détail rend des lignes vides. Un
+/// `List(selection:)` nu dans un `HStack`, lui, met à jour `@State` de façon
+/// fiable. Même look de sidebar, navigation qui marche.
 private struct PreferencesRoot: View {
     @Bindable var store: PreferencesStore
     let onModelChange: (String) -> Void
@@ -86,38 +138,135 @@ private struct PreferencesRoot: View {
     let onOpenHistoryViewer: () -> Void
     let onClearPersonalization: () -> Void
 
-    // Onglets organisés par FONCTION (les piliers de l'app), pas par accumulation
-    // historique : Souffle · Traduction · Ton réunissent chacun tout ce qui touche
-    // leur fonction (modèle compris, posé près de ce qu'il affecte). Réglages
-    // centralise activation + autorisations + démarrage ; À propos reste l'identité.
+    @State private var selection: PrefSection? = .souffle
+
     var body: some View {
-        TabView {
+        HStack(spacing: 0) {
+            List(PrefSection.allCases, selection: $selection) { section in
+                Label(section.label, systemImage: section.systemImage)
+                    .tag(section)
+            }
+            .listStyle(.sidebar)
+            .frame(width: 200)
+
+            Divider()
+
+            detail(for: selection ?? .souffle)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+        .frame(width: 800, height: 560)
+        // La voix unique : un seul accent sang-de-bœuf irrigue toggles, sliders,
+        // radios et boutons de toute la fenêtre, à la place du bleu système.
+        .tint(.sangDeBoeuf)
+    }
+
+    @ViewBuilder
+    private func detail(for section: PrefSection) -> some View {
+        switch section {
+        case .souffle:
             SouffleTab(store: store)
-                .tabItem { Label("Souffle", systemImage: "wind") }
+        case .apparence:
+            AppearanceTab(store: store)
+        case .traduction:
             TranslationTab(store: store)
-                .tabItem { Label("Traduction", systemImage: "globe") }
+        case .ton:
             ToneTab(store: store)
-                .tabItem { Label("Ton", systemImage: "textformat") }
+        case .personnalisation:
             PersonalizationTab(
                 store: store,
                 onOpenViewer: onOpenHistoryViewer,
                 onClearAll: onClearPersonalization
             )
-            .tabItem { Label("Personnalisation", systemImage: "person.crop.circle.badge.checkmark") }
+        case .contexte:
             EnrichmentTab(store: store, onCaptureToggle: onCaptureToggle)
-                .tabItem { Label("Contexte", systemImage: "doc.text.magnifyingglass") }
+        case .parApp:
             AllowlistTab(store: store)
-                .tabItem { Label("Par application", systemImage: "list.bullet.rectangle") }
+        case .reglages:
             ReglagesTab(store: store, onOpenOnboarding: onOpenOnboarding)
-                .tabItem { Label("Réglages", systemImage: "gearshape") }
+        case .aPropos:
             AboutTab()
-                .tabItem { Label("À propos", systemImage: "info.circle") }
         }
-        .padding(20)
-        .frame(width: 660, height: 520)
-        // La voix unique : un seul accent sang-de-bœuf irrigue toggles, sliders,
-        // radios et boutons de toute la fenêtre, à la place du bleu système.
-        .tint(.sangDeBoeuf)
+    }
+}
+
+/// Ligne de réglage façon Réglages Système : icône à gauche, titre + sous-titre
+/// qui explique le POURQUOI (convention maison « le rationale, pas la
+/// signature »), contrôle à droite. Introduite ici comme vitrine de l'onglet
+/// Apparence ; vouée à gagner les autres sections, une à la fois.
+private struct SettingRow<Control: View>: View {
+    let systemImage: String
+    let title: String
+    let subtitle: String
+    @ViewBuilder var control: () -> Control
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.title3)
+                .foregroundStyle(.secondary)
+                .frame(width: 24)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                Text(subtitle)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 12)
+            control()
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+/// Onglet APPARENCE — comment le souffle SE MONTRE. Deux seuls leviers, tenus
+/// court exprès : son opacité (plus ou moins discret avant acceptation) et sa
+/// couleur, bornée à DEUX choix — gris neutre (défaut) ou sang-de-bœuf, la voix
+/// de marque. Pas de nuancier libre façon cotabby : une seule voix, on ne la
+/// dilue pas en douze teintes.
+private struct AppearanceTab: View {
+    @Bindable var store: PreferencesStore
+
+    var body: some View {
+        Form {
+            Section {
+                SettingRow(
+                    systemImage: "circle.lefthalf.filled",
+                    title: "Opacité du souffle",
+                    subtitle: "À quel point la suggestion reste discrète avant que vous l'acceptiez. Au plus bas elle s'efface presque ; au plus haut elle s'affirme."
+                ) {
+                    HStack(spacing: 8) {
+                        Slider(value: $store.ghostOpacity, in: 0.2...1.0)
+                            .frame(width: 150)
+                        Text("\(Int((store.ghostOpacity * 100).rounded())) %")
+                            .font(.callout.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 42, alignment: .trailing)
+                    }
+                }
+                SettingRow(
+                    systemImage: "paintpalette",
+                    title: "Couleur du souffle",
+                    subtitle: "Le gris se lit comme « pas encore validé », un murmure. Le sang-de-bœuf affirme la voix de Souffleuse — au risque de ressembler à du texte déjà posé."
+                ) {
+                    Picker("", selection: $store.ghostColorStyle) {
+                        ForEach(GhostColorStyle.allCases, id: \.self) { style in
+                            Text(style.label).tag(style)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
+                }
+            } header: {
+                Text("Le souffle").font(.headline)
+            } footer: {
+                Text("Pour voir l'effet : ouvrez un champ de texte, tapez quelques mots, et le souffle change en direct.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
     }
 }
 
@@ -887,6 +1036,10 @@ private struct AllowlistTab: View {
                 .frame(minHeight: 240)
             }
         }
+        // Reprend le retrait qu'apportait l'ancien `.padding(20)` racine du
+        // TabView : cet onglet est un VStack nu (pas un Form à insets propres).
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .sheet(item: $draft) { rule in
             RuleEditor(rule: rule) { saved in
                 store.allowlist.upsert(saved)
@@ -1049,6 +1202,10 @@ private struct ToneTab: View {
                 .frame(minHeight: 240)
             }
         }
+        // Même retrait que l'onglet « Par application » : VStack nu, plus de
+        // `.padding(20)` racine depuis le passage en sidebar.
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .sheet(item: $draft) { rule in
             ToneRuleEditor(rule: rule) { saved in
                 store.tones.upsert(saved)
