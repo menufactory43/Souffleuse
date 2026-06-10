@@ -123,6 +123,47 @@ import Testing
     #expect(abs((a.origin.y - b.origin.y) - 40) < 0.001)
 }
 
+// MARK: - SouffleuseAppDelegate mid-line accept split (saut des lettres existantes)
+
+@MainActor
+@Test func midLineAcceptSplitSkipsExistingWordLetters() {
+    // « p|our » + accept « our votre rapport » : les lettres « our » existent déjà
+    // après le caret → on les SAUTE (flèche →) et on n'injecte que la suite.
+    let s = SouffleuseAppDelegate.midLineAcceptSplit(chunk: "our votre rapport", afterCaret: "our reste")
+    #expect(s.skip == 3)
+    #expect(s.inject == " votre rapport")
+    // Chunk entièrement déjà présent (Tab partiel « our ») → saut pur + reliquat.
+    let t = SouffleuseAppDelegate.midLineAcceptSplit(chunk: "our", afterCaret: "our reste")
+    #expect(t.skip == 3)
+    #expect(t.inject == "")
+}
+
+@MainActor
+@Test func midLineAcceptSplitBoundaryIsByteIdentical() {
+    // Frontière : chunk avec espace de tête, ou blanc après le caret → aucun saut,
+    // l'insertion est légitime (l'espace existant sert de séparateur droit).
+    let a = SouffleuseAppDelegate.midLineAcceptSplit(chunk: " votre", afterCaret: " reste")
+    #expect(a.skip == 0 && a.inject == " votre")
+    let b = SouffleuseAppDelegate.midLineAcceptSplit(chunk: "votre", afterCaret: " reste")
+    #expect(b.skip == 0 && b.inject == "votre")
+    // End-of-line (rien après le caret) → inchangé.
+    let c = SouffleuseAppDelegate.midLineAcceptSplit(chunk: "our suite", afterCaret: "")
+    #expect(c.skip == 0 && c.inject == "our suite")
+}
+
+@MainActor
+@Test func midLineAcceptSplitCaseInsensitiveAndDivergence() {
+    // Casse pliée : « Our » sauté devant « our… » (les glyphes EXISTANTS restent).
+    let a = SouffleuseAppDelegate.midLineAcceptSplit(chunk: "Our suite", afterCaret: "our reste")
+    #expect(a.skip == 3 && a.inject == " suite")
+    // Divergence dès la 1ʳᵉ lettre → pas de saut (cas dégénéré inchangé).
+    let b = SouffleuseAppDelegate.midLineAcceptSplit(chunk: "ropose", afterCaret: "our reste")
+    #expect(b.skip == 0 && b.inject == "ropose")
+    // Le saut s'arrête au premier non-alphanumérique (jamais d'espace sauté).
+    let c = SouffleuseAppDelegate.midLineAcceptSplit(chunk: "our reste", afterCaret: "our reste")
+    #expect(c.skip == 3 && c.inject == " reste")
+}
+
 // MARK: - SouffleuseAppDelegate mid-text suppression
 
 @MainActor
