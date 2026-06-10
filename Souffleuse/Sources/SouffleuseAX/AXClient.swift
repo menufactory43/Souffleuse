@@ -341,6 +341,37 @@ public final class AXClient: @unchecked Sendable {
         }
     }
 
+    /// Avance le caret de `count` caractères vers la droite (flèches → synthétiques).
+    ///
+    /// Utilisé par l'accept mid-line : quand la complétion du mot EN COURS re-tape
+    /// des lettres qui existent déjà après le caret (« p|our » + accept « our… »),
+    /// on SAUTE ces lettres au lieu de les ré-injecter — sinon le Tab produit
+    /// « pourour ». On n'écrit pas `kAXSelectedTextRangeAttribute` : des hôtes
+    /// (Notes / RichTextEdit) acceptent le write avec `.success` puis l'ignorent
+    /// silencieusement (cf. `replaceTrailing`) ; une flèche droite matérielle est
+    /// honorée partout. Même cadence d'événements que `backspaceAndInjectViaCGEvent`.
+    @discardableResult
+    public func moveCaretRight(by count: Int) -> Bool {
+        guard count > 0 else { return true }
+        return queue.sync {
+            let source = CGEventSource(stateID: .hidSystemState)
+            // Settle delay après le Tab consommé par le CGEventTap (même raison
+            // que replaceTrailing : les hôtes rapides droppent le 1er événement).
+            usleep(5_000)
+            for _ in 0..<count {
+                // virtual key 124 = flèche droite
+                guard let down = CGEvent(keyboardEventSource: source, virtualKey: 124, keyDown: true),
+                      let up = CGEvent(keyboardEventSource: source, virtualKey: 124, keyDown: false) else {
+                    return false
+                }
+                down.post(tap: .cghidEventTap)
+                up.post(tap: .cghidEventTap)
+                usleep(2_000)
+            }
+            return true
+        }
+    }
+
     /// Replace the last `deleteChars` characters before the caret with `text`.
     /// Used by typo correction and emoji expansion.
     ///

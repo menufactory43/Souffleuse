@@ -1992,6 +1992,15 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 } else {
                     let rest = String(suggestion.dropFirst(chunk.count))
                     let isLast = rest.isEmpty
+                    // Mid-line, caret DANS un mot : les lettres du chunk déjà
+                    // présentes après le caret sont SAUTÉES (flèche →), pas
+                    // ré-injectées — « p|our » + Tab ne doit pas faire « pourour ».
+                    // La comptabilité du walk utilise les caractères EXISTANTS
+                    // (leur casse réelle) + le reste injecté, pour que l'égalité
+                    // stricte `prefix == expected` du tick tienne après le saut.
+                    let split = Self.midLineAcceptSplit(
+                        chunk: chunk, afterCaret: preSnap.textAfterCaret ?? "")
+                    let effectiveChunk = String((preSnap.textAfterCaret ?? "").prefix(split.skip)) + split.inject
                     // handleKey is dispatched onto the main thread (the tap now
                     // runs on a dedicated thread and hops here via
                     // `DispatchQueue.main.async`), so this whole body runs as
@@ -2005,11 +2014,11 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                     MainActor.assumeIsolated {
                         self.ledger.recordAccepted(charsSaved: chunk.count - 1)
                         if isPartialContinuation {
-                            self.partialAcceptedSoFar += chunk
+                            self.partialAcceptedSoFar += effectiveChunk
                         } else {
                             self.partialAcceptedAtPrefix = prePrefix
                             self.partialAcceptedAtBundleID = bundleID
-                            self.partialAcceptedSoFar = chunk
+                            self.partialAcceptedSoFar = effectiveChunk
                         }
                         if isLast {
                             // Dernier chunk = ligne entièrement acceptée. Garde la
@@ -2038,11 +2047,16 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                             // prefix so even if AX races and `partialRemainder`
                             // somehow gets cleared before tick sees it, the
                             // predict gate still won't fire on the same input.
-                            self.lastPredictedPrefix = prePrefix + chunk
+                            self.lastPredictedPrefix = prePrefix + effectiveChunk
                         }
                     }
                     DispatchQueue.global(qos: .userInitiated).async { [axClient] in
-                        axClient.inject(chunk)
+                        if split.skip > 0 {
+                            axClient.moveCaretRight(by: split.skip)
+                        }
+                        if !split.inject.isEmpty {
+                            axClient.inject(split.inject)
+                        }
                         if isLast {
                             let snap = axClient.snapshot()
                             DispatchQueue.main.async { [weak self] in
@@ -2090,8 +2104,18 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                     await predictorRef.ingestAccepted(entry)
                 }
             }
+            // Mid-line, caret DANS un mot : sauter (flèche →) les lettres du début
+            // de la suggestion déjà présentes après le caret, injecter le reste.
+            let fullSplit = Self.midLineAcceptSplit(
+                chunk: suggestion, afterCaret: preSnap.textAfterCaret ?? "")
+            let effectiveSuggestion = String((preSnap.textAfterCaret ?? "").prefix(fullSplit.skip)) + fullSplit.inject
             DispatchQueue.global(qos: .userInitiated).async { [axClient] in
-                axClient.inject(suggestion)
+                if fullSplit.skip > 0 {
+                    axClient.moveCaretRight(by: fullSplit.skip)
+                }
+                if !fullSplit.inject.isEmpty {
+                    axClient.inject(fullSplit.inject)
+                }
                 // Re-read AX state after the host applies the inject, then
                 // mark that text as "dismissed" so we don't immediately re-suggest
                 // off the freshly-extended text — that's the double-Tab bug
@@ -2105,9 +2129,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 self.ledger.recordAccepted(charsSaved: suggestion.count - 1)
                 // Accept Tab plein : garde la borne gauche, étend `ghostAnchorFull`
-                // au texte committé (`prePrefix + suggestion`) pour qu'un effacement
-                // restaure encore la ligne. Ne PAS avancer la base sur Tab.
-                self.extendGhostAnchorOnAccept(committedFullText: prePrefix + suggestion, bundleID: bundleID)
+                // au texte committé pour qu'un effacement restaure encore la ligne.
+                // Texte committé EFFECTIF (chars sautés à leur casse existante).
+                self.extendGhostAnchorOnAccept(committedFullText: prePrefix + effectiveSuggestion, bundleID: bundleID)
                 self.predictor.cancel()
                 self.lastPredictedPrefix = nil
                 self.overlay.hide()
@@ -2190,7 +2214,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 self.partialAcceptedAtBundleID = nil
             }
             Log.info(.input, "ghost_accepted_full")
-            return performFullAccept(suggestion: suggestion, prePrefix: prePrefix, bundleID: bundleID)
+            return performFullAccept(suggestion: suggestion, prePrefix: prePrefix,
+                                     bundleID: bundleID, textAfterCaret: preSnap.textAfterCaret)
 
         case .commit:
             // Vraie traduction visible. On lit le champ, on rend la main au ghost
@@ -2297,7 +2322,10 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// Injects the ENTIRE `suggestion` at once, records it to personalization
     /// (opt-in, gated exactly like the Tab full-accept), and tears down the
     /// ghost. Used by the configurable accept-all key. Returns true (consumed).
-    nonisolated private func performFullAccept(suggestion: String, prePrefix: String, bundleID: String?) -> Bool {
+    /// `textAfterCaret` (mid-line) : permet de SAUTER les lettres de la suggestion
+    /// déjà présentes après le caret au lieu de les ré-injecter (cf. Tab).
+    nonisolated private func performFullAccept(suggestion: String, prePrefix: String,
+                                               bundleID: String?, textAfterCaret: String? = nil) -> Bool {
         let recordPersonalization: Bool = MainActor.assumeIsolated {
             guard store.personalizationEnabled, let bid = bundleID else { return false }
             if bundleBlocklist.contains(bid) { return false }
@@ -2324,8 +2352,16 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 await predictorRef.ingestAccepted(entry)
             }
         }
+        // Mid-line, caret DANS un mot : saut des lettres déjà présentes à droite.
+        let split = Self.midLineAcceptSplit(chunk: suggestion, afterCaret: textAfterCaret ?? "")
+        let effectiveSuggestion = String((textAfterCaret ?? "").prefix(split.skip)) + split.inject
         DispatchQueue.global(qos: .userInitiated).async { [axClient] in
-            axClient.inject(suggestion)
+            if split.skip > 0 {
+                axClient.moveCaretRight(by: split.skip)
+            }
+            if !split.inject.isEmpty {
+                axClient.inject(split.inject)
+            }
             let snap = axClient.snapshot()
             DispatchQueue.main.async { [weak self] in
                 self?.dismissedForText = snap.text ?? ""
@@ -2335,8 +2371,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             self.ledger.recordAccepted(charsSaved: suggestion.count - 1)
             // acceptAll = ligne entière acceptée. Garde la borne gauche, étend
-            // `ghostAnchorFull` au texte committé pour qu'un effacement la restaure.
-            self.extendGhostAnchorOnAccept(committedFullText: prePrefix + suggestion, bundleID: bundleID)
+            // `ghostAnchorFull` au texte committé EFFECTIF pour qu'un effacement
+            // la restaure.
+            self.extendGhostAnchorOnAccept(committedFullText: prePrefix + effectiveSuggestion, bundleID: bundleID)
             self.predictor.cancel()
             self.lastPredictedPrefix = nil
             self.overlay.hide()
@@ -2804,6 +2841,35 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// never triggers a spurious divergence clear.
     static func isLiveConsumeMatch(ghost: String, typedSince: String) -> Bool {
         ghost.lowercased().hasPrefix(typedSince.lowercased())
+    }
+
+    /// Découpe PURE d'un accept (Tab / accept-all) quand le caret est DANS un mot
+    /// dont la suite existe déjà à droite (« p|our ») : la complétion re-tape les
+    /// lettres « our » déjà présentes — les injecter produirait « pourour ».
+    ///
+    /// Renvoie `(skip, inject)` : `skip` = nombre de caractères ALPHANUMÉRIQUES en
+    /// tête du chunk qui matchent (case-insensitive) le début du texte après caret
+    /// → le caret SAUTE par-dessus (flèche →, les glyphes existants restent) ;
+    /// `inject` = le reste du chunk, injecté après le saut.
+    ///
+    /// Strictement lettres/chiffres : à une frontière (le chunk commence par un
+    /// espace, ou le texte après caret commence par un blanc/ponctuation), une
+    /// insertion est légitime et on ne saute RIEN — `(0, chunk)`, chemin
+    /// byte-identique. On ne saute jamais d'espace : l'espace existant sert de
+    /// séparateur droit à l'insertion (« pour votre rapport| reste »).
+    nonisolated static func midLineAcceptSplit(chunk: String, afterCaret: String) -> (skip: Int, inject: String) {
+        var skip = 0
+        var ci = chunk.startIndex
+        var ai = afterCaret.startIndex
+        while ci < chunk.endIndex, ai < afterCaret.endIndex {
+            let c = chunk[ci], a = afterCaret[ai]
+            guard c.isLetter || c.isNumber, a.isLetter || a.isNumber,
+                  String(c).lowercased() == String(a).lowercased() else { break }
+            skip += 1
+            ci = chunk.index(after: ci)
+            ai = afterCaret.index(after: ai)
+        }
+        return (skip, String(chunk[ci...]))
     }
 
     /// Pure render-gate decision: may the overlay paint `suggestion` right now?
