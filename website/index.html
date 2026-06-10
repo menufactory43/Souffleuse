@@ -357,11 +357,42 @@
   @keyframes ink {
     to { opacity: 1; transform: none; filter: blur(0); }
   }
-  .k1 { animation-delay: 0.10s; }
-  .k2 { animation-delay: 0.32s; }
-  .k3 { animation-delay: 0.56s; }
-  .k4 { animation-delay: 0.80s; }
-  .k5 { animation-delay: 1.02s; }
+  /* Décalés de ~0.4s : la page ne se lève qu'après les trois coups. */
+  .k1 { animation-delay: 0.55s; }
+  .k2 { animation-delay: 0.78s; }
+  .k3 { animation-delay: 1.00s; }
+  .k4 { animation-delay: 1.20s; }
+  .k5 { animation-delay: 1.40s; }
+
+  /* ===== Les trois coups ===== */
+  /* Le brigadier frappe trois coups avant le lever de rideau : trois traits
+     d'encre qui claquent (apparition sèche, pas de fondu), puis restent posés
+     en marque pâle au-dessus du « Ce soir » — une trace imprimée, pas un
+     élément d'interface. Décoratif uniquement (aria-hidden). */
+  .trois-coups {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    gap: 0.7rem;
+    height: 16px;
+    margin-bottom: 1.05rem;
+  }
+  .coup {
+    width: 2px;
+    height: 16px;
+    background: var(--ink);
+    opacity: 0;
+    transform: scaleY(0.25);
+    transform-origin: top center;
+    animation: coup-frappe 0.2s cubic-bezier(0.16, 0.84, 0.3, 1) forwards;
+  }
+  .coup:nth-child(2) { animation-delay: 0.22s; }
+  .coup:nth-child(3) { animation-delay: 0.44s; }
+  @keyframes coup-frappe {
+    0%   { opacity: 0;    transform: scaleY(0.25); }
+    45%  { opacity: 1;    transform: scaleY(1.05); }
+    100% { opacity: 0.4;  transform: scaleY(1); }
+  }
 
   /* ---------- La fenêtre de démo : le trou du souffleur ---------- */
   /* Pas de title-bar SaaS : un bandeau de programme, filets et petites capitales. */
@@ -992,6 +1023,20 @@
   .foot__meta { font-size: 0.84rem; color: var(--ink-faint); }
   .foot__sysreq { font-style: italic; }
 
+  /* Colophon : l'« achevé d'imprimer » des livres composés au plomb. La page
+     se referme comme un objet imprimé, et la promesse privacy y passe une
+     dernière fois, en sourdine. */
+  .colophon {
+    margin-top: 2.2rem;
+    padding-top: 1.3rem;
+    border-top: 1px solid rgba(26,22,19,0.18);
+    text-align: center;
+    font-style: italic;
+    font-size: 0.82rem;
+    color: var(--ink-faint);
+  }
+  .colophon p { margin: 0; line-height: 1.7; }
+
   /* ---------- Séquence d'entrée orchestrée (corps de page) ---------- */
 
   .reveal {
@@ -1165,6 +1210,9 @@
   <section class="hero" aria-labelledby="titre-principal">
     <div class="shell">
       <div class="playbill">
+        <div class="trois-coups" aria-hidden="true">
+          <span class="coup"></span><span class="coup"></span><span class="coup"></span>
+        </div>
         <div class="playbill__cesoir ink-rise k1">
           <span class="smallcaps">Ce soir, en représentation</span>
         </div>
@@ -1529,6 +1577,12 @@
       <p style="margin:0 0 0.3rem;">Souffleuse. Fait sur Mac, reste sur votre Mac.</p>
       <p class="foot__sysreq" style="margin:0;">Pour Mac · macOS Sonoma (14) ou plus récent · puces Apple M1 et suivantes</p>
     </div>
+  </div>
+  <div class="shell colophon">
+    <p>
+      Achevé d'imprimer en Bodoni Moda &amp; Spectral, sur papier crème.<br />
+      Aucun serveur n'a été dérangé pendant cette représentation.
+    </p>
   </div>
 </footer>
 
@@ -2140,6 +2194,17 @@
     }, { rootMargin: "-48% 0px -48% 0px", threshold: 0 });
     els.forEach(function (x) { io.observe(x.el); });
   }
+})();
+</script>
+<script>
+// Quand on quitte l'onglet, la souffleuse ne disparaît pas : elle attend en
+// coulisse. Le titre le dit, à voix basse, et reprend sa place au retour.
+(function () {
+  "use strict";
+  var titre = document.title;
+  document.addEventListener("visibilitychange", function () {
+    document.title = document.hidden ? "En coulisse… · Souffleuse" : titre;
+  });
 })();
 </script>
 </body>
