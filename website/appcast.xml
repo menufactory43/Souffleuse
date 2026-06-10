@@ -39,12 +39,12 @@
         </ul>
         <p>macOS 14+ · Apple Silicon · 100 % on-device.</p>
       ]]></description>
-      <!-- Signé le 2026-06-10 (build Developer ID avec Sparkle, non notarisé). -->
+      <!-- Signé le 2026-06-10 (build Developer ID, NOTARISÉ + staplé). -->
       <!-- Régénérer à chaque release : deploy/make-appcast-entry.sh website/Souffleuse.dmg -->
       <enclosure
         url="https://souffleuse.app/Souffleuse.dmg"
-        sparkle:edSignature="mJ0Ey2WsAulbVxIIr42ZDLlbHduQRDnsueGFfu+O6R3SvGNCzI3xo7sHMBHNlXmmsKatHuzFbHwJlau4H4ixAw=="
-        length="20819642"
+        sparkle:edSignature="/RmxfDrnaaXanxdCViYE1AWwtqTZ1y2qNSQ980Ffn9rwQrWRWtFt/scy/HaO/vS+kD9pxYSm3pyK20drzrSfDw=="
+        length="20827736"
         type="application/octet-stream" />
     </item>
 
