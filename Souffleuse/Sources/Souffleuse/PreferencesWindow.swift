@@ -441,6 +441,9 @@ private struct SouffleTab: View {
                 Toggle("Se taire quand une coquille est en cours", isOn: $store.hideOnTypo)
                     .disabled(!store.typoEnabled)
                 Toggle("Emoji — panneau dès « \u{003A} » et expansion (\u{003A}smile\u{003A} → 😄)", isOn: $store.emojiEnabled)
+                Toggle("Transformations « // » au clavier", isOn: $store.slashTransformEnabled)
+                Text("Tapez « // » après votre texte : corriger, raccourcir, reformuler, ton, traduire — ou une consigne libre validée par Entrée. Le résultat s'affiche d'abord en aperçu ; Tab remplace, Esc annule.")
+                    .font(.callout).foregroundStyle(.secondary)
                 Toggle("Corriger le texte avant de souffler", isOn: $store.prefixCorrectionEnabled)
             } header: {
                 Text("Corrections").font(.headline)

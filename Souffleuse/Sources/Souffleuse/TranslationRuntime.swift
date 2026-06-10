@@ -140,6 +140,34 @@ final class TranslationRuntime {
         )
     }
 
+    /// Génère depuis un prompt instruct DÉJÀ assemblé — voie générique des
+    /// transformations « // » (corriger / raccourcir / reformuler / instruction
+    /// libre, prompts de `GemmaChatPrompt+Transformation`). Même tuyau exact que
+    /// `translate`/`reformulate` : lazy-load, attente bornée du ghost (GpuGate),
+    /// budget adaptatif sur `sourceChars`, sampling déterministe (T=0,
+    /// penalty 1.1, lastN 64). L'appelant assemble le prompt avec le
+    /// chat-template du `model` courant (exposé en lecture).
+    @discardableResult
+    func transform(
+        prompt: String,
+        sourceChars: Int,
+        maxTokens: Int? = nil,
+        onToken: @escaping @Sendable (String) -> Bool
+    ) async -> LlamaMetrics? {
+        guard await ensureLoaded() else { return nil }
+        let budget = maxTokens ?? SuggestionPolicy.Tuning.translationMaxNewTokens(sourceChars: sourceChars)
+        await GpuGate.shared.awaitGhostIdle(
+            maxWaitMillis: SuggestionPolicy.Tuning.translationGhostWaitMaxMillis,
+            pollMillis: SuggestionPolicy.Tuning.translationGhostWaitPollMillis
+        )
+        return await engine.generate(
+            prompt: prompt,
+            maxTokens: budget,
+            sampling: LlamaSampling(temperature: 0, repeatPenalty: 1.1, repeatLastN: 64),
+            onToken: onToken
+        )
+    }
+
     /// Libère le modèle instruct (unload à l'idle — stratégie mémoire de repli /
     /// Phase 7).
     func unload() async {

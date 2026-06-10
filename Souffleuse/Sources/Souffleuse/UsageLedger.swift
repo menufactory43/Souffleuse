@@ -14,6 +14,31 @@ struct DayStat: Codable, Sendable, Equatable {
     var ghostsAccepted: Int = 0
     var translations: Int = 0
     var reformulations: Int = 0
+    /// Transformations « // » acceptées (Tab sur le preview).
+    var transformations: Int = 0
+
+    init(date: String, keystrokesSaved: Int = 0, ghostsAccepted: Int = 0,
+         translations: Int = 0, reformulations: Int = 0, transformations: Int = 0) {
+        self.date = date
+        self.keystrokesSaved = keystrokesSaved
+        self.ghostsAccepted = ghostsAccepted
+        self.translations = translations
+        self.reformulations = reformulations
+        self.transformations = transformations
+    }
+
+    /// Décodage tolérant : les fichiers écrits AVANT l'ajout d'un compteur n'ont
+    /// pas sa clé — `decodeIfPresent` évite de réinitialiser tout le carnet à
+    /// l'ajout d'une statistique (le décodage synthétisé jetterait le fichier).
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        date = try c.decode(String.self, forKey: .date)
+        keystrokesSaved = try c.decodeIfPresent(Int.self, forKey: .keystrokesSaved) ?? 0
+        ghostsAccepted = try c.decodeIfPresent(Int.self, forKey: .ghostsAccepted) ?? 0
+        translations = try c.decodeIfPresent(Int.self, forKey: .translations) ?? 0
+        reformulations = try c.decodeIfPresent(Int.self, forKey: .reformulations) ?? 0
+        transformations = try c.decodeIfPresent(Int.self, forKey: .transformations) ?? 0
+    }
 }
 
 /// Enveloppe versionnée sur disque (`usage-ledger.json`). Porte l'historique
@@ -79,6 +104,13 @@ final class UsageLedger {
     func recordReformulation() {
         let i = ensureToday()
         days[i].reformulations += 1
+        save()
+    }
+
+    /// Une transformation « // » a été acceptée (Tab sur le preview).
+    func recordTransformation() {
+        let i = ensureToday()
+        days[i].transformations += 1
         save()
     }
 
