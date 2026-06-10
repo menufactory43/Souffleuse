@@ -142,6 +142,7 @@ lignes, (4) overhead batch/étape.
 | Softmax vectorisé Accelerate | **REJETÉ** | A/B neutre : 134/127 vs 133/125 ms — l'expf est déjà masqué par le GPU. Pas de complexité sans gain. |
 | **Prefix-caching KV du prompt** (commit `4d15e6e`) | **ADOPTÉ** (toujours actif) | ctx long (~210 tok, `PARITY_LONGCTX=1`) : 242→97 ms (−60 %) ; ctx court : −13/−18 %. Ghosts **byte-identiques** (289 frappes, 0 diff). |
 | **Réserve advance** (commit `049c1fe`, flag `SOUFFLEUSE_BEAM_RESERVE`) | **ADOPTÉ** (flag-gaté) | voir tableau ci-dessous. |
+| maxTokens 12→8 (`SOUFFLEUSE_BEAM_MAXTOK=8`, éval 3 du handoff latence) | **REJETÉ** | A/B 2026-06-10 (15 phrases, 1087 frappes) : scorecards **identiques au pour-cent près** (KTC ≤1 58 %, ≤3 82 %, accepts 23/94, stabilité 100 %) et AUCUN gain de latence (p50 92 vs 104 ms, bruit d'ordre de passage). Les candidats terminent naturellement avant 8 tokens (`maxWords=3` + branches finies) : le cap ne mord jamais. Sanity check `MAXTOK=2` : p50 47 ms et métriques différentes — la variable est bien lue, le levier est juste mort. Le « seed décode 104→70 ms » espéré n'existe pas. |
 
 **Réserve — frais vs réserve (15 phrases, 1087 frappes)** :
 

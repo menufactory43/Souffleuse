@@ -115,21 +115,26 @@ affichage gaté), pas la consommation courante.
 
 ## 5. ÉVALS À FAIRE D'ABORD (l'étape suivante, avant tout code)
 
-1. **Quantifier le gisement sur les traces existantes** (gratuit) : étendre
-   `tools/latency_report.py` pour compter les seeds dont le préfixe a sauté de
-   plus de 3 chars depuis la génération précédente (= seeds post-consommation).
-   Les traces archivées dans /tmp suffisent. Si < 30 % des seeds → gisement
-   faible, s'arrêter là.
-2. **Banc de continuité** : étendre `SouffleuseParityEval` (ou
-   `SouffleuseBeamAmortizedEval`) avec un scénario « consomme N chars du ghost
-   puis continue de taper » qui compare : (a) comportement actuel (seed après
-   conso) vs (b) réserve avancée pendant la conso (`advance` char par char —
-   l'API existe). Mesurer : HIT%, latence à la frappe post-conso, et KTC
-   inchangé. C'est le go/no-go du fix.
-3. **Garde qualité maxTokens** (levier indépendant, zéro code) : A/B offline
-   `SOUFFLEUSE_BEAM_MAXTOK=8` vs 12 dans ParityEval (KTC ≤1/≤3, stabilité).
-   Si la qualité tient : seed décode ~104 → ~70 ms, le rolling refill (27 ms)
-   complète la fenêtre. Sinon : rejeter et documenter dans PARITY-FINDINGS.
+1. **Quantifier le gisement sur les traces existantes** — ✅ FAIT (2026-06-10,
+   commit `e2c3a53`, section « Seeds post-consommation » de
+   `tools/latency_report.py`). **Verdict : NO-GO.** Sur la session de
+   référence (`/tmp/souffleuse-latency.jsonl`, 91 seeds) : 23 % de sauts
+   > 3 chars, dont 22 % seulement en consommation probable (saut 4-24) —
+   sous le seuil de 30 %. Les autres traces confirment (apres-alignement :
+   31 % bruts mais 12 % consommation, le reste = sauts de focus > 24 chars ;
+   blocA/blocA-debug : 0 % consommation). En prime, ces seeds ne sont PAS
+   plus lents que les autres (p50 115 vs 132 ms) → gain potentiel ≈ 20 seeds
+   × ~115 ms par session. **Gisement faible : le fix réserve du §4 est
+   abandonné, ne pas re-litiguer.**
+2. **Banc de continuité** — SANS OBJET (c'était le go/no-go du fix abandonné
+   en 1).
+3. **Garde qualité maxTokens** — ✅ FAIT (2026-06-10). **Verdict : REJETÉ.**
+   A/B `SOUFFLEUSE_BEAM_MAXTOK=8` vs 12, `PARITY_ENGINE=beam`, 15 phrases :
+   scorecards identiques au pour-cent près ET aucun gain de latence — le cap
+   ne mord jamais (les candidats finissent avant 8 tokens, `maxWords=3`).
+   Sanity check `MAXTOK=2` (p50 47 ms, métriques différentes) : la variable
+   est bien effective, le levier est simplement mort. Le « décode 104→70 ms »
+   espéré n'existe pas. Documenté dans PARITY-FINDINGS §6. Ne pas re-litiguer.
 
 ## 6. Reprise après /clear
 
