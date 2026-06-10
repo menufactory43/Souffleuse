@@ -2853,8 +2853,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     ///  • BLANC : si le mot SUIVANT du chunk matche après le run de blancs
     ///    existant, on saute le run entier (le séparateur existant sert) ; en fin
     ///    de chunk on fusionne 1-pour-1 (le « espace après chaque mot » du Tab ne
-    ///    double pas l'espace existant) ; sinon on apparie 1 blanc — la
-    ///    re-synchro se fait sur un segment suivant.
+    ///    double pas l'espace existant) ; un séparateur FINAL collé à de la
+    ///    ponctuation existante est JETÉ (« hom|me. » : pas d'espace avant le
+    ///    point) ; sinon on apparie 1 blanc — la re-synchro se fait plus loin.
     ///  • COUTURE : si le plan finit sur une injection alphanumérique collée à un
     ///    caractère alphanumérique existant, on injecte un espace séparateur.
     /// Hors mid-line (`afterCaret` vide / commence par un retour) : une seule
@@ -2933,12 +2934,19 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 continue
             }
             // Segment blanc.
+            let nextWord = segments[(idx + 1)...].first(where: { $0.isWord })?.chars
             guard j < e.count, e[j].isWhitespace else {
+                // Séparateur de FIN de chunk collé à de la PONCTUATION existante
+                // (« hom|me. » + Tab « me  » : pas d'espace avant le point) → on
+                // le JETTE. Entre deux mots, ou devant un mot existant, ou en fin
+                // de champ, on l'injecte normalement.
+                if nextWord == nil, j < e.count, !isWordChar(e[j]) {
+                    continue
+                }
                 inject(String(seg.chars))
                 continue
             }
             let run = whitespaceRun(at: j)
-            let nextWord = segments[(idx + 1)...].first(where: { $0.isWord })?.chars
             if let nextWord, wordMatches(nextWord, at: j + run) {
                 skip(run)                           // le séparateur existant sert
             } else if nextWord == nil {
@@ -2965,16 +2973,13 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// Exécute le plan d'accept côté AX : flèches → pour les sauts (les glyphes
     /// existants restent en place), injection pour le texte nouveau.
     nonisolated private static func applyMidLineAcceptPlan(_ plan: MidLineAcceptPlan, axClient: AXClient) {
-        for (idx, op) in plan.ops.enumerated() {
+        for op in plan.ops {
             switch op {
             case .skip(let n):
+                // `moveCaretRight` ne REND la main qu'après confirmation (lecture
+                // AX) du déplacement — l'injection suivante part de la bonne
+                // position, pas de l'ancienne (le bug « hom me. »).
                 axClient.moveCaretRight(by: n)
-                // Les flèches sont des CGEvents ASYNCHRONES ; l'op suivante (write
-                // AX synchrone) doit voir le caret déjà déplacé. On laisse la
-                // runloop de l'hôte drainer les événements avant de continuer.
-                if idx + 1 < plan.ops.count {
-                    usleep(30_000)
-                }
             case .inject(let s):
                 axClient.inject(s)
             }
