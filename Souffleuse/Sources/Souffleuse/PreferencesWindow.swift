@@ -859,8 +859,21 @@ private struct AllowlistTab: View {
                 }
             ) {
                 Table(store.allowlist.rules, selection: $selection) {
-                    TableColumn("Bundle ID") { rule in
-                        Text(rule.bundleID).font(.system(.body, design: .monospaced))
+                    TableColumn("Application") { rule in
+                        // Nom + icône résolus depuis le bundle ID (AppCatalog,
+                        // même pattern que l'onglet Ton) ; app introuvable →
+                        // ID brut en fallback.
+                        if let app = AppCatalog.entry(forBundleID: rule.bundleID) {
+                            HStack(spacing: 6) {
+                                Image(nsImage: app.icon)
+                                    .resizable()
+                                    .frame(width: 16, height: 16)
+                                Text(app.name)
+                            }
+                            .help(rule.bundleID)
+                        } else {
+                            Text(rule.bundleID).font(.system(.callout, design: .monospaced))
+                        }
                     }
                     TableColumn("Titre (regex)") { rule in
                         Text(rule.titleRegex.isEmpty ? "—" : rule.titleRegex)
@@ -885,10 +898,18 @@ private struct AllowlistTab: View {
     }
 }
 
+/// Éditeur de règle d'allowlist. L'app se choisit par NOM + icône (même
+/// sélecteur que l'onglet Ton, `AppCatalog`) ; le bundle ID brut survit replié
+/// en « Avancé ». Le filtre de titre (regex) reste tel quel — outil
+/// volontairement avancé.
 private struct RuleEditor: View {
     @State var rule: AllowlistRule
     let onSave: (AllowlistRule) -> Void
     let onCancel: () -> Void
+
+    @State private var apps: [AppEntry] = []
+    @State private var filter = ""
+    @State private var showAdvanced = false
 
     var regexValid: Bool {
         let pattern = rule.titleRegex.trimmingCharacters(in: .whitespaces)
@@ -896,11 +917,51 @@ private struct RuleEditor: View {
         return (try? NSRegularExpression(pattern: pattern)) != nil
     }
 
+    private var filteredApps: [AppEntry] {
+        let needle = filter.trimmingCharacters(in: .whitespaces)
+        guard !needle.isEmpty else { return apps }
+        return apps.filter { $0.name.localizedCaseInsensitiveContains(needle) }
+    }
+
     var body: some View {
-        Form {
-            TextField("Bundle ID", text: $rule.bundleID, prompt: Text("com.apple.mail"))
+        VStack(alignment: .leading, spacing: 12) {
+            TextField("Rechercher une application…", text: $filter)
                 .textFieldStyle(.roundedBorder)
-                .font(.system(.body, design: .monospaced))
+
+            List(filteredApps, selection: Binding(
+                get: { rule.bundleID.isEmpty ? nil : rule.bundleID },
+                set: { rule.bundleID = $0 ?? "" }
+            )) { app in
+                HStack(spacing: 8) {
+                    Image(nsImage: app.icon)
+                        .resizable()
+                        .frame(width: 18, height: 18)
+                    Text(app.name)
+                    Spacer()
+                    if app.bundleID == rule.bundleID {
+                        Image(systemName: "checkmark")
+                            .foregroundStyle(.tint)
+                    }
+                }
+                .tag(app.bundleID)
+            }
+            .frame(height: 200)
+            .overlay {
+                if apps.isEmpty {
+                    ProgressView()
+                } else if filteredApps.isEmpty {
+                    Text("Aucune application ne correspond — voir « Avancé ».")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+            }
+
+            DisclosureGroup("Avancé — identifiant d'application", isExpanded: $showAdvanced) {
+                TextField("Bundle ID", text: $rule.bundleID, prompt: Text("com.apple.mail"))
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+            }
+            .font(.callout)
+
             TextField("Titre (regex, optionnel)", text: $rule.titleRegex, prompt: Text("^Re: .*"))
                 .textFieldStyle(.roundedBorder)
                 .font(.system(.body, design: .monospaced))
@@ -920,7 +981,15 @@ private struct RuleEditor: View {
             }
         }
         .padding(20)
-        .frame(width: 420)
+        .frame(width: 460)
+        .onAppear {
+            apps = AppCatalog.entries()
+            // Règle hors catalogue (app désinstallée, ID manuel) : ouvre
+            // l'avancé pour que l'ID reste visible et modifiable.
+            if !rule.bundleID.isEmpty, !apps.contains(where: { $0.bundleID == rule.bundleID }) {
+                showAdvanced = true
+            }
+        }
     }
 }
 
