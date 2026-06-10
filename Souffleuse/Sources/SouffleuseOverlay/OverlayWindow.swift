@@ -81,6 +81,51 @@ public final class OverlayWindow {
         show(text: text, at: caretRectQuartz, hostText: nil, caretIndex: nil, hostFont: nil)
     }
 
+    // MARK: - Apparence du souffle (Préférences › Apparence)
+
+    /// Couleur du souffle inline. `neutral` = murmure gris historique
+    /// (`.tertiaryLabelColor`, « pas encore validé ») ; `brand` = sang-de-bœuf,
+    /// opt-in. Pas de troisième cas : une seule voix de marque, jamais un nuancier.
+    public enum GhostTint: Sendable {
+        case neutral
+        case brand
+    }
+
+    /// Applique couleur + opacité du souffle. Persiste sur le `label`/`pillView`
+    /// réutilisés (ni `show` ni `showPill` ne les réécrivent), donc un seul appel
+    /// au lancement + un à chaque changement de pref suffit. La correction
+    /// (rouge barré / vert) garde ses couleurs SÉMANTIQUES — ce n'est pas « le
+    /// souffle », c'est une coquille signalée — donc elle n'est pas teintée ici.
+    public func applyGhostAppearance(tint: GhostTint, opacity: Double) {
+        let clamped = max(0.2, min(1.0, opacity))
+        label.textColor = Self.ghostColor(for: tint)
+        label.alphaValue = clamped
+        // La pill mid-line suit le même souffle : opacité commune, et la marque
+        // remplace son gris `.secondaryLabelColor` quand elle est choisie (nil =
+        // garde le gris historique de la pill).
+        pillView.alphaValue = clamped
+        pillView.suggestionColor = (tint == .brand) ? Self.brandGhost : nil
+        if !pillView.isHidden { pillView.needsDisplay = true }
+    }
+
+    static func ghostColor(for tint: GhostTint) -> NSColor {
+        switch tint {
+        case .neutral: return .tertiaryLabelColor
+        case .brand: return brandGhost
+        }
+    }
+
+    /// Sang-de-bœuf (#8c2b21 ; éclairci en dark pour rester lisible). Dupliqué
+    /// ici depuis la couche app (`PreferencesWindow.Color.sangDeBoeuf`) car
+    /// `SouffleuseOverlay` est un module autonome sans accès à SwiftUI.Color —
+    /// même valeur, même voix de marque.
+    static let brandGhost: NSColor = NSColor(name: nil) { appearance in
+        let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        return dark
+            ? NSColor(srgbRed: 0xd0 / 255, green: 0x6a / 255, blue: 0x5d / 255, alpha: 1)
+            : NSColor(srgbRed: 0x8c / 255, green: 0x2b / 255, blue: 0x21 / 255, alpha: 1)
+    }
+
     /// `hostText` + `caretIndex` are used to correct caret X when the AX rect is a
     /// line rect (some apps, e.g. Notes, return line bounds instead of caret bounds).
     /// `hostFont` is the actual font of the host text (queried via
@@ -523,6 +568,11 @@ final class PillView: NSView {
     private var text: String = ""
     private var font: NSFont = .systemFont(ofSize: 15)
 
+    /// Couleur de la suggestion dans la pill. `nil` = gris historique
+    /// (`.secondaryLabelColor`) ; posée par `OverlayWindow.applyGhostAppearance`
+    /// à la voix de marque quand l'utilisateur choisit le sang-de-bœuf.
+    var suggestionColor: NSColor?
+
     override var isOpaque: Bool { false }
     override var isFlipped: Bool { false }
 
@@ -553,7 +603,7 @@ final class PillView: NSView {
         // la hauteur du run combiné, inset hPad.
         let suggestionAttrs: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: NSColor.secondaryLabelColor,
+            .foregroundColor: suggestionColor ?? NSColor.secondaryLabelColor,
         ]
         var x = Self.hPad
         if !typed.isEmpty {

@@ -56,6 +56,22 @@ enum CompletionLength: String, CaseIterable, Sendable {
     }
 }
 
+/// Couleur du souffle inline. `gris` = murmure neutre par défaut (le look
+/// historique `.tertiaryLabelColor`, qui se lit comme « pas encore validé ») ;
+/// `sangDeBoeuf` = la voix de marque, opt-in. Volontairement BINAIRE — pas de
+/// nuancier libre façon cotabby : une seule voix, on ne la dilue pas en douze
+/// teintes. Persisté en raw string.
+enum GhostColorStyle: String, CaseIterable, Sendable {
+    case gris, sangDeBoeuf
+
+    var label: String {
+        switch self {
+        case .gris: return "Gris neutre"
+        case .sangDeBoeuf: return "Sang-de-bœuf"
+        }
+    }
+}
+
 struct ModelOption: Identifiable, Sendable, Hashable {
     let id: String
     let displayName: String
@@ -150,6 +166,8 @@ final class PreferencesStore {
         static let trailingSpaceOnPartial = "trailingSpaceOnPartial"
         static let prefixCorrectionEnabled = "prefixCorrectionEnabled"
         static let midLineGhostEnabled = "midLineGhostEnabled"
+        static let ghostOpacity = "ghostOpacity"
+        static let ghostColorStyle = "ghostColorStyle"
     }
 
     var enabled: Bool {
@@ -276,6 +294,18 @@ final class PreferencesStore {
     var midLineGhostEnabled: Bool {
         didSet { UserDefaults.standard.set(midLineGhostEnabled, forKey: K.midLineGhostEnabled) }
     }
+    /// Opacité du souffle inline (0.2 → 1.0). À 1.0 = look historique (le gris
+    /// `.tertiaryLabelColor` à pleine intensité, aucun changement pour l'existant) ;
+    /// plus bas = plus effacé avant acceptation. Réglé dans Préférences › Apparence,
+    /// appliqué au label de l'overlay via `alphaValue`.
+    var ghostOpacity: Double {
+        didSet { UserDefaults.standard.set(ghostOpacity, forKey: K.ghostOpacity) }
+    }
+    /// Couleur du souffle inline — gris neutre (défaut) ou sang-de-bœuf opt-in.
+    /// Voir `GhostColorStyle`. Mappé sur `OverlayWindow.GhostTint` côté AppDelegate.
+    var ghostColorStyle: GhostColorStyle {
+        didSet { UserDefaults.standard.set(ghostColorStyle.rawValue, forKey: K.ghostColorStyle) }
+    }
 
     let allowlist = AllowlistStore()
     let hudAnchors = HUDAnchorStore()
@@ -327,6 +357,10 @@ final class PreferencesStore {
         self.trailingSpaceOnPartial = (d.object(forKey: K.trailingSpaceOnPartial) as? Bool) ?? true
         self.prefixCorrectionEnabled = (d.object(forKey: K.prefixCorrectionEnabled) as? Bool) ?? true
         self.midLineGhostEnabled = (d.object(forKey: K.midLineGhostEnabled) as? Bool) ?? false
+        // Défauts = look historique : gris à pleine opacité, donc rien ne bouge
+        // pour qui n'ouvre jamais l'onglet Apparence.
+        self.ghostOpacity = (d.object(forKey: K.ghostOpacity) as? Double) ?? 1.0
+        self.ghostColorStyle = GhostColorStyle(rawValue: d.string(forKey: K.ghostColorStyle) ?? "") ?? .gris
     }
 
     /// Vision language codes derived from the toggles. Always non-empty (falls
