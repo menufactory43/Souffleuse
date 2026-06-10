@@ -123,6 +123,11 @@ public final class KeyInterceptor: @unchecked Sendable {
         /// sur QWERTY le panneau ne s'ouvre pas après un chiffre (garde 14:30),
         /// donc le vol d'un vrai chiffre reste marginal.
         case digit(Int)
+        /// Retour (keyCode 36) NU — validation de l'instruction libre du picker
+        /// « // ». Résolu uniquement pendant que ce picker est armé ET que son
+        /// filtre est non vide (`setSlashPickerArmed(enter:)`) : « // » nu suivi
+        /// d'Entrée reste un saut de ligne normal dans l'app hôte.
+        case enter
     }
 
     /// Called on the tap thread when a Tab/Esc keyDown arrives while active.
@@ -141,15 +146,24 @@ public final class KeyInterceptor: @unchecked Sendable {
     private let lock = OSAllocatedUnfairLock(initialState: false)
     /// SOURCES d'armement du tap : `ghost` (une suggestion s'affiche — sémantique
     /// historique de `setActive`), `hud` (le panneau de traduction est visible —
-    /// permet ⌘↩/⌘⇧→ SANS ghost) et `picker` (le picker emoji est visible —
-    /// permet la rangée 1–9 et Esc). Le tap est armé si l'une est vraie ; la
-    /// POLITIQUE DE CONSOMMATION diffère (voir `shouldConsume`) : armé-HUD-seul,
-    /// Tab/Esc/accept-all restent à l'hôte ; armé-picker-seul, seuls les digits
-    /// et Esc nous appartiennent — la frappe normale continue dans l'app hôte.
-    /// Écrit du main (`setActive`/`setHUDArmed`/`setPickerArmed`), lu sur le
-    /// thread du tap.
-    private let armSources = OSAllocatedUnfairLock<(ghost: Bool, hud: Bool, picker: Bool)>(
-        initialState: (false, false, false))
+    /// permet ⌘↩/⌘⇧→ SANS ghost), `picker` (le picker emoji est visible —
+    /// permet la rangée 1–9 et Esc), `slashPicker` (le picker « // » est visible —
+    /// rangée 1–9 si `slashDigits`, ⏎ si `slashEnter`, et Esc) et `preview`
+    /// (un preview de transformation attend Tab/Esc). Le tap est armé si l'une
+    /// est vraie ; la POLITIQUE DE CONSOMMATION diffère (voir `shouldConsume`) :
+    /// armé-HUD-seul, Tab/Esc/accept-all restent à l'hôte ; armé-picker-seul,
+    /// seuls les digits et Esc nous appartiennent ; armé-preview-seul, seuls
+    /// Tab et Esc — la frappe normale continue dans l'app hôte.
+    /// `slashDigits` est faux en mode instruction libre (le filtre ne matche
+    /// aucune intention) : les chiffres redeviennent de la saisie normale
+    /// (« //passe en 3 points » reste saisissable). `slashEnter` est faux quand
+    /// le filtre est vide (« // » nu + Entrée = saut de ligne normal).
+    /// Écrit du main (`setActive`/`setHUDArmed`/`setPickerArmed`/
+    /// `setSlashPickerArmed`/`setPreviewArmed`), lu sur le thread du tap.
+    private let armSources = OSAllocatedUnfairLock<(
+        ghost: Bool, hud: Bool, picker: Bool,
+        slashPicker: Bool, slashDigits: Bool, slashEnter: Bool, preview: Bool
+    )>(initialState: (false, false, false, false, false, false, false))
     /// Configurable "accept all" binding (keyCode + relevant modifier flags as a
     /// raw mask), nil when disabled. Written from the main thread
     /// (`setAcceptAllKey`), read on the tap thread (`handle`); its own lock.
@@ -232,14 +246,37 @@ public final class KeyInterceptor: @unchecked Sendable {
         setArm(picker: armed)
     }
 
+    /// Arme le tap pour le PICKER « // » : rangée 1–9 (si `digits`), ⏎ (si
+    /// `enter`) et Esc. `digits == false` quand le filtre ne matche aucune
+    /// intention (mode instruction libre) ; `enter == false` quand le filtre
+    /// est vide — Entrée reste alors un saut de ligne dans l'app hôte.
+    public func setSlashPickerArmed(_ armed: Bool, digits: Bool = true, enter: Bool = true) {
+        setArm(slashPicker: armed, slashDigits: digits, slashEnter: enter)
+    }
+
+    /// Arme le tap pour le PREVIEW de transformation : Tab (accepter) et Esc
+    /// (annuler) nus, hors flux ghost. Branché sur `onVisibilityChanged` du HUD
+    /// de preview.
+    public func setPreviewArmed(_ armed: Bool) {
+        setArm(preview: armed)
+    }
+
     /// Recalcule l'état effectif (OR des sources) et (dés)active le tap.
-    private func setArm(ghost: Bool? = nil, hud: Bool? = nil, picker: Bool? = nil) {
+    private func setArm(
+        ghost: Bool? = nil, hud: Bool? = nil, picker: Bool? = nil,
+        slashPicker: Bool? = nil, slashDigits: Bool? = nil,
+        slashEnter: Bool? = nil, preview: Bool? = nil
+    ) {
         guard let tap else { return }
         let effective = armSources.withLock { s in
             if let g = ghost { s.ghost = g }
             if let h = hud { s.hud = h }
             if let p = picker { s.picker = p }
-            return s.ghost || s.hud || s.picker
+            if let sp = slashPicker { s.slashPicker = sp }
+            if let sd = slashDigits { s.slashDigits = sd }
+            if let se = slashEnter { s.slashEnter = se }
+            if let pv = preview { s.preview = pv }
+            return s.ghost || s.hud || s.picker || s.slashPicker || s.preview
         }
         lock.withLock { $0 = effective }
         CGEvent.tapEnable(tap: tap, enable: effective)
@@ -252,12 +289,19 @@ public final class KeyInterceptor: @unchecked Sendable {
     /// un Esc ou la touche accept-all (souvent →) tapés pendant que le panneau
     /// est visible continuent leur vie normale dans l'app hôte. Armé pour le
     /// PICKER emoji, les digits 1–9 et Esc nous appartiennent (fermer/choisir).
-    static func shouldConsume(key: Key, ghostArmed: Bool, pickerArmed: Bool = false) -> Bool {
+    /// Armé pour le PICKER « // », digits + ⏎ + Esc ; armé pour un PREVIEW de
+    /// transformation, Tab (accepter) + Esc (annuler) — le reste passe à l'hôte.
+    static func shouldConsume(
+        key: Key, ghostArmed: Bool, pickerArmed: Bool = false,
+        slashPickerArmed: Bool = false, previewArmed: Bool = false
+    ) -> Bool {
         switch key {
         case .commit, .cycleTarget: return true
-        case .digit: return pickerArmed
-        case .esc: return ghostArmed || pickerArmed
-        case .tab, .acceptAll: return ghostArmed
+        case .digit: return pickerArmed || slashPickerArmed
+        case .enter: return slashPickerArmed
+        case .esc: return ghostArmed || pickerArmed || slashPickerArmed || previewArmed
+        case .tab: return ghostArmed || previewArmed
+        case .acceptAll: return ghostArmed
         }
     }
 
@@ -322,19 +366,27 @@ public final class KeyInterceptor: @unchecked Sendable {
     /// `pickerArmed` : les digits 1–9 ne sont RÉSOLUS que pendant que le picker
     /// emoji est visible — sinon une frappe « & » (AZERTY) ou « 1 » (QWERTY)
     /// pendant un ghost serait résolue puis avalée par la politique historique
-    /// « armé-ghost consomme tout ».
+    /// « armé-ghost consomme tout ». Même logique pour le picker « // »
+    /// (`slashPickerArmed`), dont les digits se coupent en mode instruction
+    /// libre (`slashDigitsArmed == false`) et dont le ⏎ ne se résout que filtre
+    /// non vide (`slashEnterArmed`).
     static func resolveKey(
         keyCode: Int64,
         mods: UInt64,
         commit: (code: Int64, flagsRaw: UInt64)?,
         acceptAll: (code: Int64, flagsRaw: UInt64)?,
         cycleTarget: (code: Int64, flagsRaw: UInt64)? = nil,
-        pickerArmed: Bool = false
+        pickerArmed: Bool = false,
+        slashPickerArmed: Bool = false,
+        slashDigitsArmed: Bool = true,
+        slashEnterArmed: Bool = true
     ) -> Key? {
         if let b = commit, keyCode == b.code, mods == (b.flagsRaw & relevantFlags) { return .commit }
         if let b = cycleTarget, keyCode == b.code, mods == (b.flagsRaw & relevantFlags) { return .cycleTarget }
         if let b = acceptAll, keyCode == b.code, mods == (b.flagsRaw & relevantFlags) { return .acceptAll }
-        if pickerArmed, mods == 0, let n = digitRowPositions[keyCode] { return .digit(n) }
+        if pickerArmed || (slashPickerArmed && slashDigitsArmed),
+           mods == 0, let n = digitRowPositions[keyCode] { return .digit(n) }
+        if slashPickerArmed, slashEnterArmed, keyCode == 36, mods == 0 { return .enter }
         switch keyCode {
         case 48 where mods == 0: return .tab
         case 53 where mods == 0: return .esc
@@ -368,13 +420,20 @@ public final class KeyInterceptor: @unchecked Sendable {
             commit: commitBinding.withLock { $0 },
             acceptAll: acceptBinding.withLock { $0 },
             cycleTarget: cycleBinding.withLock { $0 },
-            pickerArmed: arm.picker
+            pickerArmed: arm.picker,
+            slashPickerArmed: arm.slashPicker,
+            slashDigitsArmed: arm.slashDigits,
+            slashEnterArmed: arm.slashEnter
         ) else {
             return Unmanaged.passUnretained(event)
         }
         // Armé pour le HUD seul (pas de ghost) : Tab/Esc/accept-all passent —
         // seules les touches de traduction sont à nous. Armé-picker : digits + Esc.
-        guard Self.shouldConsume(key: key, ghostArmed: arm.ghost, pickerArmed: arm.picker) else {
+        // Armé-slash-picker : digits/⏎/Esc. Armé-preview : Tab/Esc.
+        guard Self.shouldConsume(
+            key: key, ghostArmed: arm.ghost, pickerArmed: arm.picker,
+            slashPickerArmed: arm.slashPicker, previewArmed: arm.preview
+        ) else {
             return Unmanaged.passUnretained(event)
         }
         if handler(key) {

@@ -118,6 +118,34 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// taper dans le fragment ne rouvre pas non plus ; quitter le fragment
     /// (espace, suppression du `:`) ré-arme.
     private var emojiPickerDismissedAnchor: String?
+    // ── Transformations « // » (picker d'intentions + preview Tab/Esc) ──
+    /// Picker au caret — rangée ①–⑤ (corriger · raccourcir · reformuler · ton ·
+    /// traduire), clone structurel du picker emoji.
+    private let transformPicker = TransformPickerWindow()
+    /// HUD dédié au preview — instance SÉPARÉE de `translationHUD` : son
+    /// `onVisibilityChanged` arme Tab/Esc (preview), pas ⌘↩ (flux traduction).
+    private let transformHUD = TranslationHUDWindow()
+    /// État du trigger « // » actuellement détecté (portée + filtre). Nil =
+    /// picker fermé. Lu par `handleSlashPickerDigit/Enter` sur le main thread
+    /// (handleKey y est re-dispatché) via `MainActor.assumeIsolated`.
+    private var slashPickerState: SlashTransformState?
+    /// Intentions affichées (rangée filtrée) — la position visuelle = index + 1.
+    private var slashPickerMatches: [TransformationIntent] = []
+    /// Préfixe jusqu'au « // » inclus — miroir d'`emojiPickerAnchor`.
+    private var slashPickerAnchor: String?
+    /// Ancre refusée par Esc — tant que le même « //… » reste ouvert, on ne
+    /// rouvre pas le picker que l'utilisateur vient de refuser.
+    private var slashPickerDismissedAnchor: String?
+    /// Transformation en preview (générée ou en cours de stream).
+    private var pendingTransformation: TextTransformation?
+    /// Sortie nettoyée du stream, posée à la fin — Tab l'injecte.
+    private var transformOutput: String?
+    /// Préfixe du champ à l'instant du lancement — toute dérive (frappe, clic
+    /// ailleurs) annule le preview silencieusement, sans toucher au champ.
+    private var transformAnchorPrefix: String?
+    /// Task de génération en vol — annulée par frappe (cancel-on-keystroke,
+    /// même contrat que le ghost) ou par Esc.
+    private var transformTask: Task<Void, Never>?
     /// Mini Phase 4 — moteur instruct paresseux + petit panneau de traduction.
     private let translationRuntime = TranslationRuntime()
     private let translationHUD = TranslationHUDWindow()
@@ -423,6 +451,19 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         //    à l'écran (fenêtre d'armement explicite, Tab/Esc/→ restent à l'hôte).
         translationHUD.onVisibilityChanged = { [weak self] visible in
             self?.interceptor.setHUDArmed(visible)
+        }
+        // Preview des transformations « // » : tant que SON HUD est à l'écran,
+        // Tab (accepter) et Esc (annuler) nus sont interceptables — flux séparé
+        // de la traduction (⌘↩ n'est jamais armé par ce panneau).
+        transformHUD.onVisibilityChanged = { [weak self] visible in
+            self?.interceptor.setPreviewArmed(visible)
+        }
+        // Même persistance de position par app que le HUD de traduction (§3b).
+        transformHUD.onMoved = { [weak self] bundleID, offset in
+            guard let self, let bid = bundleID else { return }
+            self.store.hudAnchors.upsert(
+                HUDAnchor(bundleID: bid, edge: .left,
+                          offsetX: Double(offset.width), offsetY: Double(offset.height)))
         }
         // 2. Hotkey GLOBALE (pref `translateHotKey`, défaut ⌥⌘T) : traduit le
         //    champ focus à tout moment, une frappe. Ré-appliquée au changement
@@ -1169,6 +1210,30 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         interceptor.setPickerArmed(false)
     }
 
+    /// Ferme le picker « // » et désarme digits/⏎/Esc. Idempotent — miroir de
+    /// `hideEmojiPicker()`, appelé sur tous les chemins où le contexte disparaît.
+    private func hideSlashPicker() {
+        guard slashPickerState != nil || transformPicker.isVisible else { return }
+        slashPickerState = nil
+        slashPickerAnchor = nil
+        slashPickerMatches = []
+        transformPicker.hide()
+        interceptor.setSlashPickerArmed(false)
+    }
+
+    /// Annule le preview de transformation : stoppe la génération en vol, cache
+    /// le HUD (→ désarme Tab/Esc via `onVisibilityChanged`), oublie l'état.
+    /// NE TOUCHE JAMAIS au champ — le « //… » tapé reste, l'utilisateur l'efface
+    /// lui-même (décision produit 5).
+    private func cancelTransformPreview() {
+        transformTask?.cancel()
+        transformTask = nil
+        pendingTransformation = nil
+        transformOutput = nil
+        transformAnchorPrefix = nil
+        transformHUD.hide()
+    }
+
     private func tick() {
         guard store.enabled else { return }
         // Icône vivante : par défaut « pas de champ actif » ; repassé à vrai plus
@@ -1180,6 +1245,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         if NSApp.isActive {
             overlay.hide()
             hideEmojiPicker()
+            hideSlashPicker()
             presenceHideNow()
             interceptor.setActive(false)
             return
@@ -1189,6 +1255,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         guard AXClient.isTrusted else {
             overlay.hide()
             hideEmojiPicker()
+            hideSlashPicker()
             presenceHideNow()
             interceptor.setActive(false)
             return
@@ -1244,6 +1311,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             }
             overlay.hide()
             hideEmojiPicker()
+            hideSlashPicker()
             // Échec AX transitoire (caret/elementRect nil ce tick) : on TIENT le
             // badge ancré pendant la grâce plutôt que de le faire clignoter.
             presenceHoldOrHide()
@@ -1261,6 +1329,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         if allowMode == .disabled {
             overlay.hide()
             hideEmojiPicker()
+            hideSlashPicker()
             presenceHideNow()
             interceptor.setActive(false)
             return
@@ -1471,6 +1540,21 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
 
         // Only predict from text up to caret; cap to 2048 chars (matches predictor).
         let prefix = String(text.prefix(caretIndex))
+
+        // Preview « // » en cours ? Toute dérive du préfixe (frappe, suppression,
+        // déplacement du caret, changement de champ) ANNULE silencieusement —
+        // génération comprise (cancel-on-keystroke, même contrat que le ghost).
+        // Le champ reste intact : seule l'acceptation Tab écrit dedans. Préfixe
+        // stable → gel du pipeline (pas de ghost/typo/predict sous le preview).
+        // Placé AVANT les branches mid-line/anchor : la dérive doit annuler même
+        // quand le caret atterrit au milieu d'un texte existant.
+        if pendingTransformation != nil {
+            if prefix != transformAnchorPrefix {
+                cancelTransformPreview()
+            } else {
+                return
+            }
+        }
 
         // Trace de latence : 1ᵉʳ tick qui VOIT ce préfixe (l'écart avec le
         // key_down précédent = la quantization du poll 80 ms).
@@ -1838,6 +1922,53 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             hideEmojiPicker()
         }
 
+        // Picker « // » — dès « // » ouvert en début de mot avant le caret, la
+        // rangée d'intentions ①–⑤ s'affiche au caret (même gabarit que le picker
+        // emoji) ; taper filtre, la rangée 1–9 choisit, ⏎ valide le 1er match ou
+        // l'instruction libre, Esc ferme. Pendant que le panneau est ouvert, pas
+        // de ghost LLM concurrent. Jamais en champ sécurisé (re-garde explicite,
+        // déjà filtré par le gate en amont) ni dans les apps où « // » est un
+        // commentaire/chemin (mêmes bundles que l'emoji).
+        if store.slashTransformEnabled,
+           !snap.isSecureField,
+           !SlashTransformDetector.disabledBundles.contains(bundleID),
+           let slashState = SlashTransformDetector.detect(textBeforeCaret: prefix),
+           let rect = rectForGhost
+        {
+            // Ancre de refus : le préfixe jusqu'au « // » inclus. Tant qu'elle
+            // n'a pas changé après un Esc, le panneau reste fermé.
+            let anchor = String(prefix.prefix(prefix.count - slashState.filter.count))
+            if slashPickerDismissedAnchor != anchor {
+                slashPickerDismissedAnchor = nil
+                if slashPickerState == nil { Log.info(.input, "slash_picker_shown") }
+                slashPickerState = slashState
+                slashPickerAnchor = anchor
+                slashPickerMatches = TransformationIntent.matches(filter: slashState.filter)
+                transformPicker.show(
+                    labels: slashPickerMatches.map(\.displayName),
+                    freeInstruction: slashPickerMatches.isEmpty ? slashState.filter : nil,
+                    at: rect)
+                // Digits coupés en mode instruction libre (« //passe en 3 points »
+                // reste saisissable) ; ⏎ armé seulement filtre non vide (« // » nu
+                // + Entrée = saut de ligne normal dans l'app hôte).
+                interceptor.setSlashPickerArmed(
+                    true,
+                    digits: !slashPickerMatches.isEmpty,
+                    enter: !slashState.filter.isEmpty)
+                predictor.cancel()
+                lastPredictedPrefix = nil
+                overlay.hide()
+                interceptor.setActive(false)
+                currentTypo = nil
+                return
+            }
+        } else {
+            // Plus de trigger ouvert : fermer le panneau et ré-armer le
+            // déclenchement après un éventuel refus.
+            slashPickerDismissedAnchor = nil
+            hideSlashPicker()
+        }
+
         // Typo correction — preempts LLM ghost. Triggered only on word boundary
         // (caret right after a non-word char like space/punct), so we don't
         // flag the word the user is still typing.
@@ -2083,7 +2214,14 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // ferme sans insérer ET mémorise le fragment refusé pour que le tick
         // suivant ne rouvre pas le panneau immédiatement.
         if case .digit(let n) = key {
-            return handleEmojiPickerDigit(n)
+            // Les deux pickers coexistent dans l'API mais jamais à l'écran
+            // ensemble (le tick n'en arme qu'un) : emoji d'abord, puis slash.
+            if handleEmojiPickerDigit(n) { return true }
+            return handleSlashPickerDigit(n)
+        }
+        if key == .enter {
+            // ⏎ n'est résolu que pendant le picker « // » (filtre non vide).
+            return handleSlashPickerEnter()
         }
         if key == .esc {
             let closedPicker: Bool = MainActor.assumeIsolated {
@@ -2096,13 +2234,32 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 Log.info(.input, "emoji_picker_dismissed")
                 return true
             }
+            // Esc pendant le picker « // » : ferme sans rien insérer ET mémorise
+            // l'ancre refusée — le tick suivant ne rouvre pas le même « //… ».
+            let closedSlashPicker: Bool = MainActor.assumeIsolated {
+                guard slashPickerState != nil else { return false }
+                slashPickerDismissedAnchor = slashPickerAnchor
+                hideSlashPicker()
+                return true
+            }
+            if closedSlashPicker {
+                Log.info(.input, "slash_picker_dismissed")
+                return true
+            }
+            // Esc pendant le preview de transformation : ferme, champ INTACT.
+            if handleTransformEsc() { return true }
+        }
+        if key == .tab, handleTransformTab() {
+            // Tab pendant le preview : remplace « portée + //filtre » par le
+            // résultat — prioritaire sur le flux ghost.
+            return true
         }
         // Les touches de TRADUCTION (.commit/.cycleTarget) n'ont pas besoin de
         // suggestion en attente : elles fonctionnent aussi quand le tap est armé
         // par le HUD seul (panneau visible sans ghost) ou via la hotkey globale.
         // Les touches du ghost (Tab/Esc/accept-all), elles, exigent du pending.
         switch key {
-        case .commit, .cycleTarget, .digit: break
+        case .commit, .cycleTarget, .digit, .enter: break
         case .tab, .esc, .acceptAll:
             if pending.typo == nil, pending.llm.isEmpty { return false }
         }
@@ -2393,8 +2550,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             }
             return true
 
-        case .digit:
-            // Traité en tête de fonction (early return) — inatteignable ici.
+        case .digit, .enter:
+            // Traités en tête de fonction (early return) — inatteignables ici.
             return false
         }
     }
@@ -2424,6 +2581,166 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
         Log.info(.input, "emoji_picker_pick")
         return true
+    }
+
+    // MARK: - Transformations « // » (sélection picker, preview, Tab/Esc)
+
+    /// Chiffre ①–⑤ pendant le picker « // ». true = consommé. `handleKey` est
+    /// re-dispatché sur le main thread → `assumeIsolated` est sûr ici (même
+    /// contrat que `handleEmojiPickerDigit`). Position au-delà de la rangée →
+    /// touche avalée sans effet (le tap a déjà consommé), comportement assumé.
+    nonisolated private func handleSlashPickerDigit(_ n: Int) -> Bool {
+        MainActor.assumeIsolated {
+            guard let state = slashPickerState,
+                  (1...slashPickerMatches.count).contains(n) else { return false }
+            let intent = slashPickerMatches[n - 1]
+            Log.info(.input, "slash_picker_pick")
+            launchTransform(intent: intent, state: state)
+            return true
+        }
+    }
+
+    /// ⏎ pendant le picker « // » : 1er match si la rangée filtrée est non vide,
+    /// sinon instruction libre (`.libre(filter)`). Filtre vide → false (⏎ reste
+    /// à l'app — « // » nu + Entrée = saut de ligne normal ; le tap ne résout
+    /// d'ailleurs pas ⏎ dans ce cas, cf. `setSlashPickerArmed(enter:)`).
+    nonisolated private func handleSlashPickerEnter() -> Bool {
+        MainActor.assumeIsolated {
+            guard let state = slashPickerState, !state.filter.isEmpty else { return false }
+            let intent = slashPickerMatches.first ?? .libre(state.filter)
+            Log.info(.input, "slash_picker_pick")
+            launchTransform(intent: intent, state: state)
+            return true
+        }
+    }
+
+    /// Résout les paramètres de l'intention (registre via `ToneStore`, cible via
+    /// la sélection de conversation courante — même aiguillage que ⌥⌘T), assemble
+    /// le prompt avec le chat-template du modèle instruct courant, ferme le
+    /// picker et lance la génération en MODE PREVIEW : le résultat streame dans
+    /// `transformHUD`, RIEN n'est écrit dans le champ avant Tab.
+    private func launchTransform(intent: TransformationIntent, state: SlashTransformState) {
+        let snap = axClient.snapshot()
+        let bundleID = snap.bundleID
+        // Préfixe au lancement — toute dérive ultérieure annule le preview.
+        let caret = snap.caretIndex ?? 0
+        let prefixNow = snap.text.map { String($0.prefix(caret)) } ?? ""
+        let model = translationRuntime.model
+        let scope = state.scopeText
+
+        var header: String
+        let prompt: String
+        switch intent {
+        case .corriger:
+            prompt = GemmaChatPrompt.correction(of: scope, model: model)
+            header = "// corriger…"
+        case .raccourcir:
+            prompt = GemmaChatPrompt.shortening(of: scope, model: model)
+            header = "// raccourcir…"
+        case .reformuler:
+            prompt = GemmaChatPrompt.rephrasing(of: scope, model: model)
+            header = "// reformuler…"
+        case .ton:
+            let tone = store.tones.tone(forBundle: bundleID)
+            prompt = GemmaChatPrompt.reformulation(of: scope, tone: tone, model: model)
+            header = "// ton · \(tone.displayName)…"
+        case .traduire:
+            // Même résolution de cible que le commit ⌥⌘T : sélection vivante /
+            // store par conversation, AUTO suit la langue détectée du
+            // correspondant. Un AUTO résolu en relecture bascule sur le ton.
+            let selection = currentTargetSelection(
+                forBundle: bundleID, windowTitle: snap.windowTitle)
+            let context = lastEnrichedVisible ?? ""
+            let detected = TranslationTarget.detected(in: context)
+            let frCorrespondent = TranslationTarget.correspondentSpeaksFrench(in: context)
+            switch selection.action(detected: detected, correspondentIsFrench: frCorrespondent) {
+            case .translate(let target):
+                prompt = GemmaChatPrompt.translation(of: scope, into: target, model: model)
+                header = "// traduire · FR → \(target.code)…"
+            case .reformulate:
+                let tone = store.tones.tone(forBundle: bundleID)
+                prompt = GemmaChatPrompt.reformulation(of: scope, tone: tone, model: model)
+                header = "// ton · \(tone.displayName)…"
+            }
+        case .libre(let instruction):
+            prompt = GemmaChatPrompt.freeTransformation(of: scope, instruction: instruction, model: model)
+            header = "// \(instruction.prefix(24))…"
+        }
+        // Portée réduite au dernier paragraphe (> 1500 chars) → l'aperçu le dit.
+        if state.isScopeTruncated { header += " · dernier paragraphe" }
+
+        hideSlashPicker()
+        let transformation = TextTransformation(
+            scopeText: scope,
+            intent: intent,
+            isScopeTruncated: state.isScopeTruncated,
+            deleteCharsOnAccept: state.deleteCharsOnAccept)
+        pendingTransformation = transformation
+        transformAnchorPrefix = prefixNow
+        transformOutput = nil
+        transformTask = runInstructCommit(
+            sourceText: scope,
+            fieldRect: snap.elementRect ?? snap.caretRect,
+            bundleID: bundleID,
+            hud: transformHUD,
+            header: header,
+            unavailableBody: "⚠︎ modèle de transformation indisponible",
+            guardEvent: "transform_guard_flagged",
+            doneEvent: "transform_commit_done",
+            applyMode: .preview(transformation),
+            record: { },   // comptabilisé au Tab seulement (preview ≠ acte)
+            stream: { [translationRuntime] onToken in
+                await translationRuntime.transform(
+                    prompt: prompt, sourceChars: scope.count, onToken: onToken)
+            })
+    }
+
+    /// Tab pendant le preview : supprime « portée + //filtre » puis injecte le
+    /// résultat — `replaceForCommit` (backspaces + inject unicode), même
+    /// mécanique que la traduction. true = consommé. Garde de sûreté : le champ
+    /// doit être EXACTEMENT celui du lancement (le focus a pu bouger pendant le
+    /// preview) — sinon on annulerait du texte dans une autre app.
+    nonisolated private func handleTransformTab() -> Bool {
+        MainActor.assumeIsolated {
+            guard let transformation = pendingTransformation,
+                  let output = transformOutput else { return false }
+            let snap = axClient.snapshot()
+            let caret = snap.caretIndex ?? 0
+            let prefixNow = snap.text.map { String($0.prefix(caret)) } ?? ""
+            guard prefixNow == transformAnchorPrefix else {
+                // Champ/préfixe différent : ne JAMAIS injecter ailleurs — on
+                // annule (champ intact) et on consomme le Tab.
+                cancelTransformPreview()
+                return true
+            }
+            let deleteChars = transformation.deleteCharsOnAccept
+            DispatchQueue.global(qos: .userInitiated).async { [axClient] in
+                axClient.replaceForCommit(deleteChars: deleteChars, with: output)
+                let s = axClient.snapshot()
+                DispatchQueue.main.async { [weak self] in self?.dismissedForText = s.text ?? "" }
+            }
+            transformHUD.hide()
+            pendingTransformation = nil
+            transformOutput = nil
+            transformAnchorPrefix = nil
+            transformTask = nil
+            ledger.recordTransformation()
+            predictor.cancel()
+            lastPredictedPrefix = nil
+            Log.info(.input, "transform_accepted")
+            return true
+        }
+    }
+
+    /// Esc pendant le preview : ferme, champ INTACT (le « //… » reste, décision
+    /// produit 5). true = consommé.
+    nonisolated private func handleTransformEsc() -> Bool {
+        MainActor.assumeIsolated {
+            guard pendingTransformation != nil else { return false }
+            cancelTransformPreview()
+            Log.info(.input, "transform_preview_dismissed")
+            return true
+        }
     }
 
     /// Vraie traduction visible — point d'entrée UNIQUE, appelable de partout :
@@ -2569,6 +2886,10 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         /// Remplace le champ dès la fin du stream — comportement HISTORIQUE de la
         /// traduction ⌥⌘T et de la relecture (préservé à l'identique).
         case immediate(deleteChars: Int)
+        /// Affiche le résultat dans le HUD avec le hint Tab/Esc, n'écrit RIEN
+        /// dans le champ — transformations « // » (l'acceptation vit dans
+        /// `handleTransformTab`).
+        case preview(TextTransformation)
     }
 
     /// Chaîne COMMUNE des commits instruct — extraite de `runTranslationCommit` /
@@ -2619,6 +2940,15 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             guard metrics != nil, !output.isEmpty else {
                 hud.update(unavailableBody)
                 hud.scheduleAutoHide(after: 3)
+                // Preview : dégeler le pipeline (le tick `return`-ait tant que la
+                // transformation restait pendante) — sans cacher le HUD, le
+                // message d'indisponibilité doit rester lisible 3 s.
+                if case .preview(let t) = applyMode, self.pendingTransformation == t {
+                    self.pendingTransformation = nil
+                    self.transformOutput = nil
+                    self.transformAnchorPrefix = nil
+                    self.transformTask = nil
+                }
                 return
             }
             hud.update(output)
@@ -2649,6 +2979,18 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 // Programme le déchargement mémoire du moteur instruct après une
                 // période d'inactivité (Phase 7) : en régime « pas d'usage » la
                 // RAM du 2e moteur retombe à zéro sur la machine 8 Go.
+                self.scheduleTranslationIdleUnload()
+            case .preview(let transformation):
+                // Le preview a pu être annulé PENDANT le stream (frappe → tick →
+                // `cancelTransformPreview`) : la sortie tardive est alors jetée.
+                guard self.pendingTransformation == transformation else { return }
+                self.transformOutput = output
+                hud.setHint("↹ Tab remplacer · esc annuler")
+                Log.info(.input, doneEvent)
+                // PAS de replaceForCommit, PAS de record() (comptés au Tab), PAS
+                // d'auto-hide : le preview attend une décision explicite —
+                // l'annulation par frappe du tick couvre l'abandon. Le moteur a
+                // fini → on programme quand même son déchargement-idle.
                 self.scheduleTranslationIdleUnload()
             }
         }
