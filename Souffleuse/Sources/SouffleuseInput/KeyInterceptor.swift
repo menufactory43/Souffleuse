@@ -132,6 +132,13 @@ public final class KeyInterceptor: @unchecked Sendable {
     /// `active` is written from the main thread (`setActive`) and read on the
     /// tap thread (`handle`), so it is guarded by a lock.
     private let lock = OSAllocatedUnfairLock(initialState: false)
+    /// SOURCES d'armement du tap : `ghost` (une suggestion s'affiche — sémantique
+    /// historique de `setActive`) et `hud` (le panneau de traduction est visible —
+    /// permet ⌘↩/⌘⇧→ SANS ghost). Le tap est armé si l'une des deux est vraie ;
+    /// la POLITIQUE DE CONSOMMATION diffère (voir `shouldConsume`) : armé-HUD-seul,
+    /// Tab/Esc/accept-all restent à l'hôte — seule la traduction nous appartient.
+    /// Écrit du main (`setActive`/`setHUDArmed`), lu sur le thread du tap.
+    private let armSources = OSAllocatedUnfairLock<(ghost: Bool, hud: Bool)>(initialState: (false, false))
     /// Configurable "accept all" binding (keyCode + relevant modifier flags as a
     /// raw mask), nil when disabled. Written from the main thread
     /// (`setAcceptAllKey`), read on the tap thread (`handle`); its own lock.
@@ -194,10 +201,42 @@ public final class KeyInterceptor: @unchecked Sendable {
 
     /// Toggle whether the tap consumes Tab/Esc. When inactive, all key events
     /// flow through untouched (Tab still does its normal job in forms, etc.).
+    /// Sémantique HISTORIQUE conservée pour les ~35 call-sites : pilote la
+    /// source `ghost` uniquement — l'armement HUD (`setHUDArmed`) survit.
     public func setActive(_ active: Bool) {
+        setArm(ghost: active, hud: nil)
+    }
+
+    /// Arme/désarme le tap pour le PANNEAU DE TRADUCTION (visible sans ghost) :
+    /// ⌘↩ (commit) et ⌘⇧→ (cycle) deviennent interceptables pendant que le HUD
+    /// est à l'écran ; Tab/Esc/accept-all restent à l'hôte (voir `shouldConsume`).
+    public func setHUDArmed(_ armed: Bool) {
+        setArm(ghost: nil, hud: armed)
+    }
+
+    /// Recalcule l'état effectif (OR des sources) et (dés)active le tap.
+    private func setArm(ghost: Bool?, hud: Bool?) {
         guard let tap else { return }
-        lock.withLock { $0 = active }
-        CGEvent.tapEnable(tap: tap, enable: active)
+        let effective = armSources.withLock { s in
+            if let g = ghost { s.ghost = g }
+            if let h = hud { s.hud = h }
+            return s.ghost || s.hud
+        }
+        lock.withLock { $0 = effective }
+        CGEvent.tapEnable(tap: tap, enable: effective)
+    }
+
+    /// Politique de consommation PURE (testable sans tap) : armé pour un ghost,
+    /// toute touche résolue nous appartient (comportement historique — le
+    /// handler décide et on avale) ; armé pour le HUD SEULEMENT, seules les
+    /// touches de traduction (.commit/.cycleTarget) sont consommées — un Tab,
+    /// un Esc ou la touche accept-all (souvent →) tapés pendant que le panneau
+    /// est visible continuent leur vie normale dans l'app hôte.
+    static func shouldConsume(key: Key, ghostArmed: Bool) -> Bool {
+        switch key {
+        case .commit, .cycleTarget: return true
+        case .tab, .esc, .acceptAll: return ghostArmed
+        }
     }
 
     /// Update the user-selected "accept all" key. Safe to call from main.
@@ -292,6 +331,12 @@ public final class KeyInterceptor: @unchecked Sendable {
             acceptAll: acceptBinding.withLock { $0 },
             cycleTarget: cycleBinding.withLock { $0 }
         ) else {
+            return Unmanaged.passUnretained(event)
+        }
+        // Armé pour le HUD seul (pas de ghost) : Tab/Esc/accept-all passent —
+        // seules les touches de traduction sont à nous.
+        let ghostArmed = armSources.withLock { $0.ghost }
+        guard Self.shouldConsume(key: key, ghostArmed: ghostArmed) else {
             return Unmanaged.passUnretained(event)
         }
         if handler(key) {
