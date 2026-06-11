@@ -115,3 +115,39 @@ import Testing
     let words = ranges.map { String(s[$0]) }
     #expect(words == ["le", "chat", "noir"])
 }
+
+// MARK: - Memo mot → verdict (perf fix 11/06 : 76 ms/predict re-vérifiés)
+
+@Test func memoMakesRepeatedCallsIdentical() {
+    let corrector = PrefixCorrector()
+    let input = "Je te confirme que la reunion de demain est maintenue "
+    let first = corrector.correctedPrefix(input, detectedLanguage: "French")
+    // Mêmes mots complétés re-soumis (frappe suivante d'un mot en cours) :
+    // le memo doit servir et le résultat rester byte-identique.
+    let second = corrector.correctedPrefix(input + "po", detectedLanguage: "French")
+    #expect(second.hasPrefix(first))
+    let third = corrector.correctedPrefix(input, detectedLanguage: "French")
+    #expect(third == first)
+}
+
+@Test func memoStoresCleanWordVerdicts() {
+    let corrector = PrefixCorrector()
+    // Des mots corrects (verdict « pas de correction » = nil) doivent AUSSI
+    // être mémoïsés — c'est le cas majoritaire. Piège du subscript Optional :
+    // memo[mot] = nil supprimerait la clé (gardé par updateValue).
+    _ = corrector.correctedPrefix("le chat noir dort ", detectedLanguage: "French")
+    #expect(corrector.memoCount > 0)
+    let before = corrector.memoCount
+    _ = corrector.correctedPrefix("le chat noir dort ", detectedLanguage: "French")
+    // Aucun mot nouveau → le memo ne grandit pas (tout est servi du cache).
+    #expect(corrector.memoCount == before)
+}
+
+@Test func memoGrowsOnlyOnNewWords() {
+    let corrector = PrefixCorrector()
+    _ = corrector.correctedPrefix("le chat ", detectedLanguage: "French")
+    let after2 = corrector.memoCount
+    _ = corrector.correctedPrefix("le chat noir ", detectedLanguage: "French")
+    // Un seul mot complété nouveau ⇒ +1 entrée max.
+    #expect(corrector.memoCount <= after2 + 1)
+}
