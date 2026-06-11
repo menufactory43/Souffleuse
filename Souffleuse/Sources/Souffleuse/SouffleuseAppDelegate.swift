@@ -146,6 +146,14 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// Task de génération en vol — annulée par frappe (cancel-on-keystroke,
     /// même contrat que le ghost) ou par Esc.
     private var transformTask: Task<Void, Never>?
+    /// Ticks consécutifs où le gate AX a échoué PENDANT un preview. Un hoquet
+    /// transitoire ne doit pas faire disparaître le panneau sous les yeux de
+    /// l'utilisateur ; passé `transformGraceTicks`, le contexte est réellement
+    /// parti (clic bureau, app non-texte) → annulation (UAT 11/06 : sans cette
+    /// annulation, le HUD du preview restait à l'écran indéfiniment).
+    private var transformMissTicks = 0
+    /// ~1 s au poll de 80 ms — même ordre de grandeur que la grâce du badge.
+    private static let transformGraceTicks = 12
     /// Mini Phase 4 — moteur instruct paresseux + petit panneau de traduction.
     private let translationRuntime = TranslationRuntime()
     private let translationHUD = TranslationHUDWindow()
@@ -1231,7 +1239,18 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         pendingTransformation = nil
         transformOutput = nil
         transformAnchorPrefix = nil
+        transformMissTicks = 0
         transformHUD.hide()
+    }
+
+    /// Contexte DÉFINITIVEMENT perdu (notre UI au premier plan, AX révoqué,
+    /// app désactivée par allowlist…) : picker « // » ET preview disparaissent
+    /// ensemble. Les sorties anticipées du tick passent par ici — le drift-
+    /// cancel, lui, vit derrière les gates et ne tourne jamais sans champ texte
+    /// (UAT 11/06 : HUD orphelin après un clic hors zone de texte). Idempotent.
+    private func dismissSlashTransformUI() {
+        hideSlashPicker()
+        if pendingTransformation != nil { cancelTransformPreview() }
     }
 
     private func tick() {
@@ -1245,7 +1264,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         if NSApp.isActive {
             overlay.hide()
             hideEmojiPicker()
-            hideSlashPicker()
+            dismissSlashTransformUI()
             presenceHideNow()
             interceptor.setActive(false)
             return
@@ -1255,7 +1274,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         guard AXClient.isTrusted else {
             overlay.hide()
             hideEmojiPicker()
-            hideSlashPicker()
+            dismissSlashTransformUI()
             presenceHideNow()
             interceptor.setActive(false)
             return
@@ -1314,6 +1333,15 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             hideSlashPicker()
             // Échec AX transitoire (caret/elementRect nil ce tick) : on TIENT le
             // badge ancré pendant la grâce plutôt que de le faire clignoter.
+            // Même logique pour le preview « // » : un hoquet AX ne le tue pas,
+            // mais passé la grâce le contexte est vraiment parti (clic bureau,
+            // app non-texte) et le HUD doit suivre — sinon il reste orphelin.
+            if pendingTransformation != nil {
+                transformMissTicks += 1
+                if transformMissTicks >= Self.transformGraceTicks {
+                    cancelTransformPreview()
+                }
+            }
             presenceHoldOrHide()
             interceptor.setActive(false)
             return
@@ -1329,7 +1357,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         if allowMode == .disabled {
             overlay.hide()
             hideEmojiPicker()
-            hideSlashPicker()
+            dismissSlashTransformUI()
             presenceHideNow()
             interceptor.setActive(false)
             return
@@ -1552,6 +1580,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             if prefix != transformAnchorPrefix {
                 cancelTransformPreview()
             } else {
+                // Champ visible et préfixe stable → le hoquet AX éventuel est fini.
+                transformMissTicks = 0
                 return
             }
         }
