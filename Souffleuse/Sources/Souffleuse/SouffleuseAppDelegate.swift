@@ -2759,13 +2759,18 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 return true
             }
             let deleteChars = transformation.deleteCharsOnAccept
-            // Portée = champ entier ET caret en fin (rien après le trigger) →
-            // voie sélection-vérifiée : pas de comptage de backspaces, donc pas
-            // de dérive dans les contenteditable Chromium (UAT 11/06, Gmail :
-            // suppression 5 chars trop courte → « BonjoHola, »). Si l'hôte
-            // n'honore pas la sélection AX, fallback sur le chemin compté.
+            // Portée = champ entier ET rien d'autre que du BLANC après le caret
+            // → voie sélection-vérifiée : pas de comptage de backspaces, donc
+            // pas de dérive dans les contenteditable Chromium (UAT 11/06,
+            // Gmail : rafales de backspaces partiellement perdues → résidus
+            // « Bonjo »/« Bo » en tête). Tolérer le blanc résiduel est
+            // nécessaire : Gmail rapporte un « \n » fantôme final dans la
+            // valeur AX, qui faisait rater la condition stricte == et retomber
+            // sur le comptage. Si l'hôte n'honore pas la sélection AX,
+            // fallback compté (événement loggé pour trancher en UAT).
+            let afterCaret = (snap.text ?? "").dropFirst(prefixNow.count)
             let wholeField = !transformation.isScopeTruncated
-                && prefixNow == (snap.text ?? "")
+                && afterCaret.allSatisfy(\.isWhitespace)
             DispatchQueue.global(qos: .userInitiated).async { [axClient] in
                 let replacedAll = wholeField
                     && axClient.replaceWholeFieldForCommit(with: output)
@@ -2773,7 +2778,14 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                     axClient.replaceForCommit(deleteChars: deleteChars, with: output)
                 }
                 let s = axClient.snapshot()
-                DispatchQueue.main.async { [weak self] in self?.dismissedForText = s.text ?? "" }
+                DispatchQueue.main.async { [weak self] in
+                    self?.dismissedForText = s.text ?? ""
+                    if replacedAll {
+                        Log.info(.input, "transform_accept_selection")
+                    } else {
+                        Log.info(.input, "transform_accept_counted", count: deleteChars)
+                    }
+                }
             }
             transformHUD.hide()
             pendingTransformation = nil
