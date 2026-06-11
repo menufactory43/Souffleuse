@@ -66,17 +66,26 @@ struct GemmaChatPromptTransformationTests {
             == GemmaChatPrompt.freeTransformation(of: "x", instruction: "i", model: .gemma1b))
     }
 
-    @Test("assemble : symétrie exacte avec translation existante (mêmes marqueurs)")
+    @Test("assemble : même tuyau que translation (few-shot Qwen en plus)")
     func assembleMirrorsTranslation() {
-        // Même consigne + même message via assemble et via translation → octets
-        // identiques : les transformations partagent le tuyau KV-LCP existant.
         let instruction = GemmaChatPrompt.translationInstruction(target: .en, examples: [])
-        for model in InstructModel.allCases {
-            let viaAssemble = GemmaChatPrompt.assemble(
-                instruction: instruction, message: "Bonjour", model: model)
-            let viaTranslation = GemmaChatPrompt.translation(of: "Bonjour", into: .en, model: model)
-            #expect(viaAssemble == viaTranslation)
-        }
+        // Gemma : octets identiques (pas de few-shot ChatML sur cette voie).
+        #expect(GemmaChatPrompt.assemble(instruction: instruction, message: "Bonjour", model: .gemma1b)
+            == GemmaChatPrompt.translation(of: "Bonjour", into: .en, model: .gemma1b))
+        // Qwen : translation == assemble AVEC les deux tours few-shot insérés
+        // entre le système et le vrai message (UAT 11/06) — même système, même
+        // tour final, rien d'autre ne diffère.
+        let viaAssemble = GemmaChatPrompt.assemble(
+            instruction: instruction, message: "Bonjour", model: .qwen1_5b)
+        let viaTranslation = GemmaChatPrompt.translation(of: "Bonjour", into: .en, model: .qwen1_5b)
+        let shotBlock = GemmaChatPrompt.translationFewShot(target: .en).map {
+            "<|im_start|>user\n" + $0.user + "<|im_end|>\n"
+                + "<|im_start|>assistant\n" + $0.assistant + "<|im_end|>\n"
+        }.joined()
+        let expected = viaAssemble.replacingOccurrences(
+            of: "<|im_end|>\n<|im_start|>user\n",
+            with: "<|im_end|>\n" + shotBlock + "<|im_start|>user\n")
+        #expect(viaTranslation == expected)
     }
 
     // MARK: - Garde-fous des consignes

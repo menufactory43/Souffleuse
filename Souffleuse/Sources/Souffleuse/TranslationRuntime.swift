@@ -109,7 +109,7 @@ final class TranslationRuntime {
         return await engine.generate(
             prompt: prompt,
             maxTokens: budget,
-            sampling: LlamaSampling(temperature: 0, repeatPenalty: 1.1, repeatLastN: 64),
+            sampling: LlamaSampling(temperature: 0, repeatPenalty: 1.1, repeatLastN: 64, primePenaltiesWithPrompt: true),
             onToken: onToken
         )
     }
@@ -135,7 +135,7 @@ final class TranslationRuntime {
         return await engine.generate(
             prompt: prompt,
             maxTokens: budget,
-            sampling: LlamaSampling(temperature: 0, repeatPenalty: 1.1, repeatLastN: 64),
+            sampling: LlamaSampling(temperature: 0, repeatPenalty: 1.1, repeatLastN: 64, primePenaltiesWithPrompt: true),
             onToken: onToken
         )
     }
@@ -163,7 +163,7 @@ final class TranslationRuntime {
         return await engine.generate(
             prompt: prompt,
             maxTokens: budget,
-            sampling: LlamaSampling(temperature: 0, repeatPenalty: 1.1, repeatLastN: 64),
+            sampling: LlamaSampling(temperature: 0, repeatPenalty: 1.1, repeatLastN: 64, primePenaltiesWithPrompt: true),
             onToken: onToken
         )
     }
