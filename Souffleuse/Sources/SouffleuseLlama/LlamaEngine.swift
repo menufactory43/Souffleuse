@@ -122,6 +122,17 @@ public struct LlamaSampling: Sendable {
     /// legitimate). `0` disables the gate (zero overhead — no softmax scan).
     public var minFirstTokenProb: Float
 
+    /// Amorce le ring de pénalité de répétition avec la queue du prompt (parité
+    /// `common_sampler` de llama.cpp : les pénalités voient les `repeatLastN`
+    /// derniers tokens du prompt, pas seulement les tokens générés). OPT-IN :
+    /// le ghost (continuation brute) ne doit PAS pénaliser le texte déjà tapé —
+    /// réutiliser les mots du préfixe y est légitime — et son chemin reste
+    /// byte-identique avec le défaut `false`. Les flux instruct (traduction /
+    /// relecture / transformations « // ») l'activent : sans cet amorçage,
+    /// l'ÉCHO du message source n'est pas pénalisé et peut l'emporter à greedy
+    /// (UAT 11/06 : « //traduire » FR→ES ressortait du français corrigé).
+    public var primePenaltiesWithPrompt: Bool
+
     /// TOKEN HEALING (experiment). When non-empty, the trailing partial word
     /// the user has already typed (e.g. "fis" of "Rapport fis"). The base
     /// SentencePiece model would otherwise tokenize "fis" to ONE complete token
@@ -154,6 +165,7 @@ public struct LlamaSampling: Sendable {
                 promoteOvershoot: Float = 0,
                 promoteMaxGap: Float = 0,
                 minFirstTokenProb: Float = 0,
+                primePenaltiesWithPrompt: Bool = false,
                 healPrefix: String? = nil) {
         self.temperature = temperature
         self.repeatPenalty = repeatPenalty
@@ -175,6 +187,7 @@ public struct LlamaSampling: Sendable {
         self.promoteOvershoot = promoteOvershoot
         self.promoteMaxGap = promoteMaxGap
         self.minFirstTokenProb = minFirstTokenProb
+        self.primePenaltiesWithPrompt = primePenaltiesWithPrompt
         self.healPrefix = healPrefix
     }
 }
@@ -1127,6 +1140,16 @@ public actor LlamaEngine {
             }
             llama_sampler_chain_add(sampler, llama_sampler_init_temp(sampling.temperature))
             llama_sampler_chain_add(sampler, llama_sampler_init_dist(sampling.seed))
+        }
+
+        // Amorçage opt-in du ring de pénalité avec la queue du prompt (cf. doc
+        // de `primePenaltiesWithPrompt`). Sans lui, l'écho du message source
+        // n'est jamais pénalisé — à greedy il peut l'emporter sur la consigne
+        // (« //traduire » FR→ES qui ressort le français corrigé, UAT 11/06).
+        if sampling.repeatPenalty != 1.0, sampling.primePenaltiesWithPrompt {
+            for t in promptTokens.suffix(Int(sampling.repeatLastN)) {
+                llama_sampler_accept(sampler, t)
+            }
         }
 
         var metrics = LlamaMetrics()

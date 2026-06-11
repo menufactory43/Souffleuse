@@ -570,10 +570,27 @@ extension SuggestionPolicy {
         /// traduction fait ~la longueur du message, donc plafonner à une constante
         /// trop basse tronque les longs messages (= traduction imparfaite). On
         /// estime ~0,4 token par caractère source + une marge, clampé. Pur,
-        /// testable.
+        /// testable. NOTE (UAT 11/06) : les flux runtime (traduction, relecture,
+        /// transformations) utilisent désormais `transformMaxNewTokens`, plus
+        /// généreux — cette estimation ~0,4 tronquait les sorties qui s'allongent
+        /// (relecture FR→FR, accents). Conservée comme référence/bench.
         public static func translationMaxNewTokens(sourceChars: Int) -> Int {
             let estimated = sourceChars * 2 / 5 + 48
             return min(translationMaxNewTokensCap, max(translationMaxNewTokensFloor, estimated))
+        }
+
+        /// Plancher / plafond du nombre de tokens générés pour une transformation « // ».
+        public static let transformMaxNewTokensFloor: Int = 192
+        public static let transformMaxNewTokensCap: Int = 768
+
+        /// Budget de sortie d'une transformation « // » : contrairement à la
+        /// traduction (sortie ≈ source en tokens), une correction/réécriture
+        /// FR→FR peut s'ALLONGER (accents plus coûteux en tokens, consigne libre
+        /// expansive) — le budget traduction tronquait en plein mot (UAT 11/06).
+        /// ~0,6 token par caractère source + marge, clampé. Pur, testable.
+        public static func transformMaxNewTokens(sourceChars: Int) -> Int {
+            let estimated = sourceChars * 3 / 5 + 64
+            return min(transformMaxNewTokensCap, max(transformMaxNewTokensFloor, estimated))
         }
 
         /// Délai d'inactivité (s) après lequel le moteur instruct (traduction) est

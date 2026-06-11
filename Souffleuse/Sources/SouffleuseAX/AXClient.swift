@@ -546,6 +546,81 @@ public final class AXClient: @unchecked Sendable {
         }
     }
 
+    /// Remplace le CHAMP ENTIER par `text` via une sélection AX **vérifiée par
+    /// relecture**, puis un unique Backspace + injection unicode (source privée,
+    /// flags nettoyés — même hygiène que `replaceForCommit`).
+    ///
+    /// Pourquoi cette voie existe (UAT 11/06, Gmail) : le remplacement COMPTÉ
+    /// (`replaceForCommit`) suppose que N Characters AX = N backspaces ; dans les
+    /// contenteditable Chromium ce n'est pas toujours vrai (la suppression s'est
+    /// arrêtée 5 caractères trop tôt → « BonjoHola, »). Sélectionner tout puis
+    /// effacer supprime la classe d'erreur entière — aucun comptage.
+    ///
+    /// Pourquoi pas ⌘A : layout-dépendant (sur AZERTY `virtualKey 0` = Q → ⌘Q
+    /// quitterait l'hôte). Pourquoi la relecture : des hôtes (Notes/RichTextEdit)
+    /// répondent `.success` à l'écriture de `kAXSelectedTextRangeAttribute` en
+    /// l'ignorant — on ne détruit RIEN tant que la sélection n'est pas confirmée.
+    /// `false` (hôte menteur, champ vide, sécurisé…) → l'appelant retombe sur le
+    /// chemin compté. Un Backspace sur une sélection active l'efface en entier
+    /// dans tous les hôtes (geste utilisateur standard).
+    @discardableResult
+    public func replaceWholeFieldForCommit(with text: String) -> Bool {
+        queue.sync {
+            guard let appEl = focusedAppElement() else { return false }
+            var focusedRef: AnyObject?
+            guard AXUIElementCopyAttributeValue(appEl, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
+                  let focused = focusedRef else { return false }
+            let element = focused as! AXUIElement
+            if copyStringAttr(element, kAXSubroleAttribute) == "AXSecureTextField" { return false }
+            guard let current = copyStringAttr(element, kAXValueAttribute), !current.isEmpty else { return false }
+            // CFRange AX en unités UTF-16 (sémantique NSString).
+            var wanted = CFRange(location: 0, length: current.utf16.count)
+            guard let rangeValue = AXValueCreate(.cfRange, &wanted),
+                  AXUIElementSetAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, rangeValue) == .success else {
+                return false
+            }
+            // Relecture : la sélection doit couvrir EXACTEMENT [0, len) — sinon
+            // l'hôte a menti (ou tronqué) et on ne touche pas au champ.
+            var readbackRef: AnyObject?
+            guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &readbackRef) == .success,
+                  let readback = readbackRef, CFGetTypeID(readback) == AXValueGetTypeID() else {
+                return false
+            }
+            var got = CFRange(location: 0, length: 0)
+            guard AXValueGetValue(readback as! AXValue, .cfRange, &got),
+                  got.location == 0, got.length == wanted.length else {
+                return false
+            }
+            // Sélection confirmée → un seul Backspace l'efface, puis injection.
+            let source = Self.makeSyntheticSource(stateID: .privateState)
+            let noFlags = CGEventFlags(rawValue: 0)
+            usleep(5_000)
+            guard let bsDown = CGEvent(keyboardEventSource: source, virtualKey: 51, keyDown: true),
+                  let bsUp = CGEvent(keyboardEventSource: source, virtualKey: 51, keyDown: false) else {
+                return false
+            }
+            bsDown.flags = noFlags
+            bsUp.flags = noFlags
+            bsDown.post(tap: .cghidEventTap)
+            bsUp.post(tap: .cghidEventTap)
+            usleep(5_000)
+            let utf16 = Array(text.utf16)
+            guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
+                  let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else {
+                return false
+            }
+            down.flags = noFlags
+            up.flags = noFlags
+            utf16.withUnsafeBufferPointer { buf in
+                down.keyboardSetUnicodeString(stringLength: buf.count, unicodeString: buf.baseAddress)
+                up.keyboardSetUnicodeString(stringLength: buf.count, unicodeString: buf.baseAddress)
+            }
+            down.post(tap: .cghidEventTap)
+            up.post(tap: .cghidEventTap)
+            return true
+        }
+    }
+
     private func injectViaCGEvent(_ text: String) -> Bool {
         let source = Self.makeSyntheticSource(stateID: .hidSystemState)
         let utf16 = Array(text.utf16)
@@ -733,12 +808,20 @@ public final class AXClient: @unchecked Sendable {
         // `caretIndex` AND the caret is strictly before end-of-text. Cap
         // the read at 500 chars — well above the 120-token afterCursor budget
         // (D-14d) but bounded.
+        // Sous-chaîne de `text` (kAXValue), PAS de lecture paramétrée
+        // kAXStringForRange : Chromium/Brave la renvoie nil/erratique, et le
+        // plan de fusion mid-line recevait alors "" → ré-injection de ce qui
+        // existait déjà après le caret (UAT 11/06 : « caret|ret » + Tab →
+        // « caretret »). La soustraction text+caretIndex est la MÊME source
+        // que la détection mid-line du tick et le préfixe du ghost — une seule
+        // vérité, les deux côtés voient le même « après-caret ».
         let textAfterCaret: String? = {
             guard let text, let caretIndex,
                   caretIndex >= 0, caretIndex < text.count else { return nil }
-            let remaining = text.count - caretIndex
-            let length = min(remaining, 500)
-            return stringForRange(element, location: caretIndex, length: length)
+            let length = min(text.count - caretIndex, 500)
+            let start = text.index(text.startIndex, offsetBy: caretIndex)
+            let end = text.index(start, offsetBy: length)
+            return String(text[start..<end])
         }()
 
         // Focused window title — used by the allowlist regex matcher.
@@ -1011,28 +1094,6 @@ public final class AXClient: @unchecked Sendable {
         var rect = CGRect.zero
         guard AXValueGetValue(bounds as! AXValue, .cgRect, &rect) else { return nil }
         return rect
-    }
-
-    /// Parameterized read of `kAXStringForRangeParameterizedAttribute`. Returns
-    /// the substring corresponding to `[location, location+length)` of the
-    /// focused text element, or nil if the host refuses the query / returns
-    /// empty. Mirrors the `boundsForRange` shape — same `CFRange` +
-    /// `AXValueCreate` + `AXUIElementCopyParameterizedAttributeValue` machinery,
-    /// different attribute name and a `String` return cast.
-    private func stringForRange(_ element: AXUIElement, location: Int, length: Int) -> String? {
-        guard length > 0 else { return nil }
-        var probe = CFRange(location: location, length: length)
-        guard let axRange = AXValueCreate(.cfRange, &probe) else { return nil }
-        var ref: AnyObject?
-        let status = AXUIElementCopyParameterizedAttributeValue(
-            element,
-            kAXStringForRangeParameterizedAttribute as CFString,
-            axRange,
-            &ref
-        )
-        guard status == .success else { return nil }
-        guard let s = ref as? String, !s.isEmpty else { return nil }
-        return s
     }
 
     /// Frame of the focused element in screen coordinates (Quartz). Combines

@@ -33,9 +33,15 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
     private let body: NSTextField
     /// Rangée d'avertissement (garde-fou C : tokens durs disparus). Masquée si vide.
     private let badge: NSTextField
+    /// Rangée d'aide en pied (« ↹ Tab remplacer · esc annuler »). Masquée si
+    /// vide — même mécanisme que `badge`. Utilisée par le mode preview des
+    /// transformations « // » : le panneau reste passif, c'est l'appelant qui
+    /// décide d'armer Tab/Esc.
+    private let hint: NSTextField
     private var anchorRectQuartz: CGRect = .zero
     private var bodyText: String = ""
     private var badgeText: String = ""
+    private var hintText: String = ""
     private var savedOffset: CGSize = .zero
     private var currentBundleID: String?
     private var defaultOriginAppKit: CGPoint = .zero
@@ -125,11 +131,19 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
         badge.lineBreakMode = .byWordWrapping
         badge.isHidden = true
 
+        hint = NSTextField(wrappingLabelWithString: "")
+        hint.font = Self.serif(size: 11, italic: true)
+        hint.alignment = .center
+        hint.maximumNumberOfLines = 1
+        hint.lineBreakMode = .byTruncatingTail
+        hint.isHidden = true
+
         container.addSubview(ruleLeft)
         container.addSubview(ruleRight)
         container.addSubview(header)
         container.addSubview(body)
         container.addSubview(badge)
+        container.addSubview(hint)
         panel.contentView = container
         super.init()
         panel.delegate = self
@@ -148,6 +162,7 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
         ruleRight.layer?.backgroundColor = Self.rule(dark).cgColor
         body.textColor = Self.ink(dark)
         badge.textColor = Self.warn(dark)
+        hint.textColor = Self.ink(dark).withAlphaComponent(0.6)
         applyHeader(headerRaw)   // la couleur de l'en-tête vit dans la chaîne attribuée
     }
 
@@ -169,6 +184,7 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
         headerRaw = headerText
         bodyText = bodyTextValue
         badgeText = ""
+        hintText = ""
         applyColors()        // (ré)applique l'apparence courante + construit l'en-tête
         relayout()
         onVisibilityChanged?(true)
@@ -197,6 +213,14 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
 
     public func setBadge(_ text: String?) {
         badgeText = text ?? ""
+        relayout()
+    }
+
+    /// Affiche/retire la ligne d'aide du pied de panneau (mode preview des
+    /// transformations « // » : « ↹ Tab remplacer · esc annuler »). nil ou
+    /// vide → masquée. `show()` la remet à vide, comme le badge.
+    public func setHint(_ text: String?) {
+        hintText = text ?? ""
         relayout()
     }
 
@@ -270,6 +294,8 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
         body.stringValue = bodyText.isEmpty ? "…" : bodyText
         badge.stringValue = badgeText
         badge.isHidden = badgeText.isEmpty
+        hint.stringValue = hintText
+        hint.isHidden = hintText.isEmpty
         let pad: CGFloat = 16
         let headerH: CGFloat = 15
         let headerGap: CGFloat = 13   // sous la rangée d'en-tête
@@ -290,7 +316,9 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
         let bodyH = textHeight(body.stringValue, font: body.font, minH: 20)
         let badgeH = badgeText.isEmpty ? 0 : textHeight(badgeText, font: badge.font, minH: 15)
         let badgeBlock = badgeText.isEmpty ? 0 : gap + badgeH
-        let total = pad + headerH + headerGap + bodyH + badgeBlock + pad
+        let hintH = hintText.isEmpty ? 0 : textHeight(hintText, font: hint.font, minH: 14)
+        let hintBlock = hintText.isEmpty ? 0 : gap + hintH
+        let total = pad + headerH + headerGap + bodyH + badgeBlock + hintBlock + pad
 
         container.frame = NSRect(x: 0, y: 0, width: Self.width, height: total)
 
@@ -307,9 +335,11 @@ public final class TranslationHUDWindow: NSObject, NSWindowDelegate {
         ruleLeft.frame = NSRect(x: pad, y: ruleY, width: max(0, leftEnd - pad), height: 1)
         ruleRight.frame = NSRect(x: rightStart, y: ruleY, width: max(0, (Self.width - pad) - rightStart), height: 1)
 
-        // Corps + badge ancrés en bas (le panneau croît vers le haut au streaming).
-        badge.frame = NSRect(x: pad, y: pad, width: bodyWidth, height: badgeH)
-        body.frame = NSRect(x: pad, y: pad + badgeBlock, width: bodyWidth, height: bodyH)
+        // Corps + badge + hint ancrés en bas (le panneau croît vers le haut au
+        // streaming) ; le hint est la rangée la plus basse, sous le badge.
+        hint.frame = NSRect(x: pad, y: pad, width: bodyWidth, height: hintH)
+        badge.frame = NSRect(x: pad, y: pad + hintBlock, width: bodyWidth, height: badgeH)
+        body.frame = NSRect(x: pad, y: pad + hintBlock + badgeBlock, width: bodyWidth, height: bodyH)
 
         let screen = NSScreen.screens.first ?? NSScreen.main
         let screenH = screen?.frame.height ?? 0

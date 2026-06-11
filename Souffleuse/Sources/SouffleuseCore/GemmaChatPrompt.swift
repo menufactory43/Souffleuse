@@ -26,6 +26,18 @@ public enum TranslationTarget: String, Sendable, CaseIterable, Codable {
         }
     }
 
+    /// Nom de langue NU (sans article) pour la directive de verrouillage
+    /// (« ta réponse doit être ENTIÈREMENT en italien »).
+    public var bareName: String {
+        switch self {
+        case .en: return "anglais"
+        case .de: return "allemand"
+        case .es: return "espagnol"
+        case .it: return "italien"
+        case .ja: return "japonais"
+        }
+    }
+
     /// Dans le périmètre V1 garanti ? JA reste best-effort : l'appelant peut
     /// avertir / exiger un override manuel via le chip.
     public var isV1: Bool { self != .ja }
@@ -242,11 +254,51 @@ public enum GemmaChatPrompt {
             let user = instruction + "\n\nMessage : \(frenchText)"
             return userOpen + user + turnClose + modelOpen
         case .qwen1_5b:
-            // Qwen2.5 : ChatML, consigne en SYSTÈME (préfixe stable → KV-LCP),
-            // message en user.
+            // Qwen2.5 : ChatML, consigne en SYSTÈME + DEUX tours few-shot FR→cible
+            // avant le vrai message (UAT 11/06 : sans eux, le 1.5B « échote » le
+            // français corrigé ou RÉPOND au message en ES/IT à greedy — le
+            // few-shot verrouille « tu traduis, tu ne réponds pas », la 2e paire
+            // ancre chiffres/termes). Préfixe stable par cible → KV-LCP intact.
+            let shots = translationFewShot(target: target)
             return "<|im_start|>system\n" + instruction + "<|im_end|>\n"
+                + shots.map {
+                    "<|im_start|>user\n" + $0.user + "<|im_end|>\n"
+                        + "<|im_start|>assistant\n" + $0.assistant + "<|im_end|>\n"
+                }.joined()
                 + "<|im_start|>user\n" + frenchText + "<|im_end|>\n"
                 + "<|im_start|>assistant\n"
+        }
+    }
+
+    /// Paires few-shot FR→cible injectées en tours ChatML (voie Qwen). Fixes et
+    /// courtes : elles coûtent ~60 tokens de préfixe stable (cache-able) et
+    /// suppriment le mode « écho / réponse » du 1.5B observé sur ES/IT.
+    static func translationFewShot(target: TranslationTarget)
+        -> [(user: String, assistant: String)]
+    {
+        let ex1 = "Merci pour votre retour, je reviens vers vous demain."
+        let ex2 = "Le montant de 1 250 € apparaît sur votre wallet depuis le 15 mai."
+        switch target {
+        case .en: return [
+            (ex1, "Thank you for your feedback, I will get back to you tomorrow."),
+            (ex2, "The amount of €1,250 has appeared in your wallet since May 15."),
+        ]
+        case .de: return [
+            (ex1, "Vielen Dank für Ihre Rückmeldung, ich melde mich morgen wieder bei Ihnen."),
+            (ex2, "Der Betrag von 1 250 € erscheint seit dem 15. Mai in Ihrem Wallet."),
+        ]
+        case .es: return [
+            (ex1, "Gracias por su respuesta, vuelvo a contactarle mañana."),
+            (ex2, "El importe de 1 250 € aparece en su wallet desde el 15 de mayo."),
+        ]
+        case .it: return [
+            (ex1, "Grazie per il suo riscontro, la ricontatto domani."),
+            (ex2, "L'importo di 1 250 € appare nel suo wallet dal 15 maggio."),
+        ]
+        case .ja: return [
+            (ex1, "ご返信ありがとうございます。明日改めてご連絡いたします。"),
+            (ex2, "1 250 €の金額は5月15日からウォレットに表示されています。"),
+        ]
         }
     }
 
@@ -280,6 +332,7 @@ public enum GemmaChatPrompt {
         Tu es un correcteur-rédacteur professionnel. Réécris EN FRANÇAIS le message ci-dessous : corrige l'orthographe, la grammaire et la formulation, sans en changer le sens ni y répondre.
         \(tone.registerInstruction)
         Conserve exactement les noms propres, montants, pourcentages, dates, nombres et termes techniques (wallet, Binance, staking, NFT, gas, CSV, PDF, Stripe…).
+        Conserve les sauts de ligne et la structure en paragraphes du message.
         Réponds UNIQUEMENT par la réécriture, sans commentaire ni guillemets.
         """
         if !examples.isEmpty {
@@ -295,6 +348,7 @@ public enum GemmaChatPrompt {
         Tu es un traducteur professionnel. Traduis FIDÈLEMENT le message ci-dessous du français vers \(target.towardName) — ne le reformule pas, n'y réponds pas, ne l'adapte pas (« comment allez-vous » → « how are you », jamais « how can I help you »).
         Conserve exactement le sens, le registre, les noms propres, montants, pourcentages, dates, nombres et termes techniques (wallet, Binance, staking, NFT, gas, CSV, PDF, Stripe…).
         Réponds UNIQUEMENT par la traduction, sans commentaire ni guillemets.
+        IMPORTANT : ta réponse doit être ENTIÈREMENT en \(target.bareName). N'écris AUCUN mot français.
         """
         if !examples.isEmpty {
             instruction += "\n\nExemples de mon style :\n" + examples.joined(separator: "\n")

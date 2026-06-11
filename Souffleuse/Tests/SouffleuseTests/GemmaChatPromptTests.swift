@@ -101,6 +101,32 @@ struct GemmaChatPromptTests {
         #expect(!p.contains("<start_of_turn>"))
     }
 
+    @Test("Qwen traduction : deux tours few-shot FR→cible avant le vrai message")
+    func qwenTranslationFewShotTurns() {
+        // UAT 11/06 : sans few-shot, le 1.5B « échote » le français (ES/IT) à
+        // greedy. Les deux paires doivent précéder le message, dans la langue
+        // cible, et le vrai message reste le DERNIER tour user.
+        for target in TranslationTarget.allCases {
+            let p = GemmaChatPrompt.translation(of: "MSG_RÉEL", into: target, model: .qwen1_5b)
+            let shots = GemmaChatPrompt.translationFewShot(target: target)
+            #expect(shots.count == 2)
+            for shot in shots {
+                let u = p.range(of: shot.user)
+                let a = p.range(of: shot.assistant)
+                #expect(u != nil && a != nil)
+                // user de l'exemple avant sa réponse, réponse avant le vrai message.
+                if let u, let a, let m = p.range(of: "MSG_RÉEL") {
+                    #expect(u.lowerBound < a.lowerBound)
+                    #expect(a.upperBound < m.lowerBound)
+                }
+            }
+            #expect(p.hasSuffix("<|im_start|>user\nMSG_RÉEL<|im_end|>\n<|im_start|>assistant\n"))
+        }
+        // Le chemin Gemma reste sans few-shot ChatML (mécanisme `examples` à part).
+        let gemma = GemmaChatPrompt.translation(of: "MSG_RÉEL", into: .es, model: .gemma1b)
+        #expect(!gemma.contains("<|im_start|>"))
+    }
+
     @Test("cleanCompletion gère aussi le token de fin Qwen")
     func cleanHandlesQwenStop() {
         #expect(GemmaChatPrompt.cleanCompletion("  Hello world<|im_end|>") == "Hello world")

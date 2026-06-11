@@ -150,6 +150,7 @@ final class PreferencesStore {
         static let ocrLangES = "ocrLangES"
         static let typoEnabled = "typoEnabled"
         static let emojiEnabled = "emojiEnabled"
+        static let slashTransformEnabled = "slashTransformEnabled"
         static let emojiFrequency = "emojiFrequency"
         static let completionLength = "completionLength"
         static let hideOnTypo = "hideOnTypo"
@@ -199,6 +200,13 @@ final class PreferencesStore {
     var ocrLangES: Bool { didSet { UserDefaults.standard.set(ocrLangES, forKey: K.ocrLangES) } }
     var typoEnabled: Bool { didSet { UserDefaults.standard.set(typoEnabled, forKey: K.typoEnabled) } }
     var emojiEnabled: Bool { didSet { UserDefaults.standard.set(emojiEnabled, forKey: K.emojiEnabled) } }
+    /// Active le déclencheur « // » (picker de transformations : corriger ·
+    /// raccourcir · reformuler · ton · traduire · instruction libre). Défaut :
+    /// actif. Mis en sommeil dans les mêmes apps que l'emoji (IDE/terminaux où
+    /// « // » est un commentaire ou un chemin).
+    var slashTransformEnabled: Bool {
+        didSet { UserDefaults.standard.set(slashTransformEnabled, forKey: K.slashTransformEnabled) }
+    }
     /// Compteur d'usage par shortcode (picker ET expansion `:code:` classique).
     /// Alimente le classement du picker : l'état « : » nu montre TES emoji, pas
     /// une liste figée. Privacy : des shortcodes de la table curée, jamais du
@@ -337,6 +345,7 @@ final class PreferencesStore {
         self.ocrLangES = (d.object(forKey: K.ocrLangES) as? Bool) ?? false
         self.typoEnabled = (d.object(forKey: K.typoEnabled) as? Bool) ?? true
         self.emojiEnabled = (d.object(forKey: K.emojiEnabled) as? Bool) ?? true
+        self.slashTransformEnabled = (d.object(forKey: K.slashTransformEnabled) as? Bool) ?? true
         self.emojiFrequency = (d.object(forKey: K.emojiFrequency) as? [String: Int]) ?? [:]
         self.completionLength = (d.string(forKey: K.completionLength).flatMap(CompletionLength.init(rawValue:))) ?? .medium
         self.hideOnTypo = (d.object(forKey: K.hideOnTypo) as? Bool) ?? true
