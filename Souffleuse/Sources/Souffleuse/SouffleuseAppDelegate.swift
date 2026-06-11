@@ -2715,8 +2715,19 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 return true
             }
             let deleteChars = transformation.deleteCharsOnAccept
+            // Portée = champ entier ET caret en fin (rien après le trigger) →
+            // voie sélection-vérifiée : pas de comptage de backspaces, donc pas
+            // de dérive dans les contenteditable Chromium (UAT 11/06, Gmail :
+            // suppression 5 chars trop courte → « BonjoHola, »). Si l'hôte
+            // n'honore pas la sélection AX, fallback sur le chemin compté.
+            let wholeField = !transformation.isScopeTruncated
+                && prefixNow == (snap.text ?? "")
             DispatchQueue.global(qos: .userInitiated).async { [axClient] in
-                axClient.replaceForCommit(deleteChars: deleteChars, with: output)
+                let replacedAll = wholeField
+                    && axClient.replaceWholeFieldForCommit(with: output)
+                if !replacedAll {
+                    axClient.replaceForCommit(deleteChars: deleteChars, with: output)
+                }
                 let s = axClient.snapshot()
                 DispatchQueue.main.async { [weak self] in self?.dismissedForText = s.text ?? "" }
             }
