@@ -56,6 +56,16 @@ public struct AXSnapshot: Sendable, Equatable {
     /// (Brave) ; le suffixe couvre toute la famille Chromium (Edge, Vivaldi…).
     public let domClassList: [String]?
 
+    /// `AXHasPopup` — mapping Chromium/Gecko de `aria-haspopup`. Vrai pour les
+    /// champs qui ouvrent une liste de choix (combobox ARIA, chip-input
+    /// Angular Material…). Faux si l'attribut est absent ou false.
+    public let hasPopup: Bool
+
+    /// `AXAutocompleteValue` — mapping de `aria-autocomplete` ("list",
+    /// "inline", "both", "none"). "list"/"both" ⇒ le champ propose ses propres
+    /// suggestions dans un popup ; notre ghost ne ferait que rivaliser avec.
+    public let autocompleteKind: String?
+
     public init(
         bundleID: String?,
         role: String?,
@@ -71,7 +81,9 @@ public struct AXSnapshot: Sendable, Equatable {
         textAfterCaret: String? = nil,
         identifier: String? = nil,
         domIdentifier: String? = nil,
-        domClassList: [String]? = nil
+        domClassList: [String]? = nil,
+        hasPopup: Bool = false,
+        autocompleteKind: String? = nil
     ) {
         self.bundleID = bundleID
         self.role = role
@@ -88,6 +100,8 @@ public struct AXSnapshot: Sendable, Equatable {
         self.identifier = identifier
         self.domIdentifier = domIdentifier
         self.domClassList = domClassList
+        self.hasPopup = hasPopup
+        self.autocompleteKind = autocompleteKind
     }
 
     public var isTextElement: Bool {
@@ -122,6 +136,22 @@ public struct AXSnapshot: Sendable, Equatable {
         if identifier == "WEB_BROWSER_ADDRESS_AND_SEARCH_FIELD" { return true }
         if domIdentifier == "urlbar-input" { return true }
         if let domClassList, domClassList.contains(where: { $0.hasSuffix("OmniboxViewViews") }) {
+            return true
+        }
+        return false
+    }
+
+    /// Vrai quand le champ focalisé est un SÉLECTEUR : un champ texte dont le
+    /// rôle est de filtrer une liste de choix (combobox ARIA, autocomplete
+    /// Angular Material/React Select, chip-input…). L'utilisateur y choisit
+    /// une valeur dans un popup — un ghost LLM y est du bruit qui rivalise
+    /// avec les suggestions du champ lui-même. Sondé le 11/06/2026 sur un
+    /// chip-input Angular Material (Brave) : AXHasPopup=1,
+    /// AXAutocompleteValue="list". "inline" n'est PAS un sélecteur (simple
+    /// complétion dans le champ, pas de liste).
+    public var isPickerField: Bool {
+        if hasPopup { return true }
+        if let autocompleteKind, autocompleteKind == "list" || autocompleteKind == "both" {
             return true
         }
         return false
@@ -836,7 +866,26 @@ public final class AXClient: @unchecked Sendable {
         }
 
         let text = copyStringAttr(element, kAXValueAttribute)
-        let (caretIndex, caretRect) = readCaret(element)
+        let (rawCaretIndex, caretRect) = readCaret(element)
+
+        // ── Remap du caret Chromium multi-blocs (Linear dans Brave, 11/06) ──
+        // Pour un contenteditable à plusieurs paragraphes (ProseMirror…),
+        // Chromium rapporte un AXSelectedTextRange qui NE COMPTE PAS les
+        // séparateurs de blocs, alors que l'AXValue matérialise un "\n" par
+        // bloc : caret décalé de (nb de blocs avant lui), donc « mid-line »
+        // détecté à tort en fin de texte et préfixe amputé. Reproduit : 2
+        // paragraphes → caret = len-1, 3 → len-2 ; le <textarea> compte juste.
+        // Gate triple : texte multi-lignes + caret pas déjà en fin + structure
+        // composite Chromium (ChromeAXNodeId ET enfants AX = un par bloc) —
+        // Notes (1 enfant, pas de ChromeAXNodeId) et les textarea (0 enfant)
+        // ne matchent pas.
+        let caretIndex: Int? = {
+            guard let raw = rawCaretIndex, let text,
+                  raw < text.count,
+                  text.contains(where: \.isNewline),
+                  isChromiumCompositeText(element) else { return rawCaretIndex }
+            return Self.remapBlockCaret(text: text, reported: raw)
+        }()
         let elementRect = readElementRect(element)
         let caretFont = caretIndex.flatMap { readFont(element, at: $0) }
 
@@ -882,10 +931,14 @@ public final class AXClient: @unchecked Sendable {
         var identifier: String?
         var domIdentifier: String?
         var domClassList: [String]?
+        var hasPopup = false
+        var autocompleteKind: String?
         if role != "AXTextArea" {
             identifier = copyStringAttr(element, kAXIdentifierAttribute)
             domIdentifier = copyStringAttr(element, "AXDOMIdentifier")
             domClassList = copyAttr(element, "AXDOMClassList") as? [String]
+            hasPopup = (copyAttr(element, "AXHasPopup") as? Bool) ?? false
+            autocompleteKind = copyStringAttr(element, "AXAutocompleteValue")
         }
 
         return AXSnapshot(
@@ -903,8 +956,41 @@ public final class AXClient: @unchecked Sendable {
             textAfterCaret: textAfterCaret,
             identifier: identifier,
             domIdentifier: domIdentifier,
-            domClassList: domClassList
+            domClassList: domClassList,
+            hasPopup: hasPopup,
+            autocompleteKind: autocompleteKind
         )
+    }
+
+    /// Structure « texte composite » Chromium : l'élément vient du contenu web
+    /// (attribut propriétaire `ChromeAXNodeId` lisible) ET expose des enfants
+    /// AX — un par bloc pour un contenteditable. C'est exactement la forme dont
+    /// les offsets de caret sont décalés (voir le remap dans `readSnapshot`).
+    /// 2 IPC max, et seulement quand le texte est multi-lignes.
+    private func isChromiumCompositeText(_ element: AXUIElement) -> Bool {
+        var ref: AnyObject?
+        guard AXUIElementCopyAttributeValue(element, "ChromeAXNodeId" as CFString, &ref) == .success else {
+            return false
+        }
+        var childCount: CFIndex = 0
+        AXUIElementGetAttributeValueCount(element, kAXChildrenAttribute as CFString, &childCount)
+        return childCount > 0
+    }
+
+    /// Convertit un offset de caret « sans séparateurs de blocs » (quirk
+    /// Chromium contenteditable) vers l'index réel dans `text` (où chaque bloc
+    /// est séparé par un "\n"). Marche en consommant `reported` caractères
+    /// NON-newline ; à égalité sur une frontière de bloc, place le caret AVANT
+    /// le "\n" (fin de ligne = le cas de frappe courant, et un ghost y reste
+    /// légitime). Identité quand `text` ne contient pas de newline.
+    public static func remapBlockCaret(text: String, reported: Int) -> Int {
+        guard reported >= 0 else { return reported }
+        var consumed = 0
+        for (index, ch) in text.enumerated() {
+            if consumed == reported { return index }
+            if !ch.isNewline { consumed += 1 }
+        }
+        return text.count
     }
 
     private func readFont(_ element: AXUIElement, at caret: Int) -> AXFontInfo? {
