@@ -1585,6 +1585,57 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // Picker « // » — dès « // » ouvert en début de mot avant le caret, la
+        // rangée d'intentions ①–⑤ s'affiche au caret (même gabarit que le picker
+        // emoji) ; taper filtre, la rangée 1–9 choisit, ⏎ valide le 1er match ou
+        // l'instruction libre, Esc ferme. Pendant que le panneau est ouvert, pas
+        // de ghost LLM concurrent. Jamais en champ sécurisé (re-garde explicite,
+        // déjà filtré par le gate en amont) ni dans les apps où « // » est un
+        // commentaire/chemin (mêmes bundles que l'emoji).
+        // Placé AVANT la branche mid-line (UAT 11/06) : un « // » tapé au MILIEU
+        // d'un texte existant doit ouvrir le picker, pas laisser la pilule
+        // mid-line confisquer le tick — le détecteur ne regarde que le préfixe,
+        // il est insensible au texte après le caret.
+        if store.slashTransformEnabled,
+           !snap.isSecureField,
+           !SlashTransformDetector.disabledBundles.contains(bundleID),
+           let slashState = SlashTransformDetector.detect(textBeforeCaret: prefix),
+           let rect = rectForGhost
+        {
+            // Ancre de refus : le préfixe jusqu'au « // » inclus. Tant qu'elle
+            // n'a pas changé après un Esc, le panneau reste fermé.
+            let anchor = String(prefix.prefix(prefix.count - slashState.filter.count))
+            if slashPickerDismissedAnchor != anchor {
+                slashPickerDismissedAnchor = nil
+                if slashPickerState == nil { Log.info(.input, "slash_picker_shown") }
+                slashPickerState = slashState
+                slashPickerAnchor = anchor
+                slashPickerMatches = TransformationIntent.matches(filter: slashState.filter)
+                transformPicker.show(
+                    labels: slashPickerMatches.map(\.displayName),
+                    freeInstruction: slashPickerMatches.isEmpty ? slashState.filter : nil,
+                    at: rect)
+                // Digits coupés en mode instruction libre (« //passe en 3 points »
+                // reste saisissable) ; ⏎ armé seulement filtre non vide (« // » nu
+                // + Entrée = saut de ligne normal dans l'app hôte).
+                interceptor.setSlashPickerArmed(
+                    true,
+                    digits: !slashPickerMatches.isEmpty,
+                    enter: !slashState.filter.isEmpty)
+                predictor.cancel()
+                lastPredictedPrefix = nil
+                overlay.hide()
+                interceptor.setActive(false)
+                currentTypo = nil
+                return
+            }
+        } else {
+            // Plus de trigger ouvert : fermer le panneau et ré-armer le
+            // déclenchement après un éventuel refus.
+            slashPickerDismissedAnchor = nil
+            hideSlashPicker()
+        }
+
         // Trace de latence : 1ᵉʳ tick qui VOIT ce préfixe (l'écart avec le
         // key_down précédent = la quantization du poll 80 ms).
         if LatencyTrace.enabled, prefix != latencyTracedPrefix {
@@ -1949,53 +2000,6 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             // déclenchement après un éventuel refus.
             emojiPickerDismissedAnchor = nil
             hideEmojiPicker()
-        }
-
-        // Picker « // » — dès « // » ouvert en début de mot avant le caret, la
-        // rangée d'intentions ①–⑤ s'affiche au caret (même gabarit que le picker
-        // emoji) ; taper filtre, la rangée 1–9 choisit, ⏎ valide le 1er match ou
-        // l'instruction libre, Esc ferme. Pendant que le panneau est ouvert, pas
-        // de ghost LLM concurrent. Jamais en champ sécurisé (re-garde explicite,
-        // déjà filtré par le gate en amont) ni dans les apps où « // » est un
-        // commentaire/chemin (mêmes bundles que l'emoji).
-        if store.slashTransformEnabled,
-           !snap.isSecureField,
-           !SlashTransformDetector.disabledBundles.contains(bundleID),
-           let slashState = SlashTransformDetector.detect(textBeforeCaret: prefix),
-           let rect = rectForGhost
-        {
-            // Ancre de refus : le préfixe jusqu'au « // » inclus. Tant qu'elle
-            // n'a pas changé après un Esc, le panneau reste fermé.
-            let anchor = String(prefix.prefix(prefix.count - slashState.filter.count))
-            if slashPickerDismissedAnchor != anchor {
-                slashPickerDismissedAnchor = nil
-                if slashPickerState == nil { Log.info(.input, "slash_picker_shown") }
-                slashPickerState = slashState
-                slashPickerAnchor = anchor
-                slashPickerMatches = TransformationIntent.matches(filter: slashState.filter)
-                transformPicker.show(
-                    labels: slashPickerMatches.map(\.displayName),
-                    freeInstruction: slashPickerMatches.isEmpty ? slashState.filter : nil,
-                    at: rect)
-                // Digits coupés en mode instruction libre (« //passe en 3 points »
-                // reste saisissable) ; ⏎ armé seulement filtre non vide (« // » nu
-                // + Entrée = saut de ligne normal dans l'app hôte).
-                interceptor.setSlashPickerArmed(
-                    true,
-                    digits: !slashPickerMatches.isEmpty,
-                    enter: !slashState.filter.isEmpty)
-                predictor.cancel()
-                lastPredictedPrefix = nil
-                overlay.hide()
-                interceptor.setActive(false)
-                currentTypo = nil
-                return
-            }
-        } else {
-            // Plus de trigger ouvert : fermer le panneau et ré-armer le
-            // déclenchement après un éventuel refus.
-            slashPickerDismissedAnchor = nil
-            hideSlashPicker()
         }
 
         // Typo correction — preempts LLM ghost. Triggered only on word boundary
