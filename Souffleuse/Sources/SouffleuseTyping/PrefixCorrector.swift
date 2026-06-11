@@ -17,8 +17,9 @@ import Foundation
 /// - Only above the detector's confidence (Levenshtein ≤ max, length ≥ min);
 ///   when unsure it leaves the word verbatim.
 ///
-/// The corrector is a thin, pure wrapper over `TypoDetector` and holds no
-/// mutable state, so it is trivially `Sendable`.
+/// The corrector is a thin wrapper over `TypoDetector` ; son seul état mutable
+/// est le memo `mot → verdict` ci-dessous, protégé par un lock (`@unchecked
+/// Sendable` honnête).
 public final class PrefixCorrector: @unchecked Sendable {
     private let detector: TypoDetector
 
@@ -26,6 +27,29 @@ public final class PrefixCorrector: @unchecked Sendable {
     /// per-keystroke cost (NSSpellChecker calls) and keeps the corrected text
     /// stable so the KV-cache LCP stays valid across keystrokes.
     public static let wordBudget = 12
+
+    /// Memo `mot → verdict` (nil = laisser tel quel). Les mots COMPLÉTÉS de la
+    /// fenêtre sont quasi identiques d'une frappe à l'autre (le mot au caret
+    /// est exclu par design) : sans memo, les 12 mêmes mots repassaient par
+    /// NSSpellChecker à CHAQUE predict — mesuré 76 ms p50 par frappe après le
+    /// durcissement multi-langues de `68a28af` (trace 11/06, segment
+    /// `lang_done→correct_done`). Avec memo : ~0 ms en cours de mot, une seule
+    /// vraie vérification à chaque mot complété. Le verdict ne dépend QUE du
+    /// mot (le hint de langue de `correctedWord` est advisory et non transmis
+    /// au détecteur) — si un futur durcissement force la langue, la clé du
+    /// memo devra l'inclure.
+    private var verdictMemo: [String: String?] = [:]
+    private let memoLock = NSLock()
+
+    /// Borne du memo. Au-delà, reset complet (plus simple qu'un LRU ; le
+    /// re-remplissage coûte une fenêtre de 12 mots, négligeable).
+    static let memoCap = 512
+
+    /// Kill-switch runtime (pattern `SOUFFLEUSE_*_OFF`) : posé ⇒ chaque mot
+    /// repasse par NSSpellChecker à chaque predict (comportement pré-memo),
+    /// pour A/B ou revert instantané sans rebuild.
+    private static let memoDisabled: Bool =
+        ProcessInfo.processInfo.environment["SOUFFLEUSE_TYPO_CACHE_OFF"] != nil
 
     public init(detector: TypoDetector = TypoDetector()) {
         self.detector = detector
@@ -81,11 +105,36 @@ public final class PrefixCorrector: @unchecked Sendable {
     /// confidence bar. Language constraint: when a confident language is known
     /// we skip correction entirely if the detector cannot agree (it already
     /// bails when any of FR/EN accepts the word).
+    ///
+    /// Memoïsé : un mot déjà arbitré ne repasse jamais par NSSpellChecker
+    /// (voir `verdictMemo`).
     private func correctedWord(_ word: String, language: String?) -> String? {
         guard word.count >= TypoDetector.minWordLength else { return nil }
         // Skip non-prose tokens: anything with a digit, a dot/slash/at/colon
         // (URLs, identifiers, code), or mixed-case interior (camelCase IDs).
         guard Self.looksLikeProse(word) else { return nil }
+        if !Self.memoDisabled {
+            memoLock.lock()
+            let hit = verdictMemo[word]
+            memoLock.unlock()
+            if let verdict = hit { return verdict }
+        }
+        let verdict = uncachedVerdict(word)
+        if !Self.memoDisabled {
+            memoLock.lock()
+            if verdictMemo.count >= Self.memoCap { verdictMemo.removeAll(keepingCapacity: true) }
+            // `updateValue`, PAS le subscript : `memo[word] = nil` sur un
+            // [String: String?] SUPPRIME la clé au lieu de stocker .some(nil) —
+            // et « pas de correction » est précisément le verdict majoritaire
+            // qu'on veut mémoïser.
+            verdictMemo.updateValue(verdict, forKey: word)
+            memoLock.unlock()
+        }
+        return verdict
+    }
+
+    /// La vérification réelle (NSSpellChecker), sans memo.
+    private func uncachedVerdict(_ word: String) -> String? {
         // The probe ends with a trailing space so the word is "completed".
         let probe = word + " "
         guard let s = detector.checkLastWord(in: probe, caretIndex: probe.count) else {
@@ -93,6 +142,13 @@ public final class PrefixCorrector: @unchecked Sendable {
         }
         guard s.original == word else { return nil }
         return s.suggestion
+    }
+
+    /// Test seam : taille courante du memo (pour vérifier hit/miss/cap).
+    var memoCount: Int {
+        memoLock.lock()
+        defer { memoLock.unlock() }
+        return verdictMemo.count
     }
 
     // MARK: - Tail / word segmentation
