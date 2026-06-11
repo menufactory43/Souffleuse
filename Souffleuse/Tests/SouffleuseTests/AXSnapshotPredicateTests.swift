@@ -34,4 +34,44 @@ struct AXSnapshotPredicateTests {
         #expect(search.isSearchField && !search.isSecureField)
         #expect(secure.isSecureField && !secure.isSearchField)
     }
+
+    // MARK: - isAddressBar (signatures sondées via axdump, 11/06/2026)
+
+    private func snap(
+        identifier: String? = nil,
+        domIdentifier: String? = nil,
+        domClassList: [String]? = nil
+    ) -> AXSnapshot {
+        AXSnapshot(bundleID: "x", role: "AXTextField", subrole: nil, text: "",
+                   caretIndex: 0, caretRect: nil, caretFont: nil,
+                   identifier: identifier, domIdentifier: domIdentifier,
+                   domClassList: domClassList)
+    }
+
+    @Test("omnibox Safari : AXIdentifier dédié")
+    func safariOmniboxDetected() {
+        #expect(snap(identifier: "WEB_BROWSER_ADDRESS_AND_SEARCH_FIELD").isAddressBar)
+    }
+
+    @Test("omnibox Chromium : classe Views, Chrome nu et forks")
+    func chromiumOmniboxDetected() {
+        #expect(snap(domClassList: ["OmniboxViewViews"]).isAddressBar)
+        #expect(snap(domClassList: ["BraveOmniboxViewViews"]).isAddressBar)
+    }
+
+    @Test("barre d'adresse Firefox : AXDOMIdentifier urlbar-input")
+    func firefoxUrlbarDetected() {
+        #expect(snap(domIdentifier: "urlbar-input").isAddressBar)
+    }
+
+    @Test("un AXIdentifier quelconque ne matche pas (Notes : Note Body Text View)")
+    func unrelatedIdentifierIsNotAddressBar() {
+        #expect(snap(identifier: "Note Body Text View").isAddressBar == false)
+        #expect(snap().isAddressBar == false)
+    }
+
+    @Test("classe DOM d'une page web quelconque ne matche pas")
+    func pageDomClassIsNotAddressBar() {
+        #expect(snap(domClassList: ["download-button", "mdc-button"]).isAddressBar == false)
+    }
 }

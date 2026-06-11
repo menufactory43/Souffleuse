@@ -39,6 +39,23 @@ public struct AXSnapshot: Sendable, Equatable {
     /// is empty (D-14c).
     public let textAfterCaret: String?
 
+    /// AX `kAXIdentifierAttribute` du champ focalisé. Lu seulement pour les
+    /// champs single-line (`AXTextField`/`AXComboBox`) — sert à reconnaître
+    /// les champs utilitaires (Safari annonce son omnibox via
+    /// "WEB_BROWSER_ADDRESS_AND_SEARCH_FIELD", sondé le 11/06/2026).
+    public let identifier: String?
+
+    /// `AXDOMIdentifier` (attribut non-standard exposé par Gecko et Chromium).
+    /// Firefox identifie sa barre d'adresse par "urlbar-input" — indépendant
+    /// de la locale, contrairement à AXDescription.
+    public let domIdentifier: String?
+
+    /// `AXDOMClassList` (attribut non-standard Chromium). Pour les vues natives
+    /// du navigateur (hors page web), contient le nom de la classe Views —
+    /// l'omnibox expose "OmniboxViewViews" (Chrome) / "BraveOmniboxViewViews"
+    /// (Brave) ; le suffixe couvre toute la famille Chromium (Edge, Vivaldi…).
+    public let domClassList: [String]?
+
     public init(
         bundleID: String?,
         role: String?,
@@ -51,7 +68,10 @@ public struct AXSnapshot: Sendable, Equatable {
         elementRect: CGRect? = nil,
         placeholder: String? = nil,
         help: String? = nil,
-        textAfterCaret: String? = nil
+        textAfterCaret: String? = nil,
+        identifier: String? = nil,
+        domIdentifier: String? = nil,
+        domClassList: [String]? = nil
     ) {
         self.bundleID = bundleID
         self.role = role
@@ -65,6 +85,9 @@ public struct AXSnapshot: Sendable, Equatable {
         self.placeholder = placeholder
         self.help = help
         self.textAfterCaret = textAfterCaret
+        self.identifier = identifier
+        self.domIdentifier = domIdentifier
+        self.domClassList = domClassList
     }
 
     public var isTextElement: Bool {
@@ -82,6 +105,26 @@ public struct AXSnapshot: Sendable, Equatable {
     /// pas de ghost dans une recherche (et on ne réveille pas le modèle pour ça).
     public var isSearchField: Bool {
         subrole == "AXSearchField"
+    }
+
+    /// Vrai quand le champ focalisé est la BARRE D'ADRESSE d'un navigateur.
+    /// Les omniboxes sont des `AXTextField` ordinaires (PAS `AXSearchField`),
+    /// donc elles passaient le gate texte et allumaient badge + génération pour
+    /// des URLs. Signatures sondées le 11/06/2026 (axdump), toutes indépendantes
+    /// de la locale :
+    ///   - Safari   : AXIdentifier "WEB_BROWSER_ADDRESS_AND_SEARCH_FIELD"
+    ///   - Chromium : AXDOMClassList contient *"OmniboxViewViews" (Chrome nu,
+    ///                "BraveOmniboxViewViews" — le suffixe couvre les forks)
+    ///   - Firefox  : AXDOMIdentifier "urlbar-input"
+    /// Match exact/suffixe uniquement : Notes expose aussi un AXIdentifier
+    /// ("Note Body Text View") et ne doit jamais matcher.
+    public var isAddressBar: Bool {
+        if identifier == "WEB_BROWSER_ADDRESS_AND_SEARCH_FIELD" { return true }
+        if domIdentifier == "urlbar-input" { return true }
+        if let domClassList, domClassList.contains(where: { $0.hasSuffix("OmniboxViewViews") }) {
+            return true
+        }
+        return false
     }
 }
 
@@ -832,6 +875,19 @@ public final class AXClient: @unchecked Sendable {
             return copyStringAttr(windowEl, kAXTitleAttribute)
         }()
 
+        // Marqueurs de champ utilitaire (omnibox…) : 3 lectures de plus par
+        // tick, seulement pour les champs single-line — les barres d'adresse
+        // sont toujours des AXTextField/AXComboBox, jamais des AXTextArea, et
+        // la composition (le cas chaud) reste à coût inchangé.
+        var identifier: String?
+        var domIdentifier: String?
+        var domClassList: [String]?
+        if role != "AXTextArea" {
+            identifier = copyStringAttr(element, kAXIdentifierAttribute)
+            domIdentifier = copyStringAttr(element, "AXDOMIdentifier")
+            domClassList = copyAttr(element, "AXDOMClassList") as? [String]
+        }
+
         return AXSnapshot(
             bundleID: bundleID,
             role: role,
@@ -844,7 +900,10 @@ public final class AXClient: @unchecked Sendable {
             elementRect: elementRect,
             placeholder: placeholder,
             help: help,
-            textAfterCaret: textAfterCaret
+            textAfterCaret: textAfterCaret,
+            identifier: identifier,
+            domIdentifier: domIdentifier,
+            domClassList: domClassList
         )
     }
 
