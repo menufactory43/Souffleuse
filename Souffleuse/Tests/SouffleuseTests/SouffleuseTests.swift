@@ -32,13 +32,12 @@ import Testing
 }
 
 @MainActor
-@Test func overlayEstimatedFontInvertsLineHeightRatio() {
-    // We divide the line height by 1.1 (not the strict 1.2) so the ghost
-    // renders a hair larger than the host text in tight web/Electron line
-    // boxes. A 18pt line height should give us roughly 16.4pt.
+@Test func overlayEstimatedFontMatchesTightWebCaretRects() {
+    // Pas de division (UAT 11/06) : ce chemin ne sert qu'aux hôtes web, dont
+    // les rects de caret sont SERRÉS (hauteur ≈ taille de police CSS). 18 → 18.
     let f = OverlayWindow.estimatedFont(forCaretRectHeight: 18)
     #expect(f != nil)
-    #expect(abs((f?.pointSize ?? 0) - 16.36) < 0.5)
+    #expect((f?.pointSize ?? 0) == 18)
 }
 
 @MainActor
