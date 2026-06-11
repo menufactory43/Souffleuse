@@ -82,13 +82,21 @@ final class TranslationRuntime {
 
     /// Traduit `frenchText` vers `target`, en streamant les morceaux de la langue
     /// cible via `onToken`. Charge le modèle au 1er usage. Renvoie les métriques
-    /// moteur (TTFT / tok-s) ou `nil` si le modèle est indisponible / annulé.
+    /// moteur du 1er segment (TTFT / tok-s) ou `nil` si le modèle est
+    /// indisponible / annulé avant le 1er token.
+    ///
+    /// Au-delà de `TranslationChunker.maxWholeChars`, le message est traduit
+    /// PHRASE PAR PHRASE et réassemblé avec ses séparateurs d'origine (UAT
+    /// 11/06 : sur un texte long, Qwen 1.5B « échote » le français à greedy au
+    /// lieu de traduire — chaque phrase isolée se traduit proprement). Le
+    /// préfixe système + few-shot étant identique entre segments, le KV-LCP
+    /// rend les prefills suivants quasi gratuits.
     ///
     /// `onToken` est `@Sendable` (il franchit la frontière de l'acteur moteur) ;
     /// l'appelant fait lui-même le hop MainActor pour mettre à jour le HUD.
     /// Retourne `true` pour continuer la génération, `false` pour l'arrêter.
-    /// `maxTokens == nil` → adapté à la longueur de la source (anti-troncature) ;
-    /// passer une valeur ne sert qu'aux bench/tests.
+    /// `maxTokens == nil` → adapté à la longueur de chaque segment
+    /// (anti-troncature) ; passer une valeur ne sert qu'aux bench/tests.
     @discardableResult
     func translate(
         _ frenchText: String,
@@ -98,25 +106,90 @@ final class TranslationRuntime {
         onToken: @escaping @Sendable (String) -> Bool
     ) async -> LlamaMetrics? {
         guard await ensureLoaded() else { return nil }
-        let prompt = GemmaChatPrompt.translation(of: frenchText, into: target, examples: examples, model: model)
-        let budget = maxTokens ?? SuggestionPolicy.Tuning.translationMaxNewTokens(sourceChars: frenchText.count)
         // Priorité au ghost FR : on attend (borné) qu'il se taise avant de lancer
         // le décode lourd de la traduction, pour qu'il reste *instantané* (§2.9).
         await GpuGate.shared.awaitGhostIdle(
             maxWaitMillis: SuggestionPolicy.Tuning.translationGhostWaitMaxMillis,
             pollMillis: SuggestionPolicy.Tuning.translationGhostWaitPollMillis
         )
-        return await engine.generate(
-            prompt: prompt,
-            maxTokens: budget,
-            sampling: LlamaSampling(temperature: 0, repeatPenalty: 1.1, repeatLastN: 64),
-            onToken: onToken
+        return await generateChunked(frenchText, maxTokens: maxTokens, onToken: onToken) {
+            GemmaChatPrompt.translation(of: $0, into: target, examples: examples, model: model)
+        }
+    }
+
+    /// Corrige `frenchText` (orthographe/grammaire FR→FR) par segments — la
+    /// correction est LOCALE par nature : le découpage lignes-puis-phrases
+    /// garantit la structure du message par construction (les sauts de ligne ne
+    /// sont jamais montrés au modèle, UAT 11/06) sans perdre de contexte utile,
+    /// contrairement à raccourcir/reformuler qui ont besoin du texte entier.
+    @discardableResult
+    func correct(
+        _ frenchText: String,
+        maxTokens: Int? = nil,
+        onToken: @escaping @Sendable (String) -> Bool
+    ) async -> LlamaMetrics? {
+        guard await ensureLoaded() else { return nil }
+        await GpuGate.shared.awaitGhostIdle(
+            maxWaitMillis: SuggestionPolicy.Tuning.translationGhostWaitMaxMillis,
+            pollMillis: SuggestionPolicy.Tuning.translationGhostWaitPollMillis
         )
+        return await generateChunked(frenchText, maxTokens: maxTokens, onToken: onToken) {
+            GemmaChatPrompt.correction(of: $0, model: model)
+        }
+    }
+
+    /// Boucle de génération PAR SEGMENTS (`TranslationChunker`, lignes puis
+    /// phrases) : un prompt par segment via `promptFor`, streaming continu,
+    /// séparateurs d'origine réinjectés entre les segments — jamais après le
+    /// dernier. Le préfixe système (stable par intention/cible) rend les
+    /// prefills suivants quasi gratuits (KV-LCP). Partagée par `translate`
+    /// et `correct`.
+    private func generateChunked(
+        _ text: String,
+        maxTokens: Int?,
+        onToken: @escaping @Sendable (String) -> Bool,
+        promptFor: (String) -> String
+    ) async -> LlamaMetrics? {
+        let segments = TranslationChunker.segments(of: text)
+        // L'arrêt demandé par l'APPELANT (frappe, annulation) stoppe tout ; une
+        // balise de fin de tour émise par le moteur ne clôt que SON segment.
+        final class Stop: @unchecked Sendable { var byCaller = false }
+        let stop = Stop()
+        var firstMetrics: LlamaMetrics?
+        for (i, segment) in segments.enumerated() {
+            let budget = maxTokens
+                ?? SuggestionPolicy.Tuning.transformMaxNewTokens(sourceChars: segment.text.count)
+            let metrics = await engine.generate(
+                prompt: promptFor(segment.text),
+                maxTokens: budget,
+                sampling: LlamaSampling(
+                    temperature: 0, repeatPenalty: 1.1, repeatLastN: 64,
+                    primePenaltiesWithPrompt: true)
+            ) { piece in
+                if piece.contains("<|im_end|>") || piece.contains("<end_of_turn>")
+                    || piece.contains("<|endoftext|>") {
+                    return false   // fin de CE segment seulement
+                }
+                let keep = onToken(piece)
+                if !keep { stop.byCaller = true }
+                return keep
+            }
+            if firstMetrics == nil { firstMetrics = metrics }
+            if stop.byCaller { return firstMetrics }
+            if i < segments.count - 1, !segment.suffix.isEmpty {
+                if !onToken(segment.suffix) { return firstMetrics }
+            }
+        }
+        return firstMetrics
     }
 
     /// Relit/réécrit `frenchText` EN FRANÇAIS selon `tone` (FR→FR), en streamant
     /// via `onToken`. Même tuyau que `translate` : lazy-load du moteur, attente
-    /// bornée du ghost (`GpuGate`), budget de tokens adaptatif, sampling déterministe.
+    /// bornée du ghost (`GpuGate`), budget de tokens adaptatif, sampling
+    /// déterministe. Budget = `transformMaxNewTokens` (UAT 11/06 : l'ancien
+    /// budget traduction ~0,4 tok/char tronquait les relectures longues en
+    /// plein mot — une réécriture FR→FR peut s'allonger ; le budget est un
+    /// PLAFOND, la génération s'arrête seule à la fin du texte).
     @discardableResult
     func reformulate(
         _ frenchText: String,
@@ -127,7 +200,7 @@ final class TranslationRuntime {
     ) async -> LlamaMetrics? {
         guard await ensureLoaded() else { return nil }
         let prompt = GemmaChatPrompt.reformulation(of: frenchText, tone: tone, examples: examples, model: model)
-        let budget = maxTokens ?? SuggestionPolicy.Tuning.translationMaxNewTokens(sourceChars: frenchText.count)
+        let budget = maxTokens ?? SuggestionPolicy.Tuning.transformMaxNewTokens(sourceChars: frenchText.count)
         await GpuGate.shared.awaitGhostIdle(
             maxWaitMillis: SuggestionPolicy.Tuning.translationGhostWaitMaxMillis,
             pollMillis: SuggestionPolicy.Tuning.translationGhostWaitPollMillis
@@ -135,7 +208,35 @@ final class TranslationRuntime {
         return await engine.generate(
             prompt: prompt,
             maxTokens: budget,
-            sampling: LlamaSampling(temperature: 0, repeatPenalty: 1.1, repeatLastN: 64),
+            sampling: LlamaSampling(temperature: 0, repeatPenalty: 1.1, repeatLastN: 64, primePenaltiesWithPrompt: true),
+            onToken: onToken
+        )
+    }
+
+    /// Génère depuis un prompt instruct DÉJÀ assemblé — voie générique des
+    /// transformations « // » (corriger / raccourcir / reformuler / instruction
+    /// libre, prompts de `GemmaChatPrompt+Transformation`). Même tuyau exact que
+    /// `translate`/`reformulate` : lazy-load, attente bornée du ghost (GpuGate),
+    /// budget adaptatif sur `sourceChars`, sampling déterministe (T=0,
+    /// penalty 1.1, lastN 64). L'appelant assemble le prompt avec le
+    /// chat-template du `model` courant (exposé en lecture).
+    @discardableResult
+    func transform(
+        prompt: String,
+        sourceChars: Int,
+        maxTokens: Int? = nil,
+        onToken: @escaping @Sendable (String) -> Bool
+    ) async -> LlamaMetrics? {
+        guard await ensureLoaded() else { return nil }
+        let budget = maxTokens ?? SuggestionPolicy.Tuning.transformMaxNewTokens(sourceChars: sourceChars)
+        await GpuGate.shared.awaitGhostIdle(
+            maxWaitMillis: SuggestionPolicy.Tuning.translationGhostWaitMaxMillis,
+            pollMillis: SuggestionPolicy.Tuning.translationGhostWaitPollMillis
+        )
+        return await engine.generate(
+            prompt: prompt,
+            maxTokens: budget,
+            sampling: LlamaSampling(temperature: 0, repeatPenalty: 1.1, repeatLastN: 64, primePenaltiesWithPrompt: true),
             onToken: onToken
         )
     }
