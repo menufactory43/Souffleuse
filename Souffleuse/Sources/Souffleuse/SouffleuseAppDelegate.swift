@@ -2628,21 +2628,34 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         let model = translationRuntime.model
         let scope = state.scopeText
 
+        // Fabrique de stream par intention. ④ ton et ⑤ traduire passent par les
+        // méthodes du runtime (reformulate/translate) — MÊME tuyau que ⌥⌘T, dont
+        // le découpage phrase-par-phrase anti-écho des textes longs (UAT 11/06).
+        // Les trois actions FR→FR + libre gardent la voie prompt pré-assemblé.
+        typealias Stream = @MainActor (_ onToken: @escaping @Sendable (String) -> Bool) async -> LlamaMetrics?
+        func transformStream(_ prompt: String) -> Stream {
+            { [translationRuntime] onToken in
+                await translationRuntime.transform(
+                    prompt: prompt, sourceChars: scope.count, onToken: onToken)
+            }
+        }
         var header: String
-        let prompt: String
+        let stream: Stream
         switch intent {
         case .corriger:
-            prompt = GemmaChatPrompt.correction(of: scope, model: model)
+            stream = transformStream(GemmaChatPrompt.correction(of: scope, model: model))
             header = "// corriger…"
         case .raccourcir:
-            prompt = GemmaChatPrompt.shortening(of: scope, model: model)
+            stream = transformStream(GemmaChatPrompt.shortening(of: scope, model: model))
             header = "// raccourcir…"
         case .reformuler:
-            prompt = GemmaChatPrompt.rephrasing(of: scope, model: model)
+            stream = transformStream(GemmaChatPrompt.rephrasing(of: scope, model: model))
             header = "// reformuler…"
         case .ton:
             let tone = store.tones.tone(forBundle: bundleID)
-            prompt = GemmaChatPrompt.reformulation(of: scope, tone: tone, model: model)
+            stream = { [translationRuntime] onToken in
+                await translationRuntime.reformulate(scope, tone: tone, onToken: onToken)
+            }
             header = "// ton · \(tone.displayName)…"
         case .traduire:
             // Même résolution de cible que le commit ⌥⌘T : sélection vivante /
@@ -2655,15 +2668,20 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             let frCorrespondent = TranslationTarget.correspondentSpeaksFrench(in: context)
             switch selection.action(detected: detected, correspondentIsFrench: frCorrespondent) {
             case .translate(let target):
-                prompt = GemmaChatPrompt.translation(of: scope, into: target, model: model)
+                stream = { [translationRuntime] onToken in
+                    await translationRuntime.translate(scope, into: target, onToken: onToken)
+                }
                 header = "// traduire · FR → \(target.code)…"
             case .reformulate:
                 let tone = store.tones.tone(forBundle: bundleID)
-                prompt = GemmaChatPrompt.reformulation(of: scope, tone: tone, model: model)
+                stream = { [translationRuntime] onToken in
+                    await translationRuntime.reformulate(scope, tone: tone, onToken: onToken)
+                }
                 header = "// ton · \(tone.displayName)…"
             }
         case .libre(let instruction):
-            prompt = GemmaChatPrompt.freeTransformation(of: scope, instruction: instruction, model: model)
+            stream = transformStream(
+                GemmaChatPrompt.freeTransformation(of: scope, instruction: instruction, model: model))
             header = "// \(instruction.prefix(24))…"
         }
         // Portée ≠ champ entier (paragraphe du trigger, ou repli > 1500 chars)
@@ -2690,10 +2708,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             doneEvent: "transform_commit_done",
             applyMode: .preview(transformation),
             record: { },   // comptabilisé au Tab seulement (preview ≠ acte)
-            stream: { [translationRuntime] onToken in
-                await translationRuntime.transform(
-                    prompt: prompt, sourceChars: scope.count, onToken: onToken)
-            })
+            stream: stream)
     }
 
     /// Tab pendant le preview : supprime « portée + //filtre » puis injecte le

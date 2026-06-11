@@ -82,13 +82,21 @@ final class TranslationRuntime {
 
     /// Traduit `frenchText` vers `target`, en streamant les morceaux de la langue
     /// cible via `onToken`. Charge le modèle au 1er usage. Renvoie les métriques
-    /// moteur (TTFT / tok-s) ou `nil` si le modèle est indisponible / annulé.
+    /// moteur du 1er segment (TTFT / tok-s) ou `nil` si le modèle est
+    /// indisponible / annulé avant le 1er token.
+    ///
+    /// Au-delà de `TranslationChunker.maxWholeChars`, le message est traduit
+    /// PHRASE PAR PHRASE et réassemblé avec ses séparateurs d'origine (UAT
+    /// 11/06 : sur un texte long, Qwen 1.5B « échote » le français à greedy au
+    /// lieu de traduire — chaque phrase isolée se traduit proprement). Le
+    /// préfixe système + few-shot étant identique entre segments, le KV-LCP
+    /// rend les prefills suivants quasi gratuits.
     ///
     /// `onToken` est `@Sendable` (il franchit la frontière de l'acteur moteur) ;
     /// l'appelant fait lui-même le hop MainActor pour mettre à jour le HUD.
     /// Retourne `true` pour continuer la génération, `false` pour l'arrêter.
-    /// `maxTokens == nil` → adapté à la longueur de la source (anti-troncature) ;
-    /// passer une valeur ne sert qu'aux bench/tests.
+    /// `maxTokens == nil` → adapté à la longueur de chaque segment
+    /// (anti-troncature) ; passer une valeur ne sert qu'aux bench/tests.
     @discardableResult
     func translate(
         _ frenchText: String,
@@ -98,20 +106,47 @@ final class TranslationRuntime {
         onToken: @escaping @Sendable (String) -> Bool
     ) async -> LlamaMetrics? {
         guard await ensureLoaded() else { return nil }
-        let prompt = GemmaChatPrompt.translation(of: frenchText, into: target, examples: examples, model: model)
-        let budget = maxTokens ?? SuggestionPolicy.Tuning.translationMaxNewTokens(sourceChars: frenchText.count)
         // Priorité au ghost FR : on attend (borné) qu'il se taise avant de lancer
         // le décode lourd de la traduction, pour qu'il reste *instantané* (§2.9).
         await GpuGate.shared.awaitGhostIdle(
             maxWaitMillis: SuggestionPolicy.Tuning.translationGhostWaitMaxMillis,
             pollMillis: SuggestionPolicy.Tuning.translationGhostWaitPollMillis
         )
-        return await engine.generate(
-            prompt: prompt,
-            maxTokens: budget,
-            sampling: LlamaSampling(temperature: 0, repeatPenalty: 1.1, repeatLastN: 64, primePenaltiesWithPrompt: true),
-            onToken: onToken
-        )
+        let segments = TranslationChunker.segments(of: frenchText)
+        // L'arrêt demandé par l'APPELANT (frappe, annulation) stoppe tout ; une
+        // balise de fin de tour émise par le moteur ne clôt que SON segment.
+        final class Stop: @unchecked Sendable { var byCaller = false }
+        let stop = Stop()
+        var firstMetrics: LlamaMetrics?
+        for (i, segment) in segments.enumerated() {
+            let prompt = GemmaChatPrompt.translation(
+                of: segment.text, into: target, examples: examples, model: model)
+            let budget = maxTokens
+                ?? SuggestionPolicy.Tuning.translationMaxNewTokens(sourceChars: segment.text.count)
+            let metrics = await engine.generate(
+                prompt: prompt,
+                maxTokens: budget,
+                sampling: LlamaSampling(
+                    temperature: 0, repeatPenalty: 1.1, repeatLastN: 64,
+                    primePenaltiesWithPrompt: true)
+            ) { piece in
+                if piece.contains("<|im_end|>") || piece.contains("<end_of_turn>")
+                    || piece.contains("<|endoftext|>") {
+                    return false   // fin de CE segment seulement
+                }
+                let keep = onToken(piece)
+                if !keep { stop.byCaller = true }
+                return keep
+            }
+            if firstMetrics == nil { firstMetrics = metrics }
+            if stop.byCaller { return firstMetrics }
+            // Réinjecte le séparateur d'origine (espace / saut de ligne) entre
+            // les segments — jamais après le dernier.
+            if i < segments.count - 1, !segment.suffix.isEmpty {
+                if !onToken(segment.suffix) { return firstMetrics }
+            }
+        }
+        return firstMetrics
     }
 
     /// Relit/réécrit `frenchText` EN FRANÇAIS selon `tone` (FR→FR), en streamant

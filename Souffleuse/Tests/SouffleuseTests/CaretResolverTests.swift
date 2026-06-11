@@ -70,6 +70,20 @@ private func wait(_ ms: UInt64) async {
     try? await Task.sleep(nanoseconds: ms * 1_000_000)
 }
 
+/// Attente-condition bornée (pas de délai fixe) : les tâches OCR de fond
+/// prennent > 100 ms quand la machine est chargée (les suites modèle-réel
+/// saturent les cœurs) — un sleep fixe flake, un poll borné non.
+@MainActor
+private func waitUntil(
+    timeoutMs: UInt64 = 3_000, _ condition: @MainActor () -> Bool
+) async {
+    var elapsed: UInt64 = 0
+    while !condition(), elapsed < timeoutMs {
+        await wait(10)
+        elapsed += 10
+    }
+}
+
 // MARK: - Tests
 
 @MainActor
@@ -261,7 +275,7 @@ private func wait(_ ms: UInt64) async {
     ))
     let snap = snapshot(elementRect: element)
     _ = resolver.resolve(snapshot: snap) {}
-    await wait(100)
+    await waitUntil { resolver.pendingOCRBundles.isEmpty }
     // OCR completed but result was discarded → no calibration cached.
     #expect(resolver.calibration(for: "com.brave.Browser") == nil)
     #expect(resolver.pendingOCRBundles.isEmpty)
@@ -283,7 +297,7 @@ private func wait(_ ms: UInt64) async {
     ))
     let snap = snapshot(elementRect: element)
     _ = resolver.resolve(snapshot: snap) {}
-    await wait(100)
+    await waitUntil { resolver.calibration(for: "com.brave.Browser") != nil }
     #expect(resolver.calibration(for: "com.brave.Browser") != nil)
 }
 
