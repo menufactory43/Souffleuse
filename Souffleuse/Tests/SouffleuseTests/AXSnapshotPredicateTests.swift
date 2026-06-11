@@ -74,4 +74,79 @@ struct AXSnapshotPredicateTests {
     func pageDomClassIsNotAddressBar() {
         #expect(snap(domClassList: ["download-button", "mdc-button"]).isAddressBar == false)
     }
+
+    // MARK: - isPickerField (sondé sur un chip-input Angular Material, 11/06/2026)
+
+    private func snap(hasPopup: Bool = false, autocompleteKind: String? = nil) -> AXSnapshot {
+        AXSnapshot(bundleID: "x", role: "AXComboBox", subrole: nil, text: "",
+                   caretIndex: 0, caretRect: nil, caretFont: nil,
+                   hasPopup: hasPopup, autocompleteKind: autocompleteKind)
+    }
+
+    @Test("aria-haspopup → sélecteur")
+    func hasPopupIsPicker() {
+        #expect(snap(hasPopup: true).isPickerField)
+    }
+
+    @Test("aria-autocomplete list/both → sélecteur")
+    func autocompleteListIsPicker() {
+        #expect(snap(autocompleteKind: "list").isPickerField)
+        #expect(snap(autocompleteKind: "both").isPickerField)
+    }
+
+    @Test("autocomplete inline/none ou absent → pas un sélecteur")
+    func inlineAutocompleteIsNotPicker() {
+        #expect(snap(autocompleteKind: "inline").isPickerField == false)
+        #expect(snap(autocompleteKind: "none").isPickerField == false)
+        #expect(snap().isPickerField == false)
+    }
+}
+
+// MARK: - RemapBlockCaretTests
+
+/// Garde le remap du caret Chromium multi-blocs (Linear/ProseMirror dans
+/// Brave, repro 11/06/2026) : l'hôte rapporte un offset SANS les séparateurs
+/// de blocs alors que l'AXValue insère un "\n" par bloc — fin de texte lue
+/// comme mid-line, préfixe amputé. Valeurs des repros contenteditable.
+@Suite("AXClient.remapBlockCaret")
+struct RemapBlockCaretTests {
+
+    @Test("sans newline : identité")
+    func identityWithoutNewline() {
+        #expect(AXClient.remapBlockCaret(text: "abcdef", reported: 3) == 3)
+        #expect(AXClient.remapBlockCaret(text: "abcdef", reported: 6) == 6)
+    }
+
+    @Test("repro 2 paragraphes : fin de texte rapportée len-1 → len")
+    func twoParagraphEndOfText() {
+        let text = "Premiere ligne deja ecrite avant\nNot sure you can help but i will"
+        // 65 chars dont 1 newline ; Brave rapportait caret=64.
+        #expect(AXClient.remapBlockCaret(text: text, reported: 64) == text.count)
+    }
+
+    @Test("repro 3 paragraphes : fin de texte rapportée len-2 → len")
+    func threeParagraphEndOfText() {
+        let text = "Premiere ligne\nDeuxieme ligne\nNot sure you can help but i will"
+        // 62 chars dont 2 newlines ; Brave rapportait caret=60.
+        #expect(AXClient.remapBlockCaret(text: text, reported: 60) == text.count)
+    }
+
+    @Test("caret au milieu d'un paragraphe suivant : décalé du nb de blocs amont")
+    func midParagraphCaret() {
+        let text = "Premiere ligne\nDeuxieme"
+        // Caret réel après "Deux" (index 19) ; l'hôte rapporte 18 (1 bloc avant).
+        #expect(AXClient.remapBlockCaret(text: text, reported: 18) == 19)
+    }
+
+    @Test("frontière de bloc : le caret se place AVANT le newline (fin de ligne)")
+    func blockBoundaryStaysEndOfLine() {
+        let text = "Premiere ligne\nDeuxieme"
+        // 14 non-newline consommés pile à la frontière → index 14 (avant "\n").
+        #expect(AXClient.remapBlockCaret(text: text, reported: 14) == 14)
+    }
+
+    @Test("offset au-delà du texte : clampé à la fin")
+    func overshootClampsToEnd() {
+        #expect(AXClient.remapBlockCaret(text: "ab\ncd", reported: 99) == 5)
+    }
 }

@@ -1309,11 +1309,14 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // isAddressBar : les omniboxes (Safari/Chromium/Firefox) sont des
         // AXTextField ordinaires — sans ce gate le badge s'allumait et le
         // modèle générait pendant la frappe d'URLs (UAT 11/06).
+        // isPickerField : combobox/autocomplete ARIA (filtres web, chip-inputs)
+        // — l'utilisateur y choisit dans une liste, le ghost y est du bruit.
         guard let bundleID = snap.bundleID,
               !bundleBlocklist.contains(bundleID),
               !snap.isSecureField,
               !snap.isSearchField,
               !snap.isAddressBar,
+              !snap.isPickerField,
               let text = snap.text,
               let caretIndex = snap.caretIndex,
               snap.isTextElement else {
@@ -1327,6 +1330,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 else if snap.isSecureField { reason = "secure_field" }
                 else if snap.isSearchField { reason = "search_field" }
                 else if snap.isAddressBar { reason = "address_bar" }
+                else if snap.isPickerField { reason = "picker_field" }
                 else if snap.text == nil { reason = "no_text" }
                 else if snap.caretIndex == nil { reason = "no_caret" }
                 else if !snap.isTextElement { reason = "not_text_element" }
