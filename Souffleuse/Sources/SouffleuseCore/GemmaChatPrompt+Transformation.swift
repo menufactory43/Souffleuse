@@ -111,6 +111,7 @@ extension GemmaChatPrompt {
         """
         Tu es un rédacteur professionnel. Raccourcis nettement le message ci-dessous, EN FRANÇAIS : garde toutes les informations essentielles, le sens et le registre, supprime les redondances et les détours — n'y réponds pas.
         Conserve exactement les noms propres, montants, pourcentages, dates, nombres et termes techniques (wallet, Binance, staking, NFT, gas, CSV, PDF, Stripe…).
+        Conserve les sauts de ligne et la structure en paragraphes du message.
         Réponds UNIQUEMENT par la version raccourcie, sans commentaire ni guillemets.
         """
     }
@@ -119,6 +120,7 @@ extension GemmaChatPrompt {
         """
         Tu es un rédacteur professionnel. Reformule le message ci-dessous, EN FRANÇAIS : dis la même chose autrement, avec une formulation plus fluide et naturelle — même sens, même registre, même longueur approximative, n'y réponds pas.
         Conserve exactement les noms propres, montants, pourcentages, dates, nombres et termes techniques (wallet, Binance, staking, NFT, gas, CSV, PDF, Stripe…).
+        Conserve les sauts de ligne et la structure en paragraphes du message.
         Réponds UNIQUEMENT par la reformulation, sans commentaire ni guillemets.
         """
     }
@@ -127,6 +129,7 @@ extension GemmaChatPrompt {
         """
         Tu es un rédacteur professionnel. Réécris le message ci-dessous EN FRANÇAIS en appliquant fidèlement cette consigne : « \(userInstruction) ». Ne réponds pas au message, n'ajoute rien qui ne découle pas de la consigne.
         Conserve exactement les noms propres, montants, pourcentages, dates, nombres et termes techniques (wallet, Binance, staking, NFT, gas, CSV, PDF, Stripe…).
+        Sauf si la consigne demande de restructurer, conserve les sauts de ligne et la structure en paragraphes du message.
         Réponds UNIQUEMENT par la réécriture, sans commentaire ni guillemets.
         """
     }
