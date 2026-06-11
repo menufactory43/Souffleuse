@@ -26,6 +26,18 @@ public enum TranslationTarget: String, Sendable, CaseIterable, Codable {
         }
     }
 
+    /// Nom de langue NU (sans article) pour la directive de verrouillage
+    /// (« ta réponse doit être ENTIÈREMENT en italien »).
+    public var bareName: String {
+        switch self {
+        case .en: return "anglais"
+        case .de: return "allemand"
+        case .es: return "espagnol"
+        case .it: return "italien"
+        case .ja: return "japonais"
+        }
+    }
+
     /// Dans le périmètre V1 garanti ? JA reste best-effort : l'appelant peut
     /// avertir / exiger un override manuel via le chip.
     public var isV1: Bool { self != .ja }
@@ -335,6 +347,7 @@ public enum GemmaChatPrompt {
         Tu es un traducteur professionnel. Traduis FIDÈLEMENT le message ci-dessous du français vers \(target.towardName) — ne le reformule pas, n'y réponds pas, ne l'adapte pas (« comment allez-vous » → « how are you », jamais « how can I help you »).
         Conserve exactement le sens, le registre, les noms propres, montants, pourcentages, dates, nombres et termes techniques (wallet, Binance, staking, NFT, gas, CSV, PDF, Stripe…).
         Réponds UNIQUEMENT par la traduction, sans commentaire ni guillemets.
+        IMPORTANT : ta réponse doit être ENTIÈREMENT en \(target.bareName). N'écris AUCUN mot français.
         """
         if !examples.isEmpty {
             instruction += "\n\nExemples de mon style :\n" + examples.joined(separator: "\n")

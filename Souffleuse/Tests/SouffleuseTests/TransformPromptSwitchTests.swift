@@ -52,37 +52,41 @@ struct TransformPromptSwitchTests {
 
     @Test("contrôle : traduction FR→ES sur moteur froid sort de l'espagnol")
     func coldTranslationIsSpanish() async throws {
-        guard let path = Self.modelPathIfAvailable() else {
-            throw XCTSkipLikeError("modèle Qwen absent")
+        try await LlamaTestGate.shared.run {
+            guard let path = Self.modelPathIfAvailable() else {
+                throw XCTSkipLikeError("modèle Qwen absent")
+            }
+            let engine = LlamaEngine()
+            guard await engine.load(modelPath: path, contextTokens: 2048) else {
+                throw XCTSkipLikeError("chargement du modèle impossible")
+            }
+            let prompt = GemmaChatPrompt.translation(of: Self.userParagraph, into: .es, model: .qwen1_5b)
+            let out = await Self.gen(engine, prompt)
+            #expect(Self.dominantLanguage(of: out) == .spanish, "sortie contrôle : \(out)")
+            await engine.unload()
         }
-        let engine = LlamaEngine()
-        guard await engine.load(modelPath: path, contextTokens: 2048) else {
-            throw XCTSkipLikeError("chargement du modèle impossible")
-        }
-        let prompt = GemmaChatPrompt.translation(of: Self.userParagraph, into: .es, model: .qwen1_5b)
-        let out = await Self.gen(engine, prompt)
-        #expect(Self.dominantLanguage(of: out) == .spanish, "sortie contrôle : \(out)")
-        await engine.unload()
     }
 
     @Test("« //corriger » puis « //traduire » : la traduction reste de l'espagnol")
     func warmCorrectionThenTranslationIsStillSpanish() async throws {
-        guard let path = Self.modelPathIfAvailable() else {
-            throw XCTSkipLikeError("modèle Qwen absent")
+        try await LlamaTestGate.shared.run {
+            guard let path = Self.modelPathIfAvailable() else {
+                throw XCTSkipLikeError("modèle Qwen absent")
+            }
+            let engine = LlamaEngine()
+            guard await engine.load(modelPath: path, contextTokens: 2048) else {
+                throw XCTSkipLikeError("chargement du modèle impossible")
+            }
+            // Génération 1 : correction (remplit le KV avec la consigne correcteur).
+            let correction = await Self.gen(
+                engine, GemmaChatPrompt.correction(of: Self.userParagraph, model: .qwen1_5b))
+            #expect(Self.dominantLanguage(of: correction) == .french, "correction : \(correction)")
+            // Génération 2 : traduction ES sur le MÊME moteur (KV chaud). Le préfixe
+            // commun des deux system prompts ne doit PAS contaminer la consigne.
+            let translation = await Self.gen(
+                engine, GemmaChatPrompt.translation(of: Self.userParagraph, into: .es, model: .qwen1_5b))
+            #expect(Self.dominantLanguage(of: translation) == .spanish, "traduction chaude : \(translation)")
+            await engine.unload()
         }
-        let engine = LlamaEngine()
-        guard await engine.load(modelPath: path, contextTokens: 2048) else {
-            throw XCTSkipLikeError("chargement du modèle impossible")
-        }
-        // Génération 1 : correction (remplit le KV avec la consigne correcteur).
-        let correction = await Self.gen(
-            engine, GemmaChatPrompt.correction(of: Self.userParagraph, model: .qwen1_5b))
-        #expect(Self.dominantLanguage(of: correction) == .french, "correction : \(correction)")
-        // Génération 2 : traduction ES sur le MÊME moteur (KV chaud). Le préfixe
-        // commun des deux system prompts ne doit PAS contaminer la consigne.
-        let translation = await Self.gen(
-            engine, GemmaChatPrompt.translation(of: Self.userParagraph, into: .es, model: .qwen1_5b))
-        #expect(Self.dominantLanguage(of: translation) == .spanish, "traduction chaude : \(translation)")
-        await engine.unload()
     }
 }
