@@ -32,12 +32,13 @@ import Testing
 }
 
 @MainActor
-@Test func overlayEstimatedFontMatchesTightWebCaretRects() {
-    // Pas de division (UAT 11/06) : ce chemin ne sert qu'aux hôtes web, dont
-    // les rects de caret sont SERRÉS (hauteur ≈ taille de police CSS). 18 → 18.
+@Test func overlayEstimatedFontSplitsWebCaretRectVariance() {
+    // ÷1,05 — encadré en UAT (Intercom) : ÷1,1 trop petit, ÷1,0 trop gros ;
+    // les rects Chromium oscillent entre hauteur de police et hauteur de
+    // ligne, 1,05 borne l'erreur à ~±5 %. 18 → ~17,14.
     let f = OverlayWindow.estimatedFont(forCaretRectHeight: 18)
     #expect(f != nil)
-    #expect((f?.pointSize ?? 0) == 18)
+    #expect(abs((f?.pointSize ?? 0) - 18.0 / 1.05) < 0.01)
 }
 
 @MainActor
