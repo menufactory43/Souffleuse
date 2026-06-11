@@ -570,7 +570,10 @@ extension SuggestionPolicy {
         /// traduction fait ~la longueur du message, donc plafonner à une constante
         /// trop basse tronque les longs messages (= traduction imparfaite). On
         /// estime ~0,4 token par caractère source + une marge, clampé. Pur,
-        /// testable.
+        /// testable. NOTE (UAT 11/06) : les flux runtime (traduction, relecture,
+        /// transformations) utilisent désormais `transformMaxNewTokens`, plus
+        /// généreux — cette estimation ~0,4 tronquait les sorties qui s'allongent
+        /// (relecture FR→FR, accents). Conservée comme référence/bench.
         public static func translationMaxNewTokens(sourceChars: Int) -> Int {
             let estimated = sourceChars * 2 / 5 + 48
             return min(translationMaxNewTokensCap, max(translationMaxNewTokensFloor, estimated))
