@@ -185,9 +185,10 @@ import Testing
         chunk: "¿podrías ", afterCaret: "¿podrías contarme")
     #expect(q.ops == [.skip(9)])
     #expect(q.effective == "¿podrías ")
-    // Garde-fou intact : « de » ne matche toujours pas « demain » (frontière).
+    // Garde-fou intact : « de » ne matche toujours pas « demain » (frontière) —
+    // injection, plus la couture qui pose le séparateur devant le mot existant.
     let r = SouffleuseAppDelegate.midLineAcceptPlan(chunk: "de", afterCaret: "demain")
-    #expect(r.ops == [.inject("de")])
+    #expect(r.ops == [.inject("de ")])
 }
 
 @MainActor
