@@ -54,6 +54,26 @@ struct TranslationChunkerTests {
         #expect(suffixes.contains { $0.contains("\n") })
     }
 
+    @Test("la ligne vide entre paragraphes survit — salutation sans point isolée")
+    func blankLineBetweenParagraphsSurvives() {
+        // UAT 11/06 (Brave) : « Bonjour Gabriel,\n\nMerci… » sans point = une
+        // seule « phrase » pour NLTokenizer → le \n\n partait DANS le segment
+        // et le modèle le mangeait. Les lignes sont désormais des séparateurs
+        // durs : la salutation est isolée, le \n\n vit dans son suffixe.
+        let body = String(
+            repeating: "Merci pour votre retour et pour le temps consacré à mon dossier. ",
+            count: 4
+        ).trimmingCharacters(in: .whitespaces)
+        let text = "Bonjour Gabriel,\n\n" + body
+        let segs = TranslationChunker.segments(of: text)
+        #expect(segs.first?.text == "Bonjour Gabriel,")
+        #expect(segs.first?.suffix == "\n\n")
+        #expect(segs.map { $0.text + $0.suffix }.joined() == text)
+        // La structure n'est JAMAIS confiée au modèle : aucun segment ne
+        // contient de saut de ligne.
+        #expect(segs.allSatisfy { !$0.text.contains("\n") })
+    }
+
     @Test("texte long SANS frontière de phrase → un seul segment (pas de coupe arbitraire)")
     func longTextWithoutSentenceBoundary() {
         let text = String(repeating: "mot ", count: 80).trimmingCharacters(in: .whitespaces)
