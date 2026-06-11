@@ -455,6 +455,7 @@ final class PredictorViewModel {
             lexicon: learnedLexicon,
             activeDomain: activeDomain
         )
+        LatencyTrace.mark("route_done", key: LatencyTrace.key(forPrefix))
         // `singleLine` here is the single chokepoint for the instant path:
         // corpus / `.history` entries captured from prose can carry a trailing
         // "\n" (e.g. "achète du Bitcoin.\n"). Sanitising at the source means
@@ -668,6 +669,7 @@ final class PredictorViewModel {
             lastDetectedLanguage = confident
         }
         let detectedLanguage = lastDetectedLanguage
+        LatencyTrace.mark("lang_done", key: LatencyTrace.key(forPrefix))
         // ── Volet 1 : silent prefix correction (model input only) ──────────
         // Correct completed-word typos in the MODEL's view of the prefix so the
         // ghost continues from clean text. `userTail` (display / anti-repeat /
@@ -678,6 +680,7 @@ final class PredictorViewModel {
         let correctedTail: String = prefixCorrectionEnabled
             ? prefixCorrector.correctedPrefix(userTail, detectedLanguage: detectedLanguage)
             : userTail
+        LatencyTrace.mark("correct_done", key: LatencyTrace.key(forPrefix))
         let baseSystemPrompt = ModelRuntime.buildSystemPrompt(detectedLanguage: detectedLanguage)
         var systemParts: [String] = [baseSystemPrompt]
         if !customInstructions.isEmpty {
@@ -792,7 +795,13 @@ final class PredictorViewModel {
         let emitTracker = GhostEmissionTracker()
 
         let task = Task { [weak self] in
+            // Bissection du segment predict→gen (régression 28→86 ms, 11/06) :
+            // trois marques fines découpent le coût — scheduling de la Task,
+            // attente de la génération précédente (annulée mais à dérouler),
+            // ranking few-shot + build de la requête.
+            LatencyTrace.mark("task_entered", key: LatencyTrace.key(forPrefix))
             _ = await previousTask?.value
+            LatencyTrace.mark("prev_awaited", key: LatencyTrace.key(forPrefix))
             if Task.isCancelled { return }
 
             // Personalization : n-gram logit bias only (post 04-07 + tightening).
@@ -862,6 +871,7 @@ final class PredictorViewModel {
             }
 
             if Task.isCancelled { return }
+            LatencyTrace.mark("examples_built", key: LatencyTrace.key(forPrefix))
 
             let request = PredictRequest(
                 prefix: prefix,
