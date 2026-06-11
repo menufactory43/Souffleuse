@@ -23,8 +23,11 @@ public final class TransformPickerWindow {
     private static let badgeDiameter: CGFloat = 15
     private static let itemSpacing: CGFloat = 14
     private static let padding: CGFloat = 10
-    /// Le badge déborde au-dessus-gauche du libellé, comme chez le picker emoji.
-    private static let badgeOverhang: CGFloat = 6
+    /// Le badge précède le libellé, centré sur la ligne de texte. Le picker
+    /// emoji fait DÉBORDER son badge sur le coin du glyphe (parité Cotypist) ;
+    /// sur du texte, ce débordement mangerait la première lettre (UAT 11/06 :
+    /// « ②accourcir ») — ici le badge est inline, jamais superposé.
+    private static let badgeGap: CGFloat = 4
     /// Hauteur de la rangée de libellés (systemFont 13 + respiration).
     private static let rowHeight: CGFloat = 18
     /// Tronque l'instruction libre affichée dans la ligne « ⏎ … ».
@@ -143,22 +146,25 @@ public final class TransformPickerWindow {
             widths.append(ceil(label.frame.width))
         }
 
+        // Chaque item = badge inline + écart + libellé.
+        let badgeBlock = Self.badgeDiameter + Self.badgeGap
         let width = Self.padding * 2
-            + Self.badgeOverhang
             + widths.reduce(0, +)
+            + CGFloat(labels.count) * badgeBlock
             + CGFloat(max(0, labels.count - 1)) * Self.itemSpacing
-        let height = Self.padding * 2 + Self.rowHeight + Self.badgeOverhang
+        let height = Self.padding * 2 + Self.rowHeight
 
-        var x = Self.padding + Self.badgeOverhang
+        var x = Self.padding
         for (i, w) in widths.enumerated() {
             let (label, badge) = itemViews[i]
-            label.frame = NSRect(x: x, y: Self.padding, width: w, height: Self.rowHeight)
             badge.frame = NSRect(
-                x: x - Self.badgeOverhang,
-                y: Self.padding + Self.rowHeight - Self.badgeDiameter + Self.badgeOverhang,
+                x: x,
+                y: Self.padding + (Self.rowHeight - Self.badgeDiameter) / 2,
                 width: Self.badgeDiameter,
                 height: Self.badgeDiameter)
-            x += w + Self.itemSpacing
+            label.frame = NSRect(
+                x: x + badgeBlock, y: Self.padding, width: w, height: Self.rowHeight)
+            x += badgeBlock + w + Self.itemSpacing
         }
 
         place(width: width, height: height, caretRectQuartz: caretRectQuartz)
