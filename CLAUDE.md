@@ -8,7 +8,7 @@
 Au-delà du ghost, l'app fait aussi : **traduction** (HUD, langue cible par conversation), **relecture par ton** (reformulation FR→FR selon l'app), et un **carnet d'usage** (frappes épargnées · temps gagné).
 
 ### Constraints
-- **Stack figée** : Swift 6 strict concurrency, AppKit/SwiftUI. Le ghost est généré par **llama.cpp** (GGUF Metal vendoré, `SouffleuseLlama`/`CLlama`) — moteur de génération unique. **MLX** (`MLXLLM`/`MLXLMCommon`) est conservé en support (tokenizer n-gram / personalisation), plus optionnel. Pas de changement de stack.
+- **Stack figée** : Swift 6 strict concurrency, AppKit/SwiftUI. Le ghost est généré par **llama.cpp** (GGUF Metal vendoré, `SouffleuseLlama`/`CLlama`) — moteur de génération unique. **MLX** (`MLXLLM`/`MLXLMCommon`) reste une dépendance SPM du package pour les probes dev, mais n'est **plus chargé ni linké par l'app** (container retiré le 11/06/2026 — 870 MB résidents pour zéro consommateur ; le n-gram perso tokenise en ids llama via `LlamaEngine.setCorpus`). Pas de changement de stack.
 - **Privacy invariants** : `audit.sh` doit passer — no `print`/`NSLog`, no `os_log` interpolant des champs user, log fields whitelistés `{ts,level,module,event,count}`, store chiffré (`history.db`) référencé hors `TypingHistoryStore`/`HistoryViewerWindow` interdit. Toute source de contexte reste in-process.
 - **Performance** : la baseline TTFT du commit `6ad70df` est le plancher ; dégradation tolérée seulement si la qualité le justifie et qu'une voie de récupération existe.
 - **Compatibility** : macOS 14+ Apple Silicon uniquement. Pas d'Intel, pas de macOS 13.
@@ -23,8 +23,8 @@ Au-delà du ghost, l'app fait aussi : **traduction** (HUD, langue cible par conv
 - **Runtime** : macOS 14+ Apple Silicon. SPM (`Souffleuse/Package.swift`), lockfile présent (`Package.resolved`). Version app : **0.3.0** (`Resources/Info.plist`, `LSUIElement = true`, bundle `app.cocotypist.Souffleuse`).
 - **Inférence** :
   - **llama.cpp** = **seule voie de génération du ghost** (Metal GGUF). Lib vendorée sous `Souffleuse/vendor/llama/` (headers `CLlama` systemLibrary ; dylibs `libllama`/`libggml*` Metal/CPU/BLAS liés via rpath, copiés dans `Contents/Frameworks` par `make-app.sh`). Wrappée par `SouffleuseLlama` (`LlamaEngine`, `GpuGate`). GGUF par défaut : `GGUFModelOption.defaultID` (Gemma 3 1B **base/pt**, continuation brute gauche→droite — **PAS un modèle FIM** : aucun token `<|fim_*|>`, le souffle est une simple continuation du préfixe ; le texte après le curseur n'est pas injecté dans le prompt. Le sampler FIM de llama.cpp existe dans la lib vendorée mais n'est pas utilisé).
-  - **MLX** (`MLX`/`MLXLLM`/`MLXLMCommon`) — via `mlx-swift-examples` (≥ 2.0.0, seule dépendance SPM directe). Container désormais **optionnel** : sert le tokenizer n-gram / `rebuildPersonalization`, pas le ghost.
-  - Orchestré par `ModelRuntime` (`Sources/Souffleuse/ModelRuntime.swift`) : possède `llamaEngine` (génération) + container MLX optionnel ; `canGenerate == llamaReady`.
+  - **MLX** (`MLX`/`MLXLLM`/`MLXLMCommon`) — via `mlx-swift-examples`. **Plus utilisé par l'app** (le container et son chargement ont été retirés le 11/06/2026 ; `rebuildPersonalization` passe par le tokenizer llama). Reste en dépendance du package pour les probes dev (`SouffleuseBench`, `SouffleuseCoherence`, `SouffleuseEnrichmentBench`, `SouffleuseTTFTBench`).
+  - Orchestré par `ModelRuntime` (`Sources/Souffleuse/ModelRuntime.swift`) : possède `llamaEngine` (génération) + `beamEngine` ; `canGenerate == llamaReady`.
 - **Frameworks Apple** : AppKit, SwiftUI, Observation (`@Observable`), CoreGraphics (`CGEventTap`), ApplicationServices (`AXUIElement*`), ScreenCaptureKit, Vision (OCR), NaturalLanguage (détection langue), CryptoKit + Security/Keychain, IOKit.hid, Foundation.
 - **Chiffrement au repos** : `CSQLCipher` (SQLCipher + CommonCrypto, sans OpenSSL) → `history.db`. Clé AES-256 en Keychain via `KeychainKey`.
 - **Tests** : Swift Testing / XCTest, target `SouffleuseTests` (`Tests/SouffleuseTests/`).
@@ -91,12 +91,12 @@ Au-delà du ghost, l'app fait aussi : **traduction** (HUD, langue cible par conv
 - **Polling debouncé** : `Timer` 80 ms dans `SouffleuseAppDelegate.tick()` ; predict gaté par debounce (~50 ms) après stabilisation du préfixe.
 - **Cancel-on-keystroke streaming** : chaque préfixe incrémente un generation counter et annule le `Task` en vol → chunks périmés droppés.
 - **MainActor-centré + actors sérialisés** ailleurs. Inférence sur `Task` détaché, annulable.
-- **Caches** : `CompletionCache`/`predictCache` (FIFO) absorbent le cycle "espace → backspace" ; **KV cache** réutilisé entre frappes (`KVCacheHolder`, voir tests `KVCacheReuse/Bypass`).
+- **Caches** : `CompletionCache`/`predictCache` (FIFO) absorbent le cycle "espace → backspace" ; **KV cache** réutilisé entre frappes (interne à `LlamaEngine`, voir tests `KVCacheReuse`).
 - **Per-bundle calibration** : caret rect, font, OCR fallback, enregistrement perso — tout keyé sur le bundle ID de l'app focus.
 - **Moteur déchargé à l'idle** (chaud pendant la session, libéré sinon).
 
 ### Layers (`Souffleuse/Sources/`)
-- **`Souffleuse`** (exécutable) — orchestration AppKit, toutes les UI SwiftUI/NSWindow, prefs. Dépend de tous les autres + MLX + Llama.
+- **`Souffleuse`** (exécutable) — orchestration AppKit, toutes les UI SwiftUI/NSWindow, prefs. Dépend de tous les autres + Llama (plus de lien MLX depuis le 11/06/2026).
 - **`SouffleuseCore`** — cœur décisionnel : `SuggestionPolicy`(+Tuning), `Tone`, `ChunkFilter`, `OutputFilter`, `TermSurvivalGuard`, `CurtnessHeuristic`, `LlamaPromptBuilder`, `GemmaChatPrompt`, `DownloadableModel`, `PredictRequest`, `GenerationToken`. Dépend de Log/Typing/Personalization.
 - **`SouffleusePrompt`** — construction de prompt sous budget de tokens : `PromptBuilder`, `PromptBudget`, `PromptSlot`, `BuiltPrompt`, `TokenCounting`/`MemoizingTokenCounter`.
 - **`SouffleuseLlama`** — wrapper llama.cpp (`LlamaEngine`, `GpuGate`) sur `CLlama` ; moteur de génération du ghost.
@@ -112,11 +112,11 @@ Au-delà du ghost, l'app fait aussi : **traduction** (HUD, langue cible par conv
 ### Composants app (`Sources/Souffleuse/`)
 - `SouffleuseAppDelegate` — orchestrateur : poll timer, AX → enricher → predictor → overlay, Tab/Esc, onboarding, hotkeys, menu-bar (icône vivante).
 - `PredictorViewModel` — cycle de vie modèle, debounce, génération streaming, cache, n-gram bias, troncature phrase/mot.
-- `ModelRuntime` — possède le `LlamaEngine` (génération) + container MLX optionnel (support n-gram). `ModelDownloadManager` (download in-app), `GGUFModelOption`.
+- `ModelRuntime` — possède le `LlamaEngine` (génération) + `beamEngine` (escalade mid-mot). `ModelDownloadManager` (download in-app), `GGUFModelOption`.
 - `GenerationPlanner` — planification de la requête de génération.
 - `ToneStore` + relecture de ton ; `TranslationRuntime` + `ConversationTargetStore` (langue cible par conversation) ; `UsageLedger` (carnet d'usage).
 - `GhostInspector`/`GhostInspectorWindow` — observabilité live du Relevance Gate (dev).
-- `CaretResolver`, `CompletionCache`, `KVCacheHolder`, `HUDAnchorStore`, `MLXTokenCounter`, `AllowlistConfig`, `PreferencesStore`, fenêtres (Preferences/Onboarding/CustomInstructions/HistoryViewer).
+- `CaretResolver`, `CompletionCache`, `HUDAnchorStore`, `AllowlistConfig`, `PreferencesStore`, fenêtres (Preferences/Onboarding/CustomInstructions/HistoryViewer).
 
 ### Probes & evals (exécutables dev)
 `SouffleuseAXProbe`, `SouffleuseContextProbe`, `SouffleuseLlamaProbe`, `SouffleuseBench` (TTFT MLX), `SouffleuseCoherence`, `SouffleuseEnrichmentBench`, `SouffleuseOCRAblation`, `SouffleuseMidwordEval`, `SouffleuseRecallEval`, `SouffleuseInjectionEval`, `SouffleuseToneBench`, `SouffleuseTranslateBench`, `SouffleuseReplay`, `SouffleuseCorpusSeed`. (Benches `print`-heavy → hors `SHIPPING_DIRS` de `audit.sh`.)

@@ -137,7 +137,8 @@ let package = Package(
             name: "SouffleusePrompt",
             dependencies: [
                 "SouffleuseLog",
-                .product(name: "MLXLMCommon", package: "mlx-swift-examples"),
+                // MLXLMCommon retiré (11/06/2026) : aucun `import MLX*` dans ce
+                // module — le compteur de tokens est un protocole pur (TokenCounting).
             ]
         ),
         .executableTarget(
@@ -154,7 +155,14 @@ let package = Package(
         ),
         .executableTarget(
             name: "SouffleuseTTFTBench",
-            dependencies: ["SouffleuseLlama"]
+            dependencies: [
+                "SouffleuseLlama",
+                // A/B contention : phase « container MLX résident » — reproduit le
+                // chargement best-effort de ModelRuntime.loadModel pour mesurer son
+                // impact sur le TTFT/tok/s du moteur llama (GGUF Metal).
+                .product(name: "MLXLLM", package: "mlx-swift-examples"),
+                .product(name: "MLXLMCommon", package: "mlx-swift-examples"),
+            ]
         ),
         .executableTarget(
             name: "SouffleuseBoundaryAblation",
@@ -199,8 +207,10 @@ let package = Package(
                 "SouffleuseCorpus",
                 "SouffleusePrompt",
                 "SouffleuseLlama",
-                .product(name: "MLXLLM", package: "mlx-swift-examples"),
-                .product(name: "MLXLMCommon", package: "mlx-swift-examples"),
+                // MLXLLM/MLXLMCommon retirés du target app (11/06/2026) : le
+                // container MLX n'est plus chargé (870 MB / ~10 s mesurés pour
+                // zéro consommateur — bench TTFTBench). La dépendance SPM reste
+                // dans le package pour les probes dev (SouffleuseBench, etc.).
                 // Sparkle 2 : canal MAJ beta manuel-only. Livré en binary XCFramework
                 // via SPM → uniquement sur l'exécutable (jamais dans un library target
                 // ni le testTarget, pour éviter `import Sparkle` dans la suite ~640 tests).

@@ -1,58 +1,16 @@
 import Foundation
-import MLXLMCommon
 import SouffleusePrompt
 import SouffleuseLog
 
-/// Production rollback gate (D-KV-06 / KV-06). When this flag is enabled at
-/// app launch, predict() bypasses the persisted KV cache holder and builds a
-/// throw-away `[KVCache]` per predict — reproducing the pre-Phase-3 behaviour
-/// for emergency rollback without a rebuild. Detection mirrors
-/// `PromptBuilderFlag` (read once at static load). The env-var literal below
-/// is the SINGLE source of truth (Phase 4 D-03 : migré de PVM:31-34 vers
-/// CompletionCache.swift sans changer la chaîne, par safety net).
-///
-/// The flag name and value MUST NEVER appear in `Log.*` events (T3
-/// privacy invariant — keep the user's local rollback choice off disk).
-private enum KVCacheBypassFlag {
-    static let enabled: Bool =
-        ProcessInfo.processInfo.environment["SOUFFLEUSE_DISABLE_KV_CACHE"]?.isEmpty == false
-}
-
-/// Pure decision verdict for the KV cache "extend / trim / invalidate" branch.
-/// Computed by `CompletionCache.decideExtendTrimInvalidate(...)` ; the caller
-/// (PVM in 04-04, ModelRuntime in 04-05) is responsible for emitting the
-/// `kv_cache_extend|trim|invalidate` log event and applying the resulting
-/// `iteratorInputTokens` slicing or rebuilding the cache.
-///
-/// Order of evaluation is FROZEN (Pitfall 4 RESEARCH §"Common Pitfalls" —
-/// reorder = subtle replay regression):
-///   bypass → cold → fingerprintChanged → identical / extend / trim / diverged
-///
-/// Note : the historical PVM region (PVM:1197-1244) keeps trim gated by a
-/// capability check on the cache type (`canTrimPromptCache`). The pure
-/// decision returned here is `.trim(removedTokens)` ; the caller MUST verify
-/// the capability and downgrade to `.diverged` when the cache type does not
-/// support trim. There is no `MAX_TRIM_TOKENS` constant in the legacy region —
-/// the cap is implicit in the cache type capability.
-enum KVDecision: Sendable, Equatable {
-    case bypass
-    case cold
-    case fingerprintChanged
-    case extend(addedTokens: Int)
-    case trim(removedTokens: Int)
-    case diverged
-    case identical
-}
-
 /// Owns all cross-keystroke caches consolidated out of `PredictorViewModel`
-/// (D-03 split, phase 4 wave 3). Three logical concerns under one `@MainActor`
-/// boundary :
+/// (D-03 split, phase 4 wave 3). Deux concerns sous une frontière `@MainActor` :
 ///
 ///   1. `predictCache` — bounded FIFO(32) memo of `userTail → suggestion`.
-///   2. `tokenCountCache` — bounded FIFO(64) memo of `string → token count`,
-///      consumed by `MemoizingTokenCounter` per predict.
-///   3. `kvCacheHolder` — the live `[KVCache]` slot persisted between
-///      keystrokes (Plan 03-02 holder).
+///   2. `tokenCountCache` — bounded FIFO(64) memo of `string → token count`.
+///
+/// (Le `kvCacheHolder` MLX de l'ère 03-02 a été retiré le 11/06/2026 : zéro
+/// caller — la réutilisation KV réelle vit DANS `LlamaEngine` (`kvTokens`),
+/// prouvée par `KVCacheReuseTests`.)
 ///
 /// Plus the cross-cutting `lastContextFingerprint` that drives `predictCache`
 /// invalidation when the AX snapshot signal flips between predicts (PVM:492-503
@@ -75,18 +33,11 @@ final class CompletionCache {
     private var predictCache: [String: String] = [:]
     private var predictCacheOrder: [String] = []
 
-    /// Shared token-count cache for the active model's tokenizer. Wrapped
-    /// around `MLXTokenCounter` at each predict via `MemoizingTokenCounter`.
-    /// Persists across `container.perform` invocations so byte-identical
+    /// Shared token-count cache for the active model's tokenizer, consumed via
+    /// `MemoizingTokenCounter`. Persists across predicts so byte-identical
     /// slot inputs avoid re-tokenisation each keystroke. Cleared on model
     /// swap by the owner because counts are tokenizer-specific.
     let tokenCountCache = TokenCountCache(cap: 64)
-
-    /// Cross-keystroke KV cache holder (Plan 03-02). Persists the MLX
-    /// `[KVCache]` between consecutive predicts when the InvariancePrefix
-    /// fingerprint is stable, so the prefill phase of TokenIterator only
-    /// processes the delta beforeCursor tokens instead of the full prompt.
-    let kvCacheHolder = KVCacheHolder()
 
     /// Fingerprint of the prompt-shaping context observed at the last
     /// predict() call. Composed of slowly-changing AX snapshot fields
@@ -186,77 +137,12 @@ final class CompletionCache {
         return false
     }
 
-    // MARK: - KV cache holder delegation
-
-    /// Install a freshly-built cache array along with the fingerprint it was
-    /// built for and the token count of the initial beforeCursor prefill.
-    /// Pass-through to `KVCacheHolder.install(caches:fingerprint:beforeCursorTokens:)`.
-    func storeCaches(_ caches: [Any], fingerprint: String, beforeCursorTokens: Int) {
-        kvCacheHolder.install(
-            caches: caches,
-            fingerprint: fingerprint,
-            beforeCursorTokens: beforeCursorTokens
-        )
-    }
-
-    /// Invalidate the KV holder. Caller is responsible for emitting the
-    /// `kv_cache_invalidate` count-only log event (PVM keeps that side
-    /// effect until 04-05 ModelRuntime extraction).
-    func invalidate(reason: KVCacheHolder.InvalidationReason) {
-        kvCacheHolder.invalidate(reason: reason)
-    }
-
-    /// Compose the three actions of PVM:swapModel(L221-225) :
-    /// `clearPredictCache()` + `kvCacheHolder.invalidate(.explicit)` +
-    /// `tokenCountCache.clear()`, plus the `kv_cache_invalidate count:3`
-    /// signal (.explicit). The count value matches the legacy emission so
-    /// downstream log readers see no regression.
+    /// Invalide tout : FIFO de suggestions + cache de comptes de tokens.
+    /// L'événement `kv_cache_invalidate` est conservé pour la parité des logs
+    /// historiques (les lecteurs aval s'y attendent sur un swap de modèle).
     func invalidateAll() {
         clearPredictCache()
-        kvCacheHolder.invalidate(reason: .explicit)
         tokenCountCache.clear()
-        Log.info(.predictor, "kv_cache_invalidate", count: 3) // .explicit
-    }
-
-    // MARK: - KV decision tree (PVM:1197-1244)
-
-    /// Pure decision : given the freshly-built `InvariancePrefix`, the
-    /// `userTail` token count, and the full prompt token count, returns the
-    /// verdict for this predict's KV cache branch. NO log emission — the
-    /// caller is responsible for the count-only signal.
-    ///
-    /// Order (verbatim PVM:1200-1244) :
-    ///   1. `KVCacheBypassFlag.enabled` ⇒ `.bypass`
-    ///   2. `kvCacheHolder.caches == nil` ⇒ `.cold`
-    ///   3. `kvCacheHolder.fingerprint != invariance.fingerprint`
-    ///       ⇒ `.fingerprintChanged`
-    ///   4. delta = userTailTokenCount − beforeCursorTokens :
-    ///       - delta == 0 ⇒ `.identical`
-    ///       - delta > 0 ⇒ `.extend(addedTokens: delta)`
-    ///       - delta < 0 ⇒ `.trim(removedTokens: |delta|)` — caller MUST
-    ///         verify cache-type trim capability ; if unsupported, treat as
-    ///         `.diverged`. No `MAX_TRIM_TOKENS` cap exists in the legacy
-    ///         region : the cap is implicit in the cache type capability
-    ///         (PVM:1224 `canTrimPromptCache(existing)`).
-    ///
-    /// `promptTokens` is currently unused by the pure decision but is kept
-    /// in the signature : future diagnostics + the empty-input guard rely on
-    /// the caller knowing the full prompt size alongside `iteratorInputTokens`.
-    func decideExtendTrimInvalidate(
-        invariance: InvariancePrefix,
-        userTailTokenCount: Int,
-        promptTokens: Int
-    ) -> KVDecision {
-        _ = promptTokens // diagnostic seam, see doc-comment
-        if KVCacheBypassFlag.enabled { return .bypass }
-        guard kvCacheHolder.caches != nil else { return .cold }
-        guard kvCacheHolder.fingerprint == invariance.fingerprint else {
-            return .fingerprintChanged
-        }
-        let prior = kvCacheHolder.beforeCursorTokens
-        let delta = userTailTokenCount - prior
-        if delta == 0 { return .identical }
-        if delta > 0 { return .extend(addedTokens: delta) }
-        return .trim(removedTokens: -delta)
+        Log.info(.predictor, "kv_cache_invalidate", count: 2) // .explicit
     }
 }

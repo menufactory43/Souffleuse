@@ -1,7 +1,4 @@
 import Foundation
-import MLX
-import MLXLLM
-import MLXLMCommon
 import NaturalLanguage
 import SouffleuseCore
 import SouffleuseLlama
@@ -12,30 +9,9 @@ import SouffleuseTyping
 
 // MARK: - Value types (Phase 4 / 04-05 — extracted alongside PVM, no callers yet)
 
-/// Sendable transfer box for `[KVCache]` across the actor boundary between
-/// `@MainActor` callers (PVM, future ModelRuntime) and the
-/// `ModelContainer.perform` closure (off-MainActor). `KVCache` is a
-/// non-Sendable protocol, but the caches are reference-typed and accessed
-/// sequentially per predict; the box's `@unchecked Sendable` is safe because
-/// we own the access pattern end-to-end (no concurrent reads/writes by
-/// construction).
-///
-/// **04-05 note** : copié verbatim depuis `PredictorViewModel.swift:50-58`.
-/// La copie est volontaire — la dédup PVM-side viendra en 04-07 quand le
-/// wiring sera complet. Tant qu'aucun caller PVM ne route via ModelRuntime,
-/// les deux structs co-existent (visibilité `private` / fileprivate côté
-/// PVM ; type interne au module côté ModelRuntime). Aucun risque de
-/// collision symbolique avec `PVM.CacheBox` (qui est `private struct` au
-/// niveau fichier mais résolu sans préfixe par les autres types nested) :
-/// on déclare CETTE copie comme `fileprivate` aussi. La promotion à
-/// `internal` (avec drop simultané de PVM.CacheBox) vit en 04-07.
-fileprivate struct CacheBox: @unchecked Sendable {
-    let caches: [KVCache]
-}
-
 /// Metrics captured during a single LLM stream. `ttftMillis` est null tant
 /// que le premier token n'est pas arrivé ; `tokensPerSecond` est null tant
-/// que `MLXLMCommon` n'a pas terminé son aggregation finale.
+/// que le stream n'a pas terminé son aggregation finale.
 ///
 /// **04-05 note** : copié verbatim depuis la nested struct `PredictorViewModel.StreamMetrics`
 /// (PVM:70-73). Déplacée au niveau top-level ici pour permettre l'usage par
@@ -52,10 +28,13 @@ struct StreamMetrics: Sendable {
 
 // MARK: - ModelRuntime
 
-/// MLX model lifecycle owner — extraction step 1 of D-03 (Phase 4 wave 4).
+/// Model lifecycle owner — extraction step 1 of D-03 (Phase 4 wave 4).
+/// Depuis le retrait du container MLX (11/06/2026, mesuré 870 MB / ~10 s de
+/// chargement pour zéro consommateur), ne possède plus QUE les moteurs
+/// llama.cpp (ghost + beam).
 ///
 /// **Scope du plan 04-05** :
-/// - Owns `container: ModelContainer?` + `modelId: String` + `lastError`.
+/// - Owns `modelId: String` + `lastError`.
 /// - Implémente `loadModel()` et `swap(to:completionCache:)` — copies
 ///   verbatim des bodies PVM.
 /// - Héberge les pure-function helpers (OutputFilter sub-namespace,
@@ -74,19 +53,19 @@ struct StreamMetrics: Sendable {
 /// 3. Revert propre si 04-06 ou 04-07 échouent.
 @MainActor
 final class ModelRuntime {
-    /// Modèle MLX courant. Initialement nil ; renseigné par `loadModel()`.
-    private(set) var container: ModelContainer?
-
-    /// Identifiant HuggingFace du modèle (ex. `mlx-community/gemma-3-1b-pt-4bit`).
+    /// Identifiant HuggingFace du modèle MLX (ex. `mlx-community/gemma-3-1b-pt-4bit`).
+    /// LEGACY : plus aucun poids MLX n'est chargé (le container a été retiré —
+    /// 870 MB résidents pour zéro consommateur, bench TTFTBench 11/06/2026).
+    /// Conservé comme clé de prefs/catalogue tant que l'UI legacy la référence.
     private(set) var modelId: String
 
     /// Dernière erreur de chargement, surfacée à l'UI via la façade PVM en 04-07.
     /// Forme `"load_failed: <localizedDescription>"`.
     private(set) var lastError: String?
 
-    /// llama.cpp engine — now the SOLE generation path (Metal GGUF). The MLX
-    /// container above is kept only for the n-gram tokenizer
-    /// (`rebuildPersonalization`) ; all ghost text comes from `llamaEngine`.
+    /// llama.cpp engine — the SOLE generation path (Metal GGUF). Tout le texte
+    /// du ghost vient de `llamaEngine` ; le n-gram perso tokenise aussi en ids
+    /// llama (`setCorpus`).
     let llamaEngine = LlamaEngine()
 
     /// Moteur **beam contraint** — le cœur LLM unifié sous `SOUFFLEUSE_BEAM_CORE`
@@ -134,8 +113,7 @@ final class ModelRuntime {
     private(set) var ggufModelID: String = GGUFModelOption.defaultID
 
     /// True when the runtime can produce ghost text — i.e. the llama engine
-    /// has a GGUF loaded. Replaces the old `container != nil` gate in PVM,
-    /// since the MLX container is now optional (n-gram tokenizer only).
+    /// has a GGUF loaded.
     var canGenerate: Bool { llamaReady }
 
     init(initialModelId: String, ggufModelID: String = GGUFModelOption.defaultID) {
@@ -165,19 +143,12 @@ final class ModelRuntime {
 
     // MARK: Lifecycle
 
-    /// Charge le modèle courant via `LLMModelFactory.shared.loadContainer`.
-    /// Body copié depuis `PVM.loadModel()` (PVM:184-211), avec deux
-    /// simplifications acceptables pour le scope 04-05 :
-    /// - Pas de publication `LoadState` UI (façade UI vit en 04-07).
-    /// - Pas de progress callback — la façade UI le branchera quand
-    ///   elle wrappera ModelRuntime.
+    /// Charge le(s) moteur(s) llama.cpp (ghost + beam optionnel).
     ///
     /// L'événement `model_load_failed` reste byte-identique au legacy
     /// (StaticString, count nil) pour preserver la signature audit.sh.
     func loadModel() async {
-        // Primary generation engine : llama.cpp + local GGUF (Metal). This is
-        // the path that produces ghost text now ; MLX is only kept for the
-        // n-gram tokenizer below.
+        // Primary generation engine : llama.cpp + local GGUF (Metal).
         let ggufPath = resolveGGUFPath()
         let ok = await llamaEngine.load(modelPath: ggufPath, contextTokens: 4096)
         llamaReady = ok
@@ -198,49 +169,26 @@ final class ModelRuntime {
             }
             if !beamReady { Log.error(.predictor, "model_load_failed") }
         }
-
-        // Best-effort MLX container load — used solely by
-        // `rebuildPersonalization` for tokenizing history into the n-gram
-        // model. Personalization defaults to off (strength 0), so a failure
-        // here (e.g. offline first-run) must NOT block the llama ghost path.
-        do {
-            MLX.GPU.set(cacheLimit: 20 * 1024 * 1024)
-            let configuration = ModelConfiguration(id: modelId, defaultPrompt: "")
-            let container = try await LLMModelFactory.shared.loadContainer(
-                configuration: configuration
-            ) { _ in }
-            self.container = container
-        } catch {
-            // Non-fatal : n-gram personalization stays inert without it.
-            self.container = nil
-        }
+        // NOTE 11/06/2026 : le chargement « best-effort » du container MLX qui
+        // vivait ici a été RETIRÉ. Il matérialisait ~870 MB de poids Metal et
+        // ~10 s de churn à chaque réveil pour un objet que plus rien ne lisait
+        // (le n-gram perso tokenise en ids llama via `LlamaEngine.setCorpus`).
+        // Mesure : SouffleuseTTFTBench, phases A/B/C.
         self.lastError = nil
     }
 
-    /// Swap vers un nouveau modèle. Idempotent si `id == modelId`.
-    ///
-    /// Body aligné sur `PVM.swapModel(to:)` (PVM:157-173) :
-    /// 1. drop container,
-    /// 2. update modelId,
-    /// 3. invalidate completionCache (predictCache + KV holder + tokenCountCache),
-    /// 4. reload.
+    /// Swap vers un nouveau modelId (legacy MLX catalogue). Idempotent si
+    /// `id == modelId`. Le GGUF llama est indépendant de cet id (cf.
+    /// `swapGGUF(to:)` pour le vrai moteur) — on invalide les caches et on
+    /// recharge llama (idempotent sur un chemin déjà chargé).
     ///
     /// **NOTE** : la cancellation de la generate en cours est l'affaire du
     /// caller (PVM/GenerationPlanner) AVANT d'appeler `runtime.swap(...)`.
     /// ModelRuntime n'a pas accès au planner — cf. comment Task 2 du plan.
-    ///
-    /// **NOTE log parity** : PVM legacy n'émet PAS `kv_cache_invalidate count:3`
-    /// dans swapModel — c'est `cache.invalidateAll()` qui l'émet en interne
-    /// (cf. CompletionCache:214 area). Donc on n'ajoute pas de log ici.
     func swap(to id: String, completionCache: CompletionCache) async {
         guard id != modelId else { return }
-        container = nil
         modelId = id
         completionCache.invalidateAll()
-        // The llama GGUF path is independent of the MLX modelId in v1 (single
-        // local GGUF). loadModel reloads both ; llama.load is idempotent on an
-        // already-loaded path, so a model swap just refreshes the MLX
-        // tokenizer container.
         await loadModel()
     }
 
@@ -307,15 +255,13 @@ final class ModelRuntime {
         // No-op by design. Voir doc-comment.
     }
 
-    /// Décharge le moteur ghost (GGUF llama.cpp) ET le container MLX (tokenizer
-    /// du n-gram) pour rendre la RAM quand l'utilisateur ne compose pas. Après
-    /// ça `canGenerate` est faux → `predict()` baille proprement sur son gate.
-    /// Un `loadModel()` ultérieur recharge les deux (le GGUF est idempotent sur
-    /// un chemin déjà chargé, mais `LlamaEngine.unload()` a libéré le model +
-    /// context, donc il recharge réellement). L'appelant DOIT avoir annulé la
-    /// génération en cours avant (cf. `cancel()` côté PVM/AppDelegate) ; l'acteur
-    /// `LlamaEngine` sérialise de toute façon `unload` après tout `generate` en
-    /// vol.
+    /// Décharge le moteur ghost (GGUF llama.cpp) pour rendre la RAM quand
+    /// l'utilisateur ne compose pas. Après ça `canGenerate` est faux →
+    /// `predict()` baille proprement sur son gate. Un `loadModel()` ultérieur
+    /// recharge réellement (`LlamaEngine.unload()` a libéré le model +
+    /// context). L'appelant DOIT avoir annulé la génération en cours avant
+    /// (cf. `cancel()` côté PVM/AppDelegate) ; l'acteur `LlamaEngine` sérialise
+    /// de toute façon `unload` après tout `generate` en vol.
     func unloadGhost() async {
         // ORDRE CRITIQUE : le beam emprunte le modèle de `LlamaEngine`. On libère
         // d'abord le contexte du beam, PUIS le modèle (via llamaEngine.unload) —
@@ -324,11 +270,6 @@ final class ModelRuntime {
         beamReady = false
         await llamaEngine.unload()
         llamaReady = false
-        // Drop le container MLX : seul son tokenizer sert (au rebuild n-gram /
-        // personnalisation), jamais la génération du ghost — celle-ci passe
-        // exclusivement par llama.cpp. Rechargé au prochain loadModel(). Rendre
-        // la référence permet à l'OS de récupérer ce qui était matérialisé.
-        container = nil
     }
 
     // MARK: - OutputFilter / prompt helpers (extracted to SouffleuseCore)
