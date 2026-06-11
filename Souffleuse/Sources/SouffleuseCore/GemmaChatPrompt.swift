@@ -242,11 +242,51 @@ public enum GemmaChatPrompt {
             let user = instruction + "\n\nMessage : \(frenchText)"
             return userOpen + user + turnClose + modelOpen
         case .qwen1_5b:
-            // Qwen2.5 : ChatML, consigne en SYSTÈME (préfixe stable → KV-LCP),
-            // message en user.
+            // Qwen2.5 : ChatML, consigne en SYSTÈME + DEUX tours few-shot FR→cible
+            // avant le vrai message (UAT 11/06 : sans eux, le 1.5B « échote » le
+            // français corrigé ou RÉPOND au message en ES/IT à greedy — le
+            // few-shot verrouille « tu traduis, tu ne réponds pas », la 2e paire
+            // ancre chiffres/termes). Préfixe stable par cible → KV-LCP intact.
+            let shots = translationFewShot(target: target)
             return "<|im_start|>system\n" + instruction + "<|im_end|>\n"
+                + shots.map {
+                    "<|im_start|>user\n" + $0.user + "<|im_end|>\n"
+                        + "<|im_start|>assistant\n" + $0.assistant + "<|im_end|>\n"
+                }.joined()
                 + "<|im_start|>user\n" + frenchText + "<|im_end|>\n"
                 + "<|im_start|>assistant\n"
+        }
+    }
+
+    /// Paires few-shot FR→cible injectées en tours ChatML (voie Qwen). Fixes et
+    /// courtes : elles coûtent ~60 tokens de préfixe stable (cache-able) et
+    /// suppriment le mode « écho / réponse » du 1.5B observé sur ES/IT.
+    static func translationFewShot(target: TranslationTarget)
+        -> [(user: String, assistant: String)]
+    {
+        let ex1 = "Merci pour votre retour, je reviens vers vous demain."
+        let ex2 = "Le montant de 1 250 € apparaît sur votre wallet depuis le 15 mai."
+        switch target {
+        case .en: return [
+            (ex1, "Thank you for your feedback, I will get back to you tomorrow."),
+            (ex2, "The amount of €1,250 has appeared in your wallet since May 15."),
+        ]
+        case .de: return [
+            (ex1, "Vielen Dank für Ihre Rückmeldung, ich melde mich morgen wieder bei Ihnen."),
+            (ex2, "Der Betrag von 1 250 € erscheint seit dem 15. Mai in Ihrem Wallet."),
+        ]
+        case .es: return [
+            (ex1, "Gracias por su respuesta, vuelvo a contactarle mañana."),
+            (ex2, "El importe de 1 250 € aparece en su wallet desde el 15 de mayo."),
+        ]
+        case .it: return [
+            (ex1, "Grazie per il suo riscontro, la ricontatto domani."),
+            (ex2, "L'importo di 1 250 € appare nel suo wallet dal 15 maggio."),
+        ]
+        case .ja: return [
+            (ex1, "ご返信ありがとうございます。明日改めてご連絡いたします。"),
+            (ex2, "1 250 €の金額は5月15日からウォレットに表示されています。"),
+        ]
         }
     }
 
