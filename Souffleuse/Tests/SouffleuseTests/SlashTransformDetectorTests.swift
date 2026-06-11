@@ -122,7 +122,53 @@ struct SlashTransformDetectorTests {
         #expect(state?.scopeText == "Bravo 🎉")
     }
 
-    // MARK: - Portée > 1500 (dernier paragraphe)
+    // MARK: - Portée paragraphe-d'abord (UAT 11/06)
+
+    @Test("« // » collé à un paragraphe → CE paragraphe seul, flag levé")
+    func triggerParagraphWinsOverFullField() {
+        let text = "Premier paragraphe long.\n\nDeuxième para //ref"
+        let state = SlashTransformDetector.detect(textBeforeCaret: text)
+        #expect(state?.scopeText == "Deuxième para")
+        #expect(state?.isScopeTruncated == true)
+        // Suppression = paragraphe brut + « // » + filtre ; le premier
+        // paragraphe et sa ligne vide restent intacts.
+        #expect(state?.deleteCharsOnAccept == "Deuxième para ".count + 2 + 3)
+    }
+
+    @Test("« // » sur sa propre ligne (simple \\n) vise le paragraphe au-dessus")
+    func triggerOnOwnLineTargetsParagraphAbove() {
+        let state = SlashTransformDetector.detect(textBeforeCaret: "Para1\n\nPara2\n//")
+        #expect(state?.scopeText == "Para2")
+        #expect(state?.isScopeTruncated == true)
+        #expect(state?.deleteCharsOnAccept == "Para2\n".count + 2)
+    }
+
+    @Test("« // » seul après une ligne vide → champ entier (échappatoire)")
+    func bareTriggerAfterBlankLineTakesFullField() {
+        let text = "Para1\n\nPara2\n\n//"
+        let state = SlashTransformDetector.detect(textBeforeCaret: text)
+        #expect(state?.scopeText == "Para1\n\nPara2")
+        #expect(state?.isScopeTruncated == false)
+        #expect(state?.deleteCharsOnAccept == text.count)
+    }
+
+    @Test("simple \\n interne : les lignes d'un même paragraphe restent ensemble")
+    func singleNewlinesStayInScope() {
+        let state = SlashTransformDetector.detect(textBeforeCaret: "ligne1\nligne2 //")
+        #expect(state?.scopeText == "ligne1\nligne2")
+        #expect(state?.isScopeTruncated == false)
+    }
+
+    @Test("paragraphe du trigger > 1500 → repli sur sa dernière ligne")
+    func oversizedTriggerParagraphFallsBackToLastLine() {
+        let text = "Intro.\n\n" + String(repeating: "x", count: 1600) + "\nFin de para. //"
+        let state = SlashTransformDetector.detect(textBeforeCaret: text)
+        #expect(state?.scopeText == "Fin de para.")
+        #expect(state?.isScopeTruncated == true)
+        #expect(state?.deleteCharsOnAccept == "Fin de para. ".count + 2)
+    }
+
+    // MARK: - Portée > 1500 (repli du mode champ entier)
 
     @Test("portée > 1500 → dernier paragraphe (séparateur \\n\\n) + flag")
     func oversizedScopeFallsBackToLastParagraph() {

@@ -155,7 +155,7 @@ final class TranslationRuntime {
         onToken: @escaping @Sendable (String) -> Bool
     ) async -> LlamaMetrics? {
         guard await ensureLoaded() else { return nil }
-        let budget = maxTokens ?? SuggestionPolicy.Tuning.translationMaxNewTokens(sourceChars: sourceChars)
+        let budget = maxTokens ?? SuggestionPolicy.Tuning.transformMaxNewTokens(sourceChars: sourceChars)
         await GpuGate.shared.awaitGhostIdle(
             maxWaitMillis: SuggestionPolicy.Tuning.translationGhostWaitMaxMillis,
             pollMillis: SuggestionPolicy.Tuning.translationGhostWaitPollMillis

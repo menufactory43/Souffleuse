@@ -576,6 +576,20 @@ extension SuggestionPolicy {
             return min(translationMaxNewTokensCap, max(translationMaxNewTokensFloor, estimated))
         }
 
+        /// Plancher / plafond du nombre de tokens générés pour une transformation « // ».
+        public static let transformMaxNewTokensFloor: Int = 192
+        public static let transformMaxNewTokensCap: Int = 768
+
+        /// Budget de sortie d'une transformation « // » : contrairement à la
+        /// traduction (sortie ≈ source en tokens), une correction/réécriture
+        /// FR→FR peut s'ALLONGER (accents plus coûteux en tokens, consigne libre
+        /// expansive) — le budget traduction tronquait en plein mot (UAT 11/06).
+        /// ~0,6 token par caractère source + marge, clampé. Pur, testable.
+        public static func transformMaxNewTokens(sourceChars: Int) -> Int {
+            let estimated = sourceChars * 3 / 5 + 64
+            return min(transformMaxNewTokensCap, max(transformMaxNewTokensFloor, estimated))
+        }
+
         /// Délai d'inactivité (s) après lequel le moteur instruct (traduction) est
         /// déchargé pour rendre la RAM (Phase 7). Compromis : trop court = rechargement
         /// fréquent (~1-2 s) ; trop long = RAM tenue inutilement. 180 s = l'utilisateur

@@ -7,8 +7,8 @@ import Foundation
 public struct SlashTransformState: Sendable, Equatable {
     /// Texte de la portée (trimé whitespace/newlines) injecté dans le prompt.
     public let scopeText: String
-    /// Vrai quand la portée brute dépassait `maxFullFieldLength` → dernier
-    /// paragraphe seulement ; le header du HUD doit l'indiquer.
+    /// Vrai quand la portée ne couvre PAS tout le champ (paragraphe du trigger,
+    /// ou repli > `maxFullFieldLength`) ; le header du HUD doit l'indiquer.
     public let isScopeTruncated: Bool
     /// Texte tapé après « // » (filtre d'intention ou instruction libre).
     /// Peut contenir espaces et accents ; jamais de saut de ligne.
@@ -97,15 +97,27 @@ public enum SlashTransformDetector {
         )
     }
 
-    /// Résout la portée : la totalité du préfixe si sa version trimée tient sous
-    /// `maxFullFieldLength` caractères ; sinon le dernier paragraphe non vide —
-    /// substring après la dernière occurrence de « \n\n », à défaut après le
-    /// dernier « \n », à défaut `suffix(maxFullFieldLength)`. Renvoie le
-    /// substring BRUT (le compte de suppression part de son début) + le flag.
+    /// Résout la portée, paragraphe-d'abord (UAT 11/06 : « // » collé à un
+    /// paragraphe doit viser CE paragraphe, pas tout le champ) :
+    /// 1. S'il y a une ligne vide (« \n\n ») au-dessus et que le paragraphe du
+    ///    trigger est non vide → ce paragraphe seul. Un simple « \n » reste
+    ///    interne (lignes d'un même message chat).
+    /// 2. Sinon — champ mono-paragraphe, OU « // » seul après une ligne vide
+    ///    (échappatoire « agis sur tout ») — champ entier si sa version trimée
+    ///    tient sous `maxFullFieldLength` ; sinon repli : dernier paragraphe
+    ///    non vide, à défaut dernière ligne, à défaut `suffix(maxFullFieldLength)`.
+    /// Renvoie le substring BRUT (le compte de suppression part de son début)
+    /// + le flag « portée ≠ champ entier ».
     /// Interne mais non-private pour les tests (`@testable`).
     static func resolveScope(prefixBeforeTrigger: Substring)
         -> (rawScope: Substring, truncated: Bool)
     {
+        if let sep = prefixBeforeTrigger.range(of: "\n\n", options: .backwards) {
+            let triggerParagraph = prefixBeforeTrigger[sep.upperBound...]
+            if !triggerParagraph.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return capToMaxLength(triggerParagraph)
+            }
+        }
         let trimmedCount = prefixBeforeTrigger
             .trimmingCharacters(in: .whitespacesAndNewlines).count
         guard trimmedCount > maxFullFieldLength else {
@@ -118,6 +130,21 @@ public enum SlashTransformDetector {
             return (line, true)
         }
         return (prefixBeforeTrigger.suffix(maxFullFieldLength), true)
+    }
+
+    /// Cap du mode paragraphe : un paragraphe unique > `maxFullFieldLength`
+    /// retombe sur sa dernière ligne, à défaut sur ses derniers caractères —
+    /// même filet que le mode champ entier.
+    private static func capToMaxLength(_ scope: Substring)
+        -> (rawScope: Substring, truncated: Bool)
+    {
+        guard scope.trimmingCharacters(in: .whitespacesAndNewlines).count > maxFullFieldLength else {
+            return (scope, true)
+        }
+        if let line = suffixAfterLastSeparator("\n", in: scope) {
+            return (line, true)
+        }
+        return (scope.suffix(maxFullFieldLength), true)
     }
 
     /// Suffixe après la DERNIÈRE occurrence de `separator` dont le contenu n'est
