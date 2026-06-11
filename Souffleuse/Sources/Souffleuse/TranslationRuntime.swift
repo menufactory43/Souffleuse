@@ -122,7 +122,7 @@ final class TranslationRuntime {
             let prompt = GemmaChatPrompt.translation(
                 of: segment.text, into: target, examples: examples, model: model)
             let budget = maxTokens
-                ?? SuggestionPolicy.Tuning.translationMaxNewTokens(sourceChars: segment.text.count)
+                ?? SuggestionPolicy.Tuning.transformMaxNewTokens(sourceChars: segment.text.count)
             let metrics = await engine.generate(
                 prompt: prompt,
                 maxTokens: budget,
@@ -151,7 +151,11 @@ final class TranslationRuntime {
 
     /// Relit/réécrit `frenchText` EN FRANÇAIS selon `tone` (FR→FR), en streamant
     /// via `onToken`. Même tuyau que `translate` : lazy-load du moteur, attente
-    /// bornée du ghost (`GpuGate`), budget de tokens adaptatif, sampling déterministe.
+    /// bornée du ghost (`GpuGate`), budget de tokens adaptatif, sampling
+    /// déterministe. Budget = `transformMaxNewTokens` (UAT 11/06 : l'ancien
+    /// budget traduction ~0,4 tok/char tronquait les relectures longues en
+    /// plein mot — une réécriture FR→FR peut s'allonger ; le budget est un
+    /// PLAFOND, la génération s'arrête seule à la fin du texte).
     @discardableResult
     func reformulate(
         _ frenchText: String,
@@ -162,7 +166,7 @@ final class TranslationRuntime {
     ) async -> LlamaMetrics? {
         guard await ensureLoaded() else { return nil }
         let prompt = GemmaChatPrompt.reformulation(of: frenchText, tone: tone, examples: examples, model: model)
-        let budget = maxTokens ?? SuggestionPolicy.Tuning.translationMaxNewTokens(sourceChars: frenchText.count)
+        let budget = maxTokens ?? SuggestionPolicy.Tuning.transformMaxNewTokens(sourceChars: frenchText.count)
         await GpuGate.shared.awaitGhostIdle(
             maxWaitMillis: SuggestionPolicy.Tuning.translationGhostWaitMaxMillis,
             pollMillis: SuggestionPolicy.Tuning.translationGhostWaitPollMillis
