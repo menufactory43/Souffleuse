@@ -3553,11 +3553,15 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
         // Le mot `w` est-il présent à la position `pos` du texte existant, à une
         // vraie frontière de mot derrière (pas un préfixe d'un mot plus long) ?
+        // Égalité caractère à caractère (casse ignorée) SANS exiger des chars
+        // alphanumériques : un segment porte sa ponctuation (« esperas, »,
+        // « ¿podrías ») et doit matcher l'existant identique — l'ancienne garde
+        // isWordChar le rendait inmatchable et le ré-injectait (UAT 11/06 :
+        // 2ᵉ Tab → « esperas, » dupliqué).
         func wordMatches(_ w: [Character], at pos: Int) -> Bool {
             guard !w.isEmpty, pos + w.count <= e.count else { return false }
             for (k, c) in w.enumerated() {
-                guard isWordChar(e[pos + k]),
-                      String(c).lowercased() == String(e[pos + k]).lowercased() else { return false }
+                guard String(c).lowercased() == String(e[pos + k]).lowercased() else { return false }
             }
             let after = pos + w.count
             return after >= e.count || !isWordChar(e[after])

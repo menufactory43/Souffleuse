@@ -171,6 +171,26 @@ import Testing
 }
 
 @MainActor
+@Test func midLineAcceptPlanSkipsSegmentsCarryingPunctuation() {
+    // UAT 11/06 : « Mientras esperas, ¿podrías… » déjà présent après le caret —
+    // le 2ᵉ Tab (chunk « esperas, ») doit SAUTER le segment identique malgré la
+    // virgule ; l'ancienne garde isWordChar le rendait inmatchable et le
+    // ré-injectait (« esperas, esperas, »).
+    let p = SouffleuseAppDelegate.midLineAcceptPlan(
+        chunk: "esperas, ", afterCaret: "esperas, ¿podrías contarme")
+    #expect(p.ops == [.skip(9)])
+    #expect(p.effective == "esperas, ")
+    // Ponctuation d'OUVERTURE espagnole portée par le segment.
+    let q = SouffleuseAppDelegate.midLineAcceptPlan(
+        chunk: "¿podrías ", afterCaret: "¿podrías contarme")
+    #expect(q.ops == [.skip(9)])
+    #expect(q.effective == "¿podrías ")
+    // Garde-fou intact : « de » ne matche toujours pas « demain » (frontière).
+    let r = SouffleuseAppDelegate.midLineAcceptPlan(chunk: "de", afterCaret: "demain")
+    #expect(r.ops == [.inject("de")])
+}
+
+@MainActor
 @Test func midLineAcceptPlanDropsTrailingSeparatorBeforePunctuation() {
     // Le cas de l'écran : « …un hom|me. » + ghost « me qui m… », Tab « me  » :
     // « me » existe → saut pur ; l'espace de fin du chunk collé au point existant
