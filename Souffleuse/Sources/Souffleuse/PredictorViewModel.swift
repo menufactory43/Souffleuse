@@ -775,22 +775,9 @@ final class PredictorViewModel {
         }()
 
         let runtime = self.runtime
-
-        // If a previous LLM Task was running, its cancellation may have left
-        // the KV cache in a state inconsistent with what the holder records
-        // (Swift offset advanced but MLX GPU update interrupted mid-step).
-        // Force-invalidate before the next generation reads the cache to
-        // avoid a MLX assertion in `KVCacheSimple.update` (race observed
-        // 2026-05-26 after partial-accept Tab: two back-to-back kv_cache_extend
-        // events triggered a slice update assert in MLX).
-        //
-        // Cost: re-prefill on the next predict only if a cancellation
-        // occurred. Normal predict-after-typing keeps cache extend.
-        let hadInFlightCancellation = (previousTask != nil)
-        if hadInFlightCancellation {
-            cache.invalidate(reason: .explicit)
-            Log.info(.predictor, "kv_cache_invalidate_on_cancel")
-        }
+        // (Le force-invalidate du KV holder MLX sur cancellation en vol qui
+        // vivait ici est parti avec le holder — 11/06/2026. Le KV réel est
+        // interne à LlamaEngine, qui gère lui-même ses divergences de préfixe.)
 
         // Stale-ghost guard : track whether THIS generation ever produced a
         // ghost the user should see (a valid non-empty LLM chunk, OR an empty

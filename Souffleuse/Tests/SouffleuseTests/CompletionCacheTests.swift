@@ -1,30 +1,15 @@
 import Testing
 import Foundation
-import MLXLMCommon
 @testable import Souffleuse
 
-// NOTE: bypass behavior (`KVCacheBypassFlag.enabled` path) is covered by the
-// existing `KVCacheBypassTests.swift`. The decideBypassWhenEnvVarSet case is
-// intentionally omitted here — env var stubbing inside Swift Testing would
-// require subprocess-level isolation since `KVCacheBypassFlag.enabled` is
-// resolved once at static init.
+// NOTE 11/06/2026 : la section « KV decision tree » (decideExtendTrimInvalidate,
+// storeCaches, KVCacheHolder) a été retirée avec le chemin KV MLX mort — la
+// réutilisation KV réelle vit dans LlamaEngine et est couverte par
+// KVCacheReuseTests.
 
 @MainActor
-@Suite("Phase 4 — CompletionCache FIFO + fingerprint + KV decision")
+@Suite("Phase 4 — CompletionCache FIFO + fingerprint")
 struct CompletionCacheTests {
-
-    // MARK: - Fixture helpers
-
-    private func makeInvariance(fingerprintMarker: String = "default") -> InvariancePrefix {
-        InvariancePrefix(
-            system: "sys-\(fingerprintMarker)",
-            customInstructions: "ci",
-            contextPrefix: "ctx",
-            fieldContext: "fc",
-            afterCursor: "ac",
-            previousUserInputs: "pui"
-        )
-    }
 
     // MARK: - predictCache FIFO
 
@@ -119,84 +104,13 @@ struct CompletionCacheTests {
         #expect(cache.lastContextFingerprintSnapshot == "fp-B")
     }
 
-    // MARK: - KV decision tree
+    // MARK: - invalidateAll
 
-    @Test func decideColdWhenHolderEmpty() {
-        let cache = CompletionCache()
-        let inv = makeInvariance()
-        let d = cache.decideExtendTrimInvalidate(
-            invariance: inv,
-            userTailTokenCount: 10,
-            promptTokens: 100
-        )
-        #expect(d == .cold)
-    }
-
-    @Test func decideFingerprintChangedWhenMismatch() {
-        let cache = CompletionCache()
-        let invA = makeInvariance(fingerprintMarker: "A")
-        // Install with a DIFFERENT fingerprint than what we'll query with.
-        cache.storeCaches([], fingerprint: "totally-other-fp", beforeCursorTokens: 50)
-        let d = cache.decideExtendTrimInvalidate(
-            invariance: invA,
-            userTailTokenCount: 50,
-            promptTokens: 100
-        )
-        #expect(d == .fingerprintChanged)
-    }
-
-    @Test func decideIdenticalWhenZeroDelta() {
-        let cache = CompletionCache()
-        let inv = makeInvariance()
-        cache.storeCaches([], fingerprint: inv.fingerprint, beforeCursorTokens: 50)
-        let d = cache.decideExtendTrimInvalidate(
-            invariance: inv,
-            userTailTokenCount: 50,
-            promptTokens: 100
-        )
-        #expect(d == .identical)
-    }
-
-    @Test func decideExtendWhenPositiveDelta() {
-        let cache = CompletionCache()
-        let inv = makeInvariance()
-        cache.storeCaches([], fingerprint: inv.fingerprint, beforeCursorTokens: 50)
-        let d = cache.decideExtendTrimInvalidate(
-            invariance: inv,
-            userTailTokenCount: 55,
-            promptTokens: 200
-        )
-        #expect(d == .extend(addedTokens: 5))
-    }
-
-    @Test func decideTrimWhenNegativeDelta() {
-        let cache = CompletionCache()
-        let inv = makeInvariance()
-        cache.storeCaches([], fingerprint: inv.fingerprint, beforeCursorTokens: 50)
-        let d = cache.decideExtendTrimInvalidate(
-            invariance: inv,
-            userTailTokenCount: 47,
-            promptTokens: 100
-        )
-        // Decision is .trim(3) — caller (PVM/ModelRuntime) is responsible
-        // for the canTrimPromptCache capability check and the downgrade to
-        // .diverged when unsupported (PVM:1224 legacy gate).
-        #expect(d == .trim(removedTokens: 3))
-    }
-
-    // MARK: - Holder delegation
-
-    @Test func invalidateAllReturnsHolderToCold() {
+    @Test func invalidateAllClearsEverything() {
         let cache = CompletionCache()
         cache.store(prefix: "k", suggestion: "v")
-        let inv = makeInvariance()
-        cache.storeCaches([], fingerprint: inv.fingerprint, beforeCursorTokens: 12)
         cache.invalidateAll()
         // FIFO cleared.
         #expect(cache.predictCacheSnapshot.isEmpty)
-        // KV holder cold.
-        #expect(cache.kvCacheHolder.caches == nil)
-        #expect(cache.kvCacheHolder.fingerprint == nil)
-        #expect(cache.kvCacheHolder.beforeCursorTokens == 0)
     }
 }
