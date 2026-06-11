@@ -466,13 +466,12 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         transformHUD.onVisibilityChanged = { [weak self] visible in
             self?.interceptor.setPreviewArmed(visible)
         }
-        // Même persistance de position par app que le HUD de traduction (§3b).
-        transformHUD.onMoved = { [weak self] bundleID, offset in
-            guard let self, let bid = bundleID else { return }
-            self.store.hudAnchors.upsert(
-                HUDAnchor(bundleID: bid, edge: .left,
-                          offsetX: Double(offset.width), offsetY: Double(offset.height)))
-        }
+        // PAS de persistance de position pour le preview (UAT 11/06) : il se
+        // DOCKE à côté du badge de présence pour former une seule « interface »
+        // au coin du champ — hériter des drags du HUD de traduction l'envoyait
+        // au milieu de l'écran. Déplaçable à la main pendant un preview, mais
+        // la position n'est pas mémorisée (et n'écrase pas celle du HUD de
+        // traduction, qui garde la sienne via son propre onMoved).
         // 2. Hotkey GLOBALE (pref `translateHotKey`, défaut ⌥⌘T) : traduit le
         //    champ focus à tout moment, une frappe. Ré-appliquée au changement
         //    de pref (handlePreferenceChange).
@@ -2979,8 +2978,16 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // `show` ci-dessous annule déjà l'auto-masquage d'un flash de cible en
         // attente : le panneau appartient désormais à ce commit.
         let anchor = fieldRect ?? .zero
+        // Preview « // » : ancré au coin haut-gauche du champ, à côté du badge
+        // de présence (offset .zero — l'héritage des positions déplacées du HUD
+        // de traduction l'envoyait au milieu de l'écran, UAT 11/06). Les flux
+        // .immediate gardent la position mémorisée par app (§3b).
+        let savedOffset: CGSize = {
+            if case .preview = applyMode { return .zero }
+            return hudSavedOffset(forBundle: bundleID)
+        }()
         hud.show(at: anchor, header: header, body: "…",
-                 savedOffset: hudSavedOffset(forBundle: bundleID), bundleID: bundleID)
+                 savedOffset: savedOffset, bundleID: bundleID)
         // Priorité basse : la génération instruct « a le droit de traîner », elle
         // ne doit pas voler un thread/priorité au ghost FR (§2.9).
         return Task(priority: .utility) { @MainActor [weak self] in
