@@ -158,3 +158,34 @@ struct TranslationMaxTokensTests {
         #expect(big > small)   // monotone croissant
     }
 }
+
+/// Couvre le budget de tokens des transformations « // » : plus généreux que la
+/// traduction (une réécriture FR→FR peut s'allonger — la troncature en plein mot
+/// de l'UAT 11/06 venait du budget traduction), mêmes clamps plancher/plafond.
+@Suite("Transformations « // » — budget de tokens")
+struct TransformMaxTokensTests {
+    typealias T = SuggestionPolicy.Tuning
+
+    @Test("clamps : plancher en-dessous, plafond au-delà")
+    func clamps() {
+        #expect(T.transformMaxNewTokens(sourceChars: 0) == T.transformMaxNewTokensFloor)
+        #expect(T.transformMaxNewTokens(sourceChars: 100_000) == T.transformMaxNewTokensCap)
+    }
+
+    @Test("plus généreux que le budget traduction à source égale (anti-troncature)")
+    func moreGenerousThanTranslation() {
+        for chars in [0, 400, 800, 1500] {
+            #expect(T.transformMaxNewTokens(sourceChars: chars)
+                    > T.translationMaxNewTokens(sourceChars: chars))
+        }
+    }
+
+    @Test("monotone croissant entre plancher et plafond")
+    func scalesWithSource() {
+        let small = T.transformMaxNewTokens(sourceChars: 400)
+        let big = T.transformMaxNewTokens(sourceChars: 900)
+        #expect(small > T.transformMaxNewTokensFloor)
+        #expect(big < T.transformMaxNewTokensCap)
+        #expect(big > small)
+    }
+}

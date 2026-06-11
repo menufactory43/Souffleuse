@@ -2666,8 +2666,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             prompt = GemmaChatPrompt.freeTransformation(of: scope, instruction: instruction, model: model)
             header = "// \(instruction.prefix(24))…"
         }
-        // Portée réduite au dernier paragraphe (> 1500 chars) → l'aperçu le dit.
-        if state.isScopeTruncated { header += " · dernier paragraphe" }
+        // Portée ≠ champ entier (paragraphe du trigger, ou repli > 1500 chars)
+        // → l'aperçu le dit.
+        if state.isScopeTruncated { header += " · paragraphe" }
 
         hideSlashPicker()
         let transformation = TextTransformation(
