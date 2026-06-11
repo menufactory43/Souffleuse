@@ -2685,7 +2685,11 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         let stream: Stream
         switch intent {
         case .corriger:
-            stream = transformStream(GemmaChatPrompt.correction(of: scope, model: model))
+            // Voie chunked du runtime : correction LOCALE par nature → découpage
+            // lignes-puis-phrases, structure préservée par construction.
+            stream = { [translationRuntime] onToken in
+                await translationRuntime.correct(scope, onToken: onToken)
+            }
             header = "// corriger…"
         case .raccourcir:
             stream = transformStream(GemmaChatPrompt.shortening(of: scope, model: model))

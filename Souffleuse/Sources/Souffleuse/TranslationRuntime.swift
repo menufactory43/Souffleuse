@@ -112,19 +112,55 @@ final class TranslationRuntime {
             maxWaitMillis: SuggestionPolicy.Tuning.translationGhostWaitMaxMillis,
             pollMillis: SuggestionPolicy.Tuning.translationGhostWaitPollMillis
         )
-        let segments = TranslationChunker.segments(of: frenchText)
+        return await generateChunked(frenchText, maxTokens: maxTokens, onToken: onToken) {
+            GemmaChatPrompt.translation(of: $0, into: target, examples: examples, model: model)
+        }
+    }
+
+    /// Corrige `frenchText` (orthographe/grammaire FR→FR) par segments — la
+    /// correction est LOCALE par nature : le découpage lignes-puis-phrases
+    /// garantit la structure du message par construction (les sauts de ligne ne
+    /// sont jamais montrés au modèle, UAT 11/06) sans perdre de contexte utile,
+    /// contrairement à raccourcir/reformuler qui ont besoin du texte entier.
+    @discardableResult
+    func correct(
+        _ frenchText: String,
+        maxTokens: Int? = nil,
+        onToken: @escaping @Sendable (String) -> Bool
+    ) async -> LlamaMetrics? {
+        guard await ensureLoaded() else { return nil }
+        await GpuGate.shared.awaitGhostIdle(
+            maxWaitMillis: SuggestionPolicy.Tuning.translationGhostWaitMaxMillis,
+            pollMillis: SuggestionPolicy.Tuning.translationGhostWaitPollMillis
+        )
+        return await generateChunked(frenchText, maxTokens: maxTokens, onToken: onToken) {
+            GemmaChatPrompt.correction(of: $0, model: model)
+        }
+    }
+
+    /// Boucle de génération PAR SEGMENTS (`TranslationChunker`, lignes puis
+    /// phrases) : un prompt par segment via `promptFor`, streaming continu,
+    /// séparateurs d'origine réinjectés entre les segments — jamais après le
+    /// dernier. Le préfixe système (stable par intention/cible) rend les
+    /// prefills suivants quasi gratuits (KV-LCP). Partagée par `translate`
+    /// et `correct`.
+    private func generateChunked(
+        _ text: String,
+        maxTokens: Int?,
+        onToken: @escaping @Sendable (String) -> Bool,
+        promptFor: (String) -> String
+    ) async -> LlamaMetrics? {
+        let segments = TranslationChunker.segments(of: text)
         // L'arrêt demandé par l'APPELANT (frappe, annulation) stoppe tout ; une
         // balise de fin de tour émise par le moteur ne clôt que SON segment.
         final class Stop: @unchecked Sendable { var byCaller = false }
         let stop = Stop()
         var firstMetrics: LlamaMetrics?
         for (i, segment) in segments.enumerated() {
-            let prompt = GemmaChatPrompt.translation(
-                of: segment.text, into: target, examples: examples, model: model)
             let budget = maxTokens
                 ?? SuggestionPolicy.Tuning.transformMaxNewTokens(sourceChars: segment.text.count)
             let metrics = await engine.generate(
-                prompt: prompt,
+                prompt: promptFor(segment.text),
                 maxTokens: budget,
                 sampling: LlamaSampling(
                     temperature: 0, repeatPenalty: 1.1, repeatLastN: 64,
@@ -140,8 +176,6 @@ final class TranslationRuntime {
             }
             if firstMetrics == nil { firstMetrics = metrics }
             if stop.byCaller { return firstMetrics }
-            // Réinjecte le séparateur d'origine (espace / saut de ligne) entre
-            // les segments — jamais après le dernier.
             if i < segments.count - 1, !segment.suffix.isEmpty {
                 if !onToken(segment.suffix) { return firstMetrics }
             }

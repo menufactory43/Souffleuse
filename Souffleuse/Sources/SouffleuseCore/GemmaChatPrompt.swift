@@ -332,6 +332,7 @@ public enum GemmaChatPrompt {
         Tu es un correcteur-rédacteur professionnel. Réécris EN FRANÇAIS le message ci-dessous : corrige l'orthographe, la grammaire et la formulation, sans en changer le sens ni y répondre.
         \(tone.registerInstruction)
         Conserve exactement les noms propres, montants, pourcentages, dates, nombres et termes techniques (wallet, Binance, staking, NFT, gas, CSV, PDF, Stripe…).
+        Conserve les sauts de ligne et la structure en paragraphes du message.
         Réponds UNIQUEMENT par la réécriture, sans commentaire ni guillemets.
         """
         if !examples.isEmpty {
