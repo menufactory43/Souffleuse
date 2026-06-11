@@ -1287,7 +1287,16 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             let caret = snap.caretIndex.map(String.init) ?? "nil"
             let rect = snap.caretRect.map { "\($0.origin.x.rounded()),\($0.origin.y.rounded())" } ?? "nil"
             let elem = snap.elementRect.map { "\($0.size.width.rounded())x\($0.size.height.rounded())" } ?? "nil"
-            let line = "[\(ISO8601DateFormatter().string(from: Date()))] tick_snap bundle=\(bid) textLen=\(txtLen) caretIdx=\(caret) isText=\(snap.isTextElement) secure=\(snap.isSecureField) caretRect=\(rect) elemRect=\(elem)\n"
+            // Queue du préfixe (12 chars, échappée) + 1er char après le caret :
+            // diagnostic « // invisible dans Brave » (UAT 11/06) — révèle un
+            // caretIndex décalé ou des chars invisibles (ZWSP) côté Chromium.
+            let tail: String = {
+                guard let t = snap.text, let c = snap.caretIndex else { return "nil" }
+                let p = String(t.prefix(c))
+                let after = c < t.count ? String(String(t.dropFirst(c)).prefix(1)) : ""
+                return String(p.suffix(12)).debugDescription + " after=" + after.debugDescription
+            }()
+            let line = "[\(ISO8601DateFormatter().string(from: Date()))] tick_snap bundle=\(bid) textLen=\(txtLen) caretIdx=\(caret) isText=\(snap.isTextElement) secure=\(snap.isSecureField) caretRect=\(rect) elemRect=\(elem) tail=\(tail)\n"
             if let data = line.data(using: .utf8) {
                 let path = "/tmp/souffleuse-tick.log"
                 if let h = FileHandle(forWritingAtPath: path) {

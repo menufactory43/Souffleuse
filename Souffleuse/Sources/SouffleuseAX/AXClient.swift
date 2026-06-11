@@ -808,12 +808,20 @@ public final class AXClient: @unchecked Sendable {
         // `caretIndex` AND the caret is strictly before end-of-text. Cap
         // the read at 500 chars — well above the 120-token afterCursor budget
         // (D-14d) but bounded.
+        // Sous-chaîne de `text` (kAXValue), PAS de lecture paramétrée
+        // kAXStringForRange : Chromium/Brave la renvoie nil/erratique, et le
+        // plan de fusion mid-line recevait alors "" → ré-injection de ce qui
+        // existait déjà après le caret (UAT 11/06 : « caret|ret » + Tab →
+        // « caretret »). La soustraction text+caretIndex est la MÊME source
+        // que la détection mid-line du tick et le préfixe du ghost — une seule
+        // vérité, les deux côtés voient le même « après-caret ».
         let textAfterCaret: String? = {
             guard let text, let caretIndex,
                   caretIndex >= 0, caretIndex < text.count else { return nil }
-            let remaining = text.count - caretIndex
-            let length = min(remaining, 500)
-            return stringForRange(element, location: caretIndex, length: length)
+            let length = min(text.count - caretIndex, 500)
+            let start = text.index(text.startIndex, offsetBy: caretIndex)
+            let end = text.index(start, offsetBy: length)
+            return String(text[start..<end])
         }()
 
         // Focused window title — used by the allowlist regex matcher.
@@ -1086,28 +1094,6 @@ public final class AXClient: @unchecked Sendable {
         var rect = CGRect.zero
         guard AXValueGetValue(bounds as! AXValue, .cgRect, &rect) else { return nil }
         return rect
-    }
-
-    /// Parameterized read of `kAXStringForRangeParameterizedAttribute`. Returns
-    /// the substring corresponding to `[location, location+length)` of the
-    /// focused text element, or nil if the host refuses the query / returns
-    /// empty. Mirrors the `boundsForRange` shape — same `CFRange` +
-    /// `AXValueCreate` + `AXUIElementCopyParameterizedAttributeValue` machinery,
-    /// different attribute name and a `String` return cast.
-    private func stringForRange(_ element: AXUIElement, location: Int, length: Int) -> String? {
-        guard length > 0 else { return nil }
-        var probe = CFRange(location: location, length: length)
-        guard let axRange = AXValueCreate(.cfRange, &probe) else { return nil }
-        var ref: AnyObject?
-        let status = AXUIElementCopyParameterizedAttributeValue(
-            element,
-            kAXStringForRangeParameterizedAttribute as CFString,
-            axRange,
-            &ref
-        )
-        guard status == .success else { return nil }
-        guard let s = ref as? String, !s.isEmpty else { return nil }
-        return s
     }
 
     /// Frame of the focused element in screen coordinates (Quartz). Combines
