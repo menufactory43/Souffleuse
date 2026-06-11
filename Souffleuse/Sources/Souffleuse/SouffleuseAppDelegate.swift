@@ -3054,13 +3054,28 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             }
             switch applyMode {
             case .immediate(let deleteChars):
-                // Remplace le champ entier par la sortie (octets identiques au
-                // chemin historique : delete du texte NON trimé, inject du clean).
+                // Remplace le champ entier par la sortie. Voie sélection-vérifiée
+                // d'abord (même mécanique que le Tab du preview «//», éprouvée en
+                // UAT) : sélection [0, len) relue, UN backspace, injection — évite
+                // les rafales de backspaces que Chromium perd (résidus « Bonjo »).
+                // Hôte qui n'honore pas la sélection → fallback compté,
+                // byte-identique au chemin historique (delete du texte NON trimé,
+                // inject du clean).
                 let axClient = self.axClient
                 DispatchQueue.global(qos: .userInitiated).async {
-                    axClient.replaceForCommit(deleteChars: deleteChars, with: output)
+                    let replacedAll = axClient.replaceWholeFieldForCommit(with: output)
+                    if !replacedAll {
+                        axClient.replaceForCommit(deleteChars: deleteChars, with: output)
+                    }
                     let s = axClient.snapshot()
-                    DispatchQueue.main.async { [weak self] in self?.dismissedForText = s.text ?? "" }
+                    DispatchQueue.main.async { [weak self] in
+                        self?.dismissedForText = s.text ?? ""
+                        if replacedAll {
+                            Log.info(.input, "commit_replace_selection")
+                        } else {
+                            Log.info(.input, "commit_replace_counted", count: deleteChars)
+                        }
+                    }
                 }
                 Log.info(.input, doneEvent)
                 record()
