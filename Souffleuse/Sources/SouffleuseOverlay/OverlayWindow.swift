@@ -438,8 +438,13 @@ public final class OverlayWindow {
     /// can never blow up the overlay beyond a readable body-text size.
     static func estimatedFont(forCaretRectHeight height: CGFloat) -> NSFont? {
         guard height > 1 else { return nil }
-        let estimated = height / 1.1
-        let clamped = max(12, min(20, estimated))
+        // Pas de division : ce chemin d'estimation ne sert qu'aux hôtes WEB
+        // (les apps natives fournissent la police via AX et n'arrivent jamais
+        // ici), et les rects de caret Chromium sont SERRÉS — hauteur ≈ taille
+        // de police CSS. L'ancien ÷1,1, calibré pour les rects natifs plus
+        // hauts que la police, rendait le ghost ~10 % trop petit à côté des
+        // vraies lettres (UAT 11/06, Intercom).
+        let clamped = max(12, min(20, height))
         return .systemFont(ofSize: clamped)
     }
 
