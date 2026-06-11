@@ -61,9 +61,16 @@ public final class OverlayWindow {
         content.addSubview(correctionView)
         content.addSubview(pillView)
         NSLayoutConstraint.activate([
+            // Label épinglé au BAS seulement (pas au haut) : le panneau est
+            // ancré par le bas sur le bas de la ligne du caret, mais sa hauteur
+            // vaut max(caret.height, texte) — quand l'hôte renvoie un caretRect
+            // GONFLÉ (rect de ligne paddé/double des éditeurs riches Chromium,
+            // ex. Intercom), un label plein-cadre dessinait le texte en HAUT du
+            // panneau → ghost décalé d'une ligne au-dessus (UAT 11/06). Épinglé
+            // en bas, le texte reste sur la ligne du caret ; cas sain (hauteurs
+            // égales) pixel-identique.
             label.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             label.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            label.topAnchor.constraint(equalTo: content.topAnchor),
             label.bottomAnchor.constraint(equalTo: content.bottomAnchor),
             correctionView.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             correctionView.trailingAnchor.constraint(equalTo: content.trailingAnchor),
@@ -167,18 +174,7 @@ public final class OverlayWindow {
             ?? label.font
             ?? .systemFont(ofSize: 15)
         let correctedRect = Self.correctCaretRect(caretRectQuartz, hostText: hostText, caretIndex: caretIndex, font: renderFont)
-        var frame = Self.appKitFrame(forGhostAfterCaret: correctedRect, text: text, font: renderFont)
-
-        // A/B (gaté par env) : décale le ghost d'UNE LIGNE vers le haut, au lieu
-        // de l'afficher inline après le caret. Utile quand un ghost long (2-4
-        // mots) gêne la lecture sur la ligne courante — on le pose au-dessus.
-        // AppKit : "vers le haut" = +y. Une ligne ≈ hauteur du caret/ligne hôte
-        // (fallback sur la police si l'AX ne donne pas de hauteur fiable).
-        // RÉVERSIBLE : retirer ce bloc.
-        if ProcessInfo.processInfo.environment["SOUFFLEUSE_GHOST_LINE_UP"] != nil {
-            let lineH = correctedRect.height > 1 ? correctedRect.height : renderFont.pointSize * 1.3
-            frame.origin.y += lineH
-        }
+        let frame = Self.appKitFrame(forGhostAfterCaret: correctedRect, text: text, font: renderFont)
 
         // Skip redundant repaints (revertable). The 80 ms poll re-calls show()
         // ~12x/s with identical content; re-running setFrame(display:) every tick
@@ -339,18 +335,11 @@ public final class OverlayWindow {
         let width = wordWidth + ceil(gap) + ceil(suggestionWidth) + 4
         let height = max(wordRect.height, ceil(renderFont.boundingRectForFont.height))
         let primaryHeight = NSScreen.screens.first?.frame.height ?? NSScreen.main?.frame.height ?? 0
-        // Comparison seam: when the ghost is lifted one line (to run side-by-side
-        // with Cotypist on the same word), the correction must lift too — else it
-        // paints ON TOP of Cotypist's own render and neither is legible. On the
-        // lifted line there are no real glyphs, so we repaint the struck original;
-        // in production (offset off) the strike sits over the host's real letters.
-        let lifted = Self.ghostLineOffsetEnabled
-        let lineOffset = lifted ? wordRect.height : 0
         // +Y is up in AppKit; the panel is anchored to the word's top-left so the
         // strike (drawn at x:0..wordWidth in the view) overlays the real glyphs.
         let frame = CGRect(
             x: wordRect.origin.x,
-            y: primaryHeight - wordRect.maxY + lineOffset,
+            y: primaryHeight - wordRect.maxY,
             width: width,
             height: height
         )
@@ -360,7 +349,10 @@ public final class OverlayWindow {
         pillView.isHidden = true
         correctionView.isHidden = false
         correctionView.configure(
-            original: lifted ? original : nil,
+            // Production : les vraies lettres de l'hôte transparaissent sous la
+            // rature — on ne repeint jamais le mot (c'était le mode « lifted »
+            // du seam de comparaison, supprimé 2026-06-11).
+            original: nil,
             suggestion: suggestion,
             wordWidth: wordWidth,
             gap: gap,
@@ -451,17 +443,10 @@ public final class OverlayWindow {
         return .systemFont(ofSize: clamped)
     }
 
-    /// Dev seam : remonte le ghost d'une ligne au-dessus du caret. Cotypist (notre
-    /// concurrent) peint pile sur le caret ; en libérant la ligne du curseur on peut
-    /// faire tourner les deux assistants côte à côte dans la *même* app, sur le *même*
-    /// préfixe, et comparer la cohérence à l'œil — ce qu'aucun bench TTFT ne donne.
-    /// Off par défaut, activé par `SOUFFLEUSE_GHOST_LINE_OFFSET=1`. Lu une fois : un
-    /// test de cohérence est une session ponctuelle, pas un réglage utilisateur — donc
-    /// pas de surface UI ni de pref persistée. Ne pas laisser activé en prod (le ghost
-    /// recouvrirait la ligne du dessus dans un champ multi-ligne).
-    static let ghostLineOffsetEnabled: Bool = {
-        ProcessInfo.processInfo.environment["SOUFFLEUSE_GHOST_LINE_OFFSET"] == "1"
-    }()
+    // (Le dev seam « ghost une ligne au-dessus » — `SOUFFLEUSE_GHOST_LINE_OFFSET`,
+    // sessions de comparaison côte à côte avec Cotypist — a été SUPPRIMÉ
+    // définitivement le 2026-06-11 : laissé actif par accident, il décalait le
+    // ghost en usage réel. Les comparaisons se font désormais par enregistrement.)
 
     static func appKitFrame(forGhostAfterCaret caret: CGRect, text: String, font: NSFont) -> CGRect {
         let textSize = (text as NSString).size(withAttributes: [.font: font])
@@ -469,11 +454,8 @@ public final class OverlayWindow {
         let height = max(caret.height, ceil(textSize.height))
 
         let primaryHeight = NSScreen.screens.first?.frame.height ?? NSScreen.main?.frame.height ?? 0
-        // +Y = vers le haut en AppKit. `caret.height` est la hauteur de ligne (les apps
-        // qui renvoient un line rect l'exposent directement), donc remonter d'exactement
-        // une ligne laisse le caret libre pour le ghost de Cotypist juste en dessous.
-        let lineOffset = ghostLineOffsetEnabled ? caret.height : 0
-        let appKitY = primaryHeight - caret.maxY + lineOffset
+        // +Y = vers le haut en AppKit.
+        let appKitY = primaryHeight - caret.maxY
         // Anchor flush against the caret X — Cotypist paints right on the
         // cursor with no horizontal padding, and a 1 px gap reads as "the
         // ghost is offset" in dense text fields.
