@@ -136,6 +136,12 @@ final class PredictorViewModel {
     /// keep the last confident detection and reuse it when the current prefix is
     /// undetectable; a *new* confident detection always wins and overwrites it.
     private var lastDetectedLanguage: String?
+    /// Ancre de la fenêtre de contexte LLM (voir le bloc « LLM input window,
+    /// ANCRÉE » dans predict) : départ de fenêtre par champ, stable entre les
+    /// frappes pour préserver le prefix-cache KV du beam. Keyée sur le bundle
+    /// de l'app focus — un changement d'app ré-ancre ; un champ raccourci sous
+    /// l'ancre aussi (garde dans `anchoredWindowStart`).
+    private var llmWindowAnchor: (bundleID: String, start: Int)?
     /// Driven by Preferences > Général > "Longueur des suggestions".
     /// Combined with sentence-end truncation in onChunk for snappy output.
     var maxTokens: Int = 10
@@ -681,6 +687,42 @@ final class PredictorViewModel {
             ? prefixCorrector.correctedPrefix(userTail, detectedLanguage: detectedLanguage)
             : userTail
         LatencyTrace.mark("correct_done", key: LatencyTrace.key(forPrefix))
+
+        // ── LLM input window, ANCRÉE (12/06) ───────────────────────────────
+        // Feed the last ~`llmContextWindowChars` of the CORRECTED prefix to the
+        // model as `beforeCursor` (fenêtre dimensionnée par l'A/B du 29/05 — voir
+        // Tuning.llmContextWindowChars). Le départ de fenêtre est ANCRÉ par champ :
+        // un `suffix(1024)` recalculé par frappe fait GLISSER la tête du prompt
+        // d'un caractère à chaque frappe dès que le champ dépasse 1024 chars —
+        // prefix-cache KV invalidé, re-prefill ~300 tokens par génération, ghosts
+        // quasi tous annulés (mesuré run C 12/06 : 49 repaints/142 frappes vs
+        // 150-161 en champ court). L'ancre ne bouge que lorsque le contenu de la
+        // fenêtre dépasse `window + slack` (ré-ancrage par cran) ou que le champ
+        // raccourcit sous l'ancre. Kill-switch SOUFFLEUSE_WINDOW_ANCHOR_OFF.
+        // L'ancre vit en coordonnées du CHAMP (`prefix`, texte complet avant le
+        // caret) — pas de `correctedTail`, qui dérive de `userTail` =
+        // `prefix.suffix(2048)` : au-delà de 2048 chars cette base glisse
+        // elle-même d'un caractère par frappe et un offset dedans re-glisserait
+        // avec elle (constaté run C-ter : seeds toujours partiels). La tête de
+        // `prefix` est stable par construction (on tape à la fin), l'offset est
+        // ensuite remappé vers `correctedTail` (même tête : les corrections ne
+        // touchent que les 12 derniers mots).
+        let llmTail: String
+        if SuggestionPolicy.Tuning.llmWindowAnchorEnabled {
+            let bid = axSnapshot?.bundleID ?? ""
+            let previous = (llmWindowAnchor?.bundleID == bid) ? llmWindowAnchor?.start : nil
+            let start = Self.anchoredWindowStart(
+                textCount: prefix.count,
+                window: SuggestionPolicy.Tuning.llmContextWindowChars,
+                slack: SuggestionPolicy.Tuning.llmContextWindowSlackChars,
+                previousStart: previous
+            )
+            llmWindowAnchor = (bundleID: bid, start: start)
+            let headOffset = max(0, start - (prefix.count - userTail.count))
+            llmTail = String(correctedTail.dropFirst(min(headOffset, correctedTail.count)))
+        } else {
+            llmTail = String(correctedTail.suffix(SuggestionPolicy.Tuning.llmContextWindowChars))
+        }
         let baseSystemPrompt = ModelRuntime.buildSystemPrompt(detectedLanguage: detectedLanguage)
         var systemParts: [String] = [baseSystemPrompt]
         if !customInstructions.isEmpty {
@@ -821,17 +863,6 @@ final class PredictorViewModel {
             // demonstration text into the prompt. This eliminates cross-
             // pollination by construction.
             //
-            // LLM input window : feed the last `llmContextWindowChars` of the
-            // CORRECTED prefix to the model as `beforeCursor`. The full 2048-char
-            // userTail still drives memoisation / anti-repeat below; only the
-            // bytes the LLM SEES are corrected and windowed. Sized by the
-            // 2026-05-29 window A/B (see Tuning.llmContextWindowChars): 512 was
-            // the worst window (a mid-sentence cut severs the discourse thread →
-            // generic filler); 1024 recovers far-antecedent coherence with no
-            // within-window regression, ~+60ms warm prefill paid once per cold
-            // field. The old "more context dilutes a 1B model" rationale was
-            // measured and refuted.
-            let llmTail = String(correctedTail.suffix(SuggestionPolicy.Tuning.llmContextWindowChars))
             let basePromptText = basePreamble + llmTail
 
             // Few-shot prose injection (B-prompt, 2026-05-30). Retrieve the user's
@@ -1482,6 +1513,31 @@ final class PredictorViewModel {
     /// completion that finishes the current word ("Bonjou" → "r") ends in a
     /// letter, so this never suppresses it. The ghost's leading space (next-word
     /// continuation marker) is ignored when measuring length.
+    /// Départ ANCRÉ de la fenêtre de contexte LLM. Pure function (testable).
+    ///
+    /// Invariants :
+    ///   • contenu de fenêtre (`textCount - start`) borné par `window + slack` ;
+    ///   • l'ancre précédente est CONSERVÉE tant que le contenu tient sous la
+    ///     borne (tête de prompt stable → prefix-cache KV chaud) ;
+    ///   • ré-ancrage à `max(0, textCount - window)` quand le contenu déborde
+    ///     (un cran de ~slack chars → un seul re-prefill) ou quand le champ a
+    ///     raccourci sous l'ancre (suppression massive, changement de champ).
+    nonisolated static func anchoredWindowStart(
+        textCount: Int,
+        window: Int,
+        slack: Int,
+        previousStart: Int?
+    ) -> Int {
+        let target = max(0, textCount - window)
+        guard let previous = previousStart,
+              previous >= 0,
+              previous <= textCount,
+              textCount - previous <= window + slack else {
+            return target
+        }
+        return previous
+    }
+
     static func isNextWordStub(userTail: String, ghost: String) -> Bool {
         // The ghost begins a NEW word when EITHER the caret sits at a word
         // boundary (userTail empty / ends in space or punctuation) OR the ghost
