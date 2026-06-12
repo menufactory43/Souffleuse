@@ -112,6 +112,7 @@ Aucun.
 | 260604-k1v | Intégrer Sparkle 2 (MAJ manuel-only, SPM, non notarisé) | 2026-06-04 | ed4e598 |  | [260604-k1v-int-grer-sparkle-2-maj-manuel-only-spm-n](./quick/260604-k1v-int-grer-sparkle-2-maj-manuel-only-spm-n/) |
 | 260612-f8l | Vidéo sociale « rafale de Tab » — Remotion 9:16, 15 s, boucle, out/souffleuse-rafale.mp4 | 2026-06-12 | — (video/ non tracké) |  | [260612-f8l-vid-o-courte-r-seaux-sociaux-rafale-de-t](./quick/260612-f8l-vid-o-courte-r-seaux-sociaux-rafale-de-t/) |
 | 260612-gto | Refonte onboarding en wizard multi-étapes inspiré de Cotabby (pied fixe, cartes permission live, reprise après relaunch, complétion versionnée) | 2026-06-12 | c2ed369 | Vérifié live (screenshots 6 étapes) | [260612-gto-refonte-onboarding-en-wizard-multi-tapes](./quick/260612-gto-refonte-onboarding-en-wizard-multi-tapes/) |
+| 260612-ij2 | Onboarding complété : rappel permission perdue (Input Monitoring), essai RÉEL du souffle (exception R1 scopée + inject self-process), toggle login item, réassurance mots de passe, logo | 2026-06-12 | f82422e | Vérifié live (souffle réel + Tab dans le wizard) | [260612-ij2-compl-ter-l-onboarding-rappel-permission](./quick/260612-ij2-compl-ter-l-onboarding-rappel-permission/) |
 
 ### Notes
 
