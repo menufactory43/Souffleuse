@@ -161,9 +161,11 @@ private struct OnboardingRootView: View {
         VStack(spacing: 0) {
             // En-tête pips — hors du scroll
             if let idx = model.currentStep.intermediateIndex {
+                // 30 pt en haut : le contenu passe sous la barre transparente
+                // (.fullSizeContentView), les pips doivent dégager les feux.
                 OnboardingProgressHeader(current: idx, total: OnboardingStep.intermediateCount)
                     .padding(.horizontal, 36)
-                    .padding(.top, 24)
+                    .padding(.top, 30)
                     .padding(.bottom, 8)
             }
 
@@ -585,11 +587,12 @@ private struct VoiceStepView: View {
             Text("La voix")
                 .font(.system(size: 22, weight: .semibold, design: .serif))
 
-            // Carte modèle du souffle (requise)
+            // Carte voix du souffle (requise) — « voix », pas « modèle » : la
+            // cible n'est pas geek, le mot technique n'apporte rien ici.
             if let ghost = ghostProvider() {
                 ModelCard(
-                    title: "Modèle du souffle",
-                    subtitle: "Le moteur local qui souffle vos suggestions. Une minute environ, 100 % sur votre Mac, rien ne sort.",
+                    title: "La voix du souffle",
+                    subtitle: "Ce qui souffle vos suggestions. Une minute environ, 100 % sur votre Mac, rien ne sort.",
                     model: ghost,
                     manager: manager,
                     isOptional: false,
@@ -597,10 +600,10 @@ private struct VoiceStepView: View {
                 )
             }
 
-            // Carte modèle de traduction (optionnelle)
+            // Carte traduction (optionnelle)
             if let translationModel = translation {
                 ModelCard(
-                    title: "Modèle de traduction",
+                    title: "La traduction",
                     subtitle: "Pour la traduction et la relecture par ton. Téléchargé tout seul au premier usage si vous passez.",
                     model: translationModel,
                     manager: manager,
@@ -869,11 +872,16 @@ final class OnboardingWindow {
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: Int(step.preferredSize.width), height: Int(step.preferredSize.height)),
-            styleMask: [.titled, .closable],
+            styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
+        // Titre gardé pour Mission Control/VoiceOver, mais barre masquée : chaque
+        // étape porte déjà son titre serif — la barre ne ferait que le doubler.
         window.title = "Bienvenue dans Souffleuse"
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.isMovableByWindowBackground = true
         window.center()
         window.isReleasedWhenClosed = false
         self.window = window
