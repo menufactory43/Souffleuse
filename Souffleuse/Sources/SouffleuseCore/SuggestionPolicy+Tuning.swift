@@ -93,6 +93,19 @@ extension SuggestionPolicy {
             ProcessInfo.processInfo.environment["SOUFFLEUSE_EXAMPLES_OFF"] == nil
         }
 
+        /// **Style primer** (étage 2 du plan primer, 2026-06-12) : préfixe le
+        /// `ctxPrefix` du prompt BEAM avec 1-2 proses passées de l'utilisateur
+        /// (même cluster, accordées au ton par app via `ToneStore`, pauvres en
+        /// entités distinctives — sélection `StylePrimer.block`). Le bench
+        /// `SouffleusePrimerBench` (A/B/C/D) a mesuré : accordé-neutre ΔlogP
+        /// +2.16 vs sans primer (7/8), accord de registre +4.12 vs désaccordé
+        /// (7/8), 0 contamination / 0 écho / 0 bascule de registre. **OPT-IN
+        /// runtime** (`SOUFFLEUSE_STYLE_PRIMER=1`) tant que l'A/B d'acceptance
+        /// live n'a pas tranché : défaut = chemin actuel byte-identique.
+        public static var stylePrimerEnabled: Bool {
+            ProcessInfo.processInfo.environment["SOUFFLEUSE_STYLE_PRIMER"] != nil
+        }
+
         /// **Token-healing master switch (Task 1 + Task 2).** When `true`, a
         /// mid-word caret feeds the trailing partial word to the engine as a
         /// `healPrefix` so the model re-derives the WHOLE word from a clean
