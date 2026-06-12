@@ -245,24 +245,33 @@ public enum OutputFilter {
     ///
     /// The corpus / `.history` fast-path can surface entries captured from
     /// prose, which carry a trailing (or embedded) newline — e.g.
-    /// "achète du Bitcoin.\n". The LLM path is already one-lined in
-    /// `ModelRuntime`; the instant path is not. A newline in the ghost both
+    /// "achète du Bitcoin.\n". A newline in the ghost both
     /// (1) renders the overlay one line ABOVE the caret — the panel is
     /// bottom-anchored to the caret rect, so a trailing "\n" adds a phantom
     /// line — and (2) gets injected verbatim on Tab-accept, inserting a line
-    /// break (or sending the message) in chat hosts. We keep only the first
-    /// non-empty physical line; leading/trailing spaces inside it are
-    /// preserved (" manger" is a legitimate continuation after a word).
+    /// break (or sending the message) in chat hosts.
+    ///
+    /// Coupe à la PREMIÈRE newline — on garde ce qui la précède, MÊME VIDE.
+    /// L'ancienne règle « première ligne non vide » transformait une
+    /// continuation commençant par "\n" en… la ligne SUIVANTE : un rappel
+    /// corpus multi-lignes (phrase retapée plusieurs fois, stockée avec ses
+    /// sauts de ligne) ou un modèle qui « passe à la ligne et répète le motif »
+    /// faisait réapparaître la phrase précédente comme ghost — répétition en
+    /// boucle constatée dans Brave/Helpdesk le 12/06 (ghost « Les dernières
+    /// erreurs » re-proposé après « …en ajoutant »). Un ghost inline ne doit
+    /// JAMAIS franchir un saut de ligne : "\n…" ⇒ "" — supprimé par les gardes
+    /// `!isEmpty` en aval, le predict suivant retente. Les espaces de tête/
+    /// queue de la ligne gardée restent préservés (" manger" est une
+    /// continuation légitime après un mot).
     public nonisolated static func singleLine(_ text: String) -> String {
         // `Character.isNewline` (not `== "\n"`) on purpose: in Swift "\r\n" is a
         // SINGLE grapheme cluster, so an explicit "\n"/"\r" comparison misses
         // CRLF endings (common in imported/web prose). `isNewline` also covers
         // U+0085, U+2028 and U+2029.
-        for line in text.split(omittingEmptySubsequences: false,
-                               whereSeparator: { $0.isNewline }) {
-            if !line.isEmpty { return String(line) }
+        if let cut = text.firstIndex(where: { $0.isNewline }) {
+            return String(text[..<cut])
         }
-        return ""
+        return text
     }
 
     /// True when the filtered ghost is a *bare* enumerator / number /

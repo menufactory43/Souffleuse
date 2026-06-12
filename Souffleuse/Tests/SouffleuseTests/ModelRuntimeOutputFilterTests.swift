@@ -295,8 +295,16 @@ struct ModelRuntimeOutputFilterTests {
         #expect(Filter.singleLine("Bonjour.\nComment ça va ?") == "Bonjour.")
     }
 
-    @Test func singleLineSkipsLeadingNewline() {
-        #expect(Filter.singleLine("\nachète du Bitcoin.") == "achète du Bitcoin.")
+    @Test func singleLineCutsAtLeadingNewline() {
+        // INVERSÉ le 12/06 (avant : le leading "\n" était SAUTÉ et la ligne
+        // suivante devenait le ghost). Une continuation qui commence par un
+        // saut de ligne est « passe à la ligne et écris X » : montrer X inline
+        // est faux — repro Brave/Helpdesk : un rappel corpus multi-lignes
+        // re-proposait en boucle la phrase précédente (« Les dernières
+        // erreurs… ») comme ghost. "\n…" doit s'effondrer à vide (le ghost est
+        // supprimé par les gardes !isEmpty en aval).
+        #expect(Filter.singleLine("\nachète du Bitcoin.") == "")
+        #expect(Filter.singleLine("\n\nLes dernières erreurs") == "")
     }
 
     @Test func singleLineHandlesCRLF() {
