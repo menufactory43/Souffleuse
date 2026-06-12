@@ -3,6 +3,8 @@ import CoreGraphics
 import Foundation
 import ImageIO
 import SouffleuseContext
+import SouffleuseCore
+import SouffleuseLlama
 import Vision
 
 // Souffleuse Screen Memory Probe — pire cas Brave
@@ -29,8 +31,11 @@ import Vision
 //
 // Usage :
 //   swift run SouffleuseScreenMemoryProbe              # capture Brave live
+//   swift run SouffleuseScreenMemoryProbe --ghost      # + génération : le 1B
+//                                                      #   recopie-t-il le fait ?
 //   swift run SouffleuseScreenMemoryProbe --image x.png # OCR d'un screenshot
 //   SOUFFLEUSE_SMP_NO_OPEN=1 …                          # ne pas (r)ouvrir Brave
+//   SOUFFLEUSE_GGUF=/path/model.gguf …                  # GGUF pour --ghost
 
 // MARK: - Fixture
 
@@ -93,20 +98,23 @@ struct Query {
     /// pour compter correct. Vide pour les négatives (silence attendu).
     let expect: String
     let regime: Regime
+    /// Mode --ghost : la suite exacte du fait que la génération doit recopier
+    /// (skeleton-containment). nil = requête hors phase génération.
+    var wantGhost: String? = nil
 }
 
 let queries: [Query] = [
     // Mi-fait : le préfixe contient le début du fait — le moment ghost réel.
-    Query(label: "adresse",  typed: "c'est au 14 rue",                 expect: "des Lilas 75011",      regime: .midFact),
-    Query(label: "commande", typed: "la réf c'est CMD-5",             expect: "58214",                regime: .midFact),
-    Query(label: "rdv",      typed: "rdv mardi 17",                   expect: "juin à 9h30",          regime: .midFact),
-    Query(label: "email",    typed: "écris à camille.lacombe@",       expect: "orange",               regime: .midFact),
-    Query(label: "tel",      typed: "son numéro : 06 52",             expect: "18 47 93",             regime: .midFact),
-    Query(label: "dossier",  typed: "le dossier n° 2024-EX",          expect: "077",                  regime: .midFact),
-    Query(label: "montant",  typed: "ça coûte 1 249",                 expect: "90",                   regime: .midFact),
-    Query(label: "suivi",    typed: "numéro de suivi 8R 102",         expect: "358 6172",             regime: .midFact),
-    Query(label: "iban",     typed: "l'IBAN FR76 3000",               expect: "4028 3798",            regime: .midFact),
-    Query(label: "nom",      typed: "elle s'appelle Camille Lac",     expect: "Lacombe",              regime: .midFact),
+    Query(label: "adresse",  typed: "c'est au 14 rue",                 expect: "des Lilas 75011",      regime: .midFact, wantGhost: "des Lilas"),
+    Query(label: "commande", typed: "la réf c'est CMD-5",             expect: "58214",                regime: .midFact, wantGhost: "8214"),
+    Query(label: "rdv",      typed: "rdv mardi 17",                   expect: "juin à 9h30",          regime: .midFact, wantGhost: "juin à 9h30"),
+    Query(label: "email",    typed: "écris à camille.lacombe@",       expect: "orange",               regime: .midFact, wantGhost: "orange.fr"),
+    Query(label: "tel",      typed: "son numéro : 06 52",             expect: "18 47 93",             regime: .midFact, wantGhost: "18 47 93"),
+    Query(label: "dossier",  typed: "le dossier n° 2024-EX",          expect: "077",                  regime: .midFact, wantGhost: "077"),
+    Query(label: "montant",  typed: "ça coûte 1 249",                 expect: "90",                   regime: .midFact, wantGhost: ",90"),
+    Query(label: "suivi",    typed: "numéro de suivi 8R 102",         expect: "358 6172",             regime: .midFact, wantGhost: "358 6172"),
+    Query(label: "iban",     typed: "l'IBAN FR76 3000",               expect: "4028 3798",            regime: .midFact, wantGhost: "4028 3798"),
+    Query(label: "nom",      typed: "elle s'appelle Camille Lac",     expect: "Lacombe",              regime: .midFact, wantGhost: "ombe"),
     // Amorce sémantique : aucun token du fait, seulement le label/contexte.
     Query(label: "adresse-label", typed: "l'adresse de livraison c'est",  expect: "14 rue des Lilas",  regime: .leadIn),
     Query(label: "tel-label",     typed: "tu peux l'appeler au",          expect: "06 52 18 47 93",    regime: .leadIn),
@@ -354,6 +362,9 @@ let index = Index(docs: docs)
 struct Tally { var fired = 0; var correct = 0; var total = 0 }
 var tallies: [Regime: Tally] = [.midFact: Tally(), .leadIn: Tally(), .negative: Tally()]
 var rows: [String] = []
+/// Rappels ayant passé le gate, pour la phase --ghost (doc top-1 réel,
+/// end-to-end — y compris un éventuel mauvais doc qui a tiré).
+var recalled: [(query: Query, doc: String)] = []
 
 print("─── Screen Memory Probe — pire cas Brave ───")
 print(String(format: "%-14@ %-8@ %5@ %6@ %5@  %@", "requête" as NSString, "régime" as NSString,
@@ -375,6 +386,7 @@ for q in queries {
     tallies[q.regime]?.total += 1
     if fires { tallies[q.regime]?.fired += 1 }
     if correct { tallies[q.regime]?.correct += 1 }
+    if fires, q.wantGhost != nil { recalled.append((query: q, doc: doc)) }
 
     let snippet = String(doc.prefix(58))
     let mark = correct ? "✓" : "✗"
@@ -406,4 +418,107 @@ if mid.correct >= 8 && falseFires == 0 {
 } else {
     verdict = "NO-GO — l'OCR bruité ou le gate lexical ne tiennent pas le pire cas."
 }
-print("VERDICT : \(verdict)")
+print("VERDICT (rappel) : \(verdict)")
+
+// MARK: - Phase --ghost : le 1B recopie-t-il le fait rappelé ?
+//
+// Trois conditions par rappel gagnant :
+//   A) baseline : prompt prod SANS le rappel — mesure ce que le modèle invente.
+//   B) rappel injecté (EnrichedContext.visible) + sampler PROD (repeatPenalty
+//      1.3, banDigitsLeading) — mesure le conflit avec le tuning anti-« web
+//      number prior » : la moitié des suites commencent par un chiffre.
+//   C) rappel injecté + sampler recall-tuned (penalty 1.0, chiffres libres)
+//      — mesure le plafond atteignable en ajustant le sampler.
+//
+// Verdict : GO si C ≥ 7/10 recopies verbatim (skeleton-containment).
+
+if args.contains("--ghost") {
+    guard !recalled.isEmpty else {
+        err("[smp] --ghost : aucun rappel gagnant à tester."); exit(2)
+    }
+    let ggufPath: String = {
+        if let p = env["SOUFFLEUSE_GGUF"], !p.isEmpty {
+            return (p as NSString).expandingTildeInPath
+        }
+        return ("~/Library/Application Support/Souffleuse/Models/gemma-3-1b-it-Q4_K_M.gguf"
+                as NSString).expandingTildeInPath
+    }()
+    guard FileManager.default.fileExists(atPath: ggufPath) else {
+        err("[smp] GGUF introuvable : \(ggufPath) — set SOUFFLEUSE_GGUF."); exit(2)
+    }
+    err("[smp] --ghost : chargement \(ggufPath)…")
+    let engine = LlamaEngine()
+    guard await engine.load(modelPath: ggufPath, contextTokens: 4096) else {
+        err("[smp] échec du chargement GGUF."); exit(2)
+    }
+
+    func generate(prompt: String, sampling: LlamaSampling) async -> String {
+        final class Acc: @unchecked Sendable { var text = "" }
+        let acc = Acc()
+        _ = await engine.generate(prompt: prompt, maxTokens: 32, sampling: sampling) { token in
+            acc.text += token
+            return true
+        }
+        return acc.text.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? acc.text
+    }
+
+    let prodSampling = LlamaSampling(
+        temperature: 0, repeatPenalty: 1.3, repeatLastN: 64,
+        banMarkup: true, banDigitsLeading: true, banEmoji: true
+    )
+    let recallSampling = LlamaSampling(
+        temperature: 0, repeatPenalty: 1.0, repeatLastN: 64,
+        banMarkup: true, banDigitsLeading: false, banEmoji: true
+    )
+
+    func prompt(for q: Query, recall: String?) -> String {
+        let ctx = recall.map {
+            EnrichedContext(
+                app: "Brave Browser",
+                windowTitle: "Boîte de réception — atelier-mail.fr",
+                clipboard: nil,
+                visible: $0
+            ).prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        } ?? ""
+        return LlamaPromptBuilder.buildLlamaPrompt(
+            system: "", customInstr: "", ctxPrefix: ctx,
+            fieldContext: "", afterCursor: "", beforeCursor: q.typed
+        )
+    }
+
+    var okA = 0, okB = 0, okC = 0
+    print("\n─── Phase ghost : recopie verbatim (\(recalled.count) rappels) ───")
+    for (q, doc) in recalled {
+        let want = skeleton(q.wantGhost ?? "")
+        let a = await generate(prompt: prompt(for: q, recall: nil), sampling: prodSampling)
+        let b = await generate(prompt: prompt(for: q, recall: doc), sampling: prodSampling)
+        let c = await generate(prompt: prompt(for: q, recall: doc), sampling: recallSampling)
+        let hitA = skeleton(a).contains(want), hitB = skeleton(b).contains(want)
+        let hitC = skeleton(c).contains(want)
+        if hitA { okA += 1 }
+        if hitB { okB += 1 }
+        if hitC { okC += 1 }
+        print("\(q.label):")
+        print("  A sans-rappel \(hitA ? "✓" : "✗")  « \(a.prefix(56)) »")
+        print("  B prod        \(hitB ? "✓" : "✗")  « \(b.prefix(56)) »")
+        print("  C recall      \(hitC ? "✓" : "✗")  « \(c.prefix(56)) »")
+    }
+
+    let n = recalled.count
+    print("""
+
+    ─── Synthèse ghost ───
+    A sans rappel (baseline)        : \(okA)/\(n)
+    B rappel + sampler prod         : \(okB)/\(n)
+    C rappel + sampler recall-tuned : \(okC)/\(n)
+    """)
+    let ghostVerdict: String
+    if okC >= 7 {
+        ghostVerdict = "GO — le 1B recopie le fait rappelé ; sampler à ajuster en mode rappel (B vs C)."
+    } else if okC >= 5 {
+        ghostVerdict = "PARTIEL — la recopie passe sur les faits courts, à durcir (prompt ou troncature)."
+    } else {
+        ghostVerdict = "NO-GO génération — le rappel marche mais le 1B paraphrase/ignore le fait."
+    }
+    print("VERDICT (ghost) : \(ghostVerdict)")
+}
