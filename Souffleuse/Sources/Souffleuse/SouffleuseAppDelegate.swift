@@ -623,13 +623,20 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             initialLanguage: store.primaryLanguage,
             onLanguageChange: { [weak self] lang in
                 // Mémorise la langue et aligne la voix sélectionnée sur la
-                // conseillée pour cette langue + la RAM réelle du Mac.
+                // conseillée pour cette langue + la RAM réelle du Mac — mais
+                // SEULEMENT si la voix actuelle n'est pas déjà sur le disque :
+                // écraser une voix installée par une conseillée absente
+                // casserait le souffle jusqu'à un téléchargement que rien
+                // n'impose (vécu : gemma installée remplacée par qwen3 absent
+                // → model_load_failed en boucle, onboarding bloqué à La voix).
                 guard let self else { return }
                 self.store.primaryLanguage = lang
-                self.store.ggufModelID = GGUFModelOption.recommendedID(
-                    machineRAMGB: GGUFModelOption.machineRAMGB(),
-                    language: lang
-                )
+                if !GGUFModelOption.option(forID: self.store.ggufModelID).isResolvable {
+                    self.store.ggufModelID = GGUFModelOption.recommendedID(
+                        machineRAMGB: GGUFModelOption.machineRAMGB(),
+                        language: lang
+                    )
+                }
             },
             onGhostInstalled: { [weak self] in
                 // Le GGUF du souffle vient d'arriver sur disque : recharge le
