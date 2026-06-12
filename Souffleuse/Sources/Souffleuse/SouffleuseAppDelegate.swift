@@ -552,6 +552,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         observePreferences()
         observeSuggestionForInstantPaint()
         wireAXPushDetection()
+        wireKeyDownTick()
 
         // 50 ms tick → live-consume + overlay refresh feel near-instant.
         // Lowered from 80 ms (2026-05-26): at 80 ms a keystroke could wait up
@@ -691,6 +692,30 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             // comme le pollTimer → même pattern `MainActor.assumeIsolated`.
             MainActor.assumeIsolated {
                 self?.tickThrottled()
+            }
+        }
+    }
+
+    /// **Tick sur keyDown (3e source de détection, après push AX et poll).**
+    /// Mesuré le 12/06 : le push AX couvre bien Chromium (p95 16 ms) mais RATE
+    /// par intermittence sur des hôtes natifs (Notes : p95 90 ms — retombée sur
+    /// le poll 50 ms). Ici on programme un `tickThrottled()` ~15 ms après chaque
+    /// keyDown physique : assez tard pour que l'hôte ait appliqué la frappe
+    /// (un tick immédiat lirait l'ANCIEN texte), assez tôt pour battre le poll.
+    /// Le monitor IGNORE le contenu de l'événement (`{ _ in }`) — il ne sert que
+    /// de signal « quelque chose a été tapé » ; aucun caractère n'est lu ni
+    /// stocké (même pattern que le monitor de LatencyTrace). `tickThrottled`
+    /// coalesce les sources concurrentes (push + keyDown + poll → un seul tick).
+    /// Kill-switch : `SOUFFLEUSE_KEYDOWN_TICK_OFF`.
+    private func wireKeyDownTick() {
+        guard ProcessInfo.processInfo.environment["SOUFFLEUSE_KEYDOWN_TICK_OFF"] == nil else { return }
+        NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] _ in
+            // Le monitor global est délivré sur le main thread ; le délai laisse
+            // l'app hôte traiter l'événement avant notre lecture AX.
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(15)) {
+                MainActor.assumeIsolated {
+                    self?.tickThrottled()
+                }
             }
         }
     }
