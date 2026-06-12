@@ -1,0 +1,2211 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Souffleuse : le mot juste, soufflé à voix basse</title>
+<meta name="description" content="Une aide à l'écriture pour Mac, entièrement privée. Souffleuse glisse le mot juste sous votre curseur quand vous hésitez, puis s'efface. Vos textes ne quittent jamais votre Mac." />
+
+<link rel="canonical" href="https://souffleuse.app/" />
+<link rel="alternate" hreflang="fr" href="https://souffleuse.app/" />
+<link rel="alternate" hreflang="en" href="https://souffleuse.app/en/" />
+<link rel="alternate" hreflang="x-default" href="https://souffleuse.app/" />
+<meta name="theme-color" content="#f3ead9" />
+
+<!-- Icônes -->
+<link rel="icon" href="/favicon.ico" sizes="any" />
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+<!-- Carte de partage (Open Graph + Twitter) -->
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Souffleuse" />
+<meta property="og:locale" content="fr_FR" />
+<meta property="og:locale:alternate" content="en_US" />
+<meta property="og:url" content="https://souffleuse.app/" />
+<meta property="og:title" content="Souffleuse : le mot juste, soufflé à voix basse" />
+<meta property="og:description" content="Une aide à l'écriture pour Mac, entièrement privée. Le mot juste sous votre curseur quand vous hésitez, puis ça s'efface. Vos textes ne quittent jamais votre Mac." />
+<meta property="og:image" content="https://souffleuse.app/og.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="Souffleuse : le mot juste, soufflé à voix basse." />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Souffleuse : le mot juste, soufflé à voix basse" />
+<meta name="twitter:description" content="Une aide à l'écriture pour Mac, entièrement privée. Vos textes ne quittent jamais votre Mac." />
+<meta name="twitter:image" content="https://souffleuse.app/og.png" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,500;0,6..96,700;0,6..96,900;1,6..96,500&family=Spectral:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet" />
+
+<style>
+  :root {
+    --paper:        #f3ead9;
+    --paper-deep:   #ece0c9;
+    --paper-edge:   #e3d5ba;
+    --ink:          #1a1613;
+    --ink-soft:     #463d33;
+    --ink-faint:    #5e5446;   /* assombri pour passer AA sur petits textes */
+    --ghost:        #a99a82;   /* l'encre pâle du souffle — décoratif uniquement */
+    --rouge:        #8c2b21;   /* sang-de-boeuf */
+    --rouge-deep:   #6f2018;
+
+    --display: "Bodoni Moda", Georgia, serif;
+    --body:    "Spectral", Georgia, serif;
+
+    --filet:   1px solid var(--ink);
+    --measure: 64ch;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background-color: var(--paper);
+    color: var(--ink);
+    font-family: var(--body);
+    font-weight: 400;
+    font-size: clamp(1rem, 0.95rem + 0.35vw, 1.12rem);
+    line-height: 1.66;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow-x: hidden;
+    position: relative;
+  }
+
+  /* Grain papier — une seule couche de texture, légère. Le vignettage a été retiré. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0.45;
+    mix-blend-mode: multiply;
+    background-image:
+      radial-gradient(rgba(60,45,25,0.06) 1px, transparent 1px),
+      radial-gradient(rgba(60,45,25,0.04) 1px, transparent 1px);
+    background-size: 3px 3px, 5px 5px;
+    background-position: 0 0, 2px 2px;
+  }
+
+  main, header, footer { position: relative; z-index: 1; }
+
+  a { color: inherit; }
+
+  ::selection { background: rgba(140,43,33,0.18); color: var(--ink); }
+
+  :focus-visible {
+    outline: 2px solid var(--rouge);
+    outline-offset: 3px;
+    border-radius: 1px;
+  }
+
+  /* ---------- Primitives éditoriales ---------- */
+
+  .shell {
+    width: min(100% - 2.5rem, 1100px);
+    margin-inline: auto;
+  }
+  .shell--narrow { width: min(100% - 2.5rem, 760px); }
+
+  .smallcaps {
+    font-family: var(--display);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.28em;
+    font-size: 0.72rem;
+  }
+
+  .stage-dir { /* didascalie */
+    font-family: var(--body);
+    font-style: italic;
+    color: var(--ink-soft);
+  }
+
+  /* Double-filet de programme */
+  .rule-double {
+    border: 0;
+    height: 6px;
+    border-top: 1px solid var(--ink);
+    border-bottom: 1px solid var(--ink);
+    background: transparent;
+    width: 100%;
+  }
+  .rule-thin {
+    border: 0;
+    height: 1px;
+    background: var(--ink);
+    opacity: 0.55;
+  }
+
+  .ornament {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    color: var(--rouge);
+  }
+  .ornament .line {
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--ink) 50%, transparent);
+    opacity: 0.45;
+  }
+  .ornament svg { flex: none; }
+
+  h1, h2, h3 { font-family: var(--display); font-weight: 700; line-height: 1.04; }
+
+  /* ---------- Header / nav ---------- */
+
+  .topbar {
+    border-bottom: var(--filet);
+    /* Papier plein, pas de flou : le bandeau est une feuille imprimée, pas un
+       verre dépoli. (Règle letterpress : aucun blur dans le système.) */
+    background: var(--paper);
+    position: sticky;
+    top: 0;
+    z-index: 50;
+  }
+  .topbar__inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-block: 0.7rem;
+    gap: 1rem;
+  }
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    text-decoration: none;
+    font-family: var(--display);
+  }
+  .brand__mark { color: var(--rouge); flex: none; }
+  .brand__name {
+    font-weight: 700;
+    font-size: 1.32rem;
+    letter-spacing: 0.04em;
+  }
+  .brand__sub {
+    display: block;
+    font-family: var(--body);
+    font-style: italic;
+    font-size: 0.7rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-top: -2px;
+  }
+  /* Le CTA de téléchargement reste visible à toute largeur ; seuls les liens
+     de section se replient sous 820 px. On n'ampute pas la fonction critique. */
+  .topbar__right { display: flex; align-items: center; gap: 1.2rem; }
+  .topnav { display: none; gap: 1.6rem; align-items: center; }
+  .topnav a {
+    text-decoration: none;
+    font-size: 0.82rem;
+    letter-spacing: 0.05em;
+    color: var(--ink-soft);
+    padding-bottom: 2px;
+    border-bottom: 1px solid transparent;
+    transition: color .2s, border-color .2s;
+  }
+  .topnav a:hover { color: var(--ink); border-bottom-color: var(--rouge); }
+
+  @media (min-width: 820px) {
+    .topnav { display: flex; }
+  }
+
+  /* Sélecteur de langue FR / EN : deux petites capitales filées, la courante
+     en rouge. Discret, à côté du CTA — on change de langue, on n'ampute rien. */
+  .langswitch {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-family: var(--display);
+    font-size: 0.8rem;
+    letter-spacing: 0.08em;
+  }
+  .langswitch a {
+    text-decoration: none;
+    color: var(--ink-faint);
+    padding-bottom: 2px;
+    border-bottom: 1px solid transparent;
+    transition: color .2s, border-color .2s;
+  }
+  .langswitch a:hover { color: var(--ink); border-bottom-color: var(--rouge); }
+  .langswitch a[aria-current="true"] { color: var(--rouge); border-bottom-color: var(--rouge); }
+  .langswitch__sep { color: var(--ink-faint); opacity: 0.5; }
+
+  /* ---------- Boutons ---------- */
+  /* Letterpress sobre : un seul relief discret, pas de saut multi-directions. */
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    font-family: var(--display);
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    text-decoration: none;
+    padding: 0.72rem 1.4rem;
+    border: var(--filet);
+    background: var(--ink);
+    color: var(--paper);
+    border-radius: 1px;
+    transition: background .22s ease, color .22s ease, border-color .22s ease;
+  }
+  .btn:hover { background: var(--rouge); border-color: var(--rouge); }
+  .btn:active { background: var(--rouge-deep); }
+
+  .btn--ghost {
+    background: transparent;
+    color: var(--ink);
+  }
+  .btn--ghost:hover { background: transparent; color: var(--rouge); border-color: var(--rouge); }
+
+  .btn--small { padding: 0.5rem 1rem; font-size: 0.85rem; }
+
+  /* Petit repère sous les CTA : gratuité bêta + pré-requis, là où ça rassure. */
+  .cta-note {
+    margin: 0.85rem 0 0;
+    font-style: italic;
+    font-size: 0.85rem;
+    color: var(--ink-faint);
+  }
+  .cta-note b { font-style: normal; font-weight: 700; color: var(--rouge); }
+
+  /* ---------- Hero ---------- */
+
+  .hero {
+    padding-block: clamp(2.5rem, 6vw, 5rem) clamp(2.5rem, 5vw, 4rem);
+  }
+  .playbill {
+    text-align: center;
+  }
+  .playbill__cesoir {
+    display: inline-block;
+    border: var(--filet);
+    padding: 0.35rem 1.1rem 0.3rem;
+    margin-bottom: 1.4rem;
+    position: relative;
+  }
+  .playbill__cesoir .smallcaps { color: var(--rouge); letter-spacing: 0.34em; }
+  .playbill__cesoir::before,
+  .playbill__cesoir::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    width: 2.4rem;
+    height: 1px;
+    background: var(--ink);
+    opacity: 0.5;
+  }
+  .playbill__cesoir::before { right: 100%; margin-right: 0.8rem; }
+  .playbill__cesoir::after  { left: 100%;  margin-left: 0.8rem; }
+
+  .playbill__eyebrow {
+    font-style: italic;
+    color: var(--ink-soft);
+    font-size: 1.02rem;
+    letter-spacing: 0.02em;
+    margin: 0 0 0.8rem;
+  }
+
+  .hero__title {
+    font-size: clamp(2.7rem, 8.5vw, 6.4rem);
+    line-height: 0.96;
+    letter-spacing: -0.005em;
+    margin: 0 0 0.2rem;
+  }
+  .hero__title .light {
+    display: block;
+    font-weight: 500;
+    font-style: italic;
+    font-size: 0.46em;
+    letter-spacing: 0.02em;
+    color: var(--rouge);
+    margin-top: 0.55rem;
+  }
+
+  .hero__sub {
+    max-width: 50ch;
+    margin: 1.6rem auto 0;
+    font-size: 1.08rem;
+    color: var(--ink-soft);
+  }
+
+  .hero__cta {
+    margin-top: 2rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    justify-content: center;
+    align-items: center;
+  }
+
+  /* ===== Geste signature : l'encre qui se pose ===== */
+  /* Le hero s'imprime — opacité + micro-translation + léger flou qui se résout. */
+  .ink-rise {
+    opacity: 0;
+    transform: translateY(10px);
+    filter: blur(4px);
+    animation: ink 0.8s cubic-bezier(0.22, 0.7, 0.2, 1) forwards;
+  }
+  @keyframes ink {
+    to { opacity: 1; transform: none; filter: blur(0); }
+  }
+  /* Décalés de ~0.4s : la page ne se lève qu'après les trois coups. */
+  .k1 { animation-delay: 0.55s; }
+  .k2 { animation-delay: 0.78s; }
+  .k3 { animation-delay: 1.00s; }
+  .k4 { animation-delay: 1.20s; }
+  .k5 { animation-delay: 1.40s; }
+
+  /* ===== Les trois coups ===== */
+  /* Le brigadier frappe trois coups avant le lever de rideau : trois traits
+     d'encre qui claquent (apparition sèche, pas de fondu), puis restent posés
+     en marque pâle au-dessus du « Ce soir » — une trace imprimée, pas un
+     élément d'interface. Décoratif uniquement (aria-hidden). */
+  .trois-coups {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    gap: 0.7rem;
+    height: 16px;
+    margin-bottom: 1.05rem;
+  }
+  .coup {
+    width: 2px;
+    height: 16px;
+    background: var(--ink);
+    opacity: 0;
+    transform: scaleY(0.25);
+    transform-origin: top center;
+    animation: coup-frappe 0.2s cubic-bezier(0.16, 0.84, 0.3, 1) forwards;
+  }
+  .coup:nth-child(2) { animation-delay: 0.22s; }
+  .coup:nth-child(3) { animation-delay: 0.44s; }
+  @keyframes coup-frappe {
+    0%   { opacity: 0;    transform: scaleY(0.25); }
+    45%  { opacity: 1;    transform: scaleY(1.05); }
+    100% { opacity: 0.4;  transform: scaleY(1); }
+  }
+
+  /* ---------- La fenêtre de démo : le trou du souffleur ---------- */
+  /* Pas de title-bar SaaS : un bandeau de programme, filets et petites capitales. */
+
+  .souffleur {
+    margin: clamp(2.5rem, 6vw, 4rem) auto 0;
+    max-width: 720px;
+  }
+
+  .souffleur__frame {
+    border: var(--filet);
+    background: #fbf5ea;
+    box-shadow:
+      0 1px 0 rgba(255,255,255,0.6) inset,
+      5px 7px 0 rgba(26,22,19,0.10);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .souffleur__bar {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    padding: 0.5rem 0.95rem;
+    border-bottom: 1px solid rgba(26,22,19,0.5);
+    background: var(--paper-deep);
+  }
+  /* Petit fleuron de programme à la place des ronds de fenêtre */
+  .souffleur__seal { color: var(--rouge); flex: none; }
+  .souffleur__app {
+    font-family: var(--display);
+    font-size: 0.66rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .souffleur__tabs {
+    margin-left: auto;
+    display: flex;
+    gap: 0.35rem;
+  }
+  .souffleur__tab {
+    appearance: none;
+    border: 1px solid transparent;
+    background: transparent;
+    font-family: var(--display);
+    font-size: 0.7rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    padding: 0.2rem 0.55rem;
+    cursor: pointer;
+    border-radius: 1px;
+    transition: color .2s, border-color .2s, background .2s;
+  }
+  .souffleur__tab[aria-selected="true"] {
+    color: var(--rouge);
+    border-color: var(--rouge);
+  }
+  .souffleur__tab:hover { color: var(--ink); }
+  /* L'onglet « À vous » : un point bordeaux qui dit « ici, c'est interactif ». */
+  .souffleur__tab--live::before {
+    content: "";
+    display: inline-block;
+    width: 5px; height: 5px;
+    margin-right: 0.34em;
+    border-radius: 50%;
+    background: var(--rouge);
+    vertical-align: middle;
+    opacity: 0.55;
+    transition: opacity .2s, transform .2s;
+  }
+  .souffleur__tab--live[aria-selected="true"]::before { opacity: 1; }
+  .souffleur__view[hidden] { display: none; }
+
+  .souffleur__stage {
+    padding: 1.7rem 1.6rem 1.5rem;
+    /* hauteur réservée : évite le saut vertical entre scènes de longueurs différentes */
+    min-height: 12.5rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .souffleur__context {
+    font-family: var(--display);
+    font-size: 0.66rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 0.9rem;
+  }
+  .souffleur__context b { color: var(--rouge); font-weight: 700; }
+
+  .souffleur__line {
+    font-size: clamp(1.05rem, 1rem + 0.7vw, 1.45rem);
+    line-height: 1.5;
+    color: var(--ink);
+    word-break: break-word;
+    margin: 0;
+  }
+  .typed { white-space: pre-wrap; }
+  /* La suite soufflée : italique d'encre pâle, comme la note d'une souffleuse */
+  .souffle {
+    font-style: italic;
+    color: var(--ghost);
+    white-space: pre-wrap;
+  }
+
+  /* ===== Le souffle ===== */
+  /* Geste signature, distinct des concurrents : pas de frappe machine, pas de
+     fondu plat. Chaque mot se condense depuis un flou et dérive depuis la
+     coulisse (bas-gauche, côté jardin) avant de se poser — une réplique
+     soufflée, pas tapée. Décélération pure, aucun rebond. */
+  .souffle__word {
+    display: inline-block;
+    white-space: pre;
+    opacity: 0;
+    filter: blur(6px);
+    transform: translate3d(-0.32em, 0.14em, 0) scale(1.045);
+    transition:
+      opacity   0.6s  cubic-bezier(0.22, 0.68, 0.16, 1),
+      filter    0.6s  cubic-bezier(0.22, 0.68, 0.16, 1),
+      transform 0.72s cubic-bezier(0.16, 0.74, 0.12, 1);
+    will-change: opacity, filter, transform;
+  }
+  .souffle__word.is-in {
+    opacity: 1;
+    filter: blur(0);
+    transform: none;
+  }
+  /* La réplique posée respire à peine — vivante, en attente, jamais figée. */
+  .souffle.is-alive {
+    /* Quelques respirations, puis la réplique se pose : pas de pulsation
+       perpétuelle (coût repaint + tax attentionnelle). Termine à opacité 1. */
+    animation: souffle-respire 3.6s ease-in-out 0.6s 4;
+  }
+  @keyframes souffle-respire {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.78; }
+  }
+
+  /* La réplique prise : elle quitte l'encre pâle, perd l'italique et se range
+     dans le tapé — exactement le geste de Tab dans l'app. */
+  .souffle__word.is-took {
+    opacity: 1;
+    filter: blur(0);
+    transform: none;
+    color: var(--ink);
+    font-style: normal;
+    transition: color 0.24s ease, transform 0.24s ease, filter 0.24s ease, opacity 0.24s ease;
+  }
+  /* Bref éclat sur le texte au moment où la réplique vient d'être prise. */
+  @keyframes prise-eclat {
+    0%   { background: rgba(168, 154, 130, 0.30); }
+    100% { background: transparent; }
+  }
+  .typed.just-took { animation: prise-eclat 0.6s ease forwards; border-radius: 2px; }
+  /* On peut prendre la réplique d'un clic, aussi. */
+  .souffle { cursor: default; }
+  .souffleur.is-armed .souffle { cursor: pointer; }
+
+  /* Le curseur posé entre le tapé et le soufflé : il respire, lui aussi. */
+  .caret {
+    display: inline-block;
+    width: 2px;
+    height: 1.05em;
+    margin: 0 1px -0.18em 0;
+    background: var(--rouge);
+    transform-origin: center bottom;
+    animation: caret-breathe 1.7s cubic-bezier(0.4, 0, 0.4, 1) infinite;
+  }
+  @keyframes caret-breathe {
+    0%, 100% { opacity: 1;    transform: scaleY(1); }
+    50%      { opacity: 0.16; transform: scaleY(0.9); }
+  }
+
+  .souffleur__hint {
+    display: flex;
+    align-items: center;
+    gap: 1.2rem;
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid rgba(26,22,19,0.22);
+    font-size: 0.84rem;
+    color: var(--ink-soft);
+    flex-wrap: wrap;
+  }
+  kbd {
+    font-family: var(--display);
+    font-weight: 500;
+    font-size: 0.78rem;
+    border: 1px solid var(--ink);
+    border-radius: 2px;
+    padding: 0.08rem 0.45rem;
+    background: var(--paper);
+    box-shadow: 1px 1px 0 rgba(26,22,19,0.25);
+    color: var(--ink);
+  }
+  .souffleur__hint span,
+  .souffleur__hint .hint-key { display: inline-flex; align-items: center; gap: 0.45rem; }
+  /* Les indices Tab / Esc sont de vrais boutons : cliquables, et qui s'allument
+     quand la réplique est réellement prenable (démo survolée ou au focus). */
+  .hint-key {
+    appearance: none;
+    border: 0;
+    margin: 0;
+    padding: 0;
+    background: none;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+    transition: opacity .2s;
+  }
+  .hint-key:disabled { cursor: default; opacity: 0.45; }
+  .hint-key kbd { transition: border-color .2s, color .2s, box-shadow .2s; }
+  .souffleur.is-armed #demo-accept:not(:disabled) kbd {
+    border-color: var(--rouge);
+    color: var(--rouge);
+    box-shadow: 1px 1px 0 rgba(127, 29, 29, 0.30);
+  }
+  .hint-key:not(:disabled):hover kbd,
+  .hint-key:focus-visible kbd { border-color: var(--rouge); color: var(--rouge); }
+  .hint-count { margin-left: 0.1em; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+
+  /* ===== Vue interactive « À vous » ===== */
+  /* Texte tapé et réplique soufflée vivent sur la MÊME ligne (mêmes spans que la
+     vue scénarisée) : la réplique coule juste après le texte, aucun calcul de
+     position, alignement parfait. Le texte tapé est un span editable. */
+  .tryinput {
+    outline: none;
+    caret-color: var(--rouge);
+    white-space: pre-wrap;
+    /* pas de saut de ligne : la démo tient sur une réplique */
+    overflow-wrap: anywhere;   /* un mot collé très long ne déborde pas du cadre */
+  }
+  /* Garde-fou : un collage très long s'enroule mais ne fait jamais exploser
+     la hauteur de scène — il défile dans la réplique. (La longueur est aussi
+     plafonnée en JS ; ceci protège le rendu si JS est absent.) */
+  .souffleur__line.tryline {
+    max-height: 7.5em;
+    overflow-y: auto;
+  }
+  .tryinput:empty::before {
+    content: attr(data-placeholder);
+    color: var(--ink-faint);
+    font-style: italic;
+    pointer-events: none;
+  }
+  .tryghost {
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .18s ease, color .2s ease;
+  }
+  .tryghost.is-shown { opacity: 1; cursor: pointer; pointer-events: auto; }
+  /* La branche easter-egg : l'encre vire à l'or. */
+  .tryghost.is-egg { color: #c8861d; }
+  #demo-tryline.is-egg .tryinput { color: #a96f12; transition: color .3s ease; }
+  @keyframes egg-pop {
+    0%   { transform: translateY(0)   scale(1);    }
+    35%  { transform: translateY(-2px) scale(1.015); }
+    100% { transform: translateY(0)   scale(1);    }
+  }
+  #demo-tryline.is-egg { animation: egg-pop .5s ease; transform-origin: left center; }
+
+  .souffleur__caption {
+    text-align: center;
+    margin-top: 1rem;
+    font-size: 0.88rem;
+  }
+
+  /* ---------- Sections génériques ---------- */
+
+  section { padding-block: clamp(3.2rem, 8vw, 6rem); }
+
+  .section-head { text-align: center; margin-bottom: clamp(2rem, 5vw, 3.2rem); }
+  .section-head .smallcaps { color: var(--rouge); display: block; margin-bottom: 0.7rem; }
+  .section-head h2 {
+    font-size: clamp(2rem, 5vw, 3.4rem);
+    margin: 0;
+  }
+  .section-head .stage-dir { margin-top: 0.6rem; font-size: 1.02rem; }
+
+  /* ---------- Manifeste ---------- */
+  /* Composition de programme : lettrine + mélange de tailles + capitales filées. */
+
+  .manifeste { background: var(--paper-deep); border-block: var(--filet); }
+  .manifeste__body {
+    max-width: var(--measure);
+    margin-inline: auto;
+    font-size: clamp(1.12rem, 1.05rem + 0.5vw, 1.4rem);
+    line-height: 1.74;
+    color: var(--ink-soft);
+  }
+  /* Lettrine */
+  .manifeste__body > p:first-of-type::first-letter {
+    font-family: var(--display);
+    font-weight: 900;
+    float: left;
+    font-size: 4.6em;
+    line-height: 0.74;
+    padding: 0.06em 0.12em 0 0;
+    margin-right: 0.04em;
+    color: var(--rouge);
+  }
+  .manifeste__body em { color: var(--ink); font-style: italic; }
+  /* Capitales filées sur le premier souffle de phrase */
+  .manifeste__lead {
+    font-variant: small-caps;
+    letter-spacing: 0.04em;
+    color: var(--ink);
+  }
+  .manifeste__coda {
+    margin-top: 1.6rem;
+    text-align: center;
+    font-family: var(--display);
+    font-style: italic;
+    font-weight: 500;
+    font-size: clamp(1.3rem, 1.1rem + 1vw, 1.9rem);
+    color: var(--rouge);
+    line-height: 1.2;
+  }
+
+  /* ---------- Le rôle-titre ---------- */
+
+  .heroine {
+    display: grid;
+    gap: clamp(1.8rem, 4vw, 3rem);
+    align-items: center;
+  }
+  @media (min-width: 880px) {
+    .heroine { grid-template-columns: 1.05fr 0.95fr; }
+  }
+  .heroine__text h2 { font-size: clamp(2rem, 4.5vw, 3.2rem); margin: 0.4rem 0 1rem; line-height: 1.02; }
+  .heroine__text .smallcaps { color: var(--rouge); }
+  /* Contre-positionnement mis en scène, pas raconté : un crescendo, puis un
+     trait d'encre qui décroît jusqu'au silence, puis la réplique murmurée.
+     Pas de filet latéral — ici, le silence se voit. */
+  .heroine__contrast { margin-top: 1.6rem; }
+  .heroine__contrast p { margin: 0; color: var(--ink-soft); }
+  .heroine__contrast .louder {
+    font-family: var(--display);
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-size: 0.8rem;
+    color: var(--ink-faint);
+  }
+  .heroine__contrast .louder::after {
+    content: "";
+    display: block;
+    height: 1px;
+    margin-top: 0.7rem;
+    background: linear-gradient(
+      90deg,
+      var(--rouge) 0%,
+      color-mix(in srgb, var(--rouge) 38%, transparent) 28%,
+      transparent 70%
+    );
+  }
+  .heroine__contrast .lower {
+    font-style: italic;
+    color: var(--ink);
+    margin-top: 0.7rem;
+  }
+
+  /* Illustration : le rythme de frappe / le moment de l'hésitation */
+  .pulse-card {
+    border: var(--filet);
+    background: #fbf5ea;
+    border-radius: 2px;
+    padding: 1.8rem 1.6rem;
+    box-shadow: 5px 6px 0 rgba(26,22,19,0.1);
+  }
+  .pulse-card figcaption {
+    font-style: italic;
+    color: var(--ink-soft);
+    font-size: 0.9rem;
+    margin-top: 1.1rem;
+    text-align: center;
+  }
+  .pulse-svg { width: 100%; height: auto; display: block; }
+  /* Le souffle s'imprime une seule fois quand l'illustration entre en vue */
+  .souffle-wave {
+    stroke-dasharray: 220;
+    stroke-dashoffset: 220;
+    opacity: 0;
+  }
+  .pulse-card.is-inked .souffle-wave {
+    animation: draw-souffle 1.5s ease forwards;
+  }
+  .souffle-label { opacity: 0; }
+  .pulse-card.is-inked .souffle-label {
+    animation: fade-in 0.9s ease 0.7s forwards;
+  }
+  @keyframes draw-souffle {
+    0%   { opacity: 0; stroke-dashoffset: 220; }
+    20%  { opacity: 1; }
+    100% { opacity: 1; stroke-dashoffset: 0; }
+  }
+  @keyframes fade-in { to { opacity: 1; } }
+
+  /* ---------- Grille fonctionnalités ---------- */
+  /* La grille respire : le pilier confidentialité passe en pleine largeur. */
+
+  .features {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0;
+    border: var(--filet);
+    background: #fbf5ea;
+  }
+  @media (min-width: 720px) {
+    .features { grid-template-columns: 1fr 1fr; }
+  }
+  .feature {
+    padding: 1.7rem 1.6rem;
+    border-bottom: 1px solid rgba(26,22,19,0.4);
+  }
+  @media (min-width: 720px) {
+    .feature:nth-child(odd):not(.feature--wide) { border-right: 1px solid rgba(26,22,19,0.4); }
+  }
+  .feature:last-child { border-bottom: none; }
+
+  /* Carte large : casse le rythme 2 colonnes, hiérarchise le message-clé */
+  .feature--wide {
+    grid-column: 1 / -1;
+    background: var(--ink);
+    color: var(--paper);
+    display: grid;
+    gap: 0.4rem 1.6rem;
+    align-items: baseline;
+  }
+  @media (min-width: 720px) {
+    .feature--wide { grid-template-columns: auto 1fr; }
+  }
+  .feature--wide .feature__num { color: var(--paper-edge); }
+  .feature--wide h3 { color: var(--paper); }
+  .feature--wide .feature__lede { color: var(--paper-edge); }
+  /* Spécificité renforcée (0,3,1) : doit l'emporter sur `.feature p:last-child`
+     (0,2,1), défini plus bas, qui rendrait sinon ce texte sombre sur le fond
+     --ink de la carte — donc invisible. */
+  .features .feature--wide p:last-child { color: var(--paper-edge); }
+  .feature--wide .feature__head { grid-row: 1 / span 2; }
+
+  .feature__num {
+    font-family: var(--display);
+    font-style: italic;
+    color: var(--rouge);
+    font-size: 0.9rem;
+    letter-spacing: 0.1em;
+  }
+  .feature h3 {
+    font-size: 1.45rem;
+    margin: 0.3rem 0 0.15rem;
+    line-height: 1.1;
+  }
+  .feature__lede {
+    font-style: italic;
+    color: var(--ink-soft);
+    margin: 0 0 0.7rem;
+  }
+  .feature p:last-child { margin-bottom: 0; color: var(--ink-soft); font-size: 0.98rem; }
+  .feature .shortcode {
+    font-family: var(--display);
+    font-weight: 500;
+    font-style: normal;
+    background: var(--paper-deep);
+    padding: 0 0.3em;
+    border-radius: 2px;
+    border: 1px solid rgba(26,22,19,0.2);
+  }
+
+  /* ---------- Coulisses / confidentialité ---------- */
+
+  .coulisses { background: var(--ink); color: var(--paper); border-block: 1px solid #000; }
+  .coulisses .section-head h2 { color: var(--paper); }
+  .coulisses .section-head .smallcaps { color: var(--paper-edge); }
+  .coulisses__lede {
+    max-width: 60ch;
+    margin: 0 auto clamp(2rem, 4vw, 2.8rem);
+    text-align: center;
+    color: var(--paper-edge);
+    font-size: 1.08rem;
+  }
+  .coulisses__lede b { color: var(--paper); font-style: italic; font-weight: 400; }
+  .vows {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 1.4rem;
+  }
+  @media (min-width: 760px) { .vows { grid-template-columns: repeat(3, 1fr); } }
+  .vow {
+    border: 1px solid rgba(243,234,217,0.28);
+    padding: 1.5rem 1.3rem;
+    border-radius: 2px;
+  }
+  .vow__icon { color: var(--paper-edge); margin-bottom: 0.8rem; }
+  .vow h3 { color: var(--paper); font-size: 1.2rem; margin: 0 0 0.5rem; }
+  .vow p { margin: 0; color: var(--paper-edge); font-size: 0.95rem; line-height: 1.6; }
+  .coulisses .ornament .line { background: linear-gradient(90deg, transparent, var(--paper-edge) 50%, transparent); }
+  .coulisses .ornament { color: var(--paper-edge); }
+
+  /* ---------- Comment ça marche ---------- */
+
+  .steps {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0;
+  }
+  @media (min-width: 820px) { .steps { grid-template-columns: repeat(3, 1fr); } }
+  .step {
+    position: relative;
+    padding: 2rem 1.6rem;
+    text-align: center;
+  }
+  @media (min-width: 820px) {
+    .step + .step::before {
+      content: "";
+      position: absolute;
+      left: 0; top: 22%; bottom: 22%;
+      width: 1px;
+      background: rgba(26,22,19,0.3);
+    }
+  }
+  @media (max-width: 819px) {
+    .step + .step { border-top: 1px solid rgba(26,22,19,0.25); }
+  }
+  .step__acte {
+    font-family: var(--display);
+    font-style: italic;
+    color: var(--rouge);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    font-size: 0.72rem;
+    margin-bottom: 0.6rem;
+  }
+  .step__num {
+    font-family: var(--display);
+    font-weight: 900;
+    font-size: 3.2rem;
+    line-height: 1;
+    color: var(--ink);
+    display: block;
+    margin-bottom: 0.6rem;
+  }
+  .step h3 { font-size: 1.4rem; margin: 0 0 0.5rem; }
+  .step p { margin: 0; color: var(--ink-soft); font-size: 0.98rem; }
+  .step kbd { margin: 0 0.1rem; }
+
+  /* ---------- FAQ ---------- */
+
+  .faq { max-width: 760px; margin-inline: auto; }
+  .qa {
+    border-top: 1px solid rgba(26,22,19,0.35);
+  }
+  .qa:last-child { border-bottom: 1px solid rgba(26,22,19,0.35); }
+  .qa summary {
+    cursor: pointer;
+    list-style: none;
+    padding: 1.25rem 2.4rem 1.25rem 0;
+    position: relative;
+    font-family: var(--display);
+    font-weight: 500;
+    font-size: 1.22rem;
+    line-height: 1.25;
+    color: var(--ink);
+    transition: color .2s;
+  }
+  .qa summary::-webkit-details-marker { display: none; }
+  .qa summary:hover { color: var(--rouge); }
+  .qa summary::after {
+    content: "+";
+    position: absolute;
+    right: 0.2rem;
+    top: 1.15rem;
+    font-family: var(--display);
+    font-size: 1.5rem;
+    color: var(--rouge);
+    transition: transform .25s ease;
+  }
+  .qa[open] summary::after { transform: rotate(45deg); }
+  .qa__body {
+    padding: 0 0 1.4rem;
+    color: var(--ink-soft);
+    max-width: 64ch;
+  }
+  .qa__body p { margin: 0; }
+
+  /* ---------- Appel final ---------- */
+
+  .finale { text-align: center; }
+  .finale h2 {
+    font-size: clamp(2rem, 6vw, 4rem);
+    font-style: italic;
+    font-weight: 500;
+    margin: 0 0 1.6rem;
+  }
+  .finale .btn { margin-top: 0.4rem; }
+
+  /* ---------- Footer ---------- */
+
+  footer {
+    border-top: var(--filet);
+    background: var(--paper-deep);
+    padding-block: 2.4rem 2rem;
+  }
+  .foot {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    align-items: center;
+    text-align: center;
+  }
+  @media (min-width: 720px) {
+    .foot { flex-direction: row; justify-content: space-between; text-align: left; }
+  }
+  .foot__brand {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 1.1rem;
+    letter-spacing: 0.04em;
+  }
+  .foot__tag { font-style: italic; color: var(--ink-faint); font-size: 0.9rem; }
+  .foot__meta { font-size: 0.84rem; color: var(--ink-faint); }
+  .foot__sysreq { font-style: italic; }
+
+  /* Colophon : l'« achevé d'imprimer » des livres composés au plomb. La page
+     se referme comme un objet imprimé, et la promesse privacy y passe une
+     dernière fois, en sourdine. */
+  .colophon {
+    margin-top: 2.2rem;
+    padding-top: 1.3rem;
+    border-top: 1px solid rgba(26,22,19,0.18);
+    text-align: center;
+    font-style: italic;
+    font-size: 0.82rem;
+    color: var(--ink-faint);
+  }
+  .colophon p { margin: 0; line-height: 1.7; }
+
+  /* ---------- Séquence d'entrée orchestrée (corps de page) ---------- */
+
+  .reveal {
+    opacity: 0;
+    transform: translateY(10px);
+    transition: opacity .7s ease, transform .7s ease;
+  }
+  .reveal.is-in { opacity: 1; transform: none; }
+
+  /* ---------- Tactile / petits écrans ---------- */
+  /* Souffleuse est macOS uniquement : la page est pensée desktop, et le geste
+     signature reste un bonus desktop. On garantit seulement que rien ne casse
+     ni n'est trop petit à toucher pour les visiteurs qui arrivent au doigt. */
+
+  /* Sur écran étroit, le bandeau de programme déborderait (titre + 4 onglets) et
+     serait rogné par l'overflow:hidden du cadre : on le laisse passer à la ligne. */
+  @media (max-width: 560px) {
+    .souffleur__bar { flex-wrap: wrap; row-gap: 0.5rem; }
+    .souffleur__tabs {
+      margin-left: 0;
+      width: 100%;
+      justify-content: flex-start;
+      flex-wrap: wrap;
+    }
+  }
+
+  /* Cibles tactiles ≥ 44px sur pointeur grossier (doigt). */
+  @media (pointer: coarse) {
+    .souffleur__tab { min-height: 44px; padding-block: 0.55rem; }
+    .hint-key { min-height: 44px; }
+    .topnav a { padding-block: 0.7rem; }
+    .langswitch a { padding-block: 0.7rem; }
+  }
+
+  /* ---------- La mascotte : la souffleuse, dans la marge gauche ---------- */
+  /* Silhouette d'encre penchée pour souffler la réplique. Purement décorative
+     (aria-hidden), ne capte jamais le clic, et ne paraît que là où la marge
+     existe (≥ 1240px) — sinon elle chevaucherait le contenu centré. */
+  .mascotte {
+    position: fixed;
+    left: 0;
+    bottom: 0;
+    z-index: 5;
+    display: none;
+    pointer-events: none;
+  }
+  @media (min-width: 1240px) {
+    .mascotte { display: block; }
+  }
+  .mascotte__fig {
+    height: clamp(300px, 36vh, 440px);
+    width: auto;
+    display: block;
+    opacity: 0.9;   /* encre, pas noir pur */
+  }
+  /* La réplique soufflée, posée près de la bouche, coulant vers la page. */
+  .mascotte__souffle {
+    position: absolute;
+    left: 80%;
+    bottom: 63%;
+    white-space: nowrap;
+    font-family: var(--body);
+    font-style: italic;
+    color: var(--rouge);
+    font-size: clamp(0.95rem, 0.9rem + 0.3vw, 1.15rem);
+    line-height: 1.3;
+  }
+  /* Le souffle, pas la frappe : les mots ne bougent pas, ils se condensent
+     simplement depuis un flou et se redissolvent. La réplique change selon la
+     scène où l'on se trouve (piloté en JS) — la souffleuse glisse le mot juste
+     pour l'acte qu'on est en train de lire. */
+  .mascotte__word {
+    display: inline-block;
+    opacity: 0;
+    filter: blur(7px);
+    transition: opacity 0.9s ease, filter 0.9s ease;
+    will-change: opacity, filter;
+  }
+  .mascotte__souffle.is-in .mascotte__word { opacity: 1; filter: blur(0); }
+  /* léger décalage : les mots se posent l'un après l'autre */
+  .mascotte__souffle.is-in .mascotte__word:nth-child(1) { transition-delay: 0s; }
+  .mascotte__souffle.is-in .mascotte__word:nth-child(2) { transition-delay: 0.18s; }
+  .mascotte__souffle.is-in .mascotte__word:nth-child(3) { transition-delay: 0.36s; }
+  .mascotte__souffle.is-in .mascotte__word:nth-child(4) { transition-delay: 0.54s; }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
+    .ink-rise { opacity: 1; transform: none; filter: none; }
+    .reveal { opacity: 1; transform: none; }
+    .souffle-wave { stroke-dashoffset: 0; opacity: 1; }
+    .souffle-label { opacity: 1; }
+    .souffle__word { opacity: 1; filter: none; transform: none; transition: none; }
+    .souffle.is-alive { animation: none; }
+    .caret { animation: none; opacity: 1; }
+    .mascotte__word { animation: none; opacity: 1; filter: none; transform: none; }
+  }
+
+  /* Masqué à l'écran, lisible par lecteur d'écran (descriptions de démo,
+     régions live). Sans cette règle, le texte injecté dans #demo-live
+     s'afficherait en clair dans le panneau « À vous ». */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  /* Lien d'évitement clavier */
+  .skip {
+    position: absolute;
+    left: -999px;
+    top: 0;
+    background: var(--ink);
+    color: var(--paper);
+    padding: 0.6rem 1rem;
+    z-index: 100;
+    text-decoration: none;
+  }
+  .skip:focus { left: 0.5rem; top: 0.5rem; }
+</style>
+</head>
+<body>
+<a href="#contenu" class="skip">Aller au contenu</a>
+
+<header class="topbar">
+  <div class="shell topbar__inner">
+    <a href="#contenu" class="brand" aria-label="Souffleuse, accueil">
+      <!-- Marque : le trou du souffleur, une coquille au bord de scène -->
+      <svg class="brand__mark" width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
+        <path d="M2 22 Q13 2 24 22" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <path d="M6 22 Q13 9 20 22" fill="none" stroke="currentColor" stroke-width="1"/>
+        <circle cx="13" cy="22" r="1.4" fill="currentColor"/>
+      </svg>
+      <span>
+        <span class="brand__name">Souffleuse</span>
+        <span class="brand__sub">Le Livret</span>
+      </span>
+    </a>
+    <div class="topbar__right">
+      <nav class="topnav" aria-label="Sections">
+        <a href="#souffle">La démo</a>
+        <a href="#manifeste">Le métier</a>
+        <a href="#fonctions">Ce qu'elle fait</a>
+        <a href="#coulisses">Les coulisses</a>
+        <a href="#faq">Questions</a>
+      </nav>
+      <div class="langswitch" role="group" aria-label="Langue / Language">
+        <a href="/" hreflang="fr" aria-current="true">FR</a>
+        <span class="langswitch__sep" aria-hidden="true">·</span>
+        <a href="/en/" hreflang="en">EN</a>
+      </div>
+      <a href="./Souffleuse.dmg" download class="btn btn--small">Télécharger</a>
+    </div>
+  </div>
+</header>
+
+<main id="contenu">
+
+  <!-- =================== HERO =================== -->
+  <section class="hero" aria-labelledby="titre-principal">
+    <div class="shell">
+      <div class="playbill">
+        <div class="trois-coups" aria-hidden="true">
+          <span class="coup"></span><span class="coup"></span><span class="coup"></span>
+        </div>
+        <div class="playbill__cesoir ink-rise k1">
+          <span class="smallcaps">Ce soir, en représentation</span>
+        </div>
+        <p class="playbill__eyebrow ink-rise k2">Une aide à l'écriture qui ne quitte jamais votre Mac</p>
+        <h1 class="hero__title ink-rise k2" id="titre-principal">
+          Le mot juste,
+          <span class="light">soufflé à voix basse</span>
+        </h1>
+        <p class="hero__sub ink-rise k3">
+          Souffleuse glisse le mot juste sous votre curseur, dans n'importe quelle app
+          du Mac, à l'instant où vous cherchez vos mots. Puis elle s'efface. Tout reste
+          sur votre machine.
+        </p>
+        <div class="hero__cta ink-rise k4">
+          <a href="./Souffleuse.dmg" download class="btn">
+            <svg width="15" height="18" viewBox="0 0 15 18" aria-hidden="true" fill="currentColor">
+              <path d="M10.4 0c.1 1-.3 2-1 2.8-.6.7-1.7 1.3-2.7 1.2-.1-1 .4-2 1-2.7C8.4.6 9.5.1 10.4 0Zm2.6 12.9c-.4 1-.6 1.4-1.1 2.3-.7 1.3-1.8 2.9-3 2.9-1.1 0-1.4-.7-2.9-.7-1.5 0-1.8.7-2.9.7-1.3 0-2.3-1.4-3-2.7C-.5 14.4-.7 10.3.9 8c.8-1.1 2.1-1.8 3.4-1.8 1.3 0 2.1.7 3.1.7 1 0 1.6-.7 3.1-.7 1.1 0 2.3.6 3.1 1.7-2.7 1.5-2.3 5.4.3 5Z"/>
+            </svg>
+            Télécharger pour Mac
+          </a>
+          <a href="#souffle" class="btn btn--ghost">Voir comment elle souffle →</a>
+        </div>
+        <p class="cta-note ink-rise k5"><b>Gratuit pendant la bêta.</b> Pour Mac à puce Apple Silicon.</p>
+      </div>
+
+      <!-- ===== ÉLÉMENT SIGNATURE : le trou du souffleur ===== -->
+      <figure class="souffleur ink-rise k5" id="souffle" aria-labelledby="demo-titre">
+        <figcaption id="demo-titre" class="souffleur__caption stage-dir" style="margin-top:0; margin-bottom:1rem;">
+          Le trou du souffleur : la réplique, glissée pile au moment de l'hésitation
+        </figcaption>
+        <div class="souffleur__frame">
+          <div class="souffleur__bar">
+            <!-- Fleuron de programme plutôt qu'une title-bar de fenêtre -->
+            <svg class="souffleur__seal" width="20" height="14" viewBox="0 0 20 14" aria-hidden="true">
+              <path d="M2 7 Q10 0 18 7" fill="none" stroke="currentColor" stroke-width="1.1"/>
+              <circle cx="10" cy="7" r="1.2" fill="currentColor"/>
+            </svg>
+            <span class="souffleur__app" id="demo-app">Mail · réponse à un devis</span>
+            <div class="souffleur__tabs" role="tablist" aria-label="Choisir un exemple">
+              <button class="souffleur__tab" role="tab" id="tab-0" aria-controls="demo-panel" aria-selected="true"  tabindex="0"  data-scene="0">Mail</button>
+              <button class="souffleur__tab" role="tab" id="tab-1" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-scene="1">Messages</button>
+              <button class="souffleur__tab" role="tab" id="tab-2" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-scene="2">Notes</button>
+              <button class="souffleur__tab souffleur__tab--live" role="tab" id="tab-3" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-scene="try">À vous</button>
+            </div>
+          </div>
+          <div class="souffleur__stage" id="demo-panel" role="tabpanel" aria-labelledby="tab-0">
+            <p class="souffleur__context" id="demo-context"><b>Contexte :</b> Mail, réponse à un devis</p>
+
+            <!-- Vue scénarisée : la démo joue toute seule (décorative).
+                 Une description statique tient lieu d'alternative pour les lecteurs d'écran. -->
+            <div class="souffleur__view" id="view-scripted">
+              <p class="souffleur__line" aria-hidden="true">
+                <span class="typed" id="demo-typed"></span><span class="caret" aria-hidden="true"></span><span class="souffle" id="demo-souffle"></span>
+              </p>
+              <p class="sr-only" id="demo-desc">
+                Exemple : vous écrivez « Je reviens vers vous », et Souffleuse propose en gris la suite « avant la fin de la semaine ». Tab l'accepte, Esc l'efface.
+              </p>
+              <div class="souffleur__hint">
+                <button type="button" class="hint-key" id="demo-accept" disabled><kbd>Tab</kbd> pour accepter</button>
+                <button type="button" class="hint-key" id="demo-dismiss" disabled><kbd>Esc</kbd> pour laisser</button>
+              </div>
+            </div>
+
+            <!-- Vue interactive : on tape pour de vrai (le texte tapé et la réplique
+                 soufflée partagent la même ligne, exactement comme la vue scénarisée). -->
+            <div class="souffleur__view" id="view-try" hidden>
+              <p class="souffleur__line tryline" id="demo-tryline"><span class="typed tryinput" id="demo-input" contenteditable="plaintext-only" role="textbox" aria-multiline="false" spellcheck="false" aria-label="Écrivez une phrase ; Souffleuse propose la suite. Tab pour la prendre, flèche bas pour une autre idée." data-placeholder="Écrivez ici…"></span><span class="souffle tryghost" id="demo-ghost" aria-hidden="true"></span></p>
+              <p class="tryline__live sr-only" id="demo-live" role="status" aria-live="polite"></p>
+              <div class="souffleur__hint">
+                <button type="button" class="hint-key" id="demo-take2" disabled><kbd>Tab</kbd> pour prendre</button>
+                <button type="button" class="hint-key" id="demo-cycle" disabled><kbd>↓</kbd> autre idée<span class="hint-count" id="demo-count"></span></button>
+                <button type="button" class="hint-key" id="demo-drop2" disabled><kbd>Esc</kbd> pour laisser</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="souffleur__caption stage-dir">Survolez ou choisissez une scène : elle joue une fois, puis se tait.</p>
+      </figure>
+    </div>
+  </section>
+
+  <hr class="rule-double shell" aria-hidden="true" />
+
+  <!-- =================== MANIFESTE =================== -->
+  <section class="manifeste reveal" id="manifeste" aria-labelledby="manifeste-titre">
+    <div class="shell shell--narrow">
+      <div class="section-head">
+        <span class="smallcaps">Le métier oublié</span>
+        <h2 id="manifeste-titre">Tapie au bord de la scène</h2>
+        <p class="stage-dir">Didascalie</p>
+      </div>
+      <div class="manifeste__body">
+        <p>
+          <span class="manifeste__lead">La souffleuse, c'est ce métier de théâtre qu'on a laissé s'éteindre.</span>
+          Une personne tapie au bord de la scène, qui souffle la réplique au comédien pile
+          quand il bute, à voix juste assez haute pour lui, jamais pour la salle. Elle ne monte
+          pas saluer. Les applaudissements vont au comédien, et c'est très bien ainsi. On a
+          écrit ce logiciel dans le même esprit : présent quand vous hésitez, invisible le reste
+          du temps. Ce que vous écrivez ne lui appartient pas : <em>il reste à vous.</em>
+        </p>
+      </div>
+      <p class="manifeste__coda">Souffler le mot, jamais le voler.</p>
+    </div>
+  </section>
+
+  <!-- =================== LE RÔLE-TITRE =================== -->
+  <section id="souffle-hesitation" class="reveal" aria-labelledby="heroine-titre">
+    <div class="shell">
+      <div class="heroine">
+        <div class="heroine__text">
+          <span class="smallcaps">Le rôle-titre</span>
+          <h2 id="heroine-titre">Le souffle à l'hésitation</h2>
+          <p>
+            Souffleuse ne couvre pas votre écran de texte gris en permanence. Elle suit le
+            rythme de votre frappe et n'avance une suggestion qu'au moment où vous ralentissez,
+            comme une vraie souffleuse attend que le comédien bute avant de lui glisser sa
+            réplique.
+          </p>
+          <div class="heroine__contrast">
+            <p class="louder">Pendant qu'ils accélèrent</p>
+            <p class="lower">elle se tait. Elle ne parle qu'au silence, et c'est là, dans le creux de l'hésitation, qu'elle place le mot juste.</p>
+          </div>
+        </div>
+
+        <figure class="pulse-card" id="pulse-card" aria-label="Illustration du rythme de frappe : la frappe régulière, puis un creux d'hésitation, et le souffle qui se pose.">
+          <svg class="pulse-svg" viewBox="0 0 420 150" role="img" aria-hidden="true">
+            <!-- ligne de base -->
+            <line x1="10" y1="100" x2="410" y2="100" stroke="#1a1613" stroke-opacity="0.25" stroke-width="1"/>
+            <!-- frappe régulière : barres serrées -->
+            <g stroke="#1a1613" stroke-width="2" stroke-linecap="round">
+              <line x1="28" y1="100" x2="28" y2="74"/>
+              <line x1="48" y1="100" x2="48" y2="68"/>
+              <line x1="68" y1="100" x2="68" y2="78"/>
+              <line x1="88" y1="100" x2="88" y2="66"/>
+              <line x1="108" y1="100" x2="108" y2="76"/>
+              <line x1="128" y1="100" x2="128" y2="70"/>
+              <line x1="148" y1="100" x2="148" y2="80"/>
+              <line x1="168" y1="100" x2="168" y2="72"/>
+            </g>
+            <!-- l'hésitation : un creux -->
+            <text x="250" y="46" text-anchor="middle" font-family="Bodoni Moda, serif" font-style="italic" font-size="14" fill="#8c2b21">… l'hésitation</text>
+            <line x1="250" y1="100" x2="250" y2="52" stroke="#8c2b21" stroke-width="1" stroke-dasharray="3 3"/>
+            <circle cx="250" cy="100" r="4" fill="#8c2b21"/>
+            <!-- le souffle : une vague douce qui s'imprime une fois -->
+            <path class="souffle-wave" d="M258 100 C 300 100, 300 60, 340 60 S 380 60, 410 60"
+                  fill="none" stroke="#8c7a5e" stroke-width="2" stroke-linecap="round"/>
+            <text class="souffle-label" x="346" y="48" text-anchor="middle" font-family="Bodoni Moda, serif" font-style="italic" font-size="13" fill="#8c7a5e">le souffle</text>
+          </svg>
+          <figcaption>Frappe régulière, puis le silence : c'est là qu'elle parle.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule-thin shell" aria-hidden="true" />
+
+  <!-- =================== GRILLE FONCTIONNALITÉS =================== -->
+  <section id="fonctions" class="reveal" aria-labelledby="fonctions-titre">
+    <div class="shell">
+      <div class="section-head">
+        <span class="smallcaps">La distribution</span>
+        <h2 id="fonctions-titre">Ce qu'elle fait</h2>
+        <p class="stage-dir">Cinq rôles, tenus en silence</p>
+      </div>
+      <ul class="features">
+        <li class="feature">
+          <span class="feature__num">i.</span>
+          <h3>Le souffle au curseur</h3>
+          <p class="feature__lede">Une suggestion grise, là où vous écrivez.</p>
+          <p>Dans Mail, Notes, Messages, votre navigateur web (presque partout où vous écrivez sur votre Mac), la suggestion apparaît en gris, juste sous votre curseur, sans rien déranger autour.</p>
+        </li>
+        <li class="feature">
+          <span class="feature__num">ii.</span>
+          <h3>Tab pour prendre, Esc pour laisser</h3>
+          <p class="feature__lede">Vous gardez la main, toujours.</p>
+          <p>Tab accepte la suite, mot par mot ou par bouts si vous préférez la prendre par morceaux ; Esc l'efface sans laisser de trace.</p>
+        </li>
+        <!-- Carte pleine largeur : le cœur du contre-positionnement -->
+        <li class="feature feature--wide">
+          <div class="feature__head">
+            <span class="feature__num">iii.</span>
+            <h3>Tout se passe sur votre Mac</h3>
+            <p class="feature__lede">Aucun serveur, aucun aller-retour.</p>
+          </div>
+          <p>Souffleuse réfléchit directement sur votre Mac, sans jamais passer par internet. Après une première mise en place, elle fonctionne même sans connexion. Ce que vous écrivez ne part nulle part, pour la simple raison qu'il n'existe aucun endroit où l'envoyer.</p>
+        </li>
+        <li class="feature">
+          <span class="feature__num">iv.</span>
+          <h3>Elle apprend votre voix, sous clé</h3>
+          <p class="feature__lede">Plus vous l'utilisez, plus elle vous ressemble.</p>
+          <p>Au fil des jours, elle retient les tournures que vous gardez et s'accorde à votre manière d'écrire. Ce qu'elle apprend reste sous clé sur votre Mac, lisible par vous seul.</p>
+        </li>
+        <li class="feature">
+          <span class="feature__num">v.</span>
+          <h3>Le détail qui dépanne</h3>
+          <p class="feature__lede">Fautes de frappe, emoji, plusieurs langues.</p>
+          <p>Elle rattrape une coquille au passage, glisse l'emoji quand vous le cherchez, et vous suit que vous écriviez en français, en anglais, ou les deux dans la même phrase.</p>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- =================== COULISSES / CONFIDENTIALITÉ =================== -->
+  <section class="coulisses reveal" id="coulisses" aria-labelledby="coulisses-titre">
+    <div class="shell">
+      <div class="section-head">
+        <span class="smallcaps">Côté jardin, côté cour</span>
+        <h2 id="coulisses-titre">Ce qui se dit en coulisse reste en coulisse</h2>
+      </div>
+      <p class="coulisses__lede">
+        Souffleuse ne fonctionne que parce qu'elle lit ce que vous écrivez. Alors on a fait
+        en sorte qu'elle n'ait <b>aucun moyen de le raconter</b> : pas de compte, pas de cloud,
+        pas de « on anonymise ». Il n'y a tout simplement pas de porte de sortie.
+      </p>
+
+      <div class="ornament" style="margin-bottom:2.4rem;">
+        <span class="line"></span>
+        <svg width="34" height="14" viewBox="0 0 34 14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1">
+          <path d="M2 7 H13 M21 7 H32"/>
+          <path d="M17 2 L20 7 L17 12 L14 7 Z" fill="currentColor" stroke="none"/>
+        </svg>
+        <span class="line"></span>
+      </div>
+
+      <ul class="vows">
+        <li class="vow">
+          <div class="vow__icon" aria-hidden="true">
+            <svg width="30" height="30" viewBox="0 0 30 30" fill="none" stroke="currentColor" stroke-width="1.3">
+              <rect x="6" y="13" width="18" height="13" rx="1.5"/>
+              <path d="M10 13 V9 a5 5 0 0 1 10 0 v4"/>
+            </svg>
+          </div>
+          <h3>Local de bout en bout</h3>
+          <p>Tout se passe sur votre Mac. Vos textes ne transitent par aucun serveur, jamais.</p>
+        </li>
+        <li class="vow">
+          <div class="vow__icon" aria-hidden="true">
+            <svg width="30" height="30" viewBox="0 0 30 30" fill="none" stroke="currentColor" stroke-width="1.3">
+              <path d="M15 4 v22 M4 15 h22"/>
+              <circle cx="15" cy="15" r="12"/>
+              <line x1="6" y1="6" x2="24" y2="24" stroke-width="1.6"/>
+            </svg>
+          </div>
+          <h3>Rien ne part, jamais</h3>
+          <p>Une seule fois, à l'installation, Souffleuse se connecte pour se mettre en place. Ensuite, plus rien ne quitte votre Mac.</p>
+        </li>
+        <li class="vow">
+          <div class="vow__icon" aria-hidden="true">
+            <svg width="30" height="30" viewBox="0 0 30 30" fill="none" stroke="currentColor" stroke-width="1.3">
+              <path d="M15 3 L25 7 v7 c0 6-4 10-10 13 C9 24 5 20 5 14 V7 Z"/>
+              <path d="M11 15 l3 3 5-6"/>
+            </svg>
+          </div>
+          <h3>Gardé sous clé</h3>
+          <p>Ce qu'elle retient de votre style est verrouillé sur votre Mac. Vous seul pouvez le lire.</p>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- =================== COMMENT ÇA MARCHE =================== -->
+  <section id="marche" class="reveal" aria-labelledby="marche-titre">
+    <div class="shell">
+      <div class="section-head">
+        <span class="smallcaps">Le déroulé</span>
+        <h2 id="marche-titre">En trois actes</h2>
+      </div>
+      <ol class="steps">
+        <li class="step">
+          <p class="step__acte">Acte I</p>
+          <span class="step__num">1</span>
+          <h3>Installez</h3>
+          <p>Glissez Souffleuse dans vos applications, donnez-lui l'autorisation qu'elle demande, et elle vient se loger discrètement dans la barre de menus, en haut de l'écran.</p>
+        </li>
+        <li class="step">
+          <p class="step__acte">Acte II</p>
+          <span class="step__num">2</span>
+          <h3>Écrivez</h3>
+          <p>Tapez normalement, dans l'app que vous voulez. Quand vous hésitez, une suggestion grise apparaît sous le curseur.</p>
+        </li>
+        <li class="step">
+          <p class="step__acte">Acte III</p>
+          <span class="step__num">3</span>
+          <h3>Soufflez</h3>
+          <p>Elle vous va ? <kbd>Tab</kbd>. Elle vous gêne ? <kbd>Esc</kbd>, ou continuez à taper : elle s'efface.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <hr class="rule-double shell" aria-hidden="true" />
+
+  <!-- =================== FAQ =================== -->
+  <section id="faq" class="reveal" aria-labelledby="faq-titre">
+    <div class="shell">
+      <div class="section-head">
+        <span class="smallcaps">Avant le lever de rideau</span>
+        <h2 id="faq-titre">Quelques questions</h2>
+      </div>
+      <div class="faq">
+        <details class="qa">
+          <summary>Quels Mac sont compatibles ?</summary>
+          <div class="qa__body">
+            <p>Souffleuse fonctionne sur les Mac équipés d'une puce Apple récente (les modèles M1, M2, M3 et les suivants) avec macOS Sonoma (version 14) ou plus récent. Les Mac plus anciens, à puce Intel, ne sont malheureusement pas compatibles. En cas de doute, le menu Pomme (en haut à gauche de l'écran) &gt; « À propos de ce Mac » vous indique votre modèle en un coup d'œil.</p>
+          </div>
+        </details>
+        <details class="qa">
+          <summary>Qu'est-ce qui part de mon Mac ?</summary>
+          <div class="qa__body">
+            <p>Au quotidien, rien du tout. La seule fois où Souffleuse se connecte, c'est à l'installation, pour se mettre en place. Ensuite, vos textes et tout ce qu'elle apprend de vous restent sur votre Mac, et elle fonctionne même sans connexion internet.</p>
+          </div>
+        </details>
+        <details class="qa">
+          <summary>C'est gratuit ? Combien ça coûte ?</summary>
+          <div class="qa__body">
+            <p>Pendant la bêta, Souffleuse est entièrement gratuite. Aucune limite de mots par jour, aucune carte demandée : vous téléchargez, et vous écrivez. On vous préviendra clairement, et à l'avance, si la tarification évolue après la bêta.</p>
+          </div>
+        </details>
+        <details class="qa">
+          <summary>En quoi c'est différent d'un correcteur classique ?</summary>
+          <div class="qa__body">
+            <p>Un correcteur attend que vous ayez fini pour souligner ce qui cloche. Souffleuse fait l'inverse : elle propose la suite avant que vous l'écriviez, dans votre ton à vous, et apprend de ce que vous gardez. Elle ne corrige pas après coup, elle souffle pendant.</p>
+          </div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- =================== FINALE =================== -->
+  <section class="finale reveal" id="telecharger" aria-labelledby="finale-titre">
+    <div class="shell shell--narrow">
+      <div class="ornament" style="margin-bottom:1.6rem;">
+        <span class="line"></span>
+        <!-- Cul-de-lampe : un fleuron distinct des deux autres ornements -->
+        <svg width="40" height="22" viewBox="0 0 40 22" aria-hidden="true" fill="none" stroke="#8c2b21" stroke-width="1.2">
+          <path d="M20 2 C 12 8, 12 14, 20 20 C 28 14, 28 8, 20 2 Z"/>
+          <path d="M20 6 C 16 9, 16 13, 20 16 C 24 13, 24 9, 20 6 Z" fill="#8c2b21" stroke="none"/>
+          <path d="M4 20 Q12 18 18 20 M36 20 Q28 18 22 20"/>
+        </svg>
+        <span class="line"></span>
+      </div>
+      <h2 id="finale-titre">Le mot juste, soufflé à voix basse.</h2>
+      <a href="./Souffleuse.dmg" download class="btn">
+        <svg width="15" height="18" viewBox="0 0 15 18" aria-hidden="true" fill="currentColor">
+          <path d="M10.4 0c.1 1-.3 2-1 2.8-.6.7-1.7 1.3-2.7 1.2-.1-1 .4-2 1-2.7C8.4.6 9.5.1 10.4 0Zm2.6 12.9c-.4 1-.6 1.4-1.1 2.3-.7 1.3-1.8 2.9-3 2.9-1.1 0-1.4-.7-2.9-.7-1.5 0-1.8.7-2.9.7-1.3 0-2.3-1.4-3-2.7C-.5 14.4-.7 10.3.9 8c.8-1.1 2.1-1.8 3.4-1.8 1.3 0 2.1.7 3.1.7 1 0 1.6-.7 3.1-.7 1.1 0 2.3.6 3.1 1.7-2.7 1.5-2.3 5.4.3 5Z"/>
+        </svg>
+        Télécharger pour Mac
+      </a>
+      <p class="cta-note"><b>Gratuit pendant la bêta.</b> macOS Sonoma (14) ou plus récent · puce Apple Silicon.</p>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="shell foot">
+    <div>
+      <span class="foot__brand">Souffleuse</span>
+      <p class="foot__tag" style="margin:0.2rem 0 0;">Le mot juste, soufflé à voix basse.</p>
+    </div>
+    <div class="foot__meta">
+      <p style="margin:0 0 0.3rem;">Souffleuse. Fait sur Mac, reste sur votre Mac.</p>
+      <p class="foot__sysreq" style="margin:0;">Pour Mac · macOS Sonoma (14) ou plus récent · puces Apple M1 et suivantes</p>
+    </div>
+  </div>
+  <div class="shell colophon">
+    <p>
+      Achevé d'imprimer en Bodoni Moda &amp; Spectral, sur papier crème.<br />
+      Aucun serveur n'a été dérangé pendant cette représentation.
+    </p>
+  </div>
+</footer>
+
+<!-- La souffleuse : silhouette d'encre dans la marge gauche, elle souffle. -->
+<aside class="mascotte" aria-hidden="true">
+  <img class="mascotte__fig" src="./assets/souffleuse-mascotte.webp" alt="" width="750" height="1008" loading="lazy" decoding="async" />
+  <p class="mascotte__souffle"><span class="mascotte__word">Bonjour,</span> <span class="mascotte__word">comment</span> <span class="mascotte__word">allez-vous&nbsp;?</span></p>
+</aside>
+
+<script>
+(function () {
+  "use strict";
+
+  var scenes = [
+    {
+      app: "Mail · réponse à un devis",
+      ctx: ["Mail", "réponse à un devis"],
+      typed: "Bonjour Camille, merci pour votre retour. Je reviens vers vous",
+      souffle: " avant la fin de la semaine avec une version corrigée du devis."
+    },
+    {
+      app: "Messages · à un proche",
+      ctx: ["Messages", "à un proche"],
+      typed: "Je t'appelle dès que",
+      souffle: " je sors de réunion, promis."
+    },
+    {
+      app: "Notes · à ne pas oublier",
+      ctx: ["Notes", "à ne pas oublier"],
+      typed: "Penser à réserver le",
+      souffle: " restaurant pour samedi soir."
+    }
+  ];
+
+  var elTyped   = document.getElementById("demo-typed");
+  var elSouffle = document.getElementById("demo-souffle");
+  var elApp     = document.getElementById("demo-app");
+  var elCtx     = document.getElementById("demo-context");
+  var panel     = document.getElementById("demo-panel");
+  var tabs      = Array.prototype.slice.call(document.querySelectorAll(".souffleur__tab"));
+
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  var current = 0;
+  var timers = [];
+  var played = [false, false, false];   // chaque scène ne se joue qu'une fois en auto
+
+  function clearTimers() {
+    timers.forEach(clearTimeout);
+    timers = [];
+  }
+
+  function setMeta(scene) {
+    elApp.textContent = scene.app;
+    elCtx.innerHTML = "<b>Contexte :</b> " + scene.ctx[0] + ", " + scene.ctx[1];
+  }
+
+  // Construit la réplique soufflée mot à mot. Chaque mot devient un span
+  // animable ; les espaces restent des nœuds texte (points de retour à la
+  // ligne naturels). `posed` = true pose tout d'un coup, sans animation.
+  function buildSouffle(text, posed) {
+    elSouffle.classList.remove("is-alive");
+    elSouffle.textContent = "";
+    var spans = [];
+    if (!text) return spans;
+    var leading = text.match(/^\s+/);
+    var rest = leading ? text.slice(leading[0].length) : text;
+    if (leading) elSouffle.appendChild(document.createTextNode(leading[0]));
+    rest.split(/(\s+)/).forEach(function (tok) {
+      if (tok === "") return;
+      if (/^\s+$/.test(tok)) {
+        elSouffle.appendChild(document.createTextNode(tok));
+      } else {
+        var s = document.createElement("span");
+        s.className = "souffle__word";
+        s.textContent = tok;
+        if (posed) s.classList.add("is-in");
+        elSouffle.appendChild(s);
+        spans.push(s);
+      }
+    });
+    return spans;
+  }
+
+  // Pose la scène d'un coup (reduced motion, ou rejouée d'un onglet déjà vu).
+  // La réplique reste vivante : elle respire (sauf en reduced-motion, désarmé en CSS).
+  function renderStatic(scene) {
+    setMeta(scene);
+    elTyped.textContent = scene.typed;
+    elTyped.classList.remove("just-took");
+    elSouffle.style.opacity = "1";
+    buildSouffle(scene.souffle, true);
+    elSouffle.classList.add("is-alive");
+    setPending(true);
+  }
+
+  // Séquence : la frappe se pose, puis le souffle apparaît — UNE fois, puis ça se fige.
+  function play(idx, forceReplay) {
+    clearTimers();
+    var scene = scenes[idx];
+    if (!scene) return;   // l'onglet « À vous » n'a pas de scène scénarisée
+
+    if (reduce) {
+      renderStatic(scene);
+      return;
+    }
+
+    // Déjà jouée et pas de relecture demandée : on fige l'état final.
+    if (played[idx] && !forceReplay) {
+      renderStatic(scene);
+      return;
+    }
+
+    setMeta(scene);
+    setPending(false);
+    elTyped.textContent = "";
+    elTyped.classList.remove("just-took");
+    elSouffle.classList.remove("is-alive");
+    elSouffle.style.opacity = "1";
+    elSouffle.textContent = "";
+
+    var typed = scene.typed;
+    var i = 0;
+    function typeNext() {
+      if (i <= typed.length) {
+        elTyped.textContent = typed.slice(0, i);
+        i++;
+        var jitter = 26 + Math.random() * 38;
+        var last = typed.charAt(i - 2);
+        if (last === "," || last === ".") jitter += 160;
+        timers.push(setTimeout(typeNext, jitter));
+      } else {
+        timers.push(setTimeout(breathe, 520));
+      }
+    }
+
+    function breathe() {
+      // La réplique se condense mot à mot depuis la coulisse, puis se met à
+      // respirer. Un seul passage : pas de carrousel.
+      elSouffle.style.opacity = "1";
+      var spans = buildSouffle(scene.souffle, false);
+      void elSouffle.offsetWidth;          // reflow : on part de l'état flouté
+      spans.forEach(function (s, k) {
+        s.style.transitionDelay = (k * 0.058) + "s";
+        s.classList.add("is-in");
+      });
+      // dès que la réplique est soufflée, elle est prenable (Tab / clic).
+      setPending(true);
+      // quand le dernier mot s'est posé, la réplique respire
+      var settle = 720 + spans.length * 58 + 120;
+      timers.push(setTimeout(function () {
+        elSouffle.classList.add("is-alive");
+      }, settle));
+      played[idx] = true;
+    }
+
+    typeNext();
+  }
+
+  function select(idx, focusTab, forceReplay) {
+    current = idx;
+    tabs.forEach(function (t, k) {
+      var sel = k === idx;
+      t.setAttribute("aria-selected", sel ? "true" : "false");
+      t.setAttribute("tabindex", sel ? "0" : "-1");
+    });
+    if (panel) panel.setAttribute("aria-labelledby", "tab-" + idx);
+    if (focusTab && tabs[idx]) tabs[idx].focus();
+    // L'onglet « À vous » bascule en mode interactif ; les autres rejouent leur scène.
+    if (idx === TRY_IDX) {
+      enterTry(!focusTab);          // clic → on prend le champ ; flèches → on reste sur l'onglet
+    } else {
+      exitTry();
+      play(idx, forceReplay);
+    }
+  }
+
+  tabs.forEach(function (tab, idx) {
+    tab.addEventListener("click", function () { select(idx, false, true); });
+    tab.addEventListener("keydown", function (e) {
+      var k = e.key;
+      var next = null;
+      if (k === "ArrowRight") next = (current + 1) % tabs.length;
+      else if (k === "ArrowLeft") next = (current - 1 + tabs.length) % tabs.length;
+      else if (k === "Home") next = 0;
+      else if (k === "End") next = tabs.length - 1;
+      if (next !== null) {
+        e.preventDefault();
+        select(next, true, true);
+      }
+    });
+  });
+
+  // ----- Prendre / laisser la réplique (Tab / Esc), comme dans l'app -----
+  var figure     = document.getElementById("souffle");
+  var acceptBtn  = document.getElementById("demo-accept");
+  var dismissBtn = document.getElementById("demo-dismiss");
+  var pending = false;   // une réplique est soufflée et attend d'être prise
+  var armed   = false;   // la démo est survolée ou tient le focus clavier
+
+  function refreshArmed() {
+    if (figure) figure.classList.toggle("is-armed", armed && pending);
+  }
+  function setArmed(on) { armed = on; refreshArmed(); }
+  function setPending(on) {
+    pending = on;
+    if (acceptBtn)  acceptBtn.disabled  = !on;
+    if (dismissBtn) dismissBtn.disabled = !on;
+    refreshArmed();
+  }
+
+  // Tab : la réplique prend l'encre puis se range dans le tapé.
+  function takeSouffle() {
+    if (!pending) return;
+    var scene = scenes[current];
+    clearTimers();
+    elSouffle.classList.remove("is-alive");
+    var words = elSouffle.querySelectorAll(".souffle__word");
+    words.forEach(function (w, k) {
+      w.style.transitionDelay = (k * 0.04) + "s";
+      w.classList.add("is-took");
+    });
+    setPending(false);
+    var commit = function () {
+      elTyped.textContent = scene.typed + scene.souffle;
+      elSouffle.textContent = "";
+      elTyped.classList.remove("just-took");
+      void elTyped.offsetWidth;
+      elTyped.classList.add("just-took");
+    };
+    if (reduce) commit();
+    else timers.push(setTimeout(commit, 240 + words.length * 40));
+  }
+
+  // Esc : la réplique repart en coulisse et s'efface, sans rien laisser.
+  function dropSouffle() {
+    if (!pending) return;
+    clearTimers();
+    elSouffle.classList.remove("is-alive");
+    var words = elSouffle.querySelectorAll(".souffle__word");
+    words.forEach(function (w, k) {
+      w.style.transitionDelay = (k * 0.03) + "s";
+      w.classList.remove("is-in");   // retour à l'état flouté → disparition
+    });
+    setPending(false);
+    if (reduce) elSouffle.textContent = "";
+    else timers.push(setTimeout(function () { elSouffle.textContent = ""; }, 440));
+  }
+
+  if (figure) {
+    figure.addEventListener("mouseenter", function () { setArmed(true); });
+    figure.addEventListener("mouseleave", function () { setArmed(false); });
+    figure.addEventListener("focusin",  function () { setArmed(true); });
+    figure.addEventListener("focusout", function (e) {
+      if (!figure.contains(e.relatedTarget)) setArmed(false);
+    });
+  }
+  if (acceptBtn)  acceptBtn.addEventListener("click", takeSouffle);
+  if (dismissBtn) dismissBtn.addEventListener("click", dropSouffle);
+  elSouffle.addEventListener("click", function () { if (pending) takeSouffle(); });
+
+  // La vraie touche Tab prend la réplique — mais seulement quand la démo est
+  // engagée (survol/focus), pour ne jamais piéger la navigation clavier du reste
+  // de la page.
+  document.addEventListener("keydown", function (e) {
+    if (!pending) return;
+    // On ne capture Tab que si le focus clavier est RÉELLEMENT dans la démo —
+    // jamais sur simple survol souris, sinon un utilisateur clavier qui a
+    // effleuré la figure à la souris verrait sa tabulation avalée (piège clavier).
+    var focusInDemo = !!(figure && figure.contains(document.activeElement));
+    if (e.key === "Tab" && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
+      if (!focusInDemo) return;
+      e.preventDefault();
+      takeSouffle();
+    } else if (e.key === "Escape" || e.key === "Esc") {
+      if (!armed && !focusInDemo) return;
+      e.preventDefault();
+      dropSouffle();
+    }
+  });
+
+  // ===================================================================
+  //  Mode interactif « À vous » — on tape pour de vrai, plusieurs branches
+  //  sont proposées, et l'une d'elles est un œuf de Pâques.
+  // ===================================================================
+  var TRY_IDX      = scenes.length;           // l'onglet « À vous » suit les scènes
+  var scriptedView = document.getElementById("view-scripted");
+  var tryView      = document.getElementById("view-try");
+  var input        = document.getElementById("demo-input");   // span contenteditable
+  var ghost        = document.getElementById("demo-ghost");
+  var tryWrap      = document.getElementById("demo-tryline");
+  var takeBtn      = document.getElementById("demo-take2");
+  var cycleBtn     = document.getElementById("demo-cycle");
+  var dropBtn      = document.getElementById("demo-drop2");
+  var countEl      = document.getElementById("demo-count");
+  var liveEl       = document.getElementById("demo-live");
+
+  // L'œuf : la branche qu'on découvre en cyclant jusqu'au bout.
+  var EGG = { t: ", et sinon, achète du bitcoin.", egg: true };
+
+  // Petites « complétions » maison : on reconnaît la fin de ce qui est tapé et
+  // on propose des suites plausibles. Rien d'un vrai modèle — c'est une démo.
+  var RULES = [
+    { when: function (t) { return /(^|\W)(bitcoin|crypto|ethereum|satoshi)$/.test(t); },
+      list: [" : franchement, la seule réponse raisonnable, c'est d'en acheter.",
+             ", discrètement, avant tout le monde.", EGG], forceEgg: true },
+    { when: function (t) { return /(argent|riche|fortune|économies?|invest(ir|issement)|placement|bourse|épargne)$/.test(t); },
+      list: [EGG, " : on en reparle au prochain bilan.", ", parlons-en autour d'un café."] },
+    { when: function (t) { return t.endsWith("je reviens vers vous"); },
+      list: [" avant la fin de la semaine.", " dès que j'ai du nouveau.", " avec une proposition chiffrée."] },
+    { when: function (t) { return t.endsWith("je t'appelle") || t.endsWith("je t’appelle"); },
+      list: [" dès que je sors de réunion.", " ce soir en rentrant.", " demain matin, promis."] },
+    { when: function (t) { return t.endsWith("merci"); },
+      list: [" beaucoup pour votre retour rapide.", " d'avance pour votre aide.", ", c'est noté de mon côté."] },
+    { when: function (t) { return t.endsWith("bonjour") || t.endsWith("bonsoir"); },
+      list: [", j'espère que vous allez bien.", " et merci pour votre message.", " à toute l'équipe !"] },
+    { when: function (t) { return t.endsWith("penser à") || t.endsWith("ne pas oublier de"); },
+      list: [" réserver le restaurant pour samedi.", " rappeler le client demain.", " relire avant d'envoyer."] },
+    { when: function (t) { return t.endsWith("je voulais") || t.endsWith("je souhaitais"); },
+      list: [" revenir vers vous au sujet du devis.", " vous remercier pour l'accueil.", " faire un point rapide."] },
+  ];
+  var GENERIC = [" et je reviens vers vous très vite.", ", dites-moi ce que vous en pensez.", " dès que possible."];
+
+  function trim_(t) { return t.replace(/\s+$/, ""); }
+  function wordCount(t) { var a = trim_(t).split(/\s+/); return a[0] === "" ? 0 : a.length; }
+
+  // Renvoie la liste de branches pour le texte courant (chaque branche : string | EGG).
+  function branchesFor(raw) {
+    var t = trim_(raw.toLowerCase());
+    if (t.length < 2) return [];
+    for (var i = 0; i < RULES.length; i++) {
+      if (RULES[i].when(t)) {
+        var list = RULES[i].list.slice();
+        if (!RULES[i].forceEgg && list.indexOf(EGG) === -1) list.push(EGG);
+        return list;
+      }
+    }
+    if (wordCount(raw) >= 3 || /\s$/.test(raw)) return GENERIC.concat([EGG]);
+    return [];
+  }
+
+  var tryBranches = [];
+  var tryIndex = 0;
+  var trySuppressed = false;   // Esc masque la réplique jusqu'à la frappe suivante
+
+  // Texte tapé : le contenu du span editable, nettoyé des sauts de ligne.
+  function tryText() { return (input.textContent || "").replace(/\r?\n/g, " "); }
+  // Une réplique tient en une phrase : on plafonne la saisie (frappe + collage)
+  // pour qu'un pavé collé ne déborde jamais la scène ni ne ralentisse les regex.
+  var TRY_MAX = 180;
+  function capInput() {
+    var t = tryText();
+    if (t.length > TRY_MAX) {
+      input.textContent = t.slice(0, TRY_MAX);
+      placeCaretEnd();
+    }
+  }
+  function placeCaretEnd() {
+    input.focus();
+    var sel = window.getSelection();
+    if (!sel) return;
+    var r = document.createRange();
+    r.selectNodeContents(input);
+    r.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(r);
+  }
+  function branchText() {
+    var b = tryBranches[tryIndex];
+    var t = (typeof b === "string") ? b : b.t;
+    // évite la double espace si l'utilisateur a déjà tapé une espace finale
+    if (/\s$/.test(tryText()) && /^\s/.test(t)) t = t.replace(/^\s+/, "");
+    return t;
+  }
+  function branchEgg() {
+    var b = tryBranches[tryIndex];
+    return !!(b && b.egg);
+  }
+  function setTryButtons(on, canCycle) {
+    takeBtn.disabled = !on;
+    dropBtn.disabled = !on;
+    cycleBtn.disabled = !(on && canCycle);
+  }
+  function hideGhost() {
+    ghost.classList.remove("is-shown", "is-egg");
+    ghost.textContent = "";
+    countEl.textContent = "";
+    setTryButtons(false, false);
+  }
+  function renderTry() {
+    if (trySuppressed) { hideGhost(); return; }
+    tryBranches = branchesFor(tryText());
+    if (!tryBranches.length) { hideGhost(); return; }
+    if (tryIndex >= tryBranches.length) tryIndex = 0;
+    ghost.textContent = branchText();   // coule juste après le texte tapé, même ligne
+    ghost.classList.toggle("is-egg", branchEgg());
+    ghost.classList.add("is-shown");
+    var many = tryBranches.length > 1;
+    countEl.textContent = many ? " " + (tryIndex + 1) + "/" + tryBranches.length : "";
+    setTryButtons(true, many);
+  }
+  function takeTry() {
+    if (!ghost.classList.contains("is-shown")) return;
+    var txt = branchText();
+    var egg = branchEgg();
+    input.textContent = tryText() + txt;
+    placeCaretEnd();
+    trySuppressed = false;
+    tryIndex = 0;
+    if (egg) {
+      tryWrap.classList.remove("is-egg"); void tryWrap.offsetWidth;
+      tryWrap.classList.add("is-egg");
+      if (liveEl) liveEl.textContent = "Conseil non sollicité accepté.";
+      setTimeout(function () { tryWrap.classList.remove("is-egg"); }, 1400);
+    }
+    hideGhost();
+    renderTry();         // propose aussitôt une suite pour le nouveau texte
+  }
+  function cycleTry(dir) {
+    if (tryBranches.length < 2) return;
+    tryIndex = (tryIndex + (dir || 1) + tryBranches.length) % tryBranches.length;
+    renderTry();
+  }
+  function dropTry() { trySuppressed = true; hideGhost(); }
+
+  if (input) {
+    input.addEventListener("input", function (e) { if (e && e.isComposing) return; capInput(); trySuppressed = false; tryIndex = 0; renderTry(); });
+    input.addEventListener("keydown", function (e) {
+      var shown = ghost.classList.contains("is-shown");
+      if ((e.key === "Tab" || e.key === "Enter") &&
+          !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
+        // Entrée ne doit jamais insérer de saut de ligne ; Tab/Entrée prennent la réplique.
+        if (e.key === "Enter") e.preventDefault();
+        if (shown) { e.preventDefault(); takeTry(); }
+      } else if (e.key === "ArrowDown") {
+        if (shown) { e.preventDefault(); cycleTry(1); }
+      } else if (e.key === "ArrowUp") {
+        if (shown) { e.preventDefault(); cycleTry(-1); }
+      } else if (e.key === "Escape" || e.key === "Esc") {
+        if (shown) { e.preventDefault(); dropTry(); }
+      }
+    });
+    // Coller du texte → en texte brut, sur une seule ligne.
+    input.addEventListener("paste", function (e) {
+      e.preventDefault();
+      var t = (e.clipboardData || window.clipboardData).getData("text").replace(/\r?\n/g, " ");
+      // tronque le collage à la capacité restante avant insertion
+      var room = Math.max(0, TRY_MAX - tryText().length);
+      document.execCommand("insertText", false, t.slice(0, room));
+      capInput();
+    });
+    // Cliquer la réplique grise = la prendre.
+    ghost.addEventListener("click", function () { if (ghost.classList.contains("is-shown")) takeTry(); });
+    takeBtn.addEventListener("click", takeTry);
+    cycleBtn.addEventListener("click", function () { cycleTry(1); placeCaretEnd(); });
+    dropBtn.addEventListener("click", dropTry);
+  }
+
+  function enterTry(grabInput) {
+    if (!tryView) return;
+    if (scriptedView) scriptedView.hidden = true;
+    tryView.hidden = false;
+    setPending(false);                 // coupe la logique scénarisée
+    if (elCtx) elCtx.innerHTML = "<b>À vous :</b> écrivez, Souffleuse souffle la suite";
+    if (elApp) elApp.textContent = "À vous · essai libre";
+    if (tryText() === "") input.textContent = "Je reviens vers vous";
+    trySuppressed = false; tryIndex = 0;
+    renderTry();
+    if (grabInput) placeCaretEnd();
+  }
+  function exitTry() {
+    if (!tryView) return;
+    tryView.hidden = true;
+    if (scriptedView) scriptedView.hidden = false;
+    hideGhost();
+  }
+
+  // Pose la première scène (état figé) tout de suite, sans rien jouer.
+  renderStatic(scenes[0]);
+
+  // Joue la scène courante UNE fois quand la démo entre dans le champ de vision.
+  if (!reduce && "IntersectionObserver" in window) {
+    var figure = document.getElementById("souffle");
+    var demoSeen = new IntersectionObserver(function (entries, obs) {
+      entries.forEach(function (en) {
+        if (en.isIntersecting) {
+          timers.push(setTimeout(function () { play(current, false); }, 350));
+          obs.unobserve(en.target);
+        }
+      });
+    }, { threshold: 0.4 });
+    if (figure) demoSeen.observe(figure);
+  }
+
+  // ----- Fondu-au-scroll très retenu sur les sections (l'encre qui se pose) -----
+  var reveals = Array.prototype.slice.call(document.querySelectorAll(".reveal"));
+  if (reduce || !("IntersectionObserver" in window)) {
+    reveals.forEach(function (el) { el.classList.add("is-in"); });
+  } else {
+    var io = new IntersectionObserver(function (entries, obs) {
+      entries.forEach(function (en) {
+        if (en.isIntersecting) {
+          en.target.classList.add("is-in");
+          obs.unobserve(en.target);
+        }
+      });
+    }, { threshold: 0.16, rootMargin: "0px 0px -8% 0px" });
+    reveals.forEach(function (el) { io.observe(el); });
+  }
+
+  // ----- L'illustration du souffle s'imprime une fois en vue -----
+  var pulse = document.getElementById("pulse-card");
+  if (pulse && !reduce && "IntersectionObserver" in window) {
+    var pio = new IntersectionObserver(function (entries, obs) {
+      entries.forEach(function (en) {
+        if (en.isIntersecting) {
+          en.target.classList.add("is-inked");
+          obs.unobserve(en.target);
+        }
+      });
+    }, { threshold: 0.45 });
+    pio.observe(pulse);
+  } else if (pulse) {
+    pulse.classList.add("is-inked");
+  }
+})();
+</script>
+
+<!-- La souffleuse change de réplique selon la scène que vous lisez : elle
+     souffle le mot juste pour l'acte en cours, comme une vraie souffleuse. -->
+<script>
+(function () {
+  "use strict";
+  var souffle = document.querySelector(".mascotte__souffle");
+  if (!souffle) return;
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // Une réplique par scène, dans la voix chuchotée de la souffleuse.
+  var LINES = [
+    { sel: ".hero",               words: ["Bonjour,", "comment", "allez-vous ?"] },
+    { sel: "#manifeste",          words: ["Je me tiens", "dans la", "coulisse."] },
+    { sel: "#souffle-hesitation", words: ["Là, dans le silence,", "j'écoute."] },
+    { sel: "#fonctions",          words: ["Le mot juste,", "sous votre", "curseur."] },
+    { sel: "#coulisses",          words: ["Ce qui se dit ici,", "reste ici."] },
+    { sel: "#marche",             words: ["En trois actes,", "et c'est", "à vous."] },
+    { sel: "#faq",                words: ["Une question ?", "Je", "vous écoute."] },
+    { sel: "#telecharger",        words: ["Le rideau", "se lève."] }
+  ];
+
+  var els = LINES.map(function (l) {
+    var el = document.querySelector(l.sel);
+    return el ? { el: el, words: l.words } : null;
+  }).filter(Boolean);
+  if (!els.length) return;
+
+  var holdTimer = null, swapTimer = null;
+  function render(words) {
+    souffle.textContent = "";
+    words.forEach(function (w, i) {
+      var s = document.createElement("span");
+      s.className = "mascotte__word";
+      s.textContent = w;
+      souffle.appendChild(s);
+      if (i < words.length - 1) souffle.appendChild(document.createTextNode(" "));
+    });
+  }
+  // Chuchote une réplique : efface la précédente, échange le texte, fait
+  // émerger la nouvelle, puis la laisse se redissoudre après quelques secondes.
+  function whisper(words) {
+    clearTimeout(holdTimer); clearTimeout(swapTimer);
+    if (reduce) { render(words); souffle.classList.add("is-in"); return; }
+    souffle.classList.remove("is-in");           // le souffle courant s'efface
+    swapTimer = setTimeout(function () {
+      render(words);
+      void souffle.offsetWidth;                  // reflow → la transition repart
+      souffle.classList.add("is-in");
+      holdTimer = setTimeout(function () {
+        souffle.classList.remove("is-in");       // se tait après la pose
+      }, 6000);
+    }, 520);
+  }
+
+  // État initial : la salutation émerge en fondu (flou → net) puis se pose.
+  // Les mots partent floutés (pas de « is-in » dans le HTML) ; on l'ajoute après
+  // un court délai pour que la transition s'anime au chargement, comme un souffle.
+  var current = els[0].el;
+  if (reduce) {
+    souffle.classList.add("is-in");
+  } else {
+    souffle.classList.remove("is-in");
+    setTimeout(function () {
+      void souffle.offsetWidth;                 // reflow → la transition part du flou
+      souffle.classList.add("is-in");
+      holdTimer = setTimeout(function () { souffle.classList.remove("is-in"); }, 6000);
+    }, 800);
+  }
+  if ("IntersectionObserver" in window) {
+    // Bande fine au centre du viewport : la scène « active » est celle qui
+    // croise le milieu de l'écran.
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting && e.target !== current) {
+          current = e.target;
+          for (var i = 0; i < els.length; i++) {
+            if (els[i].el === e.target) { whisper(els[i].words); break; }
+          }
+        }
+      });
+    }, { rootMargin: "-48% 0px -48% 0px", threshold: 0 });
+    els.forEach(function (x) { io.observe(x.el); });
+  }
+})();
+</script>
+<script>
+// Quand on quitte l'onglet, la souffleuse ne disparaît pas : elle attend en
+// coulisse. Le titre le dit, à voix basse, et reprend sa place au retour.
+(function () {
+  "use strict";
+  var titre = document.title;
+  document.addEventListener("visibilitychange", function () {
+    document.title = document.hidden ? "En coulisse… · Souffleuse" : titre;
+  });
+})();
+</script>
+</body>
+</html>
