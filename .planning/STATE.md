@@ -111,6 +111,7 @@ Aucun.
 | 260602-oru | strongCorpusMatchMinChars 16→12 + override runtime MW_STRONG_MINCHARS (recall corpus début de phrase) | 2026-06-02 | 730c95f |  | [260602-oru-abaisser-strongcorpusmatchminchars-de-16](./quick/260602-oru-abaisser-strongcorpusmatchminchars-de-16/) |
 | 260604-k1v | Intégrer Sparkle 2 (MAJ manuel-only, SPM, non notarisé) | 2026-06-04 | ed4e598 |  | [260604-k1v-int-grer-sparkle-2-maj-manuel-only-spm-n](./quick/260604-k1v-int-grer-sparkle-2-maj-manuel-only-spm-n/) |
 | 260612-f8l | Vidéo sociale « rafale de Tab » — Remotion 9:16, 15 s, boucle, out/souffleuse-rafale.mp4 | 2026-06-12 | — (video/ non tracké) |  | [260612-f8l-vid-o-courte-r-seaux-sociaux-rafale-de-t](./quick/260612-f8l-vid-o-courte-r-seaux-sociaux-rafale-de-t/) |
+| 260612-gto | Refonte onboarding en wizard multi-étapes inspiré de Cotabby (pied fixe, cartes permission live, reprise après relaunch, complétion versionnée) | 2026-06-12 | c2ed369 | Vérifié live (screenshots 6 étapes) | [260612-gto-refonte-onboarding-en-wizard-multi-tapes](./quick/260612-gto-refonte-onboarding-en-wizard-multi-tapes/) |
 
 ### Notes
 
