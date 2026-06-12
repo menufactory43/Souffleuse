@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import IOKit.hid
 import Observation
+import ServiceManagement
 import SouffleuseAX
 import SouffleuseContext
 import SouffleuseCore
@@ -352,16 +353,26 @@ private struct WelcomeStepView: View {
 
     var body: some View {
         VStack(spacing: 28) {
-            VStack(spacing: 10) {
-                Text("Bienvenue dans Souffleuse")
-                    .font(.system(size: 22, weight: .semibold, design: .serif))
-                    .multilineTextAlignment(.center)
+            VStack(spacing: 18) {
+                // Logo de l'app, coins arrondis façon icône macOS. NSApp.applicationIconImage
+                // est la source fiable (suit Resources/AppIcon.icns sans dépendre de son layout interne).
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 72, height: 72)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
 
-                Text("Souffleuse vit dans votre barre de menus et souffle le mot juste là où vous écrivez. Quelques réglages, puis elle s'efface.")
-                    .font(.system(size: 13, design: .serif))
-                    .italic()
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+                VStack(spacing: 10) {
+                    Text("Bienvenue dans Souffleuse")
+                        .font(.system(size: 22, weight: .semibold, design: .serif))
+                        .multilineTextAlignment(.center)
+
+                    Text("Souffleuse vit dans votre barre de menus et souffle le mot juste là où vous écrivez. Quelques réglages, puis elle s'efface.")
+                        .font(.system(size: 13, design: .serif))
+                        .italic()
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
             }
 
             Button("Commencer") { onStart() }
@@ -418,6 +429,19 @@ private struct PermissionsStepView: View {
                 settingsURL: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!,
                 onAuthorize: { Task { await ScreenCapturer.forcePermissionPrompt() } }
             )
+
+            // Réassurance factuelle : le gate isSecureField (tick l.1378) + la blocklist
+            // secureBundles écartent champs de mot de passe et apps bancaires en amont.
+            HStack(alignment: .center, spacing: 6) {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Text("Les champs de mot de passe ne sont jamais lus, ni les apps bancaires.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.top, 2)
 
             // Encart d'aide repliable
             DisclosureGroup(isExpanded: $helpExpanded) {
@@ -778,6 +802,11 @@ private struct DoneStepView: View {
     let imGranted: Bool
     let onFinished: () -> Void
 
+    /// L'état de l'item de login EST sa source de vérité (pas de pref stockée) :
+    /// on lit SMAppService.mainApp.status. Décoché par défaut — on ne pré-active
+    /// jamais sans consentement explicite.
+    @State private var launchAtLogin: Bool = SMAppService.mainApp.status == .enabled
+
     private var canFinish: Bool { axGranted && imGranted }
 
     private var ghostStatus: ModelDownloadManager.Status? {
@@ -818,6 +847,27 @@ private struct DoneStepView: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
+
+            VStack(spacing: 4) {
+                Toggle("Lancer Souffleuse à l'ouverture du Mac", isOn: $launchAtLogin)
+                    .onChange(of: launchAtLogin) { _, on in
+                        do {
+                            if on { try SMAppService.mainApp.register() }
+                            else { try SMAppService.mainApp.unregister() }
+                        } catch {
+                            // Échec d'enregistrement (build dev hors /Applications) →
+                            // resync silencieux, fidèle au house-style « fallback silencieux ».
+                            launchAtLogin = SMAppService.mainApp.status == .enabled
+                        }
+                    }
+                    .toggleStyle(.checkbox)
+                Text("Conseillé : la souffleuse ne souffle que si elle est ouverte.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: 300)
 
             Button("Commencer à écrire") { onFinished() }
                 .buttonStyle(SangDeBoeufButtonStyle())
