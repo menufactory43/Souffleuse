@@ -295,6 +295,10 @@ private struct PersonalizationTab: View {
                     .disabled(!store.personalizationEnabled)
                 Text("Souffleuse apprend alors de tout ce que vous tapez, pas seulement des suggestions retenues — un meilleur reflet de votre style. À éviter si vous écrivez des choses sensibles.")
                     .font(.callout).foregroundStyle(.secondary)
+                Toggle("Teinter les suggestions de vos mots et de votre ton", isOn: $store.personalizedSuggestionsEnabled)
+                    .disabled(!store.personalizationEnabled)
+                Text("Le ghost reprend vos tournures récurrentes (un mot revenu dans plusieurs phrases est reproposé au bon endroit) et s'inspire de votre prose récente du même registre, application par application — le ton se règle dans l'onglet Ton.")
+                    .font(.callout).foregroundStyle(.secondary)
             } header: {
                 Text("Apprendre de vous").font(.headline)
             }
@@ -1154,13 +1158,13 @@ private struct ToneTab: View {
     @State private var selection: UUID?
     @State private var draft: ToneRule?
 
-    /// Description du panneau, fidèle à ce que le ton gouverne RÉELLEMENT dans
-    /// ce build : la relecture toujours ; les suggestions (style primer du
-    /// ghost) seulement quand le flag opt-in est actif — mentir sur un
+    /// Description du panneau, fidèle à ce que le ton gouverne RÉELLEMENT :
+    /// la relecture toujours ; les suggestions seulement quand la préférence
+    /// « Teinter les suggestions » (ou le flag dev) est active — mentir sur un
     /// comportement désactivé sèmerait le doute sur tout le panneau.
     private var panelDescription: String {
         var text = "Quand le correspondant écrit en français, ⌘↩ ne traduit pas : la souffleuse relit ton message. Choisis le registre — un défaut, et des exceptions par application."
-        if SuggestionPolicy.Tuning.stylePrimerEnabled {
+        if SuggestionPolicy.Tuning.stylePrimerEnabled || store.personalizedSuggestionsEnabled {
             text += " Ce registre teinte aussi les suggestions : dans chaque application, le ghost s'inspire de ta prose écrite sur le même ton."
         }
         return text

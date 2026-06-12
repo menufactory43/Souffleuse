@@ -158,6 +158,7 @@ final class PreferencesStore {
         static let personalizationStrength = "personalizationStrength"
         static let personalizationOnboardingShown = "personalizationOnboardingShown"
         static let storeWithoutAccepted = "storeWithoutAccepted"
+        static let personalizedSuggestions = "personalizedSuggestionsEnabled"
         static let partialAcceptEnabled = "partialAcceptEnabled"
         static let acceptAllKey = "acceptAllKey"
         static let commitKey = "commitKey"
@@ -223,6 +224,16 @@ final class PreferencesStore {
     var hideOnTypo: Bool { didSet { UserDefaults.standard.set(hideOnTypo, forKey: K.hideOnTypo) } }
     var personalizationEnabled: Bool {
         didSet { UserDefaults.standard.set(personalizationEnabled, forKey: K.personalizationEnabled) }
+    }
+    /// Teinter les SUGGESTIONS de la personnalisation : style primer (le ghost
+    /// s'inspire de la prose passée du même ton/app) + bias corpus dans le beam
+    /// (vos mots récurrents — collocations attestées par ≥2 phrases distinctes —
+    /// re-proposés au bon endroit). Sous le master « Apprendre votre plume »
+    /// (force 0 ⇒ les deux mécanismes fast-path déjà). Défaut OFF tant que
+    /// l'acceptance live n'a pas tranché ; `SOUFFLEUSE_STYLE_PRIMER` /
+    /// `SOUFFLEUSE_BEAM_BIAS` restent des overrides de dev.
+    var personalizedSuggestionsEnabled: Bool {
+        didSet { UserDefaults.standard.set(personalizedSuggestionsEnabled, forKey: K.personalizedSuggestions) }
     }
     /// 0.0 (off) → 2.0 (max). Multiplied with per-token n-gram log-prob inside
     /// the logit bias.
@@ -357,6 +368,7 @@ final class PreferencesStore {
         // (2k + dedup) and the prompt no longer gets random prose, so the
         // footprint is small. TO REVERT to opt-in: change `?? true` to `?? false`.
         self.storeWithoutAccepted = (d.object(forKey: K.storeWithoutAccepted) as? Bool) ?? true
+        self.personalizedSuggestionsEnabled = (d.object(forKey: K.personalizedSuggestions) as? Bool) ?? false
         self.partialAcceptEnabled = (d.object(forKey: K.partialAcceptEnabled) as? Bool) ?? true
         self.acceptAllKey = AcceptAllKey(rawValue: d.string(forKey: K.acceptAllKey) ?? "") ?? .rightArrow
         self.commitKey = CommitKey(rawValue: d.string(forKey: K.commitKey) ?? "") ?? .cmdReturn

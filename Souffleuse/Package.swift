@@ -350,6 +350,14 @@ let package = Package(
             ]
         ),
         .executableTarget(
+            name: "SouffleuseBeamBiasEval",
+            dependencies: [
+                "SouffleuseCore",
+                "SouffleuseLlama",
+                "SouffleuseLog",
+            ]
+        ),
+        .executableTarget(
             name: "SouffleuseEchoEval",
             dependencies: [
                 "SouffleuseCore",

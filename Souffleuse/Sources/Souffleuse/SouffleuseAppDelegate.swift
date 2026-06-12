@@ -493,6 +493,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         predictor.maxTokens = store.completionLength.maxTokens
         predictor.maxWords = store.completionLength.maxWords
         predictor.personalizationStrength = store.effectivePersonalizationStrength
+        predictor.personalizedSuggestionsEnabled = store.personalizedSuggestionsEnabled
         predictor.prefixCorrectionEnabled = store.prefixCorrectionEnabled
         // Few-shot dynamique : le predictor lit ce store à chaque appel à
         // `predict()` pour retrouver des entrées similaires au userTail.
@@ -871,6 +872,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         let effectiveStrength = store.effectivePersonalizationStrength
         if predictor.personalizationStrength != effectiveStrength {
             predictor.personalizationStrength = effectiveStrength
+        }
+        if predictor.personalizedSuggestionsEnabled != store.personalizedSuggestionsEnabled {
+            predictor.personalizedSuggestionsEnabled = store.personalizedSuggestionsEnabled
         }
         if predictor.prefixCorrectionEnabled != store.prefixCorrectionEnabled {
             predictor.prefixCorrectionEnabled = store.prefixCorrectionEnabled

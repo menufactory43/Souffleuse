@@ -273,6 +273,41 @@ public actor BeamGhostEngine {
     private var reservePrompt: String = ""
     private var reserveTypedSoFar: String = ""
 
+    // MARK: - Corpus de personnalisation (bias, flag SOUFFLEUSE_BEAM_BIAS)
+
+    /// Mêmes structures que `LlamaEngine` (même module, mêmes token ids — le
+    /// modèle est partagé via `borrowModel`, donc le vocab est identique).
+    /// Vides tant que `setCorpus` n'est pas appelé ⇒ la boucle d'expansion ne
+    /// touche jamais les logits (zéro coût, chemin byte-identique).
+    private var corpusNgram = LlamaCorpusNgram()
+    private var corpusSuffixArray = LlamaCorpusSuffixArray()
+    /// Gain du bias (0 = OFF). Posé par `ModelRuntime.generateGhostBeam` /
+    /// `extendGhostBeam` à chaque génération depuis le flag
+    /// `Tuning.beamBiasEnabled` × `personalizationStrength` (déjà scalé par
+    /// `LlamaSampling.personalizationGainScale`, parité greedy). État actor :
+    /// le re-beam interne d'un MISS (`advance`) et `refillSurvivors` en
+    /// héritent sans plomber les signatures.
+    private var biasStrength: Float = 0
+
+    /// Plancher de promotion du BEAM (tokens de contexte rejoués). Calibré par
+    /// le sweep `SouffleuseBeamBiasEval` v2 (corpus prod-fidèle dédupliqué,
+    /// 16 mots appris / 12 near-miss durcis, 2026-06-12) :
+    ///   5 (défaut greedy) → recall 8/16, sur-injection 0/12
+    ///   **4 → recall 10/16, sur-injection 0/12  ← valeur retenue**
+    ///   3 → recall 11/16, sur-injection 2/12 (« votre dossier à »,
+    ///       « accordé un ») — NO-GO, la frontière est bien là.
+    /// Plus bas que le greedy (5) parce que le repli compté PAR ENTRÉES
+    /// raccourcit le contexte gagnant d'un corpus dédupliqué (collocation ×3 ≈
+    /// 4-6 tokens) tout en étant plus exigeant sur l'attestation (entrées
+    /// distinctes, barème). Override : `SOUFFLEUSE_BEAM_PROMOTE_MATCHLEN`.
+    static let beamPromoteMatchLen: Int = {
+        if let s = ProcessInfo.processInfo.environment["SOUFFLEUSE_BEAM_PROMOTE_MATCHLEN"],
+           let v = Int(s), v >= 2 {
+            return v
+        }
+        return 4
+    }()
+
     public init(config: BeamConfig = .cotypistDefault) {
         self.config = config
     }
@@ -355,6 +390,8 @@ public actor BeamGhostEngine {
         surfacePieceCache = nil   // nouveau vocab → cache surface à rebâtir
         firstCharIndex = nil      // idem pour l'index 1er-char
         cachedPromptTokens = []   // KV neuf → pas de préfixe réutilisable
+        corpusNgram.clear()       // ids de l'ancien vocab → setCorpus rejoué
+        corpusSuffixArray.clear() // par les callers après chaque load
         Log.info(.predictor, "beam_loaded")
         return true
     }
@@ -366,6 +403,131 @@ public actor BeamGhostEngine {
         }
         handles = nil
         cachedPromptTokens = []
+        // Les ids du corpus appartiennent au vocab du modèle déchargé — un
+        // futur modèle doit re-passer par setCorpus (rejoué par les callers,
+        // cf. PVM.swapGGUF / rebuildPersonalization).
+        corpusNgram.clear()
+        corpusSuffixArray.clear()
+    }
+
+    // MARK: - Personalization corpus (miroir de LlamaEngine.setCorpus)
+
+    /// Reconstruit le corpus n-gram + suffix array à partir des strings
+    /// acceptés/prose (mêmes entrées que `LlamaEngine.setCorpus` — nourri par
+    /// `ModelRuntime.setCorpus`). Tokenisé avec le vocab du modèle CHARGÉ ici
+    /// (emprunté au greedy ⇒ ids strictement identiques). No-op (clear) quand
+    /// le moteur n'est pas chargé — l'orchestration rejoue setCorpus après
+    /// chaque load. N'invalide PAS `cachedPromptTokens` (le corpus n'affecte
+    /// que le bias de logits, jamais le KV — même invariant que le greedy).
+    public func setCorpus(_ entries: [String]) {
+        corpusNgram.clear()
+        corpusSuffixArray.clear()
+        guard handles != nil else { return }
+        var tokenised: [[Int32]] = []
+        tokenised.reserveCapacity(entries.count)
+        for entry in entries {
+            let trimmed = entry.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { continue }
+            let ids = tokenize(trimmed, addSpecial: false)
+            corpusNgram.ingest(ids)
+            tokenised.append(ids)
+        }
+        corpusSuffixArray.build(entries: tokenised)
+        if !corpusSuffixArray.isEmpty {
+            Log.info(.predictor, "beam_corpus_built")
+        }
+    }
+
+    /// Pose le gain du bias pour les générations à venir (0 = OFF, expansion
+    /// byte-identique). Appelé par `ModelRuntime` avant chaque génération.
+    public func setBiasStrength(_ strength: Float) {
+        biasStrength = strength
+    }
+
+    /// Applique le boost corpus à UNE ligne de logits de branche, in place,
+    /// AVANT `topNextTokens`/`topCompatibleTokens` (la softmax interne lit la
+    /// distribution modifiée : probas, seuil de branche, fan-out).
+    ///
+    /// Hérite des constantes greedy (nucleus gate marge 8, boost cappé 6,
+    /// promotion count ≥ 3 / share ≥ 0.6 / plafond topLogit−35 / cible
+    /// topLogit+0.5) mais DIVERGE sur trois points, dictés par la forme du
+    /// corpus PROD (dédupliqué) et la revue adverse du design — la calibration
+    /// 25/25 · 0/33 du greedy ne se transpose donc PAS telle quelle ; la
+    /// référence du beam est `SouffleuseBeamBiasEval` (corpus prod-fidèle) :
+    ///   1. **repli compté par entrées distinctes** (`longestMatch(after:minCount:)`,
+    ///      barème croissant, plancher 3 tokens) — sans lui le bias ne s'arme
+    ///      jamais sur un corpus réel (longest-match ⇒ count 1) ;
+    ///   2. **plancher de promotion sweepable** (`beamPromoteMatchLen`, défaut =
+    ///      la valeur greedy 5) ;
+    ///   3. **score découplé** : la valeur de retour donne les boosts DOUX
+    ///      appliqués, que la boucle d'expansion SOUSTRAIT du `logProb` accumulé
+    ///      — le boost sert la SÉLECTION des candidats, pas le classement des
+    ///      branches (sinon la distorsion se compose sur ~12 pas × top-K et la
+    ///      réserve sur-retient les branches corpus-following). La PROMOTION
+    ///      n'est volontairement PAS soustraite : c'est une surcharge assumée
+    ///      de la sélection (le terme appris doit gagner), rare par
+    ///      construction (barème + share), et la soustraire ferait élaguer la
+    ///      branche promue dès le pas suivant.
+    /// L'anti-boucle de promotion du greedy (`emittedIds`) devient « les tokens
+    /// déjà émis PAR CETTE BRANCHE » — même garantie, portée par branche.
+    @discardableResult
+    private func applyCorpusBias(
+        to logits: UnsafeMutablePointer<Float>,
+        branchTokens: [Int32],
+        promptTail: [Int32],
+        nVocab: Int
+    ) -> [Int32: Float] {
+        // Fenêtre de contexte PAR BRANCHE : queue du prompt + tokens propres.
+        let windowLen = LlamaCorpusSuffixArray.maxMatchLen
+        var recent = promptTail
+        recent.append(contentsOf: branchTokens)
+        if recent.count > windowLen { recent.removeFirst(recent.count - windowLen) }
+
+        let candidates: [Int32: Int]
+        let matchLen: Int
+        if !corpusSuffixArray.isEmpty {
+            // Repli COMPTÉ par entrées distinctes (cf. docstring, point 1).
+            let m = corpusSuffixArray.longestMatch(
+                after: recent[recent.startIndex...], minCount: LlamaEngine.minBiasCount)
+            candidates = m.candidates
+            matchLen = m.matchLength
+        } else {
+            candidates = corpusNgram.candidates(after: recent.suffix(2))
+            matchLen = candidates.isEmpty ? 0 : min(2, recent.count)
+        }
+        guard !candidates.isEmpty, matchLen >= 2 else { return [:] }
+
+        var topLogit: Float = -Float.greatestFiniteMagnitude
+        vDSP_maxv(logits, 1, &topLogit, vDSP_Length(nVocab))
+        let floor = topLogit - LlamaEngine.nucleusMargin
+        let sharpen = 1.0 + 0.5 * Float(max(0, matchLen - 1))
+
+        let promotionArmed = matchLen >= Self.beamPromoteMatchLen
+        let total = promotionArmed ? candidates.values.reduce(0, +) : 0
+        let promoteFloor = topLogit - LlamaEngine.promoteMaxGap
+        let emitted = promotionArmed ? Set(branchTokens) : []
+
+        var applied: [Int32: Float] = [:]
+        for (id, count) in candidates
+            where id >= 0 && Int(id) < nVocab && count >= LlamaEngine.minBiasCount {
+            let i = Int(id)
+            if promotionArmed && count >= LlamaEngine.promoteMinCount
+                && Float(count) >= LlamaEngine.promoteShare * Float(max(1, total))
+                && logits[i] < floor
+                && logits[i] >= promoteFloor
+                && !emitted.contains(id) {
+                let target = topLogit + LlamaEngine.promoteOvershoot
+                if logits[i] < target { logits[i] = target }
+                // Promotion : PAS dans `applied` (surcharge assumée du score).
+                continue
+            }
+            guard logits[i] >= floor else { continue }
+            let boost = min(LlamaEngine.maxBiasBoost,
+                            biasStrength * sharpen * logf(Float(count)))
+            logits[i] += boost
+            applied[id] = boost
+        }
+        return applied
     }
 
     deinit {
@@ -567,6 +729,16 @@ public actor BeamGhostEngine {
         var finished: [Branch] = []
         let nVocab = Int(h.nVocab)
 
+        // ── Bias corpus (flag SOUFFLEUSE_BEAM_BIAS) — état par génération ────
+        // Inactif (gain 0 ou corpus vide) ⇒ AUCUNE lecture/écriture des logits,
+        // aucune fenêtre maintenue : expansion byte-identique au chemin actuel.
+        // La queue du prompt est figée une fois ; la fenêtre PAR BRANCHE est
+        // recomposée dans `applyCorpusBias` (les branches divergent).
+        let biasActive = biasStrength > 0
+            && (!corpusSuffixArray.isEmpty || !corpusNgram.isEmpty)
+        let biasPromptTail: [Int32] = biasActive
+            ? Array(promptTokens.suffix(LlamaCorpusSuffixArray.maxMatchLen)) : []
+
         // ── Boucle de décodage pas-à-pas ─────────────────────────────────────
         // À chaque étape : on décode UN batch multi-séquences (un token « dernier »
         // par branche vivante), on lit les logits par séquence, on étend.
@@ -594,6 +766,16 @@ public actor BeamGhostEngine {
 
             for (bi, branch) in live.enumerated() {
                 let logits = logitRows[bi]
+                // Bias corpus AVANT la softmax de topNextTokens/topCompatibleTokens
+                // — couvre donc AUSSI le chemin mid-mot contraint (recall de
+                // termes appris majoritairement mid-mot). Mutation in place ;
+                // les boosts DOUX retournés sont soustraits du logProb accumulé
+                // plus bas (sélection ≠ score, cf. docstring d'applyCorpusBias).
+                var appliedBoosts: [Int32: Float] = [:]
+                if biasActive {
+                    appliedBoosts = applyCorpusBias(to: logits, branchTokens: branch.tokens,
+                                                    promptTail: biasPromptTail, nVocab: nVocab)
+                }
                 // ── Seuil de branche vs contrainte requiredPrefix ───────────────
                 // CRUCIAL : tant que le préfixe obligatoire mid-mot n'est pas
                 // consommé, le `minBranchProbability` (0.05) NE doit PAS pré-
@@ -621,8 +803,12 @@ public actor BeamGhostEngine {
                     continue
                 }
                 for cand in next {
+                    // Score découplé : le boost doux a servi la sélection (le
+                    // candidat est là) mais ne crédite pas le classement de la
+                    // branche — on accumule le logprob « vrai modèle ».
+                    let scoreLogProb = cand.logProb - Double(appliedBoosts[cand.tokenId] ?? 0)
                     guard let child = extend(branch: branch, tokenId: cand.tokenId,
-                                             logProb: cand.logProb) else {
+                                             logProb: scoreLogProb) else {
                         continue   // incompatible avec le requiredPrefix → branche tuée
                     }
                     expanded.append(child)
@@ -1350,7 +1536,15 @@ public actor BeamGhostEngine {
         // re-tokenise le prompt d'origine (`reservePrompt`, invariant entre frappes
         // HIT) pour retrouver `basePos`. Le requiredPrefix healing du prompt n'altère
         // pas cette base car la réserve provient d'un beam sur ce même prompt.
-        let basePos = Int32(tokenize(reservePrompt, addSpecial: true).count)
+        let baseIds = tokenize(reservePrompt, addSpecial: true)
+        let basePos = Int32(baseIds.count)
+        // Bias corpus dans le refill aussi : sans lui, la PROFONDEUR re-décodée
+        // d'une réserve serait non-biaisée alors que son seed l'était — un terme
+        // appris disparaîtrait du ghost à mesure que la réserve se rallonge.
+        let biasActive = biasStrength > 0
+            && (!corpusSuffixArray.isEmpty || !corpusNgram.isEmpty)
+        let biasPromptTail: [Int32] = biasActive
+            ? Array(baseIds.suffix(LlamaCorpusSuffixArray.maxMatchLen)) : []
 
         for _ in 0..<BeamGhostEngine.refillTokens {
             // Même cancel-on-keystroke que la boucle de décodage du beam : un
@@ -1378,6 +1572,10 @@ public actor BeamGhostEngine {
             var stop = true
             for (bi, ri) in idxs.enumerated() {
                 guard let row = llama_get_logits_ith(h.context, Int32(bi)) else { continue }
+                if biasActive {
+                    applyCorpusBias(to: row, branchTokens: reserve[ri].tokens,
+                                    promptTail: biasPromptTail, nVocab: nVocab)
+                }
                 // Greedy argmax (le refill ne ré-ouvre pas de branches).
                 var best: Int32 = 0; var bestVal: Float = -.greatestFiniteMagnitude
                 for v in 0..<nVocab where row[v] > bestVal { bestVal = row[v]; best = Int32(v) }

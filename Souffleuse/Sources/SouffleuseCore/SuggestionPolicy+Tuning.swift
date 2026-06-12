@@ -106,6 +106,21 @@ extension SuggestionPolicy {
             ProcessInfo.processInfo.environment["SOUFFLEUSE_STYLE_PRIMER"] != nil
         }
 
+        /// **Bias corpus dans le beam** (étage « mots », 2026-06-12) : applique
+        /// le boost suffix-array/n-gram de personnalisation (nucleus gate + tier
+        /// promotion, calibration greedy 25/25 recall · 0/33 sur-injection,
+        /// LlamaEngine.swift:489-514) dans la boucle d'expansion du
+        /// `BeamGhostEngine` — le chemin LLM ACTIF, où ce biais n'existait pas
+        /// (le rappel génératif des termes appris était mort depuis le passage
+        /// au beam core). Dépend de `beamCoreEnabled` (pas de beam ⇒ pas de
+        /// bias beam) et gated en aval par `personalizationStrength > 0`.
+        /// **OPT-IN runtime** (`SOUFFLEUSE_BEAM_BIAS=1`) tant que
+        /// `SouffleuseBeamBiasEval` et l'essai live n'ont pas tranché :
+        /// défaut = expansion beam byte-identique (biasStrength 0, zéro lookup).
+        public static var beamBiasEnabled: Bool {
+            beamCoreEnabled && ProcessInfo.processInfo.environment["SOUFFLEUSE_BEAM_BIAS"] != nil
+        }
+
         /// **Token-healing master switch (Task 1 + Task 2).** When `true`, a
         /// mid-word caret feeds the trailing partial word to the engine as a
         /// `healPrefix` so the model re-derives the WHOLE word from a clean

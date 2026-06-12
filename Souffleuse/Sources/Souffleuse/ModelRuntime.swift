@@ -242,8 +242,16 @@ final class ModelRuntime {
     /// llama engine, which rebuilds its llama-token-id n-gram. Called at
     /// startup once the GGUF is loaded and after each acceptance / clear.
     /// Cheap full rebuild — the corpus is small (ring buffer ≤ 200 entries).
+    /// Le beam est nourri AUSSI (mêmes entrées, mêmes ids — modèle partagé)
+    /// pour le bias de l'expansion (flag SOUFFLEUSE_BEAM_BIAS). Guard
+    /// beamCoreEnabled : flag core OFF ⇒ le beam n'est jamais touché (l'appel
+    /// serait un no-op — setCorpus clear+guard handles — mais on préserve
+    /// l'invariant « beam intact » à la lettre).
     func setCorpus(_ entries: [String]) async {
         await llamaEngine.setCorpus(entries)
+        if SuggestionPolicy.Tuning.beamCoreEnabled {
+            await beamEngine.setCorpus(entries)
+        }
     }
 
     /// Heuristique SYNCHRONE (zéro hop d'actor) : vraie quand la frappe courante
@@ -818,6 +826,19 @@ final class ModelRuntime {
         guard beamReady else { return nil }
         let userTail = request.userTail
 
+        // ── Bias corpus (préférence « Teinter les suggestions », ou flag dev
+        // SOUFFLEUSE_BEAM_BIAS — OU logique, défaut OFF) ─────────────────────
+        // Même calibration de gain que la voie greedy : slider Préférences
+        // (0…2, via request.personalizationStrength) × gain scale interne.
+        // Posé en ÉTAT actor avant toute génération : le seed, la réserve
+        // (re-beam MISS interne d'`advance`) et le refill en héritent. OFF ou
+        // perso à 0 ⇒ gain 0 ⇒ expansion byte-identique.
+        let biasOn = request.personalizedSuggestions || SuggestionPolicy.Tuning.beamBiasEnabled
+        let beamBias: Float = biasOn
+            ? Float(request.personalizationStrength) * LlamaSampling.personalizationGainScale
+            : 0
+        await beamEngine.setBiasStrength(beamBias)
+
         // G2 — reprise après le point : pas de proposition tant que la phrase en
         // cours n'est pas amorcée (≥ beamMinSentenceLetters lettres après le dernier
         // terminateur). Couvre « on reprend quand l'utilisateur a retapé quelques
@@ -1130,6 +1151,13 @@ final class ModelRuntime {
         // ne sert que le chemin predict (divergences courtes).
         let prompt = BeamGhostShaper.buildPrompt(
             customInstr: request.customInstr, ctxPrefix: request.ctxPrefix, llmTail: request.llmTail)
+        // Même gain de bias que le seed (préférence ou flag dev) : la rallonge
+        // du living ghost doit voir le même corpus que la génération initiale.
+        let biasOn = request.personalizedSuggestions || SuggestionPolicy.Tuning.beamBiasEnabled
+        let beamBias: Float = biasOn
+            ? Float(request.personalizationStrength) * LlamaSampling.personalizationGainScale
+            : 0
+        await beamEngine.setBiasStrength(beamBias)
         GpuGate.shared.ghostBegan()
         let result = await beamEngine.ghost(prompt: prompt, requiredPrefix: "", maxWidth: 1)
         GpuGate.shared.ghostEnded()

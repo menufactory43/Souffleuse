@@ -271,6 +271,11 @@ public struct LlamaCorpusSuffixArray {
     private var tokens: [Int32] = []
     /// Suffix-array : indices into `tokens`, sorted lexicographically by suffix.
     private var sa: [Int] = []
+    /// Offsets de début de chaque entrée dans `tokens` (triés croissants).
+    /// Sert au comptage PAR ENTRÉES DISTINCTES du repli compté : count =
+    /// « nombre d'attestations indépendantes », pas « occurrences » (une entrée
+    /// répétant deux fois la même tournure ne vaut qu'une attestation).
+    private var entryStarts: [Int] = []
 
     /// Longest context suffix (in tokens) we bother matching. Beyond this the
     /// distribution is already maximally sharp and the extra comparisons cost
@@ -289,8 +294,10 @@ public struct LlamaCorpusSuffixArray {
     public mutating func build(entries: [[Int32]]) {
         tokens.removeAll(keepingCapacity: true)
         sa.removeAll(keepingCapacity: true)
+        entryStarts.removeAll(keepingCapacity: true)
         var sentinel: Int32 = -1
         for entry in entries where entry.count >= 2 {
+            entryStarts.append(tokens.count)
             tokens.append(contentsOf: entry)
             tokens.append(sentinel)
             sentinel -= 1
@@ -312,6 +319,7 @@ public struct LlamaCorpusSuffixArray {
     public mutating func clear() {
         tokens.removeAll(keepingCapacity: true)
         sa.removeAll(keepingCapacity: true)
+        entryStarts.removeAll(keepingCapacity: true)
     }
 
     /// Result of a longest-match query : the observed next-token counts for the
@@ -338,6 +346,84 @@ public struct LlamaCorpusSuffixArray {
             }
         }
         return Match(candidates: [:], matchLength: 0)
+    }
+
+    /// Variante à **repli compté** (étage « mots » du beam, 2026-06-12) : comme
+    /// `longestMatch`, mais continue le repli vers des contextes PLUS COURTS
+    /// tant que le meilleur candidat n'atteint pas `minCount` occurrences.
+    ///
+    /// Motivation PROD : `TypingHistoryStore.append` déduplique les phrases
+    /// identiques (`deleteDuplicate`) — un vrai corpus n'a que des entrées
+    /// distinctes, donc le match le plus long est presque toujours spécifique à
+    /// UNE entrée (count 1 < `minBiasCount`) et le bias ne s'armait jamais en
+    /// usage réel (l'éval ×3-copies masquait ce trou). Le repli s'arrête au
+    /// PLUS LONG contexte suffisamment attesté : c'est là que la collocation
+    /// récurrente de l'utilisateur (« de référence reste » ×3 phrases
+    /// différentes) agrège ses occurrences.
+    ///
+    /// Garde-fous issus de la revue adverse du design (2026-06-12) :
+    ///   - **count = entrées DISTINCTES** (`continuationsByEntry`), pas
+    ///     occurrences — restaure la sémantique calibrée de `minBiasCount`
+    ///     (« ≥N attestations indépendantes ») qu'un comptage brut perdait
+    ///     (une entrée répétant une tournure se sur-comptait seule) ;
+    ///   - **barème croissant** : `minCount` suffit pour matchLen ≥ 4 ; un
+    ///     contexte de 3 tokens exige ≥ max(minCount+1, 3) entrées ; le repli
+    ///     ne descend JAMAIS sous 3 tokens (un bigramme français attesté 2×
+    ///     est de la langue, pas un signal personnel — c'est le régime qui
+    ///     aurait fait tirer le bias à chaque step sur les mots-outils).
+    ///
+    /// Quand AUCUNE longueur n'atteint son barème, retourne le match le plus
+    /// long non vide (l'appelant applique ses propres gardes de compte).
+    /// Utilisée par le bias BEAM uniquement (flag `SOUFFLEUSE_BEAM_BIAS`) ;
+    /// le greedy garde `longestMatch` intact.
+    public func longestMatch(after context: ArraySlice<Int32>, minCount: Int) -> Match {
+        guard !sa.isEmpty, !context.isEmpty else { return Match(candidates: [:], matchLength: 0) }
+        let ctx = Array(context.suffix(Self.maxMatchLen))
+        var firstNonEmpty: Match? = nil
+        for start in 0..<ctx.count {
+            let pattern = Array(ctx[start...])
+            if pattern.count < 3 { break }   // plancher : pas de repli sous 3 tokens
+            let cands = continuationsByEntry(matching: pattern)
+            if cands.isEmpty { continue }
+            if firstNonEmpty == nil {
+                firstNonEmpty = Match(candidates: cands, matchLength: pattern.count)
+            }
+            let required = pattern.count >= 4 ? minCount : max(minCount + 1, 3)
+            if (cands.values.max() ?? 0) >= required {
+                return Match(candidates: cands, matchLength: pattern.count)
+            }
+        }
+        return firstNonEmpty ?? Match(candidates: [:], matchLength: 0)
+    }
+
+    /// Comme `continuations(matching:)` mais compte les ENTRÉES DISTINCTES
+    /// attestant chaque continuation (pas les occurrences). Réservée au repli
+    /// compté — la voie greedy historique garde le comptage par occurrences
+    /// (sa calibration en dépend).
+    private func continuationsByEntry(matching pattern: [Int32]) -> [Int32: Int] {
+        guard !pattern.isEmpty else { return [:] }
+        let lo = lowerBound(pattern)
+        let hi = upperBound(pattern)
+        guard lo < hi else { return [:] }
+        var byEntry: [Int32: Set<Int>] = [:]
+        for k in lo..<hi {
+            let next = sa[k] + pattern.count
+            if next >= tokens.count { continue }
+            let nextTok = tokens[next]
+            if nextTok < 0 { continue }  // sentinel — end of entry
+            byEntry[nextTok, default: []].insert(entryIndex(of: sa[k]))
+        }
+        return byEntry.mapValues { $0.count }
+    }
+
+    /// Index de l'entrée contenant la position `pos` (binaire sur `entryStarts`).
+    private func entryIndex(of pos: Int) -> Int {
+        var lo = 0, hi = entryStarts.count
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if entryStarts[mid] <= pos { lo = mid + 1 } else { hi = mid }
+        }
+        return lo - 1
     }
 
     /// Binary-searches the suffix array for the range of suffixes that begin
