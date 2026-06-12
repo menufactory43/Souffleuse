@@ -177,6 +177,10 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// composer une réponse support ; assez court pour ne pas fuiter sur une autre
     /// conversation de la même app si l'utilisateur n'a pas re-cyclé.
     private static let liveTargetSelectionTTL: TimeInterval = 300
+    /// Version courante du wizard d'onboarding. Écrire une valeur ≥ 1 dans
+    /// `onboardingCompletedVersion` marque le wizard comme terminé — rétrocompat
+    /// avec l'ancienne clé `onboardingDone`.
+    private static let onboardingVersion = 1
     /// Le Carnet — apparition livret convoquée au clic sur l'icône (sparkline + stats).
     private let carnet = CarnetWindow()
     private var pollTimer: Timer?
@@ -576,7 +580,19 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Onboarding
 
     private func shouldShowOnboarding() -> Bool {
+        // Override dev : SOUFFLEUSE_ONBOARDING=fresh simule un premier lancement
+        // (efface la reprise) ; =1 force l'affichage sans toucher aux clés.
+        if let env = ProcessInfo.processInfo.environment["SOUFFLEUSE_ONBOARDING"] {
+            if env == "fresh" {
+                UserDefaults.standard.removeObject(forKey: "onboardingProgressStep")
+                return true
+            }
+            if env == "1" { return true }
+        }
+        // Rétrocompat : accepte l'ancienne clé `onboardingDone` ET la nouvelle
+        // `onboardingCompletedVersion` (wizard terminé via `onFinished`).
         let onboarded = UserDefaults.standard.bool(forKey: "onboardingDone")
+            || UserDefaults.standard.integer(forKey: "onboardingCompletedVersion") >= Self.onboardingVersion
         // On ré-affiche tant que le souffle ne peut pas générer : permission AX
         // manquante OU GGUF du souffle introuvable (l'utilisateur a pu quitter
         // avant la fin du téléchargement). `isResolvable` couvre aussi le dossier
@@ -596,6 +612,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             GGUFModelOption.option(forID: store.ggufModelID).downloadable
                 ?? GGUFModelOption.option(forID: GGUFModelOption.defaultID).downloadable
         }
+        // Reprise : si SOUFFLEUSE_ONBOARDING=fresh, on repart de l'étape 0.
+        let isFresh = ProcessInfo.processInfo.environment["SOUFFLEUSE_ONBOARDING"] == "fresh"
+        let resumeStep = isFresh ? 0 : UserDefaults.standard.integer(forKey: "onboardingProgressStep")
         return OnboardingWindow(
             modelDownloads: store.modelDownloads,
             ghostProvider: ghostProvider,
@@ -616,6 +635,15 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 // Le GGUF du souffle vient d'arriver sur disque : recharge le
                 // moteur pour que le ghost marche sans relancer l'app.
                 Task { await self?.predictor.reloadAfterDownload() }
+            },
+            onFinished: {
+                // Complétion versionnée écrite ICI, à la fin du wizard — jamais à l'ouverture.
+                UserDefaults.standard.set(Self.onboardingVersion, forKey: "onboardingCompletedVersion")
+            },
+            initialStep: resumeStep,
+            onProgress: { step in
+                // Persiste l'étape atteinte pour la reprise après un relancement forcé par macOS.
+                UserDefaults.standard.set(step, forKey: "onboardingProgressStep")
             }
         )
     }
@@ -624,7 +652,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         let win = makeOnboardingWindow()
         self.onboarding = win
         win.show()
-        UserDefaults.standard.set(true, forKey: "onboardingDone")
+        // Ne PAS écrire onboardingDone ici — la complétion passe par onFinished
+        // (appelé seulement quand l'utilisateur termine le wizard). Écrire la clé
+        // à l'ouverture était le bug initial qui masquait l'onboarding incomplet.
     }
 
     // MARK: - Global hotkey ⌃⌥⌘S / ⌃⌥⌘E
