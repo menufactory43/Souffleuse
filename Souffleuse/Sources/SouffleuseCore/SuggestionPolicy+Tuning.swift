@@ -332,6 +332,14 @@ extension SuggestionPolicy {
         /// `SOUFFLEUSE_GHOST_STREAM` — peint le longghost AU FIL des tokens (TTFT ~20 ms)
         /// au lieu d'attendre la génération complète (~300 ms, que la frappe suivante
         /// annulerait). OFF par défaut ⇒ one-shot d'origine, byte-identique.
+        ///
+        /// ⚠️ OBSOLÈTE depuis que le beam-core est le défaut (10/06) : son unique
+        /// call-site vit dans la branche long-ghost/escalade, court-circuitée par
+        /// `useBeamCore` (`if useBeamCore { … return }` dans PVM.predict). Le flag
+        /// ne tire plus que sur le FALLBACK cascade (beam non chargé ou
+        /// `SOUFFLEUSE_BEAM_CORE_OFF`). Le beam est one-shot par nature (le gagnant
+        /// des K branches n'est connu qu'en fin de décodage) — un streaming beam
+        /// serait une feature à concevoir, pas ce flag. Vérifié le 12/06.
         public static var ghostStreamEnabled: Bool {
             ProcessInfo.processInfo.environment["SOUFFLEUSE_GHOST_STREAM"] != nil
         }
@@ -486,6 +494,21 @@ extension SuggestionPolicy {
         /// pour +25 % de prompt au pire (1280 chars) — bien sous le palier 2048
         /// mesuré inutile (+185 ms).
         public static let llmContextWindowSlackChars: Int = 256
+
+        /// **Debounce conditionnel (12/06).** Quand la réserve beam paraît chaude
+        /// (la frappe prolonge `beamSessionTail` de ≤ 3 chars), le predict sera
+        /// très probablement servi par l'avancée de réserve (HIT ~1 ms, aucun
+        /// coût LLM) : les 15 ms de debounce AppDelegate ne protègent alors rien
+        /// et retardent le ghost. **ON PAR DÉFAUT** (A/B 12/06 : tick→predict
+        /// 40 → 21 ms p50 sur ~1/3 des frappes, mêmes suggestions nouvelles
+        /// 44 vs 45 — le gain est la réactivité du ghost vivant, repaints
+        /// 76 → 103, HITs 13 → 16 ; aucune tempête de predicts, annulées
+        /// 66 → 62). Un faux positif coûte juste un predict avancé de 15 ms,
+        /// absorbé par le cancel-on-keystroke. Kill-switch :
+        /// `SOUFFLEUSE_DEBOUNCE_SKIP_WARM_OFF`.
+        public static var debounceSkipWarmReserveEnabled: Bool {
+            ProcessInfo.processInfo.environment["SOUFFLEUSE_DEBOUNCE_SKIP_WARM_OFF"] == nil
+        }
 
         // MARK: - D-08 Cache / undo-cache floors (tightening 2026-05-26)
         ///

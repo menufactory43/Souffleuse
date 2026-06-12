@@ -2133,13 +2133,24 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             // paused for at least `predictDebounceNanos`. This avoids
             // bursts of cancel-and-restart cycles when the user types
             // multiple characters between two poll ticks.
+            //
+            // Debounce CONDITIONNEL (opt-in A/B, 12/06) : quand la réserve beam
+            // paraît chaude, le predict sera servi par l'avancée (~1 ms, zéro
+            // coût LLM) — les 15 ms n'y protègent rien, on les saute.
             predictDebounceTask?.cancel()
             let capturedPrefix = prefix
             let capturedContext = cachedEnrichmentPrefix
             let capturedCustom = CustomInstructionsWindow.current()
             let capturedSnap = snap                                    // Phase 2: forward live AX snapshot
+            let skipDebounce = SuggestionPolicy.Tuning.debounceSkipWarmReserveEnabled
+                && predictor.reserveLooksWarm(forPrefix: prefix)
+            if skipDebounce {
+                LatencyTrace.mark("debounce_skip", key: LatencyTrace.key(prefix))
+            }
             predictDebounceTask = Task { @MainActor [weak self] in
-                try? await Task.sleep(nanoseconds: Self.predictDebounceNanos)
+                if !skipDebounce {
+                    try? await Task.sleep(nanoseconds: Self.predictDebounceNanos)
+                }
                 guard !Task.isCancelled, let self else { return }
                 // Re-check freshness — another tick may have advanced
                 // lastPredictedPrefix already.
