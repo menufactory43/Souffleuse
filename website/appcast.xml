@@ -20,26 +20,26 @@
     <language>fr</language>
 
     <item>
-      <title>Version 0.7.0</title>
-      <pubDate>Thu, 11 Jun 2026 11:20:06 +0000</pubDate>
-      <sparkle:version>0.7.0</sparkle:version>
-      <sparkle:shortVersionString>0.7.0</sparkle:shortVersionString>
+      <title>Version 0.8.0</title>
+      <pubDate>Fri, 12 Jun 2026 18:21:07 +0000</pubDate>
+      <sparkle:version>0.8.0</sparkle:version>
+      <sparkle:shortVersionString>0.8.0</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
       <description><![CDATA[
-        <h2>Souffleuse 0.7.0</h2>
+        <h2>Souffleuse 0.8.0</h2>
         <ul>
-          <li><b>Transformez ce que vous écrivez avec « // ».</b> Tapez deux barres obliques à la fin de votre brouillon : une rangée d'actions apparaît au curseur — corriger, raccourcir, reformuler, ajuster le ton, traduire — ou tapez directement une consigne libre (« plus chaleureux »). Le résultat s'affiche en aperçu à côté du badge : Tab remplace, Esc annule — votre texte n'est jamais touché sans votre accord.</li>
-          <li><b>Traductions plus fidèles.</b> Les messages longs ne ressortent plus en français par erreur, les sauts de ligne et paragraphes sont préservés, et le remplacement du texte est désormais fiable dans Gmail et les éditeurs du même genre.</li>
-          <li><b>Le souffle retrouve sa ligne.</b> Correction d'un décalage qui affichait la suggestion une ligne au-dessus du curseur dans certaines applications (Intercom notamment).</li>
+          <li><b>La souffleuse parle désormais avec vos mots.</b> Nouvelle option « Teinter les suggestions de vos mots et de votre ton » (Préférences → Personnalisation) : un mot qui revient dans plusieurs de vos phrases — un nom, un terme métier, une tournure — est reproposé au bon endroit, même au creux d'une phrase nouvelle. Désactivé par défaut, à vous de l'essayer.</li>
+          <li><b>Le bon registre, application par application.</b> Avec la même option, la suggestion s'inspire de votre prose récente du même ton : tutoiement détendu dans vos messageries, vouvoiement soigné dans vos courriels — selon le ton choisi dans l'onglet Ton.</li>
+          <li>Comme toujours : 100 % sur votre Mac, rien ne part en ligne, et tout s'éteint d'un interrupteur.</li>
         </ul>
         <p>macOS 14+ · Apple Silicon · 100 % on-device.</p>
       ]]></description>
-      <!-- Signé le 2026-06-11 (build Developer ID, NOTARISÉ + staplé). -->
+      <!-- Signé le 2026-06-12 (build Developer ID, NOTARISÉ + staplé). -->
       <!-- Régénérer à chaque release : deploy/make-appcast-entry.sh website/Souffleuse.dmg -->
       <enclosure
         url="https://souffleuse.app/Souffleuse.dmg"
-        sparkle:edSignature="118bLZ+bVsBBrUgv/ZYm6AjzxVR08p/uK7rmTN8ssEOzRafM+3GMC68lrfwbBUKQuHE7l+EWE8pF8sl0aMWcDQ=="
-        length="18912764"
+        sparkle:edSignature="QprmXNPaLye8rrCJua4JSDVomIfERYjDAZd2sxuUYmYBet46LbixIBTD1szfxDuFinPhvRROVpsoidfKKGTwBw=="
+        length="7429350"
         type="application/octet-stream" />
     </item>
 
