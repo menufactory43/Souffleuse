@@ -114,6 +114,7 @@ private struct OnboardingRootView: View {
     let manager: ModelDownloadManager
     let ghostProvider: () -> DownloadableModel?
     let ghostReady: () -> Bool
+    let canTryGhost: () -> Bool
     let translation: DownloadableModel?
     let onLanguageChange: @MainActor (PrimaryLanguage) -> Void
     let onFinished: @MainActor () -> Void
@@ -215,7 +216,7 @@ private struct OnboardingRootView: View {
                 onGhostInstalled: onGhostInstalled
             )
         case .howItWorks:
-            HowItWorksStepView()
+            HowItWorksStepView(canTryGhost: canTryGhost)
         case .welcome, .done:
             EmptyView()
         }
@@ -743,28 +744,76 @@ private struct ModelCard: View {
     }
 }
 
+// MARK: - Ghost try field (NSTextField AppKit)
+
+/// Champ texte AppKit pour l'étape « Comment ça marche » : un vrai champ où le
+/// pipeline normal (tick → AX → predictor → overlay → Tab) souffle pour de vrai.
+/// On passe par AppKit et NON par un TextField SwiftUI car l'AX d'un TextField
+/// SwiftUI n'expose pas toujours caret/bounds de façon fiable pour AXClient.
+private struct GhostTryField: NSViewRepresentable {
+    let placeholderSeed: String
+
+    func makeNSView(context: Context) -> NSTextField {
+        let field = NSTextField(string: placeholderSeed)
+        field.font = .systemFont(ofSize: 15)
+        field.isEditable = true
+        field.isSelectable = true
+        field.isBordered = true
+        field.bezelStyle = .roundedBezel
+        field.focusRingType = .default
+        field.lineBreakMode = .byTruncatingTail
+        // Auto-focus + caret en fin de seed pour que la frappe continue la phrase.
+        DispatchQueue.main.async {
+            guard let win = field.window else { return }
+            win.makeFirstResponder(field)
+            field.currentEditor()?.selectedRange = NSRange(location: placeholderSeed.count, length: 0)
+        }
+        return field
+    }
+
+    func updateNSView(_ nsView: NSTextField, context: Context) {}
+}
+
 // MARK: - Step: How it works
 
 private struct HowItWorksStepView: View {
+    let canTryGhost: () -> Bool
+
+    private let seed = "Bonjour, je voulais vous dire que "
+
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             Text("Comment ça marche")
                 .font(.system(size: 22, weight: .semibold, design: .serif))
 
-            // Visuel simulé : texte + ghost gris
-            HStack(spacing: 0) {
-                Text("Bonjour, je vous ")
-                    .font(.system(size: 15))
-                + Text("écris ce mot")
-                    .font(.system(size: 15))
-                    .foregroundStyle(.tertiary)
+            if canTryGhost() {
+                // Essai RÉEL : un vrai champ où le souffle apparaît au caret.
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Essayez : écrivez quelques mots. Quand le mot gris apparaît, appuyez sur Tab pour l'accepter.")
+                        .font(.system(size: 13, design: .serif))
+                        .italic()
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    GhostTryField(placeholderSeed: seed)
+                        .frame(height: 30)
+                }
+            } else {
+                // Repli : la voix n'est pas encore prête → maquette statique
+                // (le souffle ne viendrait pas, autant ne pas frustrer).
+                HStack(spacing: 0) {
+                    Text("Bonjour, je vous ")
+                        .font(.system(size: 15))
+                    + Text("écris ce mot")
+                        .font(.system(size: 15))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(12)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color(nsColor: .textBackgroundColor))
+                        .shadow(color: .black.opacity(0.06), radius: 3, y: 1)
+                )
             }
-            .padding(12)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color(nsColor: .textBackgroundColor))
-                    .shadow(color: .black.opacity(0.06), radius: 3, y: 1)
-            )
 
             VStack(alignment: .leading, spacing: 12) {
                 HowBullet("Le mot juste apparaît en gris : appuyez sur **Tab** pour l'accepter.")
@@ -905,6 +954,7 @@ final class OnboardingWindow {
         modelDownloads: ModelDownloadManager,
         ghostProvider: @escaping () -> DownloadableModel?,
         ghostReady: @escaping () -> Bool,
+        canTryGhost: @escaping () -> Bool,
         translation: DownloadableModel?,
         initialLanguage: PrimaryLanguage,
         onLanguageChange: @escaping @MainActor (PrimaryLanguage) -> Void,
@@ -946,6 +996,7 @@ final class OnboardingWindow {
             manager: modelDownloads,
             ghostProvider: ghostProvider,
             ghostReady: ghostReady,
+            canTryGhost: canTryGhost,
             translation: translation,
             onLanguageChange: onLanguageChange,
             onFinished: onFinished,
