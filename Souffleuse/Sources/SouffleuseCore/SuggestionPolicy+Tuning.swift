@@ -85,7 +85,13 @@ extension SuggestionPolicy {
         /// multi-greeting cross-pollution that motivated the original removal
         /// (PVM:600-609). Flip to false to restore sampler-only personalization
         /// (the llama corpus n-gram bias) with no demonstration text in the prompt.
-        public static let examplesInjectionEnabled: Bool = true
+        /// Kill-switch runtime `SOUFFLEUSE_EXAMPLES_OFF` (pattern *_OFF maison) :
+        /// sert l'A/B « tête de prompt stable vs re-rankée par frappe » — le bloc
+        /// étant en TÊTE du prompt, tout changement de ranking invalide le
+        /// prefix-cache KV du beam (seeds « partiels » mesurés 244 ms vs 83 chauds).
+        public static var examplesInjectionEnabled: Bool {
+            ProcessInfo.processInfo.environment["SOUFFLEUSE_EXAMPLES_OFF"] == nil
+        }
 
         /// **Token-healing master switch (Task 1 + Task 2).** When `true`, a
         /// mid-word caret feeds the trailing partial word to the engine as a
@@ -460,6 +466,26 @@ extension SuggestionPolicy {
         /// was already correct even at 256 (French cues sit near the caret) — the
         /// window fixes DISCOURSE coherence, not distance agreement.
         public static let llmContextWindowChars: Int = 1024
+
+        /// **Ancrage de la fenêtre de contexte (12/06).** Sans ancre, la fenêtre
+        /// `suffix(1024)` GLISSE d'un caractère à chaque frappe dès que le champ
+        /// dépasse 1024 chars : la tête du `beforeCursor` change → le prefix-cache
+        /// KV du beam est invalidé → chaque génération re-prefill ~300 tokens.
+        /// Mesuré (run C, note > 1024 chars) : 49 repaints/142 frappes vs 150-161
+        /// dans un champ court, seeds « partiels » 229 ms vs 47-90 chauds.
+        /// Avec ancre : la tête reste FIXE tant que le contenu de la fenêtre tient
+        /// sous `window + slack`, puis se ré-ancre d'un cran (~un re-prefill
+        /// toutes les ~slack frappes au lieu d'un par frappe).
+        /// Kill-switch `SOUFFLEUSE_WINDOW_ANCHOR_OFF` ⇒ retour au suffix glissant.
+        public static var llmWindowAnchorEnabled: Bool {
+            ProcessInfo.processInfo.environment["SOUFFLEUSE_WINDOW_ANCHOR_OFF"] == nil
+        }
+
+        /// Marge d'ancrage : la fenêtre peut grossir jusqu'à `window + slack`
+        /// chars avant ré-ancrage. 256 ≈ ~50 frappes entre deux re-prefills,
+        /// pour +25 % de prompt au pire (1280 chars) — bien sous le palier 2048
+        /// mesuré inutile (+185 ms).
+        public static let llmContextWindowSlackChars: Int = 256
 
         // MARK: - D-08 Cache / undo-cache floors (tightening 2026-05-26)
         ///
