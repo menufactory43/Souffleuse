@@ -218,6 +218,39 @@ final class PredictorViewModel {
     /// (P1.3). `.other` ⇒ aucun scope (comportement historique).
     @ObservationIgnored private var lastActiveDomain: DomainCluster = .other
 
+    /// Résout le ton par défaut de l'app focus (`ToneStore.tone(forBundle:)`)
+    /// pour la sélection du style primer. Wiré par `SouffleuseAppDelegate` au
+    /// démarrage ; nil (tests / startup) ⇒ `.neutral` (pas de contrainte de
+    /// registre). Le MÊME ton par app que la relecture — une seule source.
+    @ObservationIgnored var toneResolver: (@MainActor (String?) -> Tone)?
+
+    /// Bloc style primer FIGÉ PAR BUNDLE + LANGUE (tête de prompt beam →
+    /// recalcul par frappe = prefix-cache KV invalidé à chaque accept ; même
+    /// rationale que `llmWindowAnchor`). Re-ancré au changement d'app focus OU
+    /// quand la langue détectée change (les premières frappes < 8 chars donnent
+    /// `nil` → l'anchor se raffine UNE fois la langue connue, un seul re-prefill).
+    /// Invalidé par `rebuildPersonalization` (démarrage, « Tout supprimer » —
+    /// privacy : un historique vidé ne doit plus jamais ressortir en primer).
+    @ObservationIgnored private var stylePrimerAnchor: (bundleID: String, language: String?, block: String)?
+
+    /// Sélectionne (ou rejoue) le bloc primer pour l'app focus. Gated par le
+    /// flag opt-in + la perso : OFF ⇒ "" ⇒ prompt byte-identique à avant.
+    private func stylePrimerBlock(activeDomain: DomainCluster, bundleID: String?) -> String {
+        guard SuggestionPolicy.Tuning.stylePrimerEnabled, personalizationStrength > 0 else { return "" }
+        let bid = bundleID ?? ""
+        let lang = lastDetectedLanguage
+        if let anchor = stylePrimerAnchor, anchor.bundleID == bid, anchor.language == lang {
+            return anchor.block
+        }
+        let tone = toneResolver?(bundleID) ?? .neutral
+        let block = StylePrimer.block(
+            from: historySnapshot, activeDomain: activeDomain, tone: tone, language: lang)
+        stylePrimerAnchor = (bundleID: bid, language: lang, block: block)
+        if !block.isEmpty { Log.info(.predictor, "style_primer_anchored", count: block.count) }
+        PredictDebug.log("style_primer_anchor", "bundle=\(bid) tone=\(tone.rawValue) lang=\(lang ?? "nil") block=\(block.debugDescription)")
+        return block
+    }
+
     /// Active GGUF model id (the real ghost engine). Mirrored from
     /// `PreferencesStore.ggufModelID` at startup ; changed via `swapGGUF(to:)`.
     private var ggufModelID: String = GGUFModelOption.defaultID
@@ -806,12 +839,23 @@ final class PredictorViewModel {
         let baseSystem = baseSystemPrompt
         let customInstr = customInstructions
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let ctxPrefix = contextPrefix
+        // ── Style primer (12/06, flag SOUFFLEUSE_STYLE_PRIMER, défaut OFF) ──
+        // Préfixe le ctxPrefix avec la voix passée de l'utilisateur (même
+        // cluster, ton par app, prose pauvre en entités — StylePrimer.block,
+        // mesuré par SouffleusePrimerBench). FIGÉ PAR BUNDLE (anchor) : le bloc
+        // est en TÊTE du prompt beam, le recalculer par frappe invaliderait le
+        // prefix-cache KV à chaque accept (même rationale que llmWindowAnchor).
+        // Flag OFF ⇒ primerBlock == "" ⇒ ctxPrefix byte-identique à avant.
+        let primerBlock = stylePrimerBlock(activeDomain: activeDomain, bundleID: axSnapshot?.bundleID)
+        let ctxPrefixBody = contextPrefix
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        let ctxPrefix = primerBlock.isEmpty ? ctxPrefixBody
+            : (ctxPrefixBody.isEmpty ? primerBlock : primerBlock + "\n\n" + ctxPrefixBody)
         // Mémorisés pour le refill vivant : son prompt doit partager sa TÊTE
         // token-pour-token avec celui-ci, sinon chaque alternance predict↔refill
         // wipe le prefix-cache KV du beam (mesuré par la trace de latence :
         // seed froid 1,3 s vs chaud 0,4 s ; refill froid 362 ms vs chaud 113 ms).
+        // Le primer est DANS lastPromptCtxPrefix → le refill partage la même tête.
         lastPromptCustomInstr = customInstr
         lastPromptCtxPrefix = ctxPrefix
         // ── Phase 2: fieldContext slot body (D-15c French annotation) ──
@@ -1459,6 +1503,10 @@ final class PredictorViewModel {
         self.historySnapshot = Array(entries.reversed())
         // Personal lexicon refresh, in lockstep with the snapshot (same corpus).
         self.learnedLexicon = LearnedLexicon.build(from: self.historySnapshot)
+        // Style primer : l'anchor dérive du snapshot → un rebuild (démarrage,
+        // « Tout supprimer ») l'invalide. Un historique vidé ne doit plus jamais
+        // ressortir en tête de prompt (privacy) ; le prochain predict re-sélectionne.
+        self.stylePrimerAnchor = nil
 
         // Phase 1 personalization : rebuild the llama-token-id corpus n-gram
         // inside the engine. This is the path that biases the llama.cpp

@@ -342,6 +342,14 @@ let package = Package(
             ]
         ),
         .executableTarget(
+            name: "SouffleusePrimerBench",
+            dependencies: [
+                "SouffleuseCore",
+                "SouffleuseLlama",
+                "SouffleuseLog",
+            ]
+        ),
+        .executableTarget(
             name: "SouffleuseEchoEval",
             dependencies: [
                 "SouffleuseCore",

@@ -498,6 +498,19 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // `predict()` pour retrouver des entrées similaires au userTail.
         // Gated par `personalizationStrength > 0` côté predictor.
         predictor.history = store.history
+        // Style primer (flag SOUFFLEUSE_STYLE_PRIMER) : le ton par défaut PAR
+        // APP de la relecture (`ToneStore`) sert aussi de prior de sélection du
+        // primer — une seule source de vérité pour « cette app s'écrit dans ce
+        // registre ». Résolu au moment du predict (pas figé ici) pour suivre
+        // les éditions de règles dans Préférences > Ton sans redémarrage.
+        predictor.toneResolver = { [weak self] bundleID in
+            guard let self else { return .neutral }
+            return ToneStore.tone(
+                forBundle: bundleID,
+                rules: self.store.tones.rules,
+                defaultTone: self.store.tones.defaultTone
+            )
+        }
         // Load the persisted GGUF selection on launch (the real ghost engine).
         predictor.configureInitialGGUF(store.ggufModelID)
         Task { [weak self] in

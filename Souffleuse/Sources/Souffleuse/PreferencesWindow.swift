@@ -1154,9 +1154,21 @@ private struct ToneTab: View {
     @State private var selection: UUID?
     @State private var draft: ToneRule?
 
+    /// Description du panneau, fidèle à ce que le ton gouverne RÉELLEMENT dans
+    /// ce build : la relecture toujours ; les suggestions (style primer du
+    /// ghost) seulement quand le flag opt-in est actif — mentir sur un
+    /// comportement désactivé sèmerait le doute sur tout le panneau.
+    private var panelDescription: String {
+        var text = "Quand le correspondant écrit en français, ⌘↩ ne traduit pas : la souffleuse relit ton message. Choisis le registre — un défaut, et des exceptions par application."
+        if SuggestionPolicy.Tuning.stylePrimerEnabled {
+            text += " Ce registre teinte aussi les suggestions : dans chaque application, le ghost s'inspire de ta prose écrite sur le même ton."
+        }
+        return text
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Quand le correspondant écrit en français, ⌘↩ ne traduit pas : la souffleuse relit ton message. Choisis le registre — un défaut, et des exceptions par application.")
+            Text(panelDescription)
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
