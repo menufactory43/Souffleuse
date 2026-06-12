@@ -32,6 +32,7 @@ Compteur « frappes épargnées » persistant, cumulatif (0 → 63 → 91 → 11
 1. **Trous morts aux cuts** : frontières resserrées (116/232 au lieu de 120/240) + montée des feuilles accélérée (`rise={14}`) — plus de papier nu entre scènes.
 2. **Scène 3 recomposée** : insertion raccourcie (« disons jeudi ») et ghost (« en fin de journée — ») pour que la frappe finisse avant le Tab et que la phrase acceptée se lise d'une traite. Bande-son recalée (souffle 306, arpège 334).
 3. **Pastille** : ancrée à droite du caret (plus de débordement hors feuille) ; disparition pile au Tab (le fondu de sortie traînait un fragment rogné après le saut du caret en ligne 2).
+4. **Sons retravaillés (itération user)** : le souffle devient une vraie expiration (bande résonante état-variable, centre glissant 1800→450 Hz) et le Tab un coup de tampon (choc mat 170→70 Hz + clic d'encre + accord plaqué) au lieu de l'arpège de harpe. Gains calibrés par analyse RMS (impacts ≈ 2–2,5× l'ambiance, zéro clipping).
 
 ## Notes
 
