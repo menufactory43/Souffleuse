@@ -645,6 +645,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             modelDownloads: store.modelDownloads,
             ghostProvider: ghostProvider,
             ghostReady: { [store] in GGUFModelOption.option(forID: store.ggufModelID).isResolvable },
+            canTryGhost: { [predictor] in predictor.isModelReady },
             translation: store.translationModel.downloadable,
             initialLanguage: store.primaryLanguage,
             onLanguageChange: { [weak self] lang in
