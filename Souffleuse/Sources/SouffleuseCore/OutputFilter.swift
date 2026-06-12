@@ -274,6 +274,88 @@ public enum OutputFilter {
         return text
     }
 
+    /// Strips display markup the base model occasionally imitates from web /
+    /// HTML-flavoured training text : balises HTML complètes (`<strong>`,
+    /// `</em>`, `<br/>`), balise PARTIELLE en fin de chaîne (le `>` n'a pas
+    /// encore streamé — sans cette règle le ghost affiche "<stron" pendant
+    /// quelques frames), emphase markdown (`**`/`__`/backtick), et U+FFFD
+    /// (quand le sampler banne un token, greedy peut retomber sur un token
+    /// byte-fallback qui décode au milieu d'une séquence UTF-8).
+    ///
+    /// Mutualisé entre le chemin streaming (`ChunkFilter.filterChunk`) et le
+    /// chemin beam (`BeamGhostShaper.beamPostFilter`) — le beam laissait fuir
+    /// des ghosts "<strong>" à l'écran (bug visuel constaté le 12/06).
+    public nonisolated static func stripMarkup(_ s: String) -> String {
+        var out = s.replacingOccurrences(
+            of: "<[/!?]?[A-Za-z][A-Za-z0-9]{0,15}\\s*[^>]{0,32}>",
+            with: "",
+            options: .regularExpression
+        )
+        // Balise partielle en QUEUE seulement : "<" + début de nom de tag sans
+        // ">" à la fin de la chaîne. Un "<" de comparaison ("3 < 5") n'est pas
+        // suivi d'une lettre collée, donc survit.
+        out = out.replacingOccurrences(
+            of: "<[/!?]?([A-Za-z][A-Za-z0-9]{0,15}[^>]{0,32})?$",
+            with: "",
+            options: .regularExpression
+        )
+        out = out.replacingOccurrences(of: "**", with: "")
+        out = out.replacingOccurrences(of: "__", with: "")
+        out = out.replacingOccurrences(of: "`", with: "")
+        out = out.replacingOccurrences(of: "\u{FFFD}", with: "")
+        return out
+    }
+
+    /// Au-delà de ce nombre de chiffres, un nombre dans le ghost est jugé
+    /// halluciné (le modèle boucle sur un chiffre : "10000000000"). 7 garde
+    /// les nombres légitimes de la prose — années (4), heures, prix jusqu'à
+    /// 999 999, "1er janvier" — et coupe les compteurs absurdes.
+    public nonisolated static let absurdNumberMinDigits = 7
+
+    /// Coupe le ghost juste AVANT le premier run numérique de
+    /// `absurdNumberMinDigits` chiffres ou plus ("coûte 10000000000 euros" →
+    /// "coûte") ; la tête reste affichable, et un ghost réduit à vide est
+    /// supprimé par les gardes `isEmpty` en aval. Les séparateurs de groupe
+    /// (espace, espace insécable, virgule, point, underscore, apostrophe)
+    /// comptent dans le même run quand ils sont ENTRE deux chiffres, donc
+    /// "10 000 000 000" est coupé aussi — mais "le 12 mars 2026" survit (runs
+    /// distincts, le séparateur n'est pas suivi d'un chiffre). Pur, testable.
+    public nonisolated static func cutAbsurdNumberRun(_ s: String) -> String {
+        let groupSeparators: Set<Character> = [
+            " ", "\u{00A0}", "\u{202F}", ",", ".", "_", "'", "\u{2019}",
+        ]
+        var runStart: String.Index?
+        var digitCount = 0
+        var pendingSeparator = false
+        var i = s.startIndex
+        while i < s.endIndex {
+            let c = s[i]
+            if c.isWholeNumber {
+                if runStart == nil {
+                    runStart = i
+                    digitCount = 0
+                }
+                digitCount += 1
+                pendingSeparator = false
+                if digitCount >= absurdNumberMinDigits, let start = runStart {
+                    var head = String(s[..<start])
+                    while head.last?.isWhitespace == true { head.removeLast() }
+                    return head
+                }
+            } else if runStart != nil, !pendingSeparator, groupSeparators.contains(c) {
+                // Séparateur de groupe toléré une fois ; le run ne continue
+                // que si un chiffre suit immédiatement.
+                pendingSeparator = true
+            } else {
+                runStart = nil
+                digitCount = 0
+                pendingSeparator = false
+            }
+            i = s.index(after: i)
+        }
+        return s
+    }
+
     /// True when the filtered ghost is a *bare* enumerator / number /
     /// list-marker with no real word behind it — e.g. "1", "1.", "12)",
     /// "1er", "100%", "1/2", "-", "•", or pure punctuation.
