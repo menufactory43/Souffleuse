@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Souffleuse: the right word, whispered from the wings</title>
-<meta name="description" content="A fully private writing aid for Mac. Souffleuse slips the right word in under your cursor when you hesitate, then disappears. Your text never leaves your Mac." />
+<title>Souffleuse : le mot juste, soufflé à voix basse</title>
+<meta name="description" content="Une aide à l'écriture pour Mac, entièrement privée. Souffleuse glisse le mot juste sous votre curseur quand vous hésitez, puis s'efface. Vos textes ne quittent jamais votre Mac." />
 
-<link rel="canonical" href="https://souffleuse.app/en/" />
+<link rel="canonical" href="https://souffleuse.app/" />
 <link rel="alternate" hreflang="fr" href="https://souffleuse.app/" />
 <link rel="alternate" hreflang="en" href="https://souffleuse.app/en/" />
 <link rel="alternate" hreflang="x-default" href="https://souffleuse.app/" />
@@ -20,18 +20,18 @@
 <!-- Carte de partage (Open Graph + Twitter) -->
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="Souffleuse" />
-<meta property="og:locale" content="en_US" />
-<meta property="og:locale:alternate" content="fr_FR" />
-<meta property="og:url" content="https://souffleuse.app/en/" />
-<meta property="og:title" content="Souffleuse: the right word, whispered from the wings" />
-<meta property="og:description" content="A fully private writing aid for Mac. The right word under your cursor when you hesitate, then it disappears. Your text never leaves your Mac." />
+<meta property="og:locale" content="fr_FR" />
+<meta property="og:locale:alternate" content="en_US" />
+<meta property="og:url" content="https://souffleuse.app/" />
+<meta property="og:title" content="Souffleuse : le mot juste, soufflé à voix basse" />
+<meta property="og:description" content="Une aide à l'écriture pour Mac, entièrement privée. Le mot juste sous votre curseur quand vous hésitez, puis ça s'efface. Vos textes ne quittent jamais votre Mac." />
 <meta property="og:image" content="https://souffleuse.app/og.png" />
 <meta property="og:image:width" content="1200" />
 <meta property="og:image:height" content="630" />
-<meta property="og:image:alt" content="Souffleuse: the right word, whispered from the wings." />
+<meta property="og:image:alt" content="Souffleuse : le mot juste, soufflé à voix basse." />
 <meta name="twitter:card" content="summary_large_image" />
-<meta name="twitter:title" content="Souffleuse: the right word, whispered from the wings" />
-<meta name="twitter:description" content="A fully private writing aid for Mac. Your text never leaves your Mac." />
+<meta name="twitter:title" content="Souffleuse : le mot juste, soufflé à voix basse" />
+<meta name="twitter:description" content="Une aide à l'écriture pour Mac, entièrement privée. Vos textes ne quittent jamais votre Mac." />
 <meta name="twitter:image" content="https://souffleuse.app/og.png" />
 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -357,12 +357,12 @@
   @keyframes ink {
     to { opacity: 1; transform: none; filter: blur(0); }
   }
-  /* Décalés : la page ne se lève qu'après les trois coups ET le rideau. */
-  .k1 { animation-delay: 1.55s; }
-  .k2 { animation-delay: 1.74s; }
-  .k3 { animation-delay: 1.94s; }
-  .k4 { animation-delay: 2.12s; }
-  .k5 { animation-delay: 2.30s; }
+  /* Décalés de ~0.4s : la page ne se lève qu'après les trois coups. */
+  .k1 { animation-delay: 0.55s; }
+  .k2 { animation-delay: 0.78s; }
+  .k3 { animation-delay: 1.00s; }
+  .k4 { animation-delay: 1.20s; }
+  .k5 { animation-delay: 1.40s; }
 
   /* ===== Les trois coups ===== */
   /* Le brigadier frappe trois coups avant le lever de rideau : trois traits
@@ -386,11 +386,8 @@
     transform-origin: top center;
     animation: coup-frappe 0.2s cubic-bezier(0.16, 0.84, 0.3, 1) forwards;
   }
-  /* La trace imprimée des coups apparaît quand le rideau finit de se lever :
-     l'écho, sur la page, de ce qui vient de frapper sur le velours. */
-  .trois-coups .coup:nth-child(1) { animation-delay: 1.35s; }
-  .trois-coups .coup:nth-child(2) { animation-delay: 1.50s; }
-  .trois-coups .coup:nth-child(3) { animation-delay: 1.65s; }
+  .coup:nth-child(2) { animation-delay: 0.22s; }
+  .coup:nth-child(3) { animation-delay: 0.44s; }
   @keyframes coup-frappe {
     0%   { opacity: 0;    transform: scaleY(0.25); }
     45%  { opacity: 1;    transform: scaleY(1.05); }
@@ -814,14 +811,8 @@
     padding: 1.7rem 1.6rem;
     border-bottom: 1px solid rgba(26,22,19,0.4);
   }
-  /* Filets de colonne : la carte large (iii) décale la parité, on désigne donc
-     explicitement les entrées de la colonne droite (2, 5, 7, 9). */
   @media (min-width: 720px) {
-    .feature:nth-child(2),
-    .feature:nth-child(5),
-    .feature:nth-child(7),
-    .feature:nth-child(9) { border-left: 1px solid rgba(26,22,19,0.4); }
-    .feature:nth-last-child(-n+2) { border-bottom: none; }
+    .feature:nth-child(odd):not(.feature--wide) { border-right: 1px solid rgba(26,22,19,0.4); }
   }
   .feature:last-child { border-bottom: none; }
 
@@ -1131,276 +1122,6 @@
   .mascotte__souffle.is-in .mascotte__word:nth-child(3) { transition-delay: 0.36s; }
   .mascotte__souffle.is-in .mascotte__word:nth-child(4) { transition-delay: 0.54s; }
 
-  /* ======================================================================
-     LA REPRÉSENTATION — chorégraphie « wahou »
-     Tout reste dans le système : papier, deux serifs, une seule voix
-     (sang-de-bœuf), ombres letterpress sans flou. On n'ajoute pas un style,
-     on monte le spectacle.
-     ====================================================================== */
-
-  /* ---------- Le rideau de scène ---------- */
-  /* Les trois coups frappent SUR le rideau, puis il se lève : la page est la
-     scène. Pur CSS (aucun JS requis), ~2 s, une fois par session (voir
-     .rideau-vu), et jamais en reduced-motion. */
-  .rideau {
-    position: fixed;
-    inset: 0;
-    z-index: 80;            /* au-dessus du topbar (50), sous le lien d'évitement (100) */
-    pointer-events: none;
-  }
-  .rideau__drape {
-    position: absolute;
-    inset: 0 0 -2px;
-    /* Plis du velours : bandes verticales sang-de-bœuf, ombre portée dure
-       sous le bord — un objet de théâtre, pas un overlay numérique. */
-    background:
-      linear-gradient(180deg, rgba(26,22,19,0.34), rgba(26,22,19,0) 26%, rgba(26,22,19,0) 78%, rgba(26,22,19,0.22)),
-      repeating-linear-gradient(
-        90deg,
-        var(--rouge)       0px  34px,
-        var(--rouge-deep) 34px  52px,
-        #98342a           52px  86px,
-        var(--rouge-deep) 86px 104px
-      );
-    box-shadow: 0 7px 0 rgba(26,22,19,0.28);
-    transform: translateY(0);
-    animation: rideau-leve 1.15s cubic-bezier(0.62, 0, 0.12, 1) 1.3s forwards;
-  }
-  /* Frange du bas : courte passementerie en filets verticaux. */
-  .rideau__drape::after {
-    content: "";
-    position: absolute;
-    left: 0; right: 0; bottom: -14px;
-    height: 14px;
-    background: repeating-linear-gradient(
-      90deg,
-      var(--rouge-deep) 0 3px,
-      transparent 3px 9px
-    );
-  }
-  @keyframes rideau-leve {
-    0%   { transform: translateY(0); }
-    100% { transform: translateY(-103%); visibility: hidden; }
-  }
-  /* Les trois coups du brigadier, frappés sur le velours. */
-  .rideau__coups {
-    position: absolute;
-    left: 50%;
-    top: 44%;
-    transform: translateX(-50%);
-    display: flex;
-    gap: 0.9rem;
-  }
-  .rideau__coups .coup {
-    width: 3px;
-    height: 26px;
-    background: var(--paper-edge);
-    opacity: 0;
-    transform: scaleY(0.25);
-    transform-origin: top center;
-    animation: coup-velours 0.26s cubic-bezier(0.16, 0.84, 0.3, 1) forwards;
-  }
-  .rideau__coups .coup:nth-child(1) { animation-delay: 0.30s; }
-  .rideau__coups .coup:nth-child(2) { animation-delay: 0.58s; }
-  .rideau__coups .coup:nth-child(3) { animation-delay: 0.86s; }
-  @keyframes coup-velours {
-    0%   { opacity: 0;    transform: scaleY(0.25); }
-    45%  { opacity: 1;    transform: scaleY(1.08); }
-    100% { opacity: 0.85; transform: scaleY(1); }
-  }
-  /* Déjà vu cette session : pas de rideau, et la page se lève sans attendre. */
-  .rideau-vu .rideau { display: none; }
-  .rideau-vu .k1 { animation-delay: 0.20s; }
-  .rideau-vu .k2 { animation-delay: 0.38s; }
-  .rideau-vu .k3 { animation-delay: 0.56s; }
-  .rideau-vu .k4 { animation-delay: 0.72s; }
-  .rideau-vu .k5 { animation-delay: 0.88s; }
-  .rideau-vu .trois-coups .coup:nth-child(1) { animation-delay: 0s; }
-  .rideau-vu .trois-coups .coup:nth-child(2) { animation-delay: 0.22s; }
-  .rideau-vu .trois-coups .coup:nth-child(3) { animation-delay: 0.44s; }
-
-  /* ---------- L'arche en filigrane, derrière le hero ---------- */
-  /* Le trou du souffleur, imprimé en creux dans le papier : un repère de
-     marque, pas un décor. Parallaxe discrète pilotée par --scrolly (JS). */
-  .hero { position: relative; }
-  .hero .playbill, .hero .souffleur { position: relative; z-index: 1; }
-  .filigrane {
-    position: absolute;
-    top: clamp(-3rem, -2vw, -1rem);
-    left: 50%;
-    width: min(920px, 96vw);
-    transform: translateX(-50%) translateY(calc(var(--scrolly, 0) * -0.05px));
-    z-index: 0;
-    pointer-events: none;
-    color: var(--paper-edge);
-  }
-  .filigrane svg { width: 100%; height: auto; display: block; }
-
-  /* ---------- La frise « En tournée » ---------- */
-  /* La distribution des salles : un bandeau de programme qui défile lentement,
-     s'arrête sous la souris, et reste lisible sans animation. */
-  .tournee {
-    border-block: var(--filet);
-    background: var(--paper);
-    padding-block: 0.8rem;
-    overflow: hidden;
-    position: relative;
-  }
-  .tournee__track {
-    display: flex;
-    align-items: center;
-    gap: 2.4rem;
-    width: max-content;
-  }
-  /* Ne défile que si la piste a été doublée (JS) : sans JS, ligne fixe. */
-  .tournee__track.is-double { animation: tournee-defile 46s linear infinite; }
-  .tournee:hover .tournee__track,
-  .tournee:focus-within .tournee__track { animation-play-state: paused; }
-  @keyframes tournee-defile {
-    to { transform: translateX(-50%); }
-  }
-  .tournee__item {
-    font-family: var(--display);
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.24em;
-    font-size: 0.72rem;
-    color: var(--ink-faint);
-    white-space: nowrap;
-  }
-  .tournee__item--lede {
-    font-family: var(--body);
-    font-style: italic;
-    text-transform: none;
-    letter-spacing: 0.02em;
-    font-size: 0.88rem;
-    color: var(--ink-soft);
-  }
-  .tournee__fleuron {
-    color: var(--rouge);
-    opacity: 0.65;
-    font-size: 0.9rem;
-    flex: none;
-  }
-
-  /* ---------- Le manifeste s'encre au fil de la lecture ---------- */
-  /* Chaque mot passe de l'encre pâle à l'encre pleine à mesure que la section
-     traverse l'écran : on lit, et le texte s'imprime sous les yeux. Piloté par
-     --p (progression de scroll, JS). Sans JS : aucun span, texte normal. */
-  .manifeste__body .ink-word {
-    opacity: clamp(0.18, calc((var(--p, 1) * (var(--n, 1) + 7) - var(--i, 0)) / 6), 1);
-  }
-
-  /* ---------- La cascade d'impression ---------- */
-  /* Les grilles ne tombent pas d'un bloc : chaque entrée se pose à son tour,
-     comme des lignes sortant de presse. */
-  .reveal .feature,
-  .reveal .vow,
-  .reveal .step {
-    opacity: 0;
-    transform: translateY(12px);
-    transition: opacity 0.65s ease, transform 0.65s cubic-bezier(0.22, 0.7, 0.2, 1);
-  }
-  .reveal.is-in .feature,
-  .reveal.is-in .vow,
-  .reveal.is-in .step { opacity: 1; transform: none; }
-  .reveal.is-in .feature:nth-child(2), .reveal.is-in .vow:nth-child(2), .reveal.is-in .step:nth-child(2) { transition-delay: 0.12s; }
-  .reveal.is-in .feature:nth-child(3), .reveal.is-in .vow:nth-child(3), .reveal.is-in .step:nth-child(3) { transition-delay: 0.24s; }
-  .reveal.is-in .feature:nth-child(4) { transition-delay: 0.36s; }
-  .reveal.is-in .feature:nth-child(5) { transition-delay: 0.46s; }
-  .reveal.is-in .feature:nth-child(6) { transition-delay: 0.56s; }
-  .reveal.is-in .feature:nth-child(7) { transition-delay: 0.64s; }
-  .reveal.is-in .feature:nth-child(8) { transition-delay: 0.72s; }
-  .reveal.is-in .feature:nth-child(9) { transition-delay: 0.80s; }
-
-  /* ---------- Les filets se tirent ---------- */
-  /* Un filet de programme se trace au moment où on l'atteint. */
-  .reveal-rule {
-    transform: scaleX(0);
-    transition: transform 1s cubic-bezier(0.22, 0.7, 0.2, 1);
-  }
-  .reveal-rule.is-in { transform: scaleX(1); }
-
-  /* ---------- Lambrequin des coulisses ---------- */
-  /* Le haut de la section sombre porte le bord du rideau : on passe
-     littéralement derrière. Décoratif, hors flux. */
-  .coulisses { position: relative; }
-  .coulisses::before {
-    content: "";
-    position: absolute;
-    top: -1px; left: 0; right: 0;
-    height: 15px;
-    pointer-events: none;
-    background:
-      linear-gradient(var(--rouge-deep), var(--rouge-deep)) top / 100% 4px no-repeat,
-      radial-gradient(circle at 12px -4px, var(--rouge-deep) 11px, transparent 11.7px) top / 24px 15px repeat-x;
-  }
-
-  /* ---------- Acte III : les touches se pressent toutes seules ---------- */
-  #marche.is-in .step:nth-child(3) kbd { animation: kbd-presse 0.5s ease 1; }
-  #marche.is-in .step:nth-child(3) kbd:first-of-type { animation-delay: 1.3s; }
-  #marche.is-in .step:nth-child(3) kbd:last-of-type  { animation-delay: 1.8s; }
-  @keyframes kbd-presse {
-    0%, 100% { transform: none; box-shadow: 1px 1px 0 rgba(26,22,19,0.25); }
-    45% {
-      transform: translate(1px, 1px);
-      box-shadow: 0 0 0 rgba(26,22,19,0.25);
-      border-color: var(--rouge);
-      color: var(--rouge);
-    }
-  }
-
-  /* ---------- Finale : le cul-de-lampe se dessine ---------- */
-  .cul path { transition: none; }
-  .cul .trace { stroke-dasharray: 140; stroke-dashoffset: 140; }
-  .cul .plein { fill-opacity: 0; transition: fill-opacity 0.7s ease 1s; }
-  .finale.is-in .cul .trace { animation: cul-trace 1.3s cubic-bezier(0.22, 0.7, 0.2, 1) forwards; }
-  .finale.is-in .cul path.trace:last-of-type { animation-delay: 0.5s; }
-  .finale.is-in .cul .plein { fill-opacity: 1; }
-  @keyframes cul-trace { to { stroke-dashoffset: 0; } }
-
-  /* ---------- Folio de programme ---------- */
-  /* Le numéro de page suit la lecture, en bas à droite, là où un programme
-     imprimé le porterait. N'apparaît que là où la marge existe. */
-  .folio {
-    position: fixed;
-    right: 1.2rem;
-    bottom: 1rem;
-    z-index: 5;
-    display: none;
-    font-family: var(--display);
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.2em;
-    font-size: 0.66rem;
-    color: var(--ink-faint);
-    pointer-events: none;
-    transition: opacity 0.4s ease;
-  }
-  @media (min-width: 1240px) { .folio { display: block; } }
-  .folio.is-turning { opacity: 0; }
-  .folio b { color: var(--rouge); font-weight: 500; }
-
-  /* ---------- Topbar : la feuille se décolle au scroll ---------- */
-  .topbar { transition: box-shadow 0.25s ease; }
-  .topbar.is-scrolled { box-shadow: 0 3px 0 rgba(26,22,19,0.07); }
-
-  /* Les ancres ne passent pas sous le bandeau collant. */
-  section[id] { scroll-margin-top: 4.6rem; }
-
-  /* ---------- Reduced motion : la représentation se donne sans effets ---------- */
-  @media (prefers-reduced-motion: reduce) {
-    .rideau { display: none; }
-    .tournee__track { animation: none; }
-    .reveal .feature, .reveal .vow, .reveal .step { opacity: 1; transform: none; transition: none; }
-    .reveal-rule { transform: none; transition: none; }
-    .manifeste__body .ink-word { opacity: 1; }
-    .cul .trace { stroke-dashoffset: 0; }
-    .cul .plein { fill-opacity: 1; transition: none; }
-    .filigrane { transform: translateX(-50%); }
-    #marche.is-in .step:nth-child(3) kbd { animation: none; }
-  }
-
   @media (prefers-reduced-motion: reduce) {
     html { scroll-behavior: auto; }
     *, *::before, *::after {
@@ -1447,36 +1168,13 @@
   }
   .skip:focus { left: 0.5rem; top: 0.5rem; }
 </style>
-<script>
-// Le rideau ne se lève qu'une fois par session : au retour, la page est déjà
-// en place. Doit tourner avant le premier rendu, d'où sa place dans le head.
-(function () {
-  try {
-    if (sessionStorage.getItem("souffleuse-rideau")) {
-      document.documentElement.classList.add("rideau-vu");
-    } else {
-      sessionStorage.setItem("souffleuse-rideau", "1");
-    }
-  } catch (e) { /* navigation privée stricte : le rideau se lèvera à chaque fois */ }
-})();
-</script>
 </head>
 <body>
-<a href="#contenu" class="skip">Skip to content</a>
-
-<!-- Le rideau de scène : les trois coups, puis le lever. Une fois par session
-     (cf. .rideau-vu posé en JS), jamais en reduced-motion. Pur CSS. -->
-<div class="rideau" aria-hidden="true">
-  <div class="rideau__drape">
-    <div class="rideau__coups">
-      <span class="coup"></span><span class="coup"></span><span class="coup"></span>
-    </div>
-  </div>
-</div>
+<a href="#contenu" class="skip">Aller au contenu</a>
 
 <header class="topbar">
   <div class="shell topbar__inner">
-    <a href="#contenu" class="brand" aria-label="Souffleuse, home">
+    <a href="#contenu" class="brand" aria-label="Souffleuse, accueil">
       <!-- Marque : le trou du souffleur, une coquille au bord de scène -->
       <svg class="brand__mark" width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
         <path d="M2 22 Q13 2 24 22" fill="none" stroke="currentColor" stroke-width="1.4"/>
@@ -1485,23 +1183,23 @@
       </svg>
       <span>
         <span class="brand__name">Souffleuse</span>
-        <span class="brand__sub">The Playbill</span>
+        <span class="brand__sub">Le Livret</span>
       </span>
     </a>
     <div class="topbar__right">
       <nav class="topnav" aria-label="Sections">
-        <a href="#souffle">The demo</a>
-        <a href="#manifeste">The craft</a>
-        <a href="#fonctions">What she does</a>
-        <a href="#coulisses">Backstage</a>
+        <a href="#souffle">La démo</a>
+        <a href="#manifeste">Le métier</a>
+        <a href="#fonctions">Ce qu'elle fait</a>
+        <a href="#coulisses">Les coulisses</a>
         <a href="#faq">Questions</a>
       </nav>
       <div class="langswitch" role="group" aria-label="Langue / Language">
-        <a href="/" hreflang="fr">FR</a>
+        <a href="/" hreflang="fr" aria-current="true">FR</a>
         <span class="langswitch__sep" aria-hidden="true">·</span>
-        <a href="/en/" hreflang="en" aria-current="true">EN</a>
+        <a href="/en/" hreflang="en">EN</a>
       </div>
-      <a href="/Souffleuse.dmg" download class="btn btn--small">Download</a>
+      <a href="./Souffleuse.dmg" download class="btn btn--small">Télécharger</a>
     </div>
   </div>
 </header>
@@ -1510,48 +1208,40 @@
 
   <!-- =================== HERO =================== -->
   <section class="hero" aria-labelledby="titre-principal">
-    <!-- L'arche du trou du souffleur, imprimée en creux dans le papier. -->
-    <div class="filigrane" aria-hidden="true">
-      <svg viewBox="0 0 920 400" fill="none" stroke="currentColor">
-        <path d="M30 400 Q460 -90 890 400" stroke-width="1.6"/>
-        <path d="M120 400 Q460 30 800 400" stroke-width="1.1" opacity="0.7"/>
-        <path d="M210 400 Q460 130 710 400" stroke-width="0.9" opacity="0.45"/>
-      </svg>
-    </div>
     <div class="shell">
       <div class="playbill">
         <div class="trois-coups" aria-hidden="true">
           <span class="coup"></span><span class="coup"></span><span class="coup"></span>
         </div>
         <div class="playbill__cesoir ink-rise k1">
-          <span class="smallcaps">Tonight, on stage</span>
+          <span class="smallcaps">Ce soir, en représentation</span>
         </div>
-        <p class="playbill__eyebrow ink-rise k2">A writing aid that never leaves your Mac</p>
+        <p class="playbill__eyebrow ink-rise k2">Une aide à l'écriture qui ne quitte jamais votre Mac</p>
         <h1 class="hero__title ink-rise k2" id="titre-principal">
-          The right word,
-          <span class="light">whispered from the wings</span>
+          Le mot juste,
+          <span class="light">soufflé à voix basse</span>
         </h1>
         <p class="hero__sub ink-rise k3">
-          Souffleuse slips the right word in under your cursor, in any app on your Mac,
-          the moment you're searching for it. Then it disappears. Everything stays
-          on your machine.
+          Souffleuse glisse le mot juste sous votre curseur, dans n'importe quelle app
+          du Mac, à l'instant où vous cherchez vos mots. Puis elle s'efface. Tout reste
+          sur votre machine.
         </p>
         <div class="hero__cta ink-rise k4">
-          <a href="/Souffleuse.dmg" download class="btn">
+          <a href="./Souffleuse.dmg" download class="btn">
             <svg width="15" height="18" viewBox="0 0 15 18" aria-hidden="true" fill="currentColor">
               <path d="M10.4 0c.1 1-.3 2-1 2.8-.6.7-1.7 1.3-2.7 1.2-.1-1 .4-2 1-2.7C8.4.6 9.5.1 10.4 0Zm2.6 12.9c-.4 1-.6 1.4-1.1 2.3-.7 1.3-1.8 2.9-3 2.9-1.1 0-1.4-.7-2.9-.7-1.5 0-1.8.7-2.9.7-1.3 0-2.3-1.4-3-2.7C-.5 14.4-.7 10.3.9 8c.8-1.1 2.1-1.8 3.4-1.8 1.3 0 2.1.7 3.1.7 1 0 1.6-.7 3.1-.7 1.1 0 2.3.6 3.1 1.7-2.7 1.5-2.3 5.4.3 5Z"/>
             </svg>
-            Download for Mac
+            Télécharger pour Mac
           </a>
-          <a href="#souffle" class="btn btn--ghost">See how she whispers →</a>
+          <a href="#souffle" class="btn btn--ghost">Voir comment elle souffle →</a>
         </div>
-        <p class="cta-note ink-rise k5"><b>Free during the beta.</b> For Apple Silicon Macs.</p>
+        <p class="cta-note ink-rise k5"><b>Gratuit pendant la bêta.</b> Pour Mac à puce Apple Silicon.</p>
       </div>
 
       <!-- ===== ÉLÉMENT SIGNATURE : le trou du souffleur ===== -->
       <figure class="souffleur ink-rise k5" id="souffle" aria-labelledby="demo-titre">
         <figcaption id="demo-titre" class="souffleur__caption stage-dir" style="margin-top:0; margin-bottom:1rem;">
-          The prompter's box: the line, slipped in right at the moment of hesitation
+          Le trou du souffleur : la réplique, glissée pile au moment de l'hésitation
         </figcaption>
         <div class="souffleur__frame">
           <div class="souffleur__bar">
@@ -1560,16 +1250,16 @@
               <path d="M2 7 Q10 0 18 7" fill="none" stroke="currentColor" stroke-width="1.1"/>
               <circle cx="10" cy="7" r="1.2" fill="currentColor"/>
             </svg>
-            <span class="souffleur__app" id="demo-app">Mail · replying to a quote</span>
-            <div class="souffleur__tabs" role="tablist" aria-label="Pick an example">
+            <span class="souffleur__app" id="demo-app">Mail · réponse à un devis</span>
+            <div class="souffleur__tabs" role="tablist" aria-label="Choisir un exemple">
               <button class="souffleur__tab" role="tab" id="tab-0" aria-controls="demo-panel" aria-selected="true"  tabindex="0"  data-scene="0">Mail</button>
               <button class="souffleur__tab" role="tab" id="tab-1" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-scene="1">Messages</button>
               <button class="souffleur__tab" role="tab" id="tab-2" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-scene="2">Notes</button>
-              <button class="souffleur__tab souffleur__tab--live" role="tab" id="tab-3" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-scene="try">Your turn</button>
+              <button class="souffleur__tab souffleur__tab--live" role="tab" id="tab-3" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-scene="try">À vous</button>
             </div>
           </div>
           <div class="souffleur__stage" id="demo-panel" role="tabpanel" aria-labelledby="tab-0">
-            <p class="souffleur__context" id="demo-context"><b>Context:</b> Mail, replying to a quote</p>
+            <p class="souffleur__context" id="demo-context"><b>Contexte :</b> Mail, réponse à un devis</p>
 
             <!-- Vue scénarisée : la démo joue toute seule (décorative).
                  Une description statique tient lieu d'alternative pour les lecteurs d'écran. -->
@@ -1578,82 +1268,53 @@
                 <span class="typed" id="demo-typed"></span><span class="caret" aria-hidden="true"></span><span class="souffle" id="demo-souffle"></span>
               </p>
               <p class="sr-only" id="demo-desc">
-                Example: you write "I'll get back to you," and Souffleuse suggests the rest in grey, "before the end of the week." Tab accepts it, Esc clears it.
+                Exemple : vous écrivez « Je reviens vers vous », et Souffleuse propose en gris la suite « avant la fin de la semaine ». Tab l'accepte, Esc l'efface.
               </p>
               <div class="souffleur__hint">
-                <button type="button" class="hint-key" id="demo-accept" disabled><kbd>Tab</kbd> to accept</button>
-                <button type="button" class="hint-key" id="demo-dismiss" disabled><kbd>Esc</kbd> to leave it</button>
+                <button type="button" class="hint-key" id="demo-accept" disabled><kbd>Tab</kbd> pour accepter</button>
+                <button type="button" class="hint-key" id="demo-dismiss" disabled><kbd>Esc</kbd> pour laisser</button>
               </div>
             </div>
 
             <!-- Vue interactive : on tape pour de vrai (le texte tapé et la réplique
                  soufflée partagent la même ligne, exactement comme la vue scénarisée). -->
             <div class="souffleur__view" id="view-try" hidden>
-              <p class="souffleur__line tryline" id="demo-tryline"><span class="typed tryinput" id="demo-input" contenteditable="plaintext-only" role="textbox" aria-multiline="false" spellcheck="false" aria-label="Write a sentence; Souffleuse suggests how it continues. Tab to take it, down arrow for another idea." data-placeholder="Write here…"></span><span class="souffle tryghost" id="demo-ghost" aria-hidden="true"></span></p>
+              <p class="souffleur__line tryline" id="demo-tryline"><span class="typed tryinput" id="demo-input" contenteditable="plaintext-only" role="textbox" aria-multiline="false" spellcheck="false" aria-label="Écrivez une phrase ; Souffleuse propose la suite. Tab pour la prendre, flèche bas pour une autre idée." data-placeholder="Écrivez ici…"></span><span class="souffle tryghost" id="demo-ghost" aria-hidden="true"></span></p>
               <p class="tryline__live sr-only" id="demo-live" role="status" aria-live="polite"></p>
               <div class="souffleur__hint">
-                <button type="button" class="hint-key" id="demo-take2" disabled><kbd>Tab</kbd> to take</button>
-                <button type="button" class="hint-key" id="demo-cycle" disabled><kbd>↓</kbd> another idea<span class="hint-count" id="demo-count"></span></button>
-                <button type="button" class="hint-key" id="demo-drop2" disabled><kbd>Esc</kbd> to leave it</button>
+                <button type="button" class="hint-key" id="demo-take2" disabled><kbd>Tab</kbd> pour prendre</button>
+                <button type="button" class="hint-key" id="demo-cycle" disabled><kbd>↓</kbd> autre idée<span class="hint-count" id="demo-count"></span></button>
+                <button type="button" class="hint-key" id="demo-drop2" disabled><kbd>Esc</kbd> pour laisser</button>
               </div>
             </div>
           </div>
         </div>
-        <p class="souffleur__caption stage-dir">Hover or pick a scene: it plays once, then falls silent.</p>
+        <p class="souffleur__caption stage-dir">Survolez ou choisissez une scène : elle joue une fois, puis se tait.</p>
       </figure>
     </div>
   </section>
 
-  <!-- =================== LA TOURNÉE =================== -->
-  <!-- La distribution des salles : un bandeau de programme qui défile
-       lentement. La piste est dupliquée en JS pour boucler sans couture ;
-       sans JS elle reste une ligne fixe, lisible. -->
-  <div class="tournee" role="marquee" aria-label="Souffleuse plays in most Mac apps: Mail, Notes, Messages, Safari, Pages, Slack, and almost anywhere you write.">
-    <div class="tournee__track" id="tournee-track" aria-hidden="true">
-      <span class="tournee__item tournee__item--lede">On tour tonight, on your Mac:</span>
-      <span class="tournee__fleuron" aria-hidden="true">❧</span>
-      <span class="tournee__item">Mail</span>
-      <span class="tournee__fleuron" aria-hidden="true">❧</span>
-      <span class="tournee__item">Notes</span>
-      <span class="tournee__fleuron" aria-hidden="true">❧</span>
-      <span class="tournee__item">Messages</span>
-      <span class="tournee__fleuron" aria-hidden="true">❧</span>
-      <span class="tournee__item">Safari</span>
-      <span class="tournee__fleuron" aria-hidden="true">❧</span>
-      <span class="tournee__item">Pages</span>
-      <span class="tournee__fleuron" aria-hidden="true">❧</span>
-      <span class="tournee__item">Slack</span>
-      <span class="tournee__fleuron" aria-hidden="true">❧</span>
-      <span class="tournee__item">Chrome</span>
-      <span class="tournee__fleuron" aria-hidden="true">❧</span>
-      <span class="tournee__item">Bear</span>
-      <span class="tournee__fleuron" aria-hidden="true">❧</span>
-      <span class="tournee__item">Obsidian</span>
-      <span class="tournee__fleuron" aria-hidden="true">❧</span>
-      <span class="tournee__item tournee__item--lede">and almost anywhere you write.</span>
-      <span class="tournee__fleuron" aria-hidden="true">❧</span>
-    </div>
-  </div>
+  <hr class="rule-double shell" aria-hidden="true" />
 
   <!-- =================== MANIFESTE =================== -->
   <section class="manifeste reveal" id="manifeste" aria-labelledby="manifeste-titre">
     <div class="shell shell--narrow">
       <div class="section-head">
-        <span class="smallcaps">The forgotten craft</span>
-        <h2 id="manifeste-titre">Crouched at the edge of the stage</h2>
-        <p class="stage-dir">Stage direction</p>
+        <span class="smallcaps">Le métier oublié</span>
+        <h2 id="manifeste-titre">Tapie au bord de la scène</h2>
+        <p class="stage-dir">Didascalie</p>
       </div>
       <div class="manifeste__body">
         <p>
-          <span class="manifeste__lead">The souffleuse — the prompter — is a theatre craft we let quietly fade away.</span>
-          A person crouched at the edge of the stage, who whispers the line to the actor right
-          when they stumble, just loud enough for them, never for the house. She never comes up
-          to take a bow. The applause goes to the actor, and that's exactly as it should be. We
-          wrote this software in the same spirit: there when you hesitate, invisible the rest of
-          the time. What you write isn't hers: <em>it stays yours.</em>
+          <span class="manifeste__lead">La souffleuse, c'est ce métier de théâtre qu'on a laissé s'éteindre.</span>
+          Une personne tapie au bord de la scène, qui souffle la réplique au comédien pile
+          quand il bute, à voix juste assez haute pour lui, jamais pour la salle. Elle ne monte
+          pas saluer. Les applaudissements vont au comédien, et c'est très bien ainsi. On a
+          écrit ce logiciel dans le même esprit : présent quand vous hésitez, invisible le reste
+          du temps. Ce que vous écrivez ne lui appartient pas : <em>il reste à vous.</em>
         </p>
       </div>
-      <p class="manifeste__coda">Whisper the word, never steal it.</p>
+      <p class="manifeste__coda">Souffler le mot, jamais le voler.</p>
     </div>
   </section>
 
@@ -1662,20 +1323,21 @@
     <div class="shell">
       <div class="heroine">
         <div class="heroine__text">
-          <span class="smallcaps">The title role</span>
-          <h2 id="heroine-titre">A whisper at the hesitation</h2>
+          <span class="smallcaps">Le rôle-titre</span>
+          <h2 id="heroine-titre">Le souffle à l'hésitation</h2>
           <p>
-            Souffleuse doesn't blanket your screen in grey text. It follows the rhythm of your
-            typing and only offers a suggestion the moment you slow down — the way a real prompter
-            waits for the actor to stumble before slipping them the line.
+            Souffleuse ne couvre pas votre écran de texte gris en permanence. Elle suit le
+            rythme de votre frappe et n'avance une suggestion qu'au moment où vous ralentissez,
+            comme une vraie souffleuse attend que le comédien bute avant de lui glisser sa
+            réplique.
           </p>
           <div class="heroine__contrast">
-            <p class="louder">While they speed up</p>
-            <p class="lower">she stays quiet. She speaks only to the silence, and it's there, in the hollow of the hesitation, that she places the right word.</p>
+            <p class="louder">Pendant qu'ils accélèrent</p>
+            <p class="lower">elle se tait. Elle ne parle qu'au silence, et c'est là, dans le creux de l'hésitation, qu'elle place le mot juste.</p>
           </div>
         </div>
 
-        <figure class="pulse-card" id="pulse-card" aria-label="Illustration of typing rhythm: steady typing, then a hollow of hesitation, and the whisper settling in.">
+        <figure class="pulse-card" id="pulse-card" aria-label="Illustration du rythme de frappe : la frappe régulière, puis un creux d'hésitation, et le souffle qui se pose.">
           <svg class="pulse-svg" viewBox="0 0 420 150" role="img" aria-hidden="true">
             <!-- ligne de base -->
             <line x1="10" y1="100" x2="410" y2="100" stroke="#1a1613" stroke-opacity="0.25" stroke-width="1"/>
@@ -1691,87 +1353,63 @@
               <line x1="168" y1="100" x2="168" y2="72"/>
             </g>
             <!-- l'hésitation : un creux -->
-            <text x="250" y="46" text-anchor="middle" font-family="Bodoni Moda, serif" font-style="italic" font-size="14" fill="#8c2b21">… the hesitation</text>
+            <text x="250" y="46" text-anchor="middle" font-family="Bodoni Moda, serif" font-style="italic" font-size="14" fill="#8c2b21">… l'hésitation</text>
             <line x1="250" y1="100" x2="250" y2="52" stroke="#8c2b21" stroke-width="1" stroke-dasharray="3 3"/>
             <circle cx="250" cy="100" r="4" fill="#8c2b21"/>
             <!-- le souffle : une vague douce qui s'imprime une fois -->
             <path class="souffle-wave" d="M258 100 C 300 100, 300 60, 340 60 S 380 60, 410 60"
                   fill="none" stroke="#8c7a5e" stroke-width="2" stroke-linecap="round"/>
-            <text class="souffle-label" x="346" y="48" text-anchor="middle" font-family="Bodoni Moda, serif" font-style="italic" font-size="13" fill="#8c7a5e">the whisper</text>
+            <text class="souffle-label" x="346" y="48" text-anchor="middle" font-family="Bodoni Moda, serif" font-style="italic" font-size="13" fill="#8c7a5e">le souffle</text>
           </svg>
-          <figcaption>Steady typing, then silence: that's when she speaks.</figcaption>
+          <figcaption>Frappe régulière, puis le silence : c'est là qu'elle parle.</figcaption>
         </figure>
       </div>
     </div>
   </section>
 
-  <hr class="rule-thin shell reveal-rule" aria-hidden="true" />
+  <hr class="rule-thin shell" aria-hidden="true" />
 
   <!-- =================== GRILLE FONCTIONNALITÉS =================== -->
   <section id="fonctions" class="reveal" aria-labelledby="fonctions-titre">
     <div class="shell">
       <div class="section-head">
-        <span class="smallcaps">The cast</span>
-        <h2 id="fonctions-titre">What she does</h2>
-        <p class="stage-dir">Nine roles, played in silence</p>
+        <span class="smallcaps">La distribution</span>
+        <h2 id="fonctions-titre">Ce qu'elle fait</h2>
+        <p class="stage-dir">Cinq rôles, tenus en silence</p>
       </div>
       <ul class="features">
         <li class="feature">
           <span class="feature__num">i.</span>
-          <h3>A whisper at the cursor</h3>
-          <p class="feature__lede">A grey suggestion, right where you write.</p>
-          <p>In Mail, Notes, Messages, your web browser (almost anywhere you write on your Mac), the suggestion appears in grey, just under your cursor, without disturbing anything around it.</p>
+          <h3>Le souffle au curseur</h3>
+          <p class="feature__lede">Une suggestion grise, là où vous écrivez.</p>
+          <p>Dans Mail, Notes, Messages, votre navigateur web (presque partout où vous écrivez sur votre Mac), la suggestion apparaît en gris, juste sous votre curseur, sans rien déranger autour.</p>
         </li>
         <li class="feature">
           <span class="feature__num">ii.</span>
-          <h3>Tab to take, Esc to leave</h3>
-          <p class="feature__lede">You stay in control, always.</p>
-          <p>Tab accepts the rest, word by word — or in chunks, if you'd rather take it piece by piece; Esc clears it without a trace.</p>
+          <h3>Tab pour prendre, Esc pour laisser</h3>
+          <p class="feature__lede">Vous gardez la main, toujours.</p>
+          <p>Tab accepte la suite, mot par mot ou par bouts si vous préférez la prendre par morceaux ; Esc l'efface sans laisser de trace.</p>
         </li>
         <!-- Carte pleine largeur : le cœur du contre-positionnement -->
         <li class="feature feature--wide">
           <div class="feature__head">
             <span class="feature__num">iii.</span>
-            <h3>Everything happens on your Mac</h3>
-            <p class="feature__lede">No server, no round trip.</p>
+            <h3>Tout se passe sur votre Mac</h3>
+            <p class="feature__lede">Aucun serveur, aucun aller-retour.</p>
           </div>
-          <p>Souffleuse thinks right on your Mac, never going through the internet. After a one-time setup, it works even offline. What you write goes nowhere, for the simple reason that there's nowhere to send it.</p>
+          <p>Souffleuse réfléchit directement sur votre Mac, sans jamais passer par internet. Après une première mise en place, elle fonctionne même sans connexion. Ce que vous écrivez ne part nulle part, pour la simple raison qu'il n'existe aucun endroit où l'envoyer.</p>
         </li>
         <li class="feature">
           <span class="feature__num">iv.</span>
-          <h3>It learns your voice, under lock and key</h3>
-          <p class="feature__lede">The more you use it, the more it sounds like you.</p>
-          <p>Over time, it remembers the turns of phrase you keep and tunes itself to the way you write. What it learns stays locked on your Mac, readable by you alone.</p>
+          <h3>Elle apprend votre voix, sous clé</h3>
+          <p class="feature__lede">Plus vous l'utilisez, plus elle vous ressemble.</p>
+          <p>Au fil des jours, elle retient les tournures que vous gardez et s'accorde à votre manière d'écrire. Ce qu'elle apprend reste sous clé sur votre Mac, lisible par vous seul.</p>
         </li>
         <li class="feature">
           <span class="feature__num">v.</span>
-          <h3>A second reading, in the right tone</h3>
-          <p class="feature__lede">Your sentence, reread for the room.</p>
-          <p>The same words don't land the same way in Mail and in Messages. On request, it rereads your sentence and rephrases it in the tone of the room: measured for a client, light for a friend. Still your words, better placed.</p>
-        </li>
-        <li class="feature">
-          <span class="feature__num">vi.</span>
-          <h3>Translation, whispered too</h3>
-          <p class="feature__lede">Each conversation's language, remembered.</p>
-          <p>One conversation in French, another in Spanish? Pick a conversation's language once: it then translates as the exchange unfolds, in a small, quiet panel, without anything going anywhere.</p>
-        </li>
-        <li class="feature">
-          <span class="feature__num">vii.</span>
-          <h3>Typos, caught mid-flight</h3>
-          <p class="feature__lede">The slip of the finger, mended in passing.</p>
-          <p>A word typed too fast, two letters swapped? It recognises the slip and whispers the continuation with the word restored, without stopping or pointing it out.</p>
-        </li>
-        <li class="feature">
-          <span class="feature__num">viii.</span>
-          <h3>The emoji, on cue</h3>
-          <p class="feature__lede">The right emoji, hands on the keyboard.</p>
-          <p>Write the word, and it holds out the emoji, taken with a Tab like everything else. The picker can stay closed. And it keeps up whether you write in English, in French, or both in the same sentence.</p>
-        </li>
-        <li class="feature">
-          <span class="feature__num">ix.</span>
-          <h3>The usage ledger</h3>
-          <p class="feature__lede">Keystrokes spared, time saved.</p>
-          <p>At the end of the day, a small ledger tells you, and you alone, what it spared you: so many keystrokes, so many minutes. It never leaves your Mac either.</p>
+          <h3>Le détail qui dépanne</h3>
+          <p class="feature__lede">Fautes de frappe, emoji, plusieurs langues.</p>
+          <p>Elle rattrape une coquille au passage, glisse l'emoji quand vous le cherchez, et vous suit que vous écriviez en français, en anglais, ou les deux dans la même phrase.</p>
         </li>
       </ul>
     </div>
@@ -1781,13 +1419,13 @@
   <section class="coulisses reveal" id="coulisses" aria-labelledby="coulisses-titre">
     <div class="shell">
       <div class="section-head">
-        <span class="smallcaps">Stage left, stage right</span>
-        <h2 id="coulisses-titre">What's said backstage stays backstage</h2>
+        <span class="smallcaps">Côté jardin, côté cour</span>
+        <h2 id="coulisses-titre">Ce qui se dit en coulisse reste en coulisse</h2>
       </div>
       <p class="coulisses__lede">
-        Souffleuse only works because it reads what you write. So we made sure it has
-        <b>no way to repeat it</b>: no account, no cloud, no "we anonymise it." There simply
-        is no way out.
+        Souffleuse ne fonctionne que parce qu'elle lit ce que vous écrivez. Alors on a fait
+        en sorte qu'elle n'ait <b>aucun moyen de le raconter</b> : pas de compte, pas de cloud,
+        pas de « on anonymise ». Il n'y a tout simplement pas de porte de sortie.
       </p>
 
       <div class="ornament" style="margin-bottom:2.4rem;">
@@ -1807,8 +1445,8 @@
               <path d="M10 13 V9 a5 5 0 0 1 10 0 v4"/>
             </svg>
           </div>
-          <h3>Local from end to end</h3>
-          <p>Everything happens on your Mac. Your text passes through no server, ever.</p>
+          <h3>Local de bout en bout</h3>
+          <p>Tout se passe sur votre Mac. Vos textes ne transitent par aucun serveur, jamais.</p>
         </li>
         <li class="vow">
           <div class="vow__icon" aria-hidden="true">
@@ -1818,8 +1456,8 @@
               <line x1="6" y1="6" x2="24" y2="24" stroke-width="1.6"/>
             </svg>
           </div>
-          <h3>Nothing leaves, ever</h3>
-          <p>Just once, at install, Souffleuse connects to set itself up. After that, nothing leaves your Mac.</p>
+          <h3>Rien ne part, jamais</h3>
+          <p>Une seule fois, à l'installation, Souffleuse se connecte pour se mettre en place. Ensuite, plus rien ne quitte votre Mac.</p>
         </li>
         <li class="vow">
           <div class="vow__icon" aria-hidden="true">
@@ -1828,8 +1466,8 @@
               <path d="M11 15 l3 3 5-6"/>
             </svg>
           </div>
-          <h3>Kept under lock and key</h3>
-          <p>What it learns of your style is locked on your Mac. You alone can read it.</p>
+          <h3>Gardé sous clé</h3>
+          <p>Ce qu'elle retient de votre style est verrouillé sur votre Mac. Vous seul pouvez le lire.</p>
         </li>
       </ul>
     </div>
@@ -1839,94 +1477,64 @@
   <section id="marche" class="reveal" aria-labelledby="marche-titre">
     <div class="shell">
       <div class="section-head">
-        <span class="smallcaps">The running order</span>
-        <h2 id="marche-titre">In three acts</h2>
+        <span class="smallcaps">Le déroulé</span>
+        <h2 id="marche-titre">En trois actes</h2>
       </div>
       <ol class="steps">
         <li class="step">
-          <p class="step__acte">Act I</p>
+          <p class="step__acte">Acte I</p>
           <span class="step__num">1</span>
-          <h3>Install</h3>
-          <p>Drag Souffleuse into your Applications, grant it the permission it asks for, and it settles quietly into the menu bar at the top of your screen.</p>
+          <h3>Installez</h3>
+          <p>Glissez Souffleuse dans vos applications, donnez-lui l'autorisation qu'elle demande, et elle vient se loger discrètement dans la barre de menus, en haut de l'écran.</p>
         </li>
         <li class="step">
-          <p class="step__acte">Act II</p>
+          <p class="step__acte">Acte II</p>
           <span class="step__num">2</span>
-          <h3>Write</h3>
-          <p>Type as you normally would, in whatever app you like. When you hesitate, a grey suggestion appears under the cursor.</p>
+          <h3>Écrivez</h3>
+          <p>Tapez normalement, dans l'app que vous voulez. Quand vous hésitez, une suggestion grise apparaît sous le curseur.</p>
         </li>
         <li class="step">
-          <p class="step__acte">Act III</p>
+          <p class="step__acte">Acte III</p>
           <span class="step__num">3</span>
-          <h3>Take the cue</h3>
-          <p>Like it? <kbd>Tab</kbd>. In your way? <kbd>Esc</kbd>, or just keep typing: it disappears.</p>
+          <h3>Soufflez</h3>
+          <p>Elle vous va ? <kbd>Tab</kbd>. Elle vous gêne ? <kbd>Esc</kbd>, ou continuez à taper : elle s'efface.</p>
         </li>
       </ol>
     </div>
   </section>
 
-  <hr class="rule-double shell reveal-rule" aria-hidden="true" />
+  <hr class="rule-double shell" aria-hidden="true" />
 
   <!-- =================== FAQ =================== -->
   <section id="faq" class="reveal" aria-labelledby="faq-titre">
     <div class="shell">
       <div class="section-head">
-        <span class="smallcaps">Before the curtain rises</span>
-        <h2 id="faq-titre">A few questions</h2>
+        <span class="smallcaps">Avant le lever de rideau</span>
+        <h2 id="faq-titre">Quelques questions</h2>
       </div>
       <div class="faq">
         <details class="qa">
-          <summary>Which Macs are supported?</summary>
+          <summary>Quels Mac sont compatibles ?</summary>
           <div class="qa__body">
-            <p>Souffleuse runs on Macs with a recent Apple chip (the M1, M2, M3 models and later) on macOS Sonoma (version 14) or newer. Older Intel Macs are unfortunately not supported. If in doubt, the Apple menu (top-left of the screen) &gt; "About This Mac" tells you your model at a glance.</p>
+            <p>Souffleuse fonctionne sur les Mac équipés d'une puce Apple récente (les modèles M1, M2, M3 et les suivants) avec macOS Sonoma (version 14) ou plus récent. Les Mac plus anciens, à puce Intel, ne sont malheureusement pas compatibles. En cas de doute, le menu Pomme (en haut à gauche de l'écran) &gt; « À propos de ce Mac » vous indique votre modèle en un coup d'œil.</p>
           </div>
         </details>
         <details class="qa">
-          <summary>What leaves my Mac?</summary>
+          <summary>Qu'est-ce qui part de mon Mac ?</summary>
           <div class="qa__body">
-            <p>Day to day, nothing at all. The only time Souffleuse connects is at install, to set itself up. After that, your text and everything it learns about you stay on your Mac, and it works even without an internet connection.</p>
+            <p>Au quotidien, rien du tout. La seule fois où Souffleuse se connecte, c'est à l'installation, pour se mettre en place. Ensuite, vos textes et tout ce qu'elle apprend de vous restent sur votre Mac, et elle fonctionne même sans connexion internet.</p>
           </div>
         </details>
         <details class="qa">
-          <summary>Is it free? How much does it cost?</summary>
+          <summary>C'est gratuit ? Combien ça coûte ?</summary>
           <div class="qa__body">
-            <p>During the beta, Souffleuse is completely free. No daily word limit, no card required: you download, and you write. We'll let you know clearly, and well in advance, if pricing changes after the beta.</p>
+            <p>Pendant la bêta, Souffleuse est entièrement gratuite. Aucune limite de mots par jour, aucune carte demandée : vous téléchargez, et vous écrivez. On vous préviendra clairement, et à l'avance, si la tarification évolue après la bêta.</p>
           </div>
         </details>
         <details class="qa">
-          <summary>How is it different from a regular spellchecker?</summary>
+          <summary>En quoi c'est différent d'un correcteur classique ?</summary>
           <div class="qa__body">
-            <p>A spellchecker waits until you're done to underline what's wrong. Souffleuse does the opposite: it offers the next words before you write them, in your own tone, and learns from what you keep. It doesn't correct after the fact, it whispers while you write.</p>
-          </div>
-        </details>
-        <details class="qa">
-          <summary>Which apps does it work in?</summary>
-          <div class="qa__body">
-            <p>Anywhere macOS lets it read the text field: Mail, Notes, Messages, Safari and most browsers, and the vast majority of Mac apps. The few apps that keep their door closed? It simply stays silent there. And you can ask it to stay silent yourself, app by app, in its settings.</p>
-          </div>
-        </details>
-        <details class="qa">
-          <summary>What about my passwords?</summary>
-          <div class="qa__body">
-            <p>It never sees them. Secure fields (passwords, codes, card numbers) are marked as such by macOS, and Souffleuse looks away: no reading, no suggestion, no trace.</p>
-          </div>
-        </details>
-        <details class="qa">
-          <summary>Does it slow my Mac down?</summary>
-          <div class="qa__body">
-            <p>It's built for Apple chips: while you write, it answers in a fraction of a second; the moment you rest your hands, it goes to sleep and frees the memory. A presence in the wings, not a second lead taking over the stage.</p>
-          </div>
-        </details>
-        <details class="qa">
-          <summary>How does translation work?</summary>
-          <div class="qa__body">
-            <p>You pick a conversation's language once; it remembers, and translates as the exchange unfolds, in a small, quiet panel. Like everything else, translation happens on your Mac: your messages don't go off to be translated somewhere else.</p>
-          </div>
-        </details>
-        <details class="qa">
-          <summary>How do I uninstall it?</summary>
-          <div class="qa__body">
-            <p>Like any Mac app: drag it from Applications to the Trash. What it had learned of your style lives in a single, encrypted folder on your Mac; delete that too and nothing remains. There is no copy anywhere else, by construction.</p>
+            <p>Un correcteur attend que vous ayez fini pour souligner ce qui cloche. Souffleuse fait l'inverse : elle propose la suite avant que vous l'écriviez, dans votre ton à vous, et apprend de ce que vous gardez. Elle ne corrige pas après coup, elle souffle pendant.</p>
           </div>
         </details>
       </div>
@@ -1939,21 +1547,21 @@
       <div class="ornament" style="margin-bottom:1.6rem;">
         <span class="line"></span>
         <!-- Cul-de-lampe : un fleuron distinct des deux autres ornements -->
-        <svg class="cul" width="40" height="22" viewBox="0 0 40 22" aria-hidden="true" fill="none" stroke="#8c2b21" stroke-width="1.2">
-          <path class="trace" d="M20 2 C 12 8, 12 14, 20 20 C 28 14, 28 8, 20 2 Z"/>
-          <path class="plein" d="M20 6 C 16 9, 16 13, 20 16 C 24 13, 24 9, 20 6 Z" fill="#8c2b21" stroke="none"/>
-          <path class="trace" d="M4 20 Q12 18 18 20 M36 20 Q28 18 22 20"/>
+        <svg width="40" height="22" viewBox="0 0 40 22" aria-hidden="true" fill="none" stroke="#8c2b21" stroke-width="1.2">
+          <path d="M20 2 C 12 8, 12 14, 20 20 C 28 14, 28 8, 20 2 Z"/>
+          <path d="M20 6 C 16 9, 16 13, 20 16 C 24 13, 24 9, 20 6 Z" fill="#8c2b21" stroke="none"/>
+          <path d="M4 20 Q12 18 18 20 M36 20 Q28 18 22 20"/>
         </svg>
         <span class="line"></span>
       </div>
-      <h2 id="finale-titre">The right word, whispered from the wings.</h2>
-      <a href="/Souffleuse.dmg" download class="btn">
+      <h2 id="finale-titre">Le mot juste, soufflé à voix basse.</h2>
+      <a href="./Souffleuse.dmg" download class="btn">
         <svg width="15" height="18" viewBox="0 0 15 18" aria-hidden="true" fill="currentColor">
           <path d="M10.4 0c.1 1-.3 2-1 2.8-.6.7-1.7 1.3-2.7 1.2-.1-1 .4-2 1-2.7C8.4.6 9.5.1 10.4 0Zm2.6 12.9c-.4 1-.6 1.4-1.1 2.3-.7 1.3-1.8 2.9-3 2.9-1.1 0-1.4-.7-2.9-.7-1.5 0-1.8.7-2.9.7-1.3 0-2.3-1.4-3-2.7C-.5 14.4-.7 10.3.9 8c.8-1.1 2.1-1.8 3.4-1.8 1.3 0 2.1.7 3.1.7 1 0 1.6-.7 3.1-.7 1.1 0 2.3.6 3.1 1.7-2.7 1.5-2.3 5.4.3 5Z"/>
         </svg>
-        Download for Mac
+        Télécharger pour Mac
       </a>
-      <p class="cta-note"><b>Free during the beta.</b> macOS Sonoma (14) or newer · Apple Silicon.</p>
+      <p class="cta-note"><b>Gratuit pendant la bêta.</b> macOS Sonoma (14) ou plus récent · puce Apple Silicon.</p>
     </div>
   </section>
 
@@ -1963,28 +1571,25 @@
   <div class="shell foot">
     <div>
       <span class="foot__brand">Souffleuse</span>
-      <p class="foot__tag" style="margin:0.2rem 0 0;">The right word, whispered from the wings.</p>
+      <p class="foot__tag" style="margin:0.2rem 0 0;">Le mot juste, soufflé à voix basse.</p>
     </div>
     <div class="foot__meta">
-      <p style="margin:0 0 0.3rem;">Souffleuse. Made on Mac, stays on your Mac.</p>
-      <p class="foot__sysreq" style="margin:0;">For Mac · macOS Sonoma (14) or newer · Apple M1 chips and later</p>
+      <p style="margin:0 0 0.3rem;">Souffleuse. Fait sur Mac, reste sur votre Mac.</p>
+      <p class="foot__sysreq" style="margin:0;">Pour Mac · macOS Sonoma (14) ou plus récent · puces Apple M1 et suivantes</p>
     </div>
   </div>
   <div class="shell colophon">
     <p>
-      Set in Bodoni Moda &amp; Spectral, on cream paper.<br />
-      No server was disturbed during this performance.
+      Achevé d'imprimer en Bodoni Moda &amp; Spectral, sur papier crème.<br />
+      Aucun serveur n'a été dérangé pendant cette représentation.
     </p>
   </div>
 </footer>
 
-<!-- Le folio : le numéro de page du programme, qui suit la lecture. -->
-<aside class="folio" aria-hidden="true" id="folio"><b>Playbill</b> · p. 1</aside>
-
 <!-- La souffleuse : silhouette d'encre dans la marge gauche, elle souffle. -->
 <aside class="mascotte" aria-hidden="true">
-  <img class="mascotte__fig" src="/assets/souffleuse-mascotte.webp" alt="" width="750" height="1008" loading="lazy" decoding="async" />
-  <p class="mascotte__souffle"><span class="mascotte__word">Hello,</span> <span class="mascotte__word">how</span> <span class="mascotte__word">are&nbsp;you?</span></p>
+  <img class="mascotte__fig" src="./assets/souffleuse-mascotte.webp" alt="" width="750" height="1008" loading="lazy" decoding="async" />
+  <p class="mascotte__souffle"><span class="mascotte__word">Bonjour,</span> <span class="mascotte__word">comment</span> <span class="mascotte__word">allez-vous&nbsp;?</span></p>
 </aside>
 
 <script>
@@ -1993,22 +1598,22 @@
 
   var scenes = [
     {
-      app: "Mail · replying to a quote",
-      ctx: ["Mail", "replying to a quote"],
-      typed: "Hi Camille, thanks for getting back to me. I'll get back to you",
-      souffle: " before the end of the week with a corrected version of the quote."
+      app: "Mail · réponse à un devis",
+      ctx: ["Mail", "réponse à un devis"],
+      typed: "Bonjour Camille, merci pour votre retour. Je reviens vers vous",
+      souffle: " avant la fin de la semaine avec une version corrigée du devis."
     },
     {
-      app: "Messages · to a friend",
-      ctx: ["Messages", "to a friend"],
-      typed: "I'll call you as soon as",
-      souffle: " I'm out of my meeting, promise."
+      app: "Messages · à un proche",
+      ctx: ["Messages", "à un proche"],
+      typed: "Je t'appelle dès que",
+      souffle: " je sors de réunion, promis."
     },
     {
-      app: "Notes · don't forget",
-      ctx: ["Notes", "don't forget"],
-      typed: "Remember to book the",
-      souffle: " restaurant for Saturday night."
+      app: "Notes · à ne pas oublier",
+      ctx: ["Notes", "à ne pas oublier"],
+      typed: "Penser à réserver le",
+      souffle: " restaurant pour samedi soir."
     }
   ];
 
@@ -2032,7 +1637,7 @@
 
   function setMeta(scene) {
     elApp.textContent = scene.app;
-    elCtx.innerHTML = "<b>Context:</b> " + scene.ctx[0] + ", " + scene.ctx[1];
+    elCtx.innerHTML = "<b>Contexte :</b> " + scene.ctx[0] + ", " + scene.ctx[1];
   }
 
   // Construit la réplique soufflée mot à mot. Chaque mot devient un span
@@ -2276,39 +1881,37 @@
   var liveEl       = document.getElementById("demo-live");
 
   // L'œuf : la branche qu'on découvre en cyclant jusqu'au bout.
-  var EGG = { t: ", and otherwise, just buy bitcoin.", egg: true };
+  var EGG = { t: ", et sinon, achète du bitcoin.", egg: true };
 
   // Petites « complétions » maison : on reconnaît la fin de ce qui est tapé et
   // on propose des suites plausibles. Rien d'un vrai modèle — c'est une démo.
   var RULES = [
     { when: function (t) { return /(^|\W)(bitcoin|crypto|ethereum|satoshi)$/.test(t); },
-      list: [" — honestly, the only reasonable answer is to buy some.",
-             ", quietly, before everyone else.", EGG], forceEgg: true },
-    { when: function (t) { return /(money|rich|fortune|savings?|invest(ing|ment)?|stocks?|nest egg)$/.test(t); },
-      list: [EGG, " — let's revisit at the next review.", ", let's talk it over coffee."] },
-    { when: function (t) { return t.endsWith("i'll get back to you"); },
-      list: [" before the end of the week.", " as soon as I have news.", " with a firm quote."] },
-    { when: function (t) { return t.endsWith("i'll call you"); },
-      list: [" as soon as I'm out of my meeting.", " tonight when I get in.", " first thing tomorrow, promise."] },
-    { when: function (t) { return t.endsWith("thanks") || t.endsWith("thank you"); },
-      list: [" so much for the quick reply.", " in advance for your help.", ", noted on my end."] },
-    { when: function (t) { return t.endsWith("hello") || t.endsWith("hi") || t.endsWith("good morning") || t.endsWith("good evening"); },
-      list: [", I hope you're doing well.", " and thanks for your message.", " to the whole team!"] },
-    { when: function (t) { return t.endsWith("remember to") || t.endsWith("don't forget to"); },
-      list: [" book the restaurant for Saturday.", " call the client back tomorrow.", " proofread it before sending."] },
-    { when: function (t) { return t.endsWith("i wanted") || t.endsWith("i'd like"); },
-      list: [" to get back to you about the quote.", " to thank you for the warm welcome.", " to do a quick check-in."] },
+      list: [" : franchement, la seule réponse raisonnable, c'est d'en acheter.",
+             ", discrètement, avant tout le monde.", EGG], forceEgg: true },
+    { when: function (t) { return /(argent|riche|fortune|économies?|invest(ir|issement)|placement|bourse|épargne)$/.test(t); },
+      list: [EGG, " : on en reparle au prochain bilan.", ", parlons-en autour d'un café."] },
+    { when: function (t) { return t.endsWith("je reviens vers vous"); },
+      list: [" avant la fin de la semaine.", " dès que j'ai du nouveau.", " avec une proposition chiffrée."] },
+    { when: function (t) { return t.endsWith("je t'appelle") || t.endsWith("je t’appelle"); },
+      list: [" dès que je sors de réunion.", " ce soir en rentrant.", " demain matin, promis."] },
+    { when: function (t) { return t.endsWith("merci"); },
+      list: [" beaucoup pour votre retour rapide.", " d'avance pour votre aide.", ", c'est noté de mon côté."] },
+    { when: function (t) { return t.endsWith("bonjour") || t.endsWith("bonsoir"); },
+      list: [", j'espère que vous allez bien.", " et merci pour votre message.", " à toute l'équipe !"] },
+    { when: function (t) { return t.endsWith("penser à") || t.endsWith("ne pas oublier de"); },
+      list: [" réserver le restaurant pour samedi.", " rappeler le client demain.", " relire avant d'envoyer."] },
+    { when: function (t) { return t.endsWith("je voulais") || t.endsWith("je souhaitais"); },
+      list: [" revenir vers vous au sujet du devis.", " vous remercier pour l'accueil.", " faire un point rapide."] },
   ];
-  var GENERIC = [" and I'll get back to you very soon.", ", let me know what you think.", " as soon as possible."];
+  var GENERIC = [" et je reviens vers vous très vite.", ", dites-moi ce que vous en pensez.", " dès que possible."];
 
   function trim_(t) { return t.replace(/\s+$/, ""); }
   function wordCount(t) { var a = trim_(t).split(/\s+/); return a[0] === "" ? 0 : a.length; }
 
   // Renvoie la liste de branches pour le texte courant (chaque branche : string | EGG).
   function branchesFor(raw) {
-    // Normalise les apostrophes typographiques → droites, pour que les règles
-    // "i'll…" matchent quelle que soit la saisie (clavier, collage, autocorrect).
-    var t = trim_(raw.toLowerCase()).replace(/[’‘`]/g, "'");
+    var t = trim_(raw.toLowerCase());
     if (t.length < 2) return [];
     for (var i = 0; i < RULES.length; i++) {
       if (RULES[i].when(t)) {
@@ -2392,7 +1995,7 @@
     if (egg) {
       tryWrap.classList.remove("is-egg"); void tryWrap.offsetWidth;
       tryWrap.classList.add("is-egg");
-      if (liveEl) liveEl.textContent = "Unsolicited advice accepted.";
+      if (liveEl) liveEl.textContent = "Conseil non sollicité accepté.";
       setTimeout(function () { tryWrap.classList.remove("is-egg"); }, 1400);
     }
     hideGhost();
@@ -2443,9 +2046,9 @@
     if (scriptedView) scriptedView.hidden = true;
     tryView.hidden = false;
     setPending(false);                 // coupe la logique scénarisée
-    if (elCtx) elCtx.innerHTML = "<b>Your turn:</b> write, and Souffleuse whispers the rest";
-    if (elApp) elApp.textContent = "Your turn · free play";
-    if (tryText() === "") input.textContent = "I'll get back to you";
+    if (elCtx) elCtx.innerHTML = "<b>À vous :</b> écrivez, Souffleuse souffle la suite";
+    if (elApp) elApp.textContent = "À vous · essai libre";
+    if (tryText() === "") input.textContent = "Je reviens vers vous";
     trySuppressed = false; tryIndex = 0;
     renderTry();
     if (grabInput) placeCaretEnd();
@@ -2475,7 +2078,7 @@
   }
 
   // ----- Fondu-au-scroll très retenu sur les sections (l'encre qui se pose) -----
-  var reveals = Array.prototype.slice.call(document.querySelectorAll(".reveal, .reveal-rule"));
+  var reveals = Array.prototype.slice.call(document.querySelectorAll(".reveal"));
   if (reduce || !("IntersectionObserver" in window)) {
     reveals.forEach(function (el) { el.classList.add("is-in"); });
   } else {
@@ -2519,14 +2122,14 @@
 
   // Une réplique par scène, dans la voix chuchotée de la souffleuse.
   var LINES = [
-    { sel: ".hero",               words: ["Hello,", "how are", "you?"] },
-    { sel: "#manifeste",          words: ["I stand", "in the", "wings."] },
-    { sel: "#souffle-hesitation", words: ["There, in the silence,", "I listen."] },
-    { sel: "#fonctions",          words: ["The right word,", "under your", "cursor."] },
-    { sel: "#coulisses",          words: ["What's said here,", "stays here."] },
-    { sel: "#marche",             words: ["In three acts,", "then it's", "your turn."] },
-    { sel: "#faq",                words: ["A question?", "I'm", "listening."] },
-    { sel: "#telecharger",        words: ["The curtain", "rises."] }
+    { sel: ".hero",               words: ["Bonjour,", "comment", "allez-vous ?"] },
+    { sel: "#manifeste",          words: ["Je me tiens", "dans la", "coulisse."] },
+    { sel: "#souffle-hesitation", words: ["Là, dans le silence,", "j'écoute."] },
+    { sel: "#fonctions",          words: ["Le mot juste,", "sous votre", "curseur."] },
+    { sel: "#coulisses",          words: ["Ce qui se dit ici,", "reste ici."] },
+    { sel: "#marche",             words: ["En trois actes,", "et c'est", "à vous."] },
+    { sel: "#faq",                words: ["Une question ?", "Je", "vous écoute."] },
+    { sel: "#telecharger",        words: ["Le rideau", "se lève."] }
   ];
 
   var els = LINES.map(function (l) {
@@ -2594,131 +2197,13 @@
 })();
 </script>
 <script>
-// La représentation : frise en tournée, encre du manifeste, folio, parallaxe
-// du filigrane, ombre du bandeau. Tout est progressif : sans JS, la page
-// reste complète et lisible ; en reduced-motion, tout reste posé.
-(function () {
-  "use strict";
-  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-  // ----- Frise « en tournée » : piste doublée pour boucler sans couture -----
-  var track = document.getElementById("tournee-track");
-  if (track && !reduce) {
-    track.innerHTML += track.innerHTML;
-    track.classList.add("is-double");
-  }
-
-  // ----- Le manifeste s'encre au fil de la lecture -----
-  // Chaque mot devient un span indexé ; --p (progression de la section dans
-  // l'écran) décide jusqu'où l'encre est posée. Les balises internes
-  // (lettrine, small-caps, italiques) sont préservées : on n'enveloppe que
-  // les nœuds texte.
-  var manifBody = document.querySelector(".manifeste__body");
-  var inkTotal = 0;
-  if (manifBody && !reduce) {
-    (function wrap(node) {
-      if (node.nodeType === 3) {
-        if (/^\s*$/.test(node.nodeValue)) return;
-        var frag = document.createDocumentFragment();
-        node.nodeValue.split(/(\s+)/).forEach(function (tok) {
-          if (tok === "") return;
-          if (/^\s+$/.test(tok)) { frag.appendChild(document.createTextNode(tok)); return; }
-          var s = document.createElement("span");
-          s.className = "ink-word";
-          s.style.setProperty("--i", inkTotal++);
-          s.textContent = tok;
-          frag.appendChild(s);
-        });
-        node.parentNode.replaceChild(frag, node);
-      } else if (node.nodeType === 1) {
-        Array.prototype.slice.call(node.childNodes).forEach(wrap);
-      }
-    })(manifBody);
-    manifBody.style.setProperty("--n", inkTotal);
-  }
-
-  // ----- Une seule boucle de scroll (rAF) pour tout ce qui suit -----
-  var topbar = document.querySelector(".topbar");
-  var docEl = document.documentElement;
-  var ticking = false;
-
-  function onFrame() {
-    ticking = false;
-    var y = window.scrollY || window.pageYOffset || 0;
-
-    // Le bandeau se décolle de la page dès qu'on quitte le haut.
-    if (topbar) topbar.classList.toggle("is-scrolled", y > 8);
-
-    // Parallaxe du filigrane (transform only, via variable CSS).
-    if (!reduce) docEl.style.setProperty("--scrolly", Math.min(y, 900).toFixed(0));
-
-    // Progression de l'encre du manifeste.
-    if (manifBody && inkTotal && !reduce) {
-      var r = manifBody.getBoundingClientRect();
-      var vh = window.innerHeight;
-      var start = vh * 0.92;     // p = 0 : le haut du texte touche le bas de l'écran
-      var end   = vh * 0.42;     // p = 1 : le bas du texte atteint 42 % de l'écran
-      var p = (start - r.top) / (start - end + r.height);
-      p = Math.max(0, Math.min(1, p));
-      manifBody.style.setProperty("--p", p.toFixed(4));
-    }
-  }
-  function queueFrame() {
-    if (!ticking) { ticking = true; window.requestAnimationFrame(onFrame); }
-  }
-  window.addEventListener("scroll", queueFrame, { passive: true });
-  window.addEventListener("resize", queueFrame);
-  queueFrame();
-
-  // ----- Le folio suit la lecture, page à page -----
-  var folio = document.getElementById("folio");
-  if (folio && "IntersectionObserver" in window) {
-    var PAGES = [
-      { sel: ".hero",               n: 1 },
-      { sel: "#manifeste",          n: 2 },
-      { sel: "#souffle-hesitation", n: 3 },
-      { sel: "#fonctions",          n: 4 },
-      { sel: "#coulisses",          n: 5 },
-      { sel: "#marche",             n: 6 },
-      { sel: "#faq",                n: 7 },
-      { sel: "#telecharger",        n: 8 }
-    ];
-    var pageOf = new Map();
-    PAGES.forEach(function (p) {
-      var el = document.querySelector(p.sel);
-      if (el) pageOf.set(el, p.n);
-    });
-    var currentPage = 1, turnTimer = null;
-    var fio = new IntersectionObserver(function (entries) {
-      entries.forEach(function (e) {
-        if (!e.isIntersecting) return;
-        var n = pageOf.get(e.target);
-        if (!n || n === currentPage) return;
-        currentPage = n;
-        if (reduce) {
-          folio.innerHTML = "<b>Playbill</b> · p. " + n;
-          return;
-        }
-        clearTimeout(turnTimer);
-        folio.classList.add("is-turning");
-        turnTimer = setTimeout(function () {
-          folio.innerHTML = "<b>Playbill</b> · p. " + n;
-          folio.classList.remove("is-turning");
-        }, 380);
-      });
-    }, { rootMargin: "-48% 0px -48% 0px", threshold: 0 });
-    pageOf.forEach(function (_n, el) { fio.observe(el); });
-  }
-})();
-</script>
-<script>
 // Quand on quitte l'onglet, la souffleuse ne disparaît pas : elle attend en
 // coulisse. Le titre le dit, à voix basse, et reprend sa place au retour.
 (function () {
   "use strict";
   var titre = document.title;
   document.addEventListener("visibilitychange", function () {
-    document.title = document.hidden ? "Waiting in the wings… · Souffleuse" : titre;
+    document.title = document.hidden ? "En coulisse… · Souffleuse" : titre;
   });
 })();
 </script>
