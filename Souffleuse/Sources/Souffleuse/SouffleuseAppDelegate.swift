@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import IOKit.hid
 import Observation
 import SouffleuseAX
 import SouffleuseContext
@@ -579,6 +580,13 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Onboarding
 
+    /// Surveillance des entrées accordée ? Requis pour que KeyInterceptor capte
+    /// Tab/Esc — sans ça le ghost s'affiche mais l'accept est inerte (le symptôme
+    /// « ghost visible, Tab ne fait rien »). Miroir de OnboardingModel.refreshPermissions.
+    private var inputMonitoringGranted: Bool {
+        IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
+    }
+
     private func shouldShowOnboarding() -> Bool {
         // Override dev : SOUFFLEUSE_ONBOARDING=fresh simule un premier lancement
         // (efface la reprise) ; =1 force l'affichage sans toucher aux clés.
@@ -598,7 +606,10 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // avant la fin du téléchargement). `isResolvable` couvre aussi le dossier
         // Cotypist legacy → pas de ré-onboarding pour qui a déjà le modèle.
         let ghostReady = GGUFModelOption.option(forID: store.ggufModelID).isResolvable
-        if onboarded && AXClient.isTrusted && ghostReady { return false }
+        // Input Monitoring fait partie des permissions REQUISES : sans elle Tab/Esc
+        // sont inertes. On la teste comme AXClient.isTrusted (sinon le wizard ne se
+        // rouvrait jamais pour ce trou — bug : ghost muet et aucun recours).
+        if onboarded && AXClient.isTrusted && inputMonitoringGranted && ghostReady { return false }
         return true
     }
 
@@ -614,11 +625,27 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
         // Reprise : si SOUFFLEUSE_ONBOARDING=fresh, on repart de l'étape 0.
         let isFresh = ProcessInfo.processInfo.environment["SOUFFLEUSE_ONBOARDING"] == "fresh"
-        let resumeStep = isFresh ? 0 : UserDefaults.standard.integer(forKey: "onboardingProgressStep")
+        // Un utilisateur DÉJÀ onboardé qu'on rouvre uniquement parce qu'une permission
+        // requise a sauté : on l'amène droit à l'étape permissions plutôt que de lui
+        // refaire l'intro. Le titre de l'étape (« Ce qu'il faut autoriser ») suffit à
+        // contextualiser. La complétion versionnée n'est pas touchée — onFinished la
+        // réécrira en sortie.
+        let alreadyOnboarded = UserDefaults.standard.bool(forKey: "onboardingDone")
+            || UserDefaults.standard.integer(forKey: "onboardingCompletedVersion") >= Self.onboardingVersion
+        let missingRequiredPermission = !AXClient.isTrusted || !inputMonitoringGranted
+        let resumeStep: Int
+        if isFresh {
+            resumeStep = 0
+        } else if alreadyOnboarded && missingRequiredPermission {
+            resumeStep = OnboardingStep.permissions.rawValue
+        } else {
+            resumeStep = UserDefaults.standard.integer(forKey: "onboardingProgressStep")
+        }
         return OnboardingWindow(
             modelDownloads: store.modelDownloads,
             ghostProvider: ghostProvider,
             ghostReady: { [store] in GGUFModelOption.option(forID: store.ggufModelID).isResolvable },
+            canTryGhost: { [predictor] in predictor.isModelReady },
             translation: store.translationModel.downloadable,
             initialLanguage: store.primaryLanguage,
             onLanguageChange: { [weak self] lang in
