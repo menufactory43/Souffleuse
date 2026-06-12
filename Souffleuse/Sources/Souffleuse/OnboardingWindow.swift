@@ -123,6 +123,13 @@ private struct OnboardingRootView: View {
     let close: @MainActor () -> Void
 
     var body: some View {
+        // Le whisper sanctionné de cette surface (même choix que Préférences) :
+        // l'accent sang-de-bœuf remplace le bleu système sur les contrôles.
+        content.tint(Color.sangDeBoeuf)
+    }
+
+    @ViewBuilder
+    private var content: some View {
         switch model.currentStep {
         case .welcome:
             terminalLayout { WelcomeStepView(onStart: advance) }
@@ -947,6 +954,15 @@ final class OnboardingWindow {
     private var lastGhostReady: Bool?
     /// Ghost provider, gardé pour le refresh de transition.
     private let ghostReady: () -> Bool
+
+    /// Vrai quand l'essai réel du souffle est en scène : fenêtre key ET étape
+    /// « Comment ça marche ». C'est la SEULE situation où le tick de
+    /// l'AppDelegate laisse le pipeline tourner alors que Souffleuse est l'app
+    /// active (exception au gate R1) — le seul champ focusable de cette étape
+    /// est le champ d'essai AppKit, dont l'AX est fiable.
+    var isTryGhostStepActive: Bool {
+        window.isKeyWindow && model.currentStep == .howItWorks
+    }
 
     // MARK: Init
 

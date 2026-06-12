@@ -645,7 +645,11 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             modelDownloads: store.modelDownloads,
             ghostProvider: ghostProvider,
             ghostReady: { [store] in GGUFModelOption.option(forID: store.ggufModelID).isResolvable },
-            canTryGhost: { [predictor] in predictor.isModelReady },
+            // « Peut essayer » = la voix est SUR LE DISQUE — pas « moteur résident » :
+            // le moteur se décharge à l'idle et se recharge tout seul à la frappe
+            // (manageGhostWarmth), donc exiger isModelReady montrait le repli
+            // statique à tort dès que l'app avait idlé avant d'atteindre l'étape.
+            canTryGhost: { [store] in GGUFModelOption.option(forID: store.ggufModelID).isResolvable },
             translation: store.translationModel.downloadable,
             initialLanguage: store.primaryLanguage,
             onLanguageChange: { [weak self] lang in
@@ -1349,7 +1353,11 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // R1: pause pipeline whenever Souffleuse is the foreground app (Preferences,
         // Onboarding, or CustomInstructions key). Prevents predicting in our own UI
         // and avoids racing AX reads against our own SwiftUI text fields.
-        if NSApp.isActive {
+        // EXCEPTION (essai réel de l'onboarding) : quand la fenêtre du wizard est
+        // key sur l'étape « Comment ça marche », on laisse tourner — le seul champ
+        // focusable y est un NSTextField AppKit (AX fiable), et c'est tout l'objet
+        // de l'étape : voir le vrai souffle avant de sortir du wizard.
+        if NSApp.isActive, onboarding?.isTryGhostStepActive != true {
             overlay.hide()
             hideEmojiPicker()
             dismissSlashTransformUI()
