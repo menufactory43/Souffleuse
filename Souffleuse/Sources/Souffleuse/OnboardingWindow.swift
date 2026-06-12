@@ -580,9 +580,6 @@ private struct VoiceStepView: View {
     let translation: DownloadableModel?
     let onGhostInstalled: (@MainActor () -> Void)?
 
-    // Suivi de la transition absent→installé pour déclencher onGhostInstalled
-    @State private var wasGhostReady: Bool? = nil
-
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             Text("La voix")
@@ -612,16 +609,8 @@ private struct VoiceStepView: View {
                 )
             }
         }
-        .onChange(of: ghostReady()) { _, nowReady in
-            // Transition false → true : déclenche onGhostInstalled une seule fois
-            if wasGhostReady == false, nowReady {
-                onGhostInstalled?()
-            }
-            wasGhostReady = nowReady
-        }
-        .onAppear {
-            wasGhostReady = ghostReady()
-        }
+        // Note : la transition absent→installé du souffle est détectée par le
+        // Timer 1 s de OnboardingWindow.show() — pas besoin d'onChange ici.
     }
 }
 
