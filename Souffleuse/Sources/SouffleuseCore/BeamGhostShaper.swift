@@ -236,6 +236,13 @@ public enum BeamGhostShaper {
     ) -> String {
         var result = OutputFilter.singleLine(rawGhost)
         if result.isEmpty { return "" }
+        // Markup ("<strong>", **gras**, U+FFFD) + run de chiffres absurde
+        // ("10000000000") : le chemin beam ne passe PAS par ChunkFilter et
+        // laissait fuir ces ghosts à l'écran (bug visuel, Brave 12/06). Mêmes
+        // gardes que le streaming, mutualisées dans OutputFilter.
+        result = OutputFilter.stripMarkup(result)
+        result = OutputFilter.cutAbsurdNumberRun(result)
+        if result.trimmingCharacters(in: .whitespaces).isEmpty { return "" }
         // Dédup d'un mot répété en tête (le beam peut re-émettre le dernier mot tapé).
         result = SuggestionPolicy.dedupLeadingRepeat(ghost: result, userTail: userTail)
         if result.isEmpty { return "" }
@@ -268,6 +275,11 @@ public enum BeamGhostShaper {
             result = words.prefix(max(1, maxWords)).joined(separator: " ")
             if hadLeadingSpace, result.first != " ", !result.isEmpty { result = " " + result }
         }
+        // Frontière : un ghost dégénéré (énumérateur nu "1.", ponctuation
+        // seule) est du bruit — même garde que ChunkFilter. Mid-mot exclu :
+        // `isFragmentedGhost` y verrait des consonnes isolées légitimes
+        // ("r la suite" complétant "pou").
+        if isBoundary, OutputFilter.isDegenerateGhost(result) { return "" }
         return OutputFilter.singleLine(result)
     }
 }

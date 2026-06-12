@@ -91,18 +91,13 @@ public enum ChunkFilter {
         } else {
             oneLine = String(stripped)
         }
-        oneLine = oneLine.replacingOccurrences(
-            of: "<[/!?]?[A-Za-z][A-Za-z0-9]{0,15}\\s*[^>]{0,32}>",
-            with: "",
-            options: .regularExpression
-        )
-        oneLine = oneLine.replacingOccurrences(of: "**", with: "")
-        oneLine = oneLine.replacingOccurrences(of: "__", with: "")
-        oneLine = oneLine.replacingOccurrences(of: "`", with: "")
-        // Strip U+FFFD replacement chars: when the sampler bans a token,
-        // greedy can fall back to a byte-fallback token that decodes mid
-        // UTF-8 sequence and renders as "" — never show it.
-        oneLine = oneLine.replacingOccurrences(of: "\u{FFFD}", with: "")
+        // Markup (balises HTML complètes ET partielles en queue de stream,
+        // emphase markdown, U+FFFD) — mutualisé avec le chemin beam. La règle
+        // queue-partielle évite d'afficher "<stron" pendant que le ">" streame.
+        oneLine = OutputFilter.stripMarkup(oneLine)
+        // Run de chiffres absurde ("10000000000") : coupe juste avant, la
+        // tête reste affichable.
+        oneLine = OutputFilter.cutAbsurdNumberRun(oneLine)
         // Set when the sentence-terminator cut below fires (a completed sentence
         // with discarded content after it) — the caller stops generating on it.
         var sentenceComplete = false
