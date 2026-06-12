@@ -667,7 +667,23 @@ final class PredictorViewModel {
             || (axSnapshot?.help?.isEmpty == false)
             || (axSnapshot?.role != nil)
         if userTail.isEmpty && !hasFieldHint {
+            Log.info(.predictor, "ghost_suppressed_empty_prefix")
             PredictDebug.log("gate_empty_no_context", "")
+            return
+        }
+
+        // KeyType empty-prefix parity (flag-gated, OFF par défaut). Le gate
+        // field-hint ci-dessus laisse passer un préfixe pauvre dès qu'un hint
+        // FAIBLE existe (placeholder/role) → le base model part dans ses priors
+        // d'ouverture (« Bonjour », « Coucou »). Quand le gate strict est actif,
+        // on exige un VRAI signal lexical dans le préfixe (≥ N mots de contenu),
+        // indépendamment des hints — la cause n°1 des ghosts « sans contexte ».
+        if SuggestionPolicy.Tuning.noContextStrictGateEnabled,
+           !SuggestionPolicy.hasLexicalContext(
+                userTail, min: SuggestionPolicy.Tuning.noContextMinContentTokens) {
+            Log.info(.predictor, "ghost_suppressed_no_lexical_context")
+            PredictDebug.log("gate_no_lexical_context",
+                             CompletionSuppressionReason.noLexicalContext.rawValue)
             return
         }
 
@@ -899,9 +915,23 @@ final class PredictorViewModel {
                 // a specific, unrelated sentence the user typed into the model's
                 // context. Nothing similar ⇒ inject nothing.
                 // TO REVERT: re-add the `if examples.count < defaultK { … }` backfill loop.
-                let examples = SimilarHistoryRetrieval.rank(
-                    entries: prose, userTail: userTail, limit: SimilarHistoryRetrieval.defaultK
-                )
+                let examples: [TypingHistoryEntry]
+                if SuggestionPolicy.Tuning.blendedRetrievalEnabled {
+                    // Mix KeyType (count=1) : pertinence PRIMAIRE puis nudge
+                    // récence × longueur. Même filtre `minRelevanceScore` → pas de
+                    // bruit injecté ; on ne fait que mieux DÉPARTAGER les pertinents.
+                    examples = SimilarHistoryRetrieval.rankBlended(
+                        entries: prose, userTail: userTail,
+                        limit: SimilarHistoryRetrieval.defaultK,
+                        recencyWeight: SuggestionPolicy.Tuning.retrievalRecencyWeight,
+                        lengthWeight: SuggestionPolicy.Tuning.retrievalLengthWeight,
+                        now: Date()
+                    )
+                } else {
+                    examples = SimilarHistoryRetrieval.rank(
+                        entries: prose, userTail: userTail, limit: SimilarHistoryRetrieval.defaultK
+                    )
+                }
                 examplesBlock = SimilarHistoryRetrieval.buildExamplesBlock(from: examples)
                 if !examples.isEmpty {
                     Log.info(.predictor, "ghost_examples_injected", count: examples.count)
