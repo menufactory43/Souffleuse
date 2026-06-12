@@ -246,6 +246,22 @@ final class ModelRuntime {
         await llamaEngine.setCorpus(entries)
     }
 
+    /// Heuristique SYNCHRONE (zéro hop d'actor) : vraie quand la frappe courante
+    /// a toutes les chances d'être servie par l'avancée de réserve (HIT/REFILL,
+    /// ~1 ms, aucun coût LLM). Miroir des gardes de continuité du bloc réserve
+    /// de `generateGhostBeam` — SANS le `beamEngine.hasReserve` (async) : un
+    /// faux positif coûte seulement un debounce sauté pour un predict qui
+    /// seedera, inoffensif. Sert au debounce conditionnel
+    /// (`debounceSkipWarmReserveEnabled`).
+    func reserveLooksWarm(userTail: String) -> Bool {
+        guard SuggestionPolicy.Tuning.beamReserveEnabled, beamReady,
+              let prev = beamSessionTail, !prev.isEmpty,
+              userTail.count > prev.count,
+              userTail.count - prev.count <= 3,
+              userTail.hasPrefix(prev) else { return false }
+        return true
+    }
+
     /// Cancellation hook. No-op : `GenerationPlanner` owns Task cancellation,
     /// container teardown happens in `swap(to:)` when modelId changes. Cette
     /// méthode existe pour symétrie d'API (la façade 04-07 voudra peut-être

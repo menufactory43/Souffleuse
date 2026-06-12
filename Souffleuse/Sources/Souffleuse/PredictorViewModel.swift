@@ -390,6 +390,13 @@ final class PredictorViewModel {
     ///    snapshot + few-shot block off the main actor, call
     ///    `runtime.generate(...)`, mirror filtered chunks into observables
     ///    through the @MainActor onChunk closure.
+    /// Façade pour le debounce conditionnel de l'AppDelegate : la frappe
+    /// courante sera-t-elle très probablement servie par l'avancée de réserve
+    /// beam (~1 ms) ? Voir `ModelRuntime.reserveLooksWarm`.
+    func reserveLooksWarm(forPrefix prefix: String) -> Bool {
+        runtime.reserveLooksWarm(userTail: String(prefix.suffix(Self.userTailCap)))
+    }
+
     func predict(
         prefix: String,
         contextPrefix: String = "",
