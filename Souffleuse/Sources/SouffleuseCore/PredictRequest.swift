@@ -18,6 +18,12 @@ public struct PredictRequest: Sendable {
     public let axSnapshotSubrole: String?
     public let axTextAfterCaret: String?
     public let personalizationStrength: Double
+    /// Préférence « Teinter les suggestions » (Préférences > Personnalisation) :
+    /// active le bias corpus du beam (et le style primer côté PVM) sans variable
+    /// d'env. Les flags dev `SOUFFLEUSE_BEAM_BIAS` / `SOUFFLEUSE_STYLE_PRIMER`
+    /// restent des overrides (OU logique). Snapshot par requête — aucun état
+    /// partagé avec `ModelRuntime` (non isolé).
+    public let personalizedSuggestions: Bool
     public let maxTokens: Int
     public let maxWords: Int
     public let detectedLanguage: String?
@@ -63,6 +69,7 @@ public struct PredictRequest: Sendable {
         axSnapshotSubrole: String?,
         axTextAfterCaret: String?,
         personalizationStrength: Double,
+        personalizedSuggestions: Bool = false,
         maxTokens: Int,
         maxWords: Int,
         detectedLanguage: String?,
@@ -89,6 +96,7 @@ public struct PredictRequest: Sendable {
         self.axSnapshotSubrole = axSnapshotSubrole
         self.axTextAfterCaret = axTextAfterCaret
         self.personalizationStrength = personalizationStrength
+        self.personalizedSuggestions = personalizedSuggestions
         self.maxTokens = maxTokens
         self.maxWords = maxWords
         self.detectedLanguage = detectedLanguage

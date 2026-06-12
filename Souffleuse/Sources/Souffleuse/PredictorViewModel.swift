@@ -224,6 +224,13 @@ final class PredictorViewModel {
     /// registre). Le MÊME ton par app que la relecture — une seule source.
     @ObservationIgnored var toneResolver: (@MainActor (String?) -> Tone)?
 
+    /// Préférence « Teinter les suggestions de vos mots et de votre ton »
+    /// (Préférences > Personnalisation), mirrorée par l'AppDelegate (startup +
+    /// sync). Active le style primer ET le bias corpus beam (via la requête) ;
+    /// les env `SOUFFLEUSE_STYLE_PRIMER`/`SOUFFLEUSE_BEAM_BIAS` restent des
+    /// overrides de dev (OU logique).
+    var personalizedSuggestionsEnabled: Bool = false
+
     /// Bloc style primer FIGÉ PAR BUNDLE + LANGUE (tête de prompt beam →
     /// recalcul par frappe = prefix-cache KV invalidé à chaque accept ; même
     /// rationale que `llmWindowAnchor`). Re-ancré au changement d'app focus OU
@@ -236,7 +243,8 @@ final class PredictorViewModel {
     /// Sélectionne (ou rejoue) le bloc primer pour l'app focus. Gated par le
     /// flag opt-in + la perso : OFF ⇒ "" ⇒ prompt byte-identique à avant.
     private func stylePrimerBlock(activeDomain: DomainCluster, bundleID: String?) -> String {
-        guard SuggestionPolicy.Tuning.stylePrimerEnabled, personalizationStrength > 0 else { return "" }
+        guard SuggestionPolicy.Tuning.stylePrimerEnabled || personalizedSuggestionsEnabled,
+              personalizationStrength > 0 else { return "" }
         let bid = bundleID ?? ""
         let lang = lastDetectedLanguage
         if let anchor = stylePrimerAnchor, anchor.bundleID == bid, anchor.language == lang {
@@ -824,6 +832,7 @@ final class PredictorViewModel {
         // `await` them without touching @MainActor state inside the
         // runtime.generate closure.
         let personalizationStrength = self.personalizationStrength
+        let personalizedSuggestions = self.personalizedSuggestionsEnabled
         // Hoisted on the @MainActor side (self is strong here) so the detached
         // generation Task can use it without touching @MainActor state. Filtered
         // to `.prose` (never accept-fragments) AND débarrassé des entrées qui ne
@@ -995,6 +1004,7 @@ final class PredictorViewModel {
                 axSnapshotSubrole: axSnapshot?.subrole,
                 axTextAfterCaret: axSnapshot?.textAfterCaret,
                 personalizationStrength: Double(personalizationStrength),
+                personalizedSuggestions: personalizedSuggestions,
                 maxTokens: maxTokens,
                 maxWords: maxWords,
                 detectedLanguage: detectedLanguage,
@@ -1452,7 +1462,13 @@ final class PredictorViewModel {
             axSnapshotRole: nil,
             axSnapshotSubrole: nil,
             axTextAfterCaret: axTextAfterCaret,
-            personalizationStrength: 0,
+            // La force réelle + la préférence voyagent pour le REFILL BEAM (la
+            // rallonge du living ghost garde le même bias corpus que son seed,
+            // gate « pref/flag ET strength>0 » dans extendGhostBeam). Le refill
+            // GREEDY (extendGhost) ignore ce champ — il re-force 0 en interne
+            // (ModelRuntime:1183, seuils calibrés sans biais) : inchangé.
+            personalizationStrength: Double(personalizationStrength),
+            personalizedSuggestions: personalizedSuggestionsEnabled,
             maxTokens: maxTokens,
             maxWords: maxWords,
             detectedLanguage: detectedLanguage,

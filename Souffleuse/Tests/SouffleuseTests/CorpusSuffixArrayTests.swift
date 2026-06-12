@@ -70,3 +70,65 @@ struct CorpusSuffixArrayTests {
         #expect(m.candidates[200] == 1)
     }
 }
+
+/// Repli COMPTÉ (`longestMatch(after:minCount:)`) — le fix prod du bias beam.
+/// Le corpus prod est dédupliqué (`deleteDuplicate`) : le match le plus long
+/// est typiquement spécifique à UNE entrée (count 1). Le repli doit reculer
+/// jusqu'au plus long contexte dont le meilleur candidat atteint `minCount`,
+/// là où la collocation récurrente agrège ses occurrences.
+@Suite("Suffix array — repli compté (corpus dédupliqué)")
+struct CorpusSuffixArrayCountedBackoffTests {
+
+    /// Trois phrases DISTINCTES partageant la collocation (2,3,4) → 9.
+    /// Préfixes différents (1 / 5 / 6) = la forme d'un corpus dédupliqué.
+    private func dedupedCorpus() -> LlamaCorpusSuffixArray {
+        var sa = LlamaCorpusSuffixArray()
+        sa.build(entries: [
+            [1, 2, 3, 4, 9, 11],
+            [5, 2, 3, 4, 9, 12],
+            [6, 7, 2, 3, 4, 9, 13],
+        ])
+        return sa
+    }
+
+    @Test func repliJusquAuContexteAtteste() {
+        let sa = dedupedCorpus()
+        // Contexte = la sonde : préfixe inédit (8) + collocation (2,3,4).
+        // Longest brut = (8,2,3,4) absent → (2,3,4) présent dans LES TROIS
+        // entrées → count 3 ≥ minCount 2 : le repli s'arrête là.
+        let m = sa.longestMatch(after: [8, 2, 3, 4][...], minCount: 2)
+        #expect(m.matchLength == 3)
+        #expect(m.candidates[9] == 3)
+    }
+
+    @Test func sansRepliLeMatchLongRestaitCount1() {
+        let sa = dedupedCorpus()
+        // La même sonde mais avec le préfixe d'UNE entrée (1,2,3,4) : le
+        // longest-match CLASSIQUE matche 4 tokens → count 1 — la preuve du
+        // trou que le repli compté corrige.
+        let classic = sa.longestMatch(after: [1, 2, 3, 4][...])
+        #expect(classic.matchLength == 4)
+        #expect(classic.candidates[9] == 1)
+        // Le repli compté recule d'un cran et agrège : count 3.
+        let counted = sa.longestMatch(after: [1, 2, 3, 4][...], minCount: 2)
+        #expect(counted.matchLength == 3)
+        #expect(counted.candidates[9] == 3)
+    }
+
+    @Test func rienNAtteintMinCountRendLePlusLongNonVide() {
+        var sa = LlamaCorpusSuffixArray()
+        sa.build(entries: [[1, 2, 3, 9, 4], [5, 6, 7, 8, 4]])   // aucun candidat ×2
+        let m = sa.longestMatch(after: [2, 3, 9][...], minCount: 2)
+        // Comportement longestMatch : le plus long non vide, count 1 — les
+        // gardes de l'appelant (minBiasCount) trancheront.
+        #expect(m.matchLength == 3)
+        #expect(m.candidates[4] == 1)
+    }
+
+    @Test func corpusVideRendVide() {
+        let sa = LlamaCorpusSuffixArray()
+        let m = sa.longestMatch(after: [1, 2][...], minCount: 2)
+        #expect(m.candidates.isEmpty)
+        #expect(m.matchLength == 0)
+    }
+}
