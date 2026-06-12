@@ -275,10 +275,15 @@ public enum BeamGhostShaper {
             result = words.prefix(max(1, maxWords)).joined(separator: " ")
             if hadLeadingSpace, result.first != " ", !result.isEmpty { result = " " + result }
         }
-        // Frontière : un ghost dégénéré (énumérateur nu "1.", ponctuation
-        // seule) est du bruit — même garde que ChunkFilter. Mid-mot exclu :
-        // `isFragmentedGhost` y verrait des consonnes isolées légitimes
-        // ("r la suite" complétant "pou").
+        // Ponctuation/symboles purs (" .", " :") à TOUTE position : une frappe
+        // épargnée au mieux, du bruit visuel au pire — le streaming les droppe
+        // déjà partout (branche « aucune lettre » de isDegenerateGhost) ;
+        // alignement du beam (ghosts " ." / " :" constatés en live le 12/06).
+        if OutputFilter.isPunctuationOnlyGhost(result) { return "" }
+        // Frontière : un ghost dégénéré (énumérateur nu "1.") est du bruit —
+        // même garde que ChunkFilter. Mid-mot exclu : `isFragmentedGhost` y
+        // verrait des consonnes isolées légitimes ("r la suite" complétant
+        // "pou").
         if isBoundary, OutputFilter.isDegenerateGhost(result) { return "" }
         return OutputFilter.singleLine(result)
     }

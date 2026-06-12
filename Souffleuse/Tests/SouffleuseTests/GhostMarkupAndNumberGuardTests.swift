@@ -159,3 +159,47 @@ struct BeamPostFilterMarkupTests {
         #expect(out == "1er janvier 2026")
     }
 }
+
+@Suite("Ghost ponctuation seule — supprimé à toute position (chemin beam)")
+struct PunctuationOnlyGhostTests {
+
+    @Test func detectsPurePunctuation() {
+        for s in [" .", " :", " !", "…", ")", " — ", "..."] {
+            #expect(OutputFilter.isPunctuationOnlyGhost(s), "should flag «\(s)»")
+        }
+    }
+
+    @Test func keepsAnythingWithALetterOrDigit() {
+        for s in ["mot.", "o :", "r la suite", " 1er", "à", ""] {
+            #expect(!OutputFilter.isPunctuationOnlyGhost(s), "should keep «\(s)»")
+        }
+    }
+
+    @Test func midWordPunctuationGhostIsSuppressed() {
+        // Les deux cas constatés en live (12/06) : "asso" + " :" et
+        // "…la balise" + " ." — mid-mot, donc hors de portée de la garde
+        // dégénérée de frontière. La garde ponctuation-seule les tait.
+        #expect(BeamGhostShaper.beamPostFilter(
+            rawGhost: " :", isBoundary: false,
+            caretAfterSpace: false, userTail: "asso", maxWords: 8) == "")
+        #expect(BeamGhostShaper.beamPostFilter(
+            rawGhost: " .", isBoundary: false,
+            caretAfterSpace: false, userTail: "on utilise la balise", maxWords: 8) == "")
+    }
+
+    @Test func boundaryPunctuationGhostIsSuppressed() {
+        // Même après l'insertion du séparateur d'espace (" " + "!"), le ghost
+        // reste ponctuation pure → silence.
+        #expect(BeamGhostShaper.beamPostFilter(
+            rawGhost: "!", isBoundary: true,
+            caretAfterSpace: false, userTail: "Merci", maxWords: 8) == "")
+    }
+
+    @Test func midWordWordCompletionStillSurvives() {
+        // Garantie de non-régression : la complétion mid-mot ordinaire passe.
+        #expect(BeamGhostShaper.beamPostFilter(
+            rawGhost: "mer le rendez-vous.", isBoundary: false,
+            caretAfterSpace: false, userTail: "Je vais confir", maxWords: 8)
+            == "mer le rendez-vous.")
+    }
+}
