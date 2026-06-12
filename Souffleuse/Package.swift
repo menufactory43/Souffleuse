@@ -190,9 +190,11 @@ let package = Package(
         .executableTarget(
             // Probe « mémoire photographique de frappe » : capture Brave +
             // OCR pleine page + rappel lexical BM25 sous gate strict.
-            // Verdict go/no-go avant tout travail dans l'app.
+            // Mode --ghost : injecte le rappel dans le prompt prod et mesure
+            // la recopie verbatim par le 1B. Verdict go/no-go avant tout
+            // travail dans l'app.
             name: "SouffleuseScreenMemoryProbe",
-            dependencies: ["SouffleuseContext"]
+            dependencies: ["SouffleuseContext", "SouffleuseCore", "SouffleuseLlama"]
         ),
         .executableTarget(
             name: "SouffleuseReplay",
