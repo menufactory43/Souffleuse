@@ -748,6 +748,210 @@ if ProcessInfo.processInfo.environment["MW_MEASURE"] != nil {
     exit(0)
 }
 
+// ── SPIKE JETABLE (MW_BEAM=1) : valide l'HYPOTHÈSE KeyType AVANT toute
+// réécriture de LlamaEngine. Question : « scorer un SET de candidats par
+// log-prob de séquence (déterministe) bat-il le greedy (11/23) et le vote
+// majoritaire stochastique (16/23) ? ». Si NON → le beam ne sauvera pas ces cas
+// (plafond modèle) → on NE reconstruit PAS. Throwaway : 100 % dans l'eval,
+// AUCUNE ligne de prod touchée. Réutilise runLLM / runLLMBranches /
+// engine.sequenceLogProb / judgeBranch / validExtends qui existent déjà.
+//
+// Candidats = {greedy} ∪ {K branches stochastiques} ∪ {dico WordCompleter},
+// filtrés par validExtends (dico + prolonge le partiel), DÉ-DOUBLONNÉS.
+// Score = sequenceLogProb(context=préfixe SANS le partiel, continuation=mot
+// entier) / tokenCount (per-token, donc indépendant de la longueur).
+// Décision : 0 candidat → cacher ; 1 → montrer ; ≥2 → montrer le top SEULEMENT
+// si la marge per-token sur le 2ᵉ ≥ MW_BEAM_MARGIN, sinon cacher (ambigu).
+if ProcessInfo.processInfo.environment["MW_BEAM"] != nil {
+    let k = max(0, Int(ProcessInfo.processInfo.environment["MW_BEAM_K"] ?? "5") ?? 5)
+    let temp = Float(ProcessInfo.processInfo.environment["MW_BEAM_TEMP"] ?? "0.7") ?? 0.7
+    let margin = Double(ProcessInfo.processInfo.environment["MW_BEAM_MARGIN"] ?? "0.15") ?? 0.15
+    err("\n──────────── SPIKE MW_BEAM (k=\(k) temp=\(temp) margin=\(margin)) ────────────")
+    err("baseline rappel : greedy 11/23 · vote+3br 16/23 (justesse décision)")
+
+    func ambiguous(_ c: MWCase) -> Bool { c.expected.contains("(ambigu)") }
+    // Score per-token d'un mot ENTIER depuis le préfixe SANS le partiel déjà tapé.
+    func score(prefix: String, word: String) async -> Double? {
+        let partial = OutputFilter.trailingPartialWord(prefix)
+        let ctxNoPartial = String(prefix.dropLast(partial.count))
+        guard let lp = await engine.sequenceLogProb(context: ctxNoPartial, continuation: word),
+              lp.tokenCount > 0 else { return nil }
+        return lp.sumLogProb / Double(lp.tokenCount)
+    }
+
+    var greedyCorrect = 0, beamCorrect = 0
+    for c in cases {
+        let partial = OutputFilter.trailingPartialWord(c.prefix)
+        // ── Candidats ──
+        let (gout, _, _) = await runLLM(prefix: c.prefix, engine: engine)
+        let greedyWord = SuggestionPolicy.midWordLeadWordDefrag(gout, partial: partial)
+        var cand = Set<String>()
+        if !greedyWord.isEmpty { cand.insert(greedyWord) }
+        if k > 0 {
+            for w in await runLLMBranches(prefix: c.prefix, engine: engine, k: k, temp: temp)
+            where !w.isEmpty { cand.insert(w) }
+        }
+        // Candidat dico (NSSpellChecker) : suffixe → mot entier = partiel + suffixe.
+        if let suffix = wordCompleter.completion(for: c.prefix), !suffix.isEmpty {
+            cand.insert(partial + suffix)
+        }
+        // Filtre dico + prolonge le partiel.
+        let valid = cand.filter { validExtends(partial: partial, modal: $0) }
+
+        // ── Scoring + décision (itération 2 : stem-dedup + hide fragment-court) ──
+        var scored: [(w: String, s: Double)] = []
+        for w in valid { if let s = await score(prefix: c.prefix, word: w) { scored.append((w, s)) } }
+        scored.sort { $0.s > $1.s }
+        // Stem-dedup : singulier/pluriel/flexions du MÊME mot (préfixe commun ≥4,
+        // cf. mwStemMatch) ne sont PAS des candidats concurrents → on garde le
+        // mieux scoré de chaque famille. Évite de cacher « cacahuète/cacahuètes ».
+        var stems: [(w: String, s: Double)] = []
+        for cnd in scored where !stems.contains(where: { mwStemMatch(mwFold($0.w), mwFold(cnd.w)) }) {
+            stems.append(cnd)
+        }
+        // Fragment court (≤2 lettres tapées) = intrinsèquement ambigu (« co », « Po »,
+        // « fa », « tr ») → on cache, comme le fast-accept de prod (escMinFastLen).
+        let shortFragment = partial.count <= 2
+        let show: Bool
+        let pick: String
+        if stems.isEmpty || shortFragment { show = false; pick = stems.first?.w ?? "" }
+        else if stems.count == 1 { show = true; pick = stems[0].w }
+        else { show = (stems[0].s - stems[1].s) >= margin; pick = stems[0].w }
+
+        // ── Verdicts (même règle que MW_MEASURE.decisionCorrect) ──
+        let gOK: Bool = ambiguous(c) ? false   // greedy montre toujours → faux sur ambigu
+            : (judgeBranch(prefix: c.prefix, expected: c.expected, modal: greedyWord) == true)
+        if gOK { greedyCorrect += 1 }
+        let bOK: Bool = ambiguous(c)
+            ? !show
+            : (show && judgeBranch(prefix: c.prefix, expected: c.expected, modal: pick) == true)
+        if bOK { beamCorrect += 1 }
+
+        let cands = scored.map { "\($0.w)(\(String(format: "%.2f", $0.s)))" }.joined(separator: " ")
+        err("  \(bOK ? "✅" : "❌") \(pad(c.label, 16)) show=\(show ? "Y" : "N") pick=\(pick.isEmpty ? "∅" : pick) | \(cands)")
+    }
+    err("\nRÉSULTAT SPIKE :")
+    err("  greedy (rappel cap8)   : \(greedyCorrect)/\(cases.count)")
+    err("  BEAM (logprob+marge)   : \(beamCorrect)/\(cases.count)   vs vote 16/23")
+    err("  → \(beamCorrect > 16 ? "BAT le vote → vaut la réécriture" : beamCorrect >= 16 ? "ÉGALE le vote (gain = déterminisme/épuration)" : "SOUS le vote → NE PAS reconstruire (plafond modèle)")")
+    exit(0)
+}
+
+// ── SPIKE MARQUES / NOMS PROPRES (MW_BRAND=1) : le sélecteur mid-word log-prob
+// généralise-t-il aux termes APPRIS (marques, noms propres) que NSSpellChecker
+// ne connaît PAS et que le base model trouve improbables ? Hypothèse adverse :
+//  (a) le dico ne fournit aucun candidat → diversité absente.
+//  (b) le rerank log-prob DÉMOTE un terme appris (logprob base bas).
+// Donc pour les marques, le levier n'est PAS le log-prob mais la PROMOTION
+// n-gram (corpus). On compare, mid-word + healing ON, sur un corpus seedé :
+//   OFF    : greedy perso=0                      (le modèle seul)
+//   PROMO  : greedy perso ON + promotion         (le levier marques)
+//   LOGSEL : sélecteur log-prob (greedy ∪ dico)  (le levier mots communs)
+//   HYBRIDE: PROMO surface le terme → on l'AJOUTE aux candidats SANS le faire
+//            re-démoter par le log-prob (trust promotion pour les termes appris).
+// But : montrer le ROUTAGE — quel mécanisme gagne sur quel type de mot.
+if ProcessInfo.processInfo.environment["MW_BRAND"] != nil {
+    struct Brand: Sendable { let lead: String; let term: String }
+    // Leads = contextes RÉCURRENTS (≥3 tokens avant le terme) pour armer la
+    // promotion via suffix-array. Termes indevinables par le base model.
+    let brands: [Brand] = [
+        .init(lead: "Pour mes paiements en crypto je passe toujours par", term: "Binance"),
+        .init(lead: "L'autre exchange sur lequel j'ai un compte c'est", term: "Kraken"),
+        .init(lead: "Le wallet hardware que je recommande c'est le", term: "Ledger"),
+        .init(lead: "Notre logiciel de fiscalité crypto s'appelle", term: "Fiscalio"),
+        .init(lead: "La blockchain que je préfère pour les NFT reste", term: "Solana"),
+        .init(lead: "Ma collègue sur ce dossier s'appelle", term: "Géraldine"),
+        .init(lead: "Mon associé sur la partie technique c'est", term: "Aurélien"),
+        .init(lead: "Cet été nous retournons en vacances à", term: "Étretat"),
+        .init(lead: "Mon broker actions de référence reste", term: "Trade Republic"),
+        .init(lead: "L'app concurrente dont on vise la parité c'est", term: "Cotypist"),
+    ]
+    // Corpus synthétique ×3 (récurrence → promotion s'arme). Override l'historique.
+    var brandCorpus: [String] = []
+    for b in brands { for _ in 0..<3 { brandCorpus.append(b.lead + " " + b.term) } }
+    await engine.setCorpus(brandCorpus)
+    let effStrength: Float = 1.0 * LlamaSampling.personalizationGainScale
+    err("\n──────────── SPIKE MARQUES (corpus \(brandCorpus.count), strength→\(effStrength)) ────────────")
+
+    // Génère mid-word healed, perso paramétrable. firstWord = mot de tête défrag.
+    func genPerso(prefix: String, strength: Float, promote: Bool) async -> String {
+        let partial = OutputFilter.trailingPartialWord(prefix)
+        let prompt = LlamaPromptBuilder.buildLlamaPrompt(
+            system: "", customInstr: "", ctxPrefix: "", fieldContext: "", afterCursor: "", beforeCursor: prefix)
+        final class Acc: @unchecked Sendable { var text = "" }
+        let acc = Acc()
+        _ = await engine.generate(
+            prompt: prompt, maxTokens: 8,
+            sampling: LlamaSampling(
+                temperature: 0, repeatPenalty: 1.3, repeatLastN: 64,
+                personalizationStrength: strength,
+                banMarkup: true, banDigitsLeading: true, banEmoji: true,
+                promoteStrongMatches: promote,
+                minFirstTokenProb: 0.0001,
+                healPrefix: partial.isEmpty ? nil : partial)
+        ) { tok in acc.text += tok; return true }
+        let line = acc.text.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? acc.text
+        return SuggestionPolicy.midWordLeadWordDefrag(line, partial: partial)
+    }
+    func score(prefix: String, word: String) async -> Double? {
+        let partial = OutputFilter.trailingPartialWord(prefix)
+        let ctx = String(prefix.dropLast(partial.count))
+        guard let lp = await engine.sequenceLogProb(context: ctx, continuation: word), lp.tokenCount > 0
+        else { return nil }
+        return lp.sumLogProb / Double(lp.tokenCount)
+    }
+    func hitsBrand(_ word: String, _ term: String) -> Bool {
+        // 1er mot du terme (pour "Trade Republic" → "Trade") doit apparaître.
+        let firstTermWord = term.split(separator: " ").first.map(String.init) ?? term
+        return mwFold(word).hasPrefix(mwFold(firstTermWord)) || mwFold(word) == mwFold(firstTermWord)
+    }
+
+    var offHits = 0, promoHits = 0, logselHits = 0, hybridHits = 0, n = 0
+    for b in brands {
+        // Coupe mid-mot du PREMIER mot du terme, à 2 et 4 lettres.
+        let firstWord = b.term.split(separator: " ").first.map(String.init) ?? b.term
+        let cutChars = Array(firstWord)
+        for cut in [2, 4] where cut < cutChars.count {
+            n += 1
+            let typed = String(cutChars[0..<cut])
+            let prefix = b.lead + " " + typed
+            let partial = typed
+
+            let off = await genPerso(prefix: prefix, strength: 0, promote: false)
+            let promo = await genPerso(prefix: prefix, strength: effStrength, promote: true)
+
+            // LOGSEL : candidats = greedy(perso OFF) ∪ dico, rerank logprob.
+            var cand = Set<String>()
+            if !off.isEmpty { cand.insert(off) }
+            if let suf = wordCompleter.completion(for: prefix), !suf.isEmpty { cand.insert(partial + suf) }
+            let valid = cand.filter { validExtends(partial: partial, modal: $0) }
+            var scored: [(String, Double)] = []
+            for w in valid { if let s = await score(prefix: prefix, word: w) { scored.append((w, s)) } }
+            scored.sort { $0.1 > $1.1 }
+            let logsel = scored.first?.0 ?? ""
+
+            // HYBRIDE : si PROMO a sorti le terme, on l'ajoute aux candidats et on
+            // le PRÉFÈRE (la promotion atteste un terme appris ; le logprob base
+            // le sous-estime structurellement). Sinon, on retombe sur LOGSEL.
+            let hybrid: String
+            if hitsBrand(promo, b.term) { hybrid = promo }
+            else { hybrid = logsel }
+
+            let oOK = hitsBrand(off, b.term), pOK = hitsBrand(promo, b.term)
+            let lOK = hitsBrand(logsel, b.term), hOK = hitsBrand(hybrid, b.term)
+            if oOK { offHits += 1 }; if pOK { promoHits += 1 }
+            if lOK { logselHits += 1 }; if hOK { hybridHits += 1 }
+            err("  \(pad(b.term, 14)) typed=\(pad(typed, 6)) | OFF=\(pad(off.isEmpty ? "∅" : off, 12))\(oOK ? "✓" : " ") PROMO=\(pad(promo.isEmpty ? "∅" : promo, 12))\(pOK ? "✓" : " ") LOGSEL=\(pad(logsel.isEmpty ? "∅" : logsel, 12))\(lOK ? "✓" : " ") HYB=\(hOK ? "✓" : "✗")")
+        }
+    }
+    err("\nRÉSULTAT MARQUES (\(n) cas mid-word) :")
+    err("  OFF (modèle seul)      : \(offHits)/\(n)")
+    err("  PROMO (n-gram)         : \(promoHits)/\(n)   ← levier marques")
+    err("  LOGSEL (log-prob+dico) : \(logselHits)/\(n)   ← levier mots communs (démote les marques ?)")
+    err("  HYBRIDE (promo→logsel) : \(hybridHits)/\(n)   ← routage")
+    exit(0)
+}
+
 // ── Mode INTENTION (MW_INTENT=1) : un ghost mid-mot LONG porte-t-il la bonne
 // INTENTION sur des phrases FR génériques ? Approche SIMPLE évaluée : un seul
 // `generate` greedy healed (maxTokens MW_LG_MAXTOKENS), post-traité en

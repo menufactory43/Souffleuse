@@ -195,6 +195,57 @@ extension SuggestionPolicy {
             ProcessInfo.processInfo.environment["SOUFFLEUSE_MIDWORD_ESCALATION_OFF"] == nil
         }
 
+        // MARK: - No-context strict gate (KeyType empty-prefix parity)
+
+        /// Garde stricte « pas de contexte ⇒ pas de ghost », parité KeyType.
+        /// **OFF par défaut** (env absente) ⇒ le gate field-hint actuel reste seul,
+        /// comportement byte-identique. `SOUFFLEUSE_NOCONTEXT_STRICT=1` ⇒ on bloque
+        /// AUSSI quand le préfixe n'a pas de signal lexical réel
+        /// (`SuggestionPolicy.hasLexicalContext`), MÊME avec un hint de champ faible
+        /// (placeholder/role) — la cause n°1 des ghosts « fortune cookie ».
+        /// Env-overridable pour l'A/B live sans rebuild (même pattern que les autres flags).
+        public static var noContextStrictGateEnabled: Bool {
+            ProcessInfo.processInfo.environment["SOUFFLEUSE_NOCONTEXT_STRICT"] != nil
+        }
+
+        /// Nombre minimal de mots de CONTENU (non stop-word, ≥2 lettres) requis
+        /// dans le préfixe pour autoriser une génération libre quand le gate strict
+        /// est actif. 1 = au moins un vrai mot. Env `SOUFFLEUSE_NOCONTEXT_MINTOKENS`.
+        public static var noContextMinContentTokens: Int {
+            if let s = ProcessInfo.processInfo.environment["SOUFFLEUSE_NOCONTEXT_MINTOKENS"],
+               let v = Int(s) { return max(1, v) }
+            return 1
+        }
+
+        // MARK: - Blended retrieval (KeyType perso mix, count=1)
+
+        /// Active le retrieval few-shot BLENDÉ (`rankBlended` : pertinence + récence
+        /// + longueur) à la place du `rank` Jaccard-pur. **OFF par défaut** ⇒ le
+        /// retrieval actuel (Jaccard top-K) reste, comportement byte-identique.
+        /// `SOUFFLEUSE_BLENDED_RETRIEVAL=1` ⇒ parmi les exemples PERTINENTS (même
+        /// filtre `minRelevanceScore`), on privilégie les démonstrations récentes et
+        /// informatives — le levier perso qui marche dès count=1 (vs promotion n-gram
+        /// qui exige count≥3).
+        public static var blendedRetrievalEnabled: Bool {
+            ProcessInfo.processInfo.environment["SOUFFLEUSE_BLENDED_RETRIEVAL"] != nil
+        }
+
+        /// Poids du bonus de récence dans le blend (multiplicatif). `MW`-style env
+        /// override pour l'A/B. 0.3 = un exemple le plus récent vaut jusqu'à +30 %.
+        public static var retrievalRecencyWeight: Double {
+            if let s = ProcessInfo.processInfo.environment["SOUFFLEUSE_RETRIEVAL_RECENCY"],
+               let v = Double(s) { return v }
+            return 0.3
+        }
+
+        /// Poids du bonus de longueur dans le blend. 0.2 = un exemple long
+        /// (≥ saturation) vaut jusqu'à +20 %.
+        public static var retrievalLengthWeight: Double {
+            if let s = ProcessInfo.processInfo.environment["SOUFFLEUSE_RETRIEVAL_LENGTH"],
+               let v = Double(s) { return v }
+            return 0.2
+        }
+
         /// Fast-accept : un mot greedy/healed valide ET prolongeant le partiel, à
         /// confiance top-1 ≥ ce seuil ET sur un fragment ≥ `escMinFastLen`, est
         /// montré DIRECT (0 branche). 0.85 = plancher mesuré : sous ce seuil un mot

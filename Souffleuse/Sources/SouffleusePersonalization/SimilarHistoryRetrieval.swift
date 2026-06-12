@@ -127,6 +127,67 @@ public enum SimilarHistoryRetrieval {
         return scored.prefix(limit).map { $0.entry }
     }
 
+    /// Saturation de longueur (chars) pour le bonus « exemple long ». Au-delà,
+    /// le bonus plafonne — un exemple de 200 chars ne vaut pas plus qu'un de 120.
+    public static let lengthSaturationChars: Double = 120
+
+    /// **Mix retrieval KeyType (count=1).** La promotion n-gram exige la récurrence
+    /// (`count ≥ 3`) ; la retrieval few-shot, elle, fait resurgir un terme/registre
+    /// tapé UNE SEULE FOIS — c'est le levier perso qui marche en usage réel
+    /// non-répétitif. Comme `rank`, on GARDE le filtre de pertinence
+    /// (`minRelevanceScore`) en primaire — pas d'injection de bruit non-corrélé
+    /// (mesuré nocif côté PVM). Mais parmi les entrées PERTINENTES, on départage
+    /// façon KeyType : récence + longueur (démonstrations récentes et informatives
+    /// l'emportent sur les vieilles/courtes à pertinence ~égale).
+    ///
+    /// Blend MULTIPLICATIF (`jaccard * (1 + wRecency*récenceNorm + wLength*longueurNorm)`)
+    /// → la pertinence reste dominante : un nudge ne peut pas faire remonter une
+    /// entrée beaucoup moins pertinente, seulement réordonner les quasi-ex æquo.
+    /// `now` est injecté (testabilité ; pas de `Date()` caché).
+    public static func rankBlended(
+        entries: [TypingHistoryEntry],
+        userTail: String,
+        limit: Int,
+        recencyWeight: Double,
+        lengthWeight: Double,
+        now: Date
+    ) -> [TypingHistoryEntry] {
+        let tailTokens = Set(tokenize(userTail))
+        guard !tailTokens.isEmpty, limit > 0 else { return [] }
+
+        struct Scored { let blended: Double; let entry: TypingHistoryEntry }
+        var relevant: [Scored] = []
+        relevant.reserveCapacity(entries.count)
+        // Borne de récence sur l'ENSEMBLE pertinent : on normalise l'âge entre la
+        // plus vieille et la plus récente entrée retenue (réordonnancement relatif).
+        var oldest = now.timeIntervalSinceReferenceDate
+        var newest = now.timeIntervalSinceReferenceDate
+
+        // 1ère passe : filtre pertinence + collecte jaccard + bornes de récence.
+        var jaccards: [(Double, TypingHistoryEntry)] = []
+        for entry in entries {
+            let joined = entry.contextBefore.isEmpty
+                ? entry.accepted : entry.contextBefore + " " + entry.accepted
+            let score = jaccard(tailTokens, Set(tokenize(joined)))
+            guard score >= minRelevanceScore else { continue }
+            jaccards.append((score, entry))
+            let t = entry.timestamp.timeIntervalSinceReferenceDate
+            oldest = Swift.min(oldest, t)
+            newest = Swift.max(newest, t)
+        }
+        let span = Swift.max(1, newest - oldest)   // évite la division par 0
+
+        // 2ᵉ passe : blend récence + longueur (nudges multiplicatifs).
+        for (score, entry) in jaccards {
+            let recencyNorm = (entry.timestamp.timeIntervalSinceReferenceDate - oldest) / span
+            let lengthNorm = Swift.min(1.0, Double(entry.accepted.count) / lengthSaturationChars)
+            let blended = score * (1 + recencyWeight * recencyNorm + lengthWeight * lengthNorm)
+            relevant.append(Scored(blended: blended, entry: entry))
+        }
+        relevant.sort { $0.blended > $1.blended }
+        return relevant.prefix(limit).map(\.entry)
+    }
+
     /// Construit le bloc d'exemples few-shot prêt à coller dans le prompt,
     /// avec un cap dur sur la longueur totale (drop des moins similaires
     /// si dépassement). Chaque exemple sur sa propre ligne, format brut
