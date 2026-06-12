@@ -1378,6 +1378,11 @@
     color: var(--ink-faint);
   }
   .vue-num { font-weight: 700; font-variant-numeric: tabular-nums; }
+  /* La palette des favoris : une touche par emoji, posée comme une rangée
+     de touches de clavier. */
+  .vue-picker { display: inline-flex; align-items: center; gap: 0.75em; flex-wrap: wrap; }
+  .vue-pick { white-space: nowrap; }
+  .vue-pick kbd { margin-right: 0.3em; }
   .feature__vue kbd { font-size: 0.68rem; padding: 0.02rem 0.35rem; }
   .feature__vue .caret { height: 0.95em; }
   /* Sur le fond encre de la carte large, pas de vignette : elle reste prose. */
@@ -1794,9 +1799,9 @@
           <span class="feature__num">v.</span>
           <h3>La relecture, dans le bon ton</h3>
           <p class="feature__lede">Votre phrase, relue selon l'app.</p>
-          <p>Un même mot ne se dit pas pareil dans Mail et dans Messages. Sur demande, elle relit votre phrase et la reformule dans le ton du lieu : posé pour un client, léger pour un proche. Toujours vos mots, mieux placés.</p>
+          <p>Un même mot ne se dit pas pareil dans Mail et dans Messages. Tapez <span class="shortcode">//</span> : elle relit votre phrase et la reformule dans le ton du lieu (posé pour un client, léger pour un proche), ou la resserre si elle s'étire. Toujours vos mots, mieux placés.</p>
           <p class="feature__vue" aria-hidden="true">
-            <span class="vue-scene">Relu pour : Mail, à un client</span>
+            <span class="vue-scene"><span class="shortcode">//</span> : relu pour Mail, à un client</span>
             <span class="vue-avant">« On se capte demain pour le devis ? »</span><span class="vue-fleche">→</span><span class="vue-apres">« Pourrions-nous échanger demain au sujet du devis ? »</span>
           </p>
         </li>
@@ -1804,7 +1809,7 @@
           <span class="feature__num">vi.</span>
           <h3>La traduction, soufflée aussi</h3>
           <p class="feature__lede">La langue de chaque conversation, retenue.</p>
-          <p>Une conversation en anglais, une autre en espagnol ? Choisissez la langue d'une conversation, une seule fois : elle traduit ensuite au fil de l'échange, dans un petit panneau discret, sans que rien ne parte nulle part.</p>
+          <p>Une conversation en anglais, une autre en espagnol ? Choisissez la langue d'une conversation, une seule fois : elle traduit ensuite au fil de l'échange, dans un petit panneau discret, sans que rien ne parte nulle part. Un <span class="shortcode">//</span> la convoque aussi, à la demande.</p>
           <p class="feature__vue" aria-hidden="true">
             <span class="vue-scene">Conversation réglée sur : anglais</span>
             <span class="vue-avant">« On se voit toujours jeudi ? »</span><span class="vue-fleche">→</span><span class="vue-apres">“Are we still on for Thursday?”</span>
@@ -1814,22 +1819,23 @@
           <span class="feature__num">vii.</span>
           <h3>Les coquilles, rattrapées au vol</h3>
           <p class="feature__lede">La faute de frappe, corrigée en passant.</p>
-          <p>Un mot tapé trop vite, deux lettres inversées ? Elle reconnaît la coquille et souffle la suite avec le mot rétabli, sans s'arrêter ni vous le faire remarquer.</p>
+          <p>Un mot tapé trop vite, deux lettres inversées ? Elle reconnaît la coquille, souffle la suite avec le mot juste, et Tab rétablit tout au passage, sans vous le faire remarquer.</p>
           <p class="feature__vue" aria-hidden="true">
             <span class="vue-scene">Tapé trop vite</span>
             <span class="vue-typed">Voici notre <span class="vue-typo">porposition</span></span><span class="caret" aria-hidden="true"></span><span class="vue-souffle">&nbsp;tarifaire pour le mois de juin.</span>
-            <span class="vue-note">Elle a lu « proposition », et n'en dira rien.</span>
+            <span class="vue-note"><kbd>Tab</kbd> prend la suite et rétablit « proposition ».</span>
           </p>
         </li>
         <li class="feature">
           <span class="feature__num">viii.</span>
           <h3>L'emoji, au mot près</h3>
           <p class="feature__lede">Le bon emoji, sans quitter le clavier.</p>
-          <p>Écrivez le mot, elle vous tend l'emoji, à prendre d'un Tab comme le reste. La palette peut rester fermée. Et elle vous suit que vous écriviez en français, en anglais, ou les deux dans la même phrase.</p>
+          <p>Tapez deux-points : la palette s'ouvre là où vous écrivez, vos favoris en première ligne. Une touche, de 1 à 5, et l'emoji est posé. Et elle vous suit que vous écriviez en français, en anglais, ou les deux dans la même phrase.</p>
           <p class="feature__vue" aria-hidden="true">
             <span class="vue-scene">Messages, entre amis</span>
-            <span class="vue-typed">On a signé&nbsp;!</span><span class="caret" aria-hidden="true"></span><span class="vue-souffle">&nbsp;🎉</span>
-            <span class="vue-note"><kbd>Tab</kbd>, et il est posé.</span>
+            <span class="vue-typed">On a signé <span class="shortcode">:</span></span><span class="caret" aria-hidden="true"></span>
+            <span class="vue-picker"><span class="vue-pick"><kbd>1</kbd>🎉</span><span class="vue-pick"><kbd>2</kbd>❤️</span><span class="vue-pick"><kbd>3</kbd>👍</span><span class="vue-pick"><kbd>4</kbd>😅</span><span class="vue-pick"><kbd>5</kbd>🙏</span></span>
+            <span class="vue-note">Une touche, et c'est posé.</span>
           </p>
         </li>
         <li class="feature">
