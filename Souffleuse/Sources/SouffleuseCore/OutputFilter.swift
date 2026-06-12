@@ -356,6 +356,21 @@ public enum OutputFilter {
         return s
     }
 
+    /// True quand le ghost trimé est NON-VIDE mais ne contient ni lettre ni
+    /// chiffre — ponctuation/symboles purs (" .", " :", "…", ")"). Sûr à
+    /// TOUTES les positions du caret par construction : une continuation
+    /// légitime (fin de mot, mot suivant, nombre) porte toujours au moins une
+    /// lettre ou un chiffre. C'est la branche « aucune lettre » de
+    /// `isDegenerateGhost`, extraite seule pour le chemin beam mid-mot, où le
+    /// `isDegenerateGhost` complet est inapplicable (`isFragmentedGhost` y
+    /// condamnerait des continuations légitimes : "r la suite" complétant
+    /// "pou"). Vide → false (le vide est géré par les gardes `isEmpty`).
+    public nonisolated static func isPunctuationOnlyGhost(_ s: String) -> Bool {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return false }
+        return t.allSatisfy { !$0.isLetter && !$0.isNumber }
+    }
+
     /// True when the filtered ghost is a *bare* enumerator / number /
     /// list-marker with no real word behind it — e.g. "1", "1.", "12)",
     /// "1er", "100%", "1/2", "-", "•", or pure punctuation.
