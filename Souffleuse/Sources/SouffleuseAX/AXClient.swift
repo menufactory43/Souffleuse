@@ -396,6 +396,19 @@ public final class AXClient: @unchecked Sendable {
                 return false
             }
 
+            // Cible dans NOTRE propre process (essai réel de l'onboarding) : le
+            // write AX self-adressé est servi par notre main thread, souvent
+            // occupé par l'UI au moment de l'accept. Le verify-read à 50 ms lit
+            // alors l'ANCIENNE valeur et le fallback clavier ré-injecte par-
+            // dessus le write finalement appliqué → doublon (« un  un »,
+            // constaté dans le champ d'essai, 2026-06-12). Les keystrokes
+            // synthétiques marqués passent par la boucle d'événements normale :
+            // une seule écriture, pas de course.
+            var targetPid: pid_t = 0
+            if AXUIElementGetPid(element, &targetPid) == .success, targetPid == getpid() {
+                return injectViaCGEvent(text)
+            }
+
             let textBefore = copyStringAttr(element, kAXValueAttribute) ?? ""
             let status = AXUIElementSetAttributeValue(
                 element,
