@@ -238,3 +238,102 @@ if showExamples && !bExamples.isEmpty {
     }
 }
 print("════════════════════════════════════════════════════════\n")
+
+// ════════════ PASS C — repro mid-word noms-propres (opt-in) ══════════════════
+// SOUFFLEUSE_MIDWORD_PROBE=1 : la question décisive de l'enquête « Elon Mua au
+// lieu de Musk ». Pour chaque préfixe finissant EN MILIEU d'un nom propre, on
+// génère le ghost à 3 conditions × {next-word, mid-word (healing)} :
+//   base   strength 0                      (modèle seul — counterfactual)
+//   doux   strength = user × scale, promo off
+//   promo  strength = user × scale, promo on
+// On marque CORROMPU si le ghost recollé au préfixe NE reconstruit PAS le nom
+// propre attendu. But : isoler si la corruption vient du base ou de la perso.
+//   SOUFFLEUSE_PERSO_STRENGTH=1.58  (ta valeur réelle ; défaut 1.0)
+//   SOUFFLEUSE_MIDWORD_PREFIXES="Elon Mu=Musk|… "  (override, séparé par |)
+if env["SOUFFLEUSE_MIDWORD_PROBE"] == "1" {
+    await engine.setCorpus(all.map(corpusString))   // corpus = tout l'historique réel
+    let userStrength = Float(env["SOUFFLEUSE_PERSO_STRENGTH"] ?? "1.0") ?? 1.0
+    let effective = userStrength * LlamaSampling.personalizationGainScale
+
+    // (préfixe-mid-word, mot complet attendu). Le préfixe finit À L'INTÉRIEUR du
+    // mot attendu — c'est le cas où le healing s'arme et où « Mua » est apparu.
+    struct MW { let prefix: String; let expect: String }
+    let defaults: [MW] = [
+        .init(prefix: "Le patron de Tesla c'est Elon Mu", expect: "Musk"),
+        .init(prefix: "Le patron de Tesla c'est Elon Mus", expect: "Musk"),
+        .init(prefix: "j'ai répondu à Elon Mu", expect: "Musk"),
+        .init(prefix: "le compte de Elon Mus", expect: "Musk"),
+        .init(prefix: "on en a parlé avec Elon M", expect: "Musk"),
+    ]
+    let cases: [MW] = {
+        guard let raw = env["SOUFFLEUSE_MIDWORD_PREFIXES"], !raw.isEmpty else { return defaults }
+        return raw.split(separator: "|").compactMap { seg in
+            let kv = seg.split(separator: "=", maxSplits: 1)
+            guard kv.count == 2 else { return nil }
+            return MW(prefix: String(kv[0]), expect: String(kv[1]))
+        }
+    }()
+
+    func genMW(_ prefix: String, strength: Float, promote: Bool, midword: Bool) async -> String {
+        let heal = midword ? OutputFilter.trailingPartialWord(prefix) : ""
+        let prompt = LlamaPromptBuilder.buildLlamaPrompt(
+            system: "", customInstr: "", ctxPrefix: "", fieldContext: "",
+            afterCursor: "", beforeCursor: prefix
+        )
+        final class Acc: @unchecked Sendable { var t = "" }
+        let acc = Acc()
+        _ = await engine.generate(
+            prompt: prompt, maxTokens: 6,
+            sampling: LlamaSampling(
+                temperature: 0, repeatPenalty: 1.3, repeatLastN: 64,
+                personalizationStrength: strength,
+                banMarkup: true, banDigitsLeading: true, banEmoji: true,
+                promoteStrongMatches: promote,
+                minFirstTokenProb: 0.0001,
+                healPrefix: heal.isEmpty ? nil : heal
+            )
+        ) { tok in acc.t += tok; return true }
+        return acc.t.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? acc.t
+    }
+
+    // Recolle ghost au préfixe et regarde si le nom propre attendu est reconstruit.
+    // En mid-word le ghost complète le mot partiel ; en next-word il suit le préfixe.
+    func reconstructs(prefix: String, ghost: String, expect: String, midword: Bool) -> Bool {
+        let glued = midword ? (prefix + ghost) : (prefix + ghost)
+        return glued.lowercased().contains(expect.lowercased())
+    }
+
+    struct CondCount { var corrupt = 0; var total = 0 }
+    var tally: [String: CondCount] = [:]
+    let conds: [(String, Float, Bool)] = [
+        ("base   (s=0)        ", 0, false),
+        ("doux   (s=\(userStrength),promo-) ", effective, false),
+        ("promo  (s=\(userStrength),promo+) ", effective, true),
+    ]
+
+    print("\n════════════ PASS C · repro mid-word noms-propres ════════════")
+    print("user strength: \(userStrength) → effective \(effective)  |  corpus = \(all.count) entrées réelles")
+    for c in cases {
+        print("\n  préfixe «…\(String(c.prefix.suffix(38)))|»   attendu: \(c.expect)")
+        for mode in [false, true] {
+            let tag = mode ? "mid " : "next"
+            for (label, s, promo) in conds {
+                let g = await genMW(c.prefix, strength: s, promote: promo, midword: mode)
+                let ok = reconstructs(prefix: c.prefix, ghost: g, expect: c.expect, midword: mode)
+                let key = "\(tag) | \(label)"
+                tally[key, default: CondCount()].total += 1
+                if !ok { tally[key, default: CondCount()].corrupt += 1 }
+                print("    [\(tag)] \(label) \(ok ? "✓" : "✗ CORROMPU")  →\(g.debugDescription)")
+            }
+        }
+    }
+    print("\n  ── agrégat corruption (corrompu / total) ──")
+    for key in tally.keys.sorted() {
+        let c = tally[key]!
+        print("    \(key) : \(c.corrupt)/\(c.total)")
+    }
+    print("\n  LECTURE : si 'base (s=0)' corrompt AUTANT que 'doux/promo', la perso est")
+    print("  BLANCHIE — c'est le modèle de base qui hallucine le nom propre mid-word.")
+    print("  Si seules les conditions perso corrompent → la perso est en cause.")
+    print("════════════════════════════════════════════════════════\n")
+}

@@ -523,9 +523,23 @@ final class PredictorViewModel {
         // affichée, fallback du stream LLM, décision stale-clear) voient le même
         // ghost dédupliqué. Un recall qui n'est QUE la répétition s'effondre à ""
         // et le garde `!instantGhost.isEmpty` le saute (le LLM reprend la main).
-        let instantGhost: String = SuggestionPolicy.dedupLeadingRepeat(
-            ghost: ModelRuntime.OutputFilter.singleLine(routeResult?.text ?? ""),
+        // Le chemin instant/recall (L0 lexique / L1 corpus) rejouait le rappel
+        // VERBATIM, sans les filtres de sortie appliqués au stream LLM — d'où des
+        // fuites observées en prod : markup HTML (« <strong>mot</strong> ») et runs
+        // de chiffres absurdes rejoués depuis l'historique. On applique ici le MÊME
+        // strip-markup + coupe-chiffres-absurdes que le chemin LLM (cf. ChunkFilter)
+        // pour la parité de filtrage avant affichage.
+        let instantRaw: String = SuggestionPolicy.dedupLeadingRepeat(
+            ghost: ModelRuntime.OutputFilter.cutAbsurdNumberRun(
+                ModelRuntime.OutputFilter.stripMarkup(
+                    ModelRuntime.OutputFilter.singleLine(routeResult?.text ?? ""))),
             userTail: userTail)
+        // Garde de cohérence MID-MOT aussi sur le chemin instant : un rappel corpus
+        // (terme composé : « plus-val| » → « eurs ») peut démarrer par une espace en
+        // plein mot et casser le mot. On le neutralise (→ "") pour que l'escalade LLM
+        // (elle-même protégée par `breaksMidWord`) reprenne la main, plutôt que
+        // d'afficher « plus-val eurs ». No-op hors mid-mot et pour un ghost normal.
+        let instantGhost: String = Self.breaksMidWord(userTail: userTail, ghost: instantRaw) ? "" : instantRaw
         let instantSource: SuggestionSource = routeResult?.source ?? .none
         if !instantGhost.isEmpty, let route = routeResult {
             // Narrow stability gate : only block when this predict and the
@@ -1292,6 +1306,18 @@ final class PredictorViewModel {
                     GhostInspector.shared.record(tail: userTail, verdict: .stub, source: .llm, reason: "stub_1char", content: ghostText)
                     return
                 }
+                // Garde de cohérence MID-MOT : un ghost qui démarre par une ESPACE
+                // alors que le curseur est en plein mot casse le mot une fois recollé
+                // (« nor| » + « maux » → « nor maux », « rendez-v| » + « û », « Elon Mu| »
+                // + « ş » sans perso). Le healing devrait l'empêcher mais le filtre de
+                // chunk conserve l'espace de tête en mid-mot. Mieux vaut NE RIEN afficher
+                // qu'un mot cassé → on droppe le chunk (retour au ghost instant).
+                if Self.breaksMidWord(userTail: userTail, ghost: ghostText) {
+                    PredictDebug.log("chunk_midword_drop", "reason=space_head ghost=\(ghostText.debugDescription) userTail=\(userTail.debugDescription)")
+                    GhostInspector.shared.record(tail: userTail, verdict: .gated, source: .llm,
+                                                 reason: "midword_space_head", content: ghostText)
+                    return
+                }
                 let fromHigh = (self.suggestionSource == .history
                              || self.suggestionSource == .cache
                              || self.suggestionSource == .undoCache)
@@ -1637,6 +1663,19 @@ final class PredictorViewModel {
             return target
         }
         return previous
+    }
+
+    /// Cohérence MID-MOT, mutualisée entre TOUS les chemins d'émission (instant
+    /// /recall ET stream LLM). Quand le curseur est À L'INTÉRIEUR d'un mot, le
+    /// ghost doit CONTINUER ce mot (commencer par une lettre). Un ghost qui démarre
+    /// par une ESPACE abandonne le partiel tapé et casse le mot une fois recollé
+    /// (« nor| »+« maux » → « nor maux », « plus-val| »+« eurs »). Renvoie `true`
+    /// quand le ghost doit être DROPPÉ (mid-mot + tête = espace). Laisse passer les
+    /// complétions normales (« Led »→« ger ») et les boundaries (partiel vide).
+    static func breaksMidWord(userTail: String, ghost: String) -> Bool {
+        guard !ModelRuntime.OutputFilter.trailingPartialWord(userTail).isEmpty else { return false }
+        guard let head = ghost.first else { return false }
+        return head == " " || head == "\t"
     }
 
     static func isNextWordStub(userTail: String, ghost: String) -> Bool {
