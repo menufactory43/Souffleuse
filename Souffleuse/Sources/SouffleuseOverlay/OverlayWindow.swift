@@ -421,32 +421,35 @@ public final class OverlayWindow {
         return CGRect(x: rect.origin.x + measured, y: rect.origin.y, width: 1, height: rect.height)
     }
 
-    /// Estimate a usable font size when AX doesn't expose the host font.
-    /// AX caret rects are typically the line height; line-height ≈ font-size
-    /// × 1.2 for the system text rendering stack, so dividing inverts that.
-    /// We divide by 1.1 (not the strict 1.2) on purpose: web/Electron line
-    /// boxes run tighter than the system stack, and the user prefers a ghost a
-    /// hair LARGER than the host text rather than slightly smaller.
+    /// Estimate a usable font size when AX doesn't expose the host font —
+    /// the *only* path for Chromium/Electron web hosts, which (measured
+    /// 13/06/2026, see below) never expose a caret font through AX in ANY
+    /// form: NSRange `AXAttributedStringForRange` returns nil, and the
+    /// `AXTextMarker` family either refuses (`AXStartTextMarkerForTextMarkerRange`
+    /// → noValue in Brave/Slack/Signal) or returns an attributed string with
+    /// the `.font` attribute stripped. So we must derive the size from the one
+    /// reliable signal these hosts DO give: the caret rect height.
+    ///
+    /// That rect is the **line box**, not the font size. Live measurement of
+    /// the rendered glyphs (ghost vs host text, pixel-measured screenshots in
+    /// Slack, Brave, Signal) put the ratio at ~1.27 — i.e. a 19 px caret rect
+    /// in Slack is a 15 pt (Lato) font. The previous ÷1.05 treated the rect as
+    /// if it were the font box, rendering the ghost ~1.27× TOO BIG in every
+    /// Chromium/Electron host (the bug this fixes). 1.27 is a clean typographic
+    /// constant (≈ the default chat-composer line-height) and matched all three
+    /// apps within measurement error.
     ///
     /// The upper clamp is a conservative 20pt (not 64pt). On empty lines and
     /// at the start of a new paragraph some apps (Notes, TextEdit) return a
     /// line-box rect whose height is the full paragraph leading, not the font
-    /// size — feeding that into height/1.1 would produce a ghost ~3× too big.
-    /// The per-bundle reliable-font cache in `SouffleuseAppDelegate` is the
-    /// primary mitigation (it remembers the last trustworthy AX font for each
-    /// app); this 20pt cap is the secondary safety net so the fallback path
-    /// can never blow up the overlay beyond a readable body-text size.
+    /// size — feeding that in would produce a ghost ~3× too big. The per-bundle
+    /// reliable-font cache in `SouffleuseAppDelegate` is the primary mitigation;
+    /// this clamp is the secondary safety net.
+    static let caretRectToFontRatio: CGFloat = 1.27
     static func estimatedFont(forCaretRectHeight height: CGFloat) -> NSFont? {
         guard height > 1 else { return nil }
-        // ÷1,05 — encadré empiriquement (UAT 11/06, Intercom) : ÷1,1 rendait le
-        // ghost ~10 % trop PETIT, ÷1,0 légèrement trop GROS. Les rects Chromium
-        // oscillent entre « hauteur de police » et « hauteur de ligne » selon le
-        // champ ; 1,05 borne l'erreur à ~±5 % dans les deux sens. Ce chemin ne
-        // sert qu'aux hôtes web (le natif fournit la police AX) ; la voie
-        // durable pour un match exact reste la calibration OCR par app
-        // (CaretResolver.CalibratedMetrics), prioritaire quand elle existe.
-        let estimated = height / 1.05
-        let clamped = max(12, min(20, estimated))
+        let estimated = height / caretRectToFontRatio
+        let clamped = max(11, min(20, estimated))
         return .systemFont(ofSize: clamped)
     }
 
