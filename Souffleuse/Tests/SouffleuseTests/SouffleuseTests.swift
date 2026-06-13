@@ -33,10 +33,11 @@ import Testing
 
 @MainActor
 @Test func overlayEstimatedFontSplitsWebCaretRectVariance() {
-    // ÷1,27 — la hauteur du rect AX est la *boîte de ligne*, pas la police
-    // (mesuré au pixel le 13/06/2026 : ghost vs texte hôte dans Slack/Brave/
-    // Signal, ratio ~1,27 ; Slack 19px → 15pt Lato). L'ancien ÷1,05 rendait
-    // le ghost ~1,27× trop gros sur tout hôte Chromium/Electron. 18 → ~14,17.
+    // ÷1,15 — la hauteur du rect AX est la *boîte de ligne*, pas la police.
+    // Mesuré au pixel le 13/06/2026 (ghost vs cap-height du texte hôte) dans
+    // les deux hôtes sans police AX : Signal (Electron, caret 17px → ~15pt) et
+    // Intercom/Brave (Chromium) — les deux convergent à ~1,15. L'ancien 1,27
+    // rendait le ghost ~10–15 % trop petit. 18 → ~15,65.
     let f = OverlayWindow.estimatedFont(forCaretRectHeight: 18)
     #expect(f != nil)
     #expect(abs((f?.pointSize ?? 0) - 18.0 / OverlayWindow.caretRectToFontRatio) < 0.01)
