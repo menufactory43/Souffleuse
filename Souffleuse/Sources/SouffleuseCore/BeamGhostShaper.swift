@@ -206,21 +206,66 @@ public enum BeamGhostShaper {
     /// texte existant ; un rang 2/3 propose autre chose).
     public nonisolated static func selectGhost(
         rawCandidates: [String], isBoundary: Bool, caretAfterSpace: Bool,
-        userTail: String, maxWords: Int, afterCaret: String?
+        userTail: String, maxWords: Int, afterCaret: String?, trimDanglingTail: Bool = false
     ) -> String {
         guard sameLineAfterCaret(afterCaret) != nil else {
             return beamPostFilter(
                 rawGhost: rawCandidates.first ?? "", isBoundary: isBoundary,
-                caretAfterSpace: caretAfterSpace, userTail: userTail, maxWords: maxWords)
+                caretAfterSpace: caretAfterSpace, userTail: userTail, maxWords: maxWords,
+                trimDanglingTail: trimDanglingTail)
         }
         for raw in rawCandidates {
             let filtered = beamPostFilter(
                 rawGhost: raw, isBoundary: isBoundary,
-                caretAfterSpace: caretAfterSpace, userTail: userTail, maxWords: maxWords)
+                caretAfterSpace: caretAfterSpace, userTail: userTail, maxWords: maxWords,
+                trimDanglingTail: trimDanglingTail)
             let cut = afterCaretEchoCut(ghost: filtered, afterCaret: afterCaret)
             if !cut.isEmpty { return cut }
         }
         return ""
+    }
+
+    // MARK: - Cap « Long » + trim-arrière au dernier stop propre
+
+    /// Pref « Long » : le beam GÉNÈRE jusqu'à `longGhostMaxWords` (au lieu du cap
+    /// court par défaut) puis `trimBackToCleanStop` rogne la queue. Validé par
+    /// `SouffleuseMaxWordsEval` (commit eval) : 8 = dernier cap avant que la
+    /// dérive (bigramme répété) ne décolle (~+40 ms vs Moyen, ~18 ms/mot linéaire).
+    /// `triggerWords` sépare Long (request.maxWords 20) de Moyen (3) sans toucher
+    /// le mapping `PreferencesStore`. `maxTokens = maxWords×4+2` (mot long FR ≤ 4 tok).
+    public static let longGhostTriggerWords = 6
+    public static let longGhostMaxWords = 8
+    public static let longGhostMaxTokens = longGhostMaxWords * 4 + 2
+
+    /// Mots-outils FR : un ghost long qui se termine là-dessus est tronqué de façon
+    /// incohérente (« …pour la », « …et »). `trimBackToCleanStop` les lâche en fin.
+    private static let trailingFunctionWords: Set<String> = [
+        "le", "la", "les", "l", "un", "une", "des", "de", "du", "d", "au", "aux",
+        "et", "ou", "à", "en", "que", "qui", "dans", "sur", "sous", "pour", "par",
+        "avec", "sans", "ce", "cet", "cette", "ces", "mon", "ma", "mes", "ton",
+        "ta", "tes", "son", "sa", "ses", "notre", "votre", "leur", "leurs", "ne",
+        "se", "je", "tu", "il", "elle", "on", "nous", "vous", "ils", "elles", "ni",
+        "car", "donc", "mais", "or", "puis", "afin", "vers", "chez", "est", "a",
+        "ont", "sont", "qu",
+    ]
+
+    private static func normalizedTailWord(_ s: Substring) -> String {
+        s.lowercased().trimmingCharacters(in: .punctuationCharacters)
+    }
+
+    /// Trim-arrière : on a généré jusqu'au cap, on RECULE jusqu'au dernier stop
+    /// propre (on lâche les mots-outils et tokens ponctuation-seuls traînants). Ne
+    /// raccourcit QUE quand la fin est bancale — « lien vers le site de la » →
+    /// « lien vers le site » ; « informe que » → « informe ». Une fin sur `.!?`
+    /// (phrase finie) est PRÉSERVÉE. La virgule reste attachée au mot.
+    public nonisolated static func trimBackToCleanStop(_ ghost: String) -> String {
+        var parts = ghost.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
+        while let last = parts.last {
+            if last.contains(where: { ".!?".contains($0) }) { break }   // fin propre : on garde
+            let n = normalizedTailWord(Substring(last))
+            if n.isEmpty || trailingFunctionWords.contains(n) { parts.removeLast() } else { break }
+        }
+        return parts.joined(separator: " ")
     }
 
     // MARK: - Post-filtre de sortie
@@ -232,7 +277,7 @@ public enum BeamGhostShaper {
     /// `nonisolated static` (pures fonctions OutputFilter/SuggestionPolicy).
     public nonisolated static func beamPostFilter(
         rawGhost: String, isBoundary: Bool, caretAfterSpace: Bool,
-        userTail: String, maxWords: Int
+        userTail: String, maxWords: Int, trimDanglingTail: Bool = false
     ) -> String {
         var result = OutputFilter.singleLine(rawGhost)
         if result.isEmpty { return "" }
@@ -273,6 +318,14 @@ public enum BeamGhostShaper {
         if words.count > max(1, maxWords) {
             let hadLeadingSpace = result.first == " "
             result = words.prefix(max(1, maxWords)).joined(separator: " ")
+            if hadLeadingSpace, result.first != " ", !result.isEmpty { result = " " + result }
+        }
+        // Trim-arrière (Long uniquement) : après le word-cap, on rogne la queue
+        // pendante (mots-outils traînants) pour finir sur un stop propre. Inactif
+        // par défaut → Court/Moyen byte-identiques.
+        if trimDanglingTail {
+            let hadLeadingSpace = result.first == " "
+            result = trimBackToCleanStop(result)
             if hadLeadingSpace, result.first != " ", !result.isEmpty { result = " " + result }
         }
         // Ponctuation/symboles purs (" .", " :") à TOUTE position : une frappe

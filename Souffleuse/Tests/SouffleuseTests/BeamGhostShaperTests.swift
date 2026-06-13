@@ -300,4 +300,37 @@ struct BeamGhostShaperTests {
             afterCaret: nil)
         #expect(out == "")
     }
+
+    // MARK: - Cap « Long » : trim-arrière au dernier stop propre
+
+    @Test func trimBack_dropsTrailingFunctionWords() {
+        // Queue pendante sur mots-outils → on recule jusqu'au contenu.
+        #expect(BeamGhostShaper.trimBackToCleanStop("lien vers le site de la") == "lien vers le site")
+        #expect(BeamGhostShaper.trimBackToCleanStop("votre demande, je vous informe que") == "votre demande, je vous informe")
+    }
+
+    @Test func trimBack_keepsContentEnding() {
+        // Fin déjà sur un mot de contenu : inchangé (garde toute la longueur).
+        let s = "je vous informe que le service"
+        #expect(BeamGhostShaper.trimBackToCleanStop(s) == s)
+    }
+
+    @Test func trimBack_preservesSentenceTerminal() {
+        // Fin sur ponctuation forte = phrase finie : on PRÉSERVE.
+        #expect(BeamGhostShaper.trimBackToCleanStop("est à jour ?") == "est à jour ?")
+        #expect(BeamGhostShaper.trimBackToCleanStop("bonne nouvelle.") == "bonne nouvelle.")
+    }
+
+    @Test func postFilter_trimFlagOffByteIdentical_onTrims() {
+        // Le flag `trimDanglingTail` n'altère QUE la queue pendante : OFF (défaut) =
+        // comportement historique (Court/Moyen), ON = trim (Long). Même entrée.
+        let off = BeamGhostShaper.beamPostFilter(
+            rawGhost: "informe que", isBoundary: true, caretAfterSpace: true,
+            userTail: "je ", maxWords: 8)
+        let on = BeamGhostShaper.beamPostFilter(
+            rawGhost: "informe que", isBoundary: true, caretAfterSpace: true,
+            userTail: "je ", maxWords: 8, trimDanglingTail: true)
+        #expect(off == "informe que")
+        #expect(on == "informe")
+    }
 }

@@ -1406,11 +1406,23 @@ public actor BeamGhostEngine {
     /// (actor sérialisé) ; le pool de seqIds dépend de `n_seq_max` au CHARGEMENT,
     /// pas de cette largeur, donc clamper ne casse jamais le fork KV.
     private func withConfigWidth<T>(_ maxWidth: Int?, _ body: () -> T) -> T {
-        guard let mw = maxWidth else { return body() }
+        withConfigOverrides(width: maxWidth, maxTokens: nil, maxWords: nil, body)
+    }
+
+    /// Exécute `body` avec la config temporairement surchargée puis restaurée :
+    ///  - `width` clampe le K (≥1, ≤ K de chargement) — borne dure (le pool de
+    ///    seqIds dépend de `n_seq_max` au CHARGEMENT).
+    ///  - `maxTokens`/`maxWords` peuvent au contraire AUGMENTER le cap au-delà du
+    ///    défaut (cap « Long ») : ce ne sont que des prédicats d'arrêt de la boucle
+    ///    de décodage, indépendants de `n_seq_max` — sûr tant que le budget tient
+    ///    dans `n_ctx` (chargé à 4096). nil ⇒ inchangé. Mutation sûre (actor).
+    private func withConfigOverrides<T>(width: Int?, maxTokens: Int?, maxWords: Int?,
+                                        _ body: () -> T) -> T {
+        if width == nil, maxTokens == nil, maxWords == nil { return body() }
         let saved = config
-        let w = max(1, min(mw, saved.maxSearchWidth))
-        config.maxSearchWidth = w
-        config.maxResultWidth = w
+        if let w = width { let cw = max(1, min(w, saved.maxSearchWidth)); config.maxSearchWidth = cw; config.maxResultWidth = cw }
+        if let t = maxTokens, t > 0 { config.maxTokens = t }
+        if let n = maxWords, n > 0 { config.maxWords = n }
         defer { config = saved }
         return body()
     }
@@ -1606,8 +1618,9 @@ public actor BeamGhostEngine {
     /// contexte est chargé à `n_seq_max = configK + 1`, donc tout `maxWidth` ≤ K
     /// de chargement tient sans re-créer le contexte. La mutation de `config` est
     /// sûre (actor sérialisé) et restaurée en `defer`.
-    public func ghost(prompt: String, requiredPrefix: String, maxWidth: Int) -> BeamResult {
-        withConfigWidth(maxWidth) {
+    public func ghost(prompt: String, requiredPrefix: String, maxWidth: Int,
+                      genMaxTokens: Int? = nil, genMaxWords: Int? = nil) -> BeamResult {
+        withConfigOverrides(width: maxWidth, maxTokens: genMaxTokens, maxWords: genMaxWords) {
             resetSeqPool()
             return generateBeam(prompt: prompt, requiredPrefix: requiredPrefix)
         }
@@ -1618,8 +1631,9 @@ public actor BeamGhostEngine {
     /// l'appelant utilise `advance(typedChar:)` à chaque frappe. `maxWidth` clampe
     /// le K pour CE seed (mid-mot K=3, frontière K=1) ; nil ⇒ K de la config.
     public func ghostWithReserve(prompt: String, requiredPrefix: String = "",
-                                 maxWidth: Int? = nil) -> BeamResult {
-        withConfigWidth(maxWidth) {
+                                 maxWidth: Int? = nil,
+                                 genMaxTokens: Int? = nil, genMaxWords: Int? = nil) -> BeamResult {
+        withConfigOverrides(width: maxWidth, maxTokens: genMaxTokens, maxWords: genMaxWords) {
             resetSeqPool()
             return generateBeam(prompt: prompt, requiredPrefix: requiredPrefix, captureReserve: true)
         }
