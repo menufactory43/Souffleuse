@@ -100,7 +100,21 @@ func step(overlay: OverlayWindow?) {
         }
         let effectiveRect = snap.caretRect ?? lastCaretRect[app]
         let rectStr = snap.caretRect.map(rectString) ?? (lastCaretRect[app].map { "stale:\(rectString($0))" } ?? "?")
-        line = "[\(app)] field=\(role) text=\"\(preview(text))\" caret=\(caret) rect=\(rectStr)"
+        // Font diagnostic for the ghost-size investigation: what AX reports as
+        // the caret font (name + pt), whether that name maps to a real face or
+        // silently falls back to systemFont in the overlay, and the caret rect
+        // height. Raw signal for Chrome/Slack/Signal size mismatches.
+        let rh = effectiveRect?.height ?? 0
+        let fontStr: String
+        if let f = snap.caretFont {
+            let mapped = NSFont(name: f.familyName, size: CGFloat(f.pointSize)) != nil ? "OK" : "→systemFont"
+            fontStr = " font=\"\(f.familyName)\"@\(String(format: "%.1f", f.pointSize))pt[\(mapped)] rectH=\(String(format: "%.1f", rh))"
+        } else {
+            // No AX font (Chromium/Electron web hosts) → overlay sizes the
+            // ghost from this rect height via OverlayWindow.estimatedFont.
+            fontStr = " font=NIL rectH=\(String(format: "%.1f", rh)) (→estimate)"
+        }
+        line = "[\(app)] field=\(role) text=\"\(preview(text))\" caret=\(caret) rect=\(rectStr)\(fontStr)"
         if let dismissed = dismissedForText, dismissed == text {
             // User pressed Esc; suppress ghost until the text changes.
             showGhost = false
