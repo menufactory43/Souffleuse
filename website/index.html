@@ -1497,6 +1497,36 @@
     text-decoration: none;
   }
   .skip:focus { left: 0.5rem; top: 0.5rem; }
+
+  /* ---------- La preuve, en vrai (screencast réel) ---------- */
+  .preuve { padding-block: clamp(2.5rem, 6vw, 5rem); }
+  .preuve__head { text-align: center; max-width: 46ch; margin-inline: auto; }
+  .preuve__title {
+    font-family: var(--display); font-weight: 700;
+    font-size: clamp(1.9rem, 1.2rem + 3vw, 3.3rem); line-height: 1.08;
+    margin: 0.4rem 0 0.6rem;
+  }
+  .preuve__sub { font-style: italic; color: var(--ink-soft); margin: 0 auto 2rem; max-width: 52ch; }
+  /* Pas de cadre décoratif (la vidéo apporte déjà sa carte sur papier). La vidéo
+     source est en 16:9 avec beaucoup de papier autour de la carte → on recadre
+     l'embed en bandeau pour ne garder que la carte et supprimer le vide. */
+  .preuve__frame {
+    width: min(100%, 1000px); margin-inline: auto; position: relative;
+    aspect-ratio: 1000 / 210; overflow: hidden; cursor: pointer;
+  }
+  .preuve__frame video {
+    display: block; width: 100%; height: 100%;
+    object-fit: cover; object-position: center;
+  }
+  .preuve__soundhint {
+    position: absolute; right: 12px; bottom: 12px;
+    font-family: var(--display); font-size: 0.78rem; letter-spacing: 0.08em;
+    text-transform: uppercase; color: #fff; background: rgba(26,22,19,0.55);
+    padding: 0.32rem 0.62rem; border-radius: 5px; pointer-events: none;
+    opacity: 0.92; transition: opacity 0.25s ease;
+  }
+  .preuve__frame.is-on .preuve__soundhint { opacity: 0; }
+  .preuve__cap { text-align: center; font-style: italic; color: var(--ink-faint); margin-top: 1rem; }
 </style>
 <script>
 // Le rideau ne se lève qu'une fois par session : au retour, la page est déjà
@@ -1685,6 +1715,39 @@
       <span class="tournee__fleuron" aria-hidden="true">❧</span>
     </div>
   </div>
+
+  <!-- =================== LA PREUVE, EN VRAI =================== -->
+  <!-- Vraie capture (Cap) du ghost dans une app réelle, habillée Remotion.
+       Muette en boucle ; le son s'active au survol (ou au clic sur mobile). -->
+  <section class="preuve reveal" id="demo-reel" aria-labelledby="preuve-titre">
+    <div class="shell">
+      <div class="preuve__head">
+        <p class="stage-dir">La preuve, en vrai</p>
+        <h2 class="preuve__title" id="preuve-titre">Elle souffle la suite.<br>Vous n'avez qu'à dire oui.</h2>
+        <p class="preuve__sub">Une vraie capture, sur un vrai Mac : vous tapez le début, Souffleuse complète la phrase — vous validez d'un Tab.</p>
+      </div>
+      <figure class="preuve__frame" id="reel-frame">
+        <video id="reel-video" src="./assets/souffleuse-demo.mp4" muted loop autoplay playsinline preload="metadata"
+               aria-label="Capture réelle : on tape « Bonjour, je reviens vers vous » et Souffleuse propose « dès que possible pour vous faire… » ; Tab pour accepter."></video>
+        <span class="preuve__soundhint" id="reel-hint">🔊 Survolez pour le son</span>
+      </figure>
+      <figcaption class="preuve__cap">Tab. Et c'est dit.</figcaption>
+    </div>
+  </section>
+  <script>
+    (function () {
+      var f = document.getElementById('reel-frame');
+      var v = document.getElementById('reel-video');
+      if (!f || !v) return;
+      var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (reduce) { try { v.pause(); } catch (e) {} }
+      var on = function () { v.muted = false; v.volume = 0.85; var p = v.play(); if (p && p.catch) p.catch(function(){}); f.classList.add('is-on'); };
+      var off = function () { v.muted = true; f.classList.remove('is-on'); };
+      f.addEventListener('mouseenter', on);
+      f.addEventListener('mouseleave', off);
+      f.addEventListener('click', function () { v.muted ? on() : off(); });
+    })();
+  </script>
 
   <!-- =================== MANIFESTE =================== -->
   <section class="manifeste reveal" id="manifeste" aria-labelledby="manifeste-titre">
