@@ -857,6 +857,14 @@ final class ModelRuntime {
         let isBoundary = choice.isBoundary
         let width = choice.width
 
+        // Pref « Long » (request.maxWords ≥ trigger) : le beam génère jusqu'au cap
+        // haut (`longGhostMaxWords` validé par SouffleuseMaxWordsEval) puis le
+        // post-filtre rogne la queue pendante (`trimDanglingTail`). Court/Moyen :
+        // `genTokens/genWords = nil` ⇒ config par défaut, comportement byte-identique.
+        let isLong = request.maxWords >= BeamGhostShaper.longGhostTriggerWords
+        let genTokens: Int? = isLong ? BeamGhostShaper.longGhostMaxTokens : nil
+        let genWords: Int? = isLong ? BeamGhostShaper.longGhostMaxWords : nil
+
         // Prompt = contexte PROSE (« Contexte: » persona + ctxPrefix app/fenêtre/OCR,
         // prose que le base/PT CONTINUE bien) + tout le texte avant curseur. EXCLUS :
         // exemples few-shot (pollueur prouvé), annotation `Champ:`, FIM. Slots choisis
@@ -908,7 +916,7 @@ final class ModelRuntime {
                 let ghost = BeamGhostShaper.afterCaretEchoCut(
                     ghost: BeamGhostShaper.beamPostFilter(
                         rawGhost: a.ghost, isBoundary: isBoundary, caretAfterSpace: caretAfterSpace,
-                        userTail: userTail, maxWords: request.maxWords),
+                        userTail: userTail, maxWords: request.maxWords, trimDanglingTail: isLong),
                     afterCaret: request.axTextAfterCaret)
                 let reason: String
                 switch a.kind {
@@ -931,10 +939,12 @@ final class ModelRuntime {
             // réserve (les seqs sont recyclées par `generateBeam`).
             result = await beamEngine.ghostWithReserve(prompt: prompt,
                                                        requiredPrefix: requiredPrefix,
-                                                       maxWidth: width)
+                                                       maxWidth: width,
+                                                       genMaxTokens: genTokens, genMaxWords: genWords)
             beamSessionTail = userTail
         } else {
-            result = await beamEngine.ghost(prompt: prompt, requiredPrefix: requiredPrefix, maxWidth: width)
+            result = await beamEngine.ghost(prompt: prompt, requiredPrefix: requiredPrefix, maxWidth: width,
+                                            genMaxTokens: genTokens, genMaxWords: genWords)
         }
         GpuGate.shared.ghostEnded()
         if Task.isCancelled { return nil }
@@ -962,7 +972,8 @@ final class ModelRuntime {
             : result.candidates.map(\.ghost)
         let ghost = BeamGhostShaper.selectGhost(
             rawCandidates: rawCandidates, isBoundary: isBoundary, caretAfterSpace: caretAfterSpace,
-            userTail: userTail, maxWords: request.maxWords, afterCaret: request.axTextAfterCaret)
+            userTail: userTail, maxWords: request.maxWords, afterCaret: request.axTextAfterCaret,
+            trimDanglingTail: isLong)
         Log.info(.predictor, "ghost_beam_words",
                  count: ghost.split(whereSeparator: { $0.isWhitespace }).count)
         return MidWordEscalationResult(show: !ghost.isEmpty, word: ghost,
