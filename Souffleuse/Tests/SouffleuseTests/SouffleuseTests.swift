@@ -33,20 +33,21 @@ import Testing
 
 @MainActor
 @Test func overlayEstimatedFontSplitsWebCaretRectVariance() {
-    // ÷1,05 — encadré en UAT (Intercom) : ÷1,1 trop petit, ÷1,0 trop gros ;
-    // les rects Chromium oscillent entre hauteur de police et hauteur de
-    // ligne, 1,05 borne l'erreur à ~±5 %. 18 → ~17,14.
+    // ÷1,27 — la hauteur du rect AX est la *boîte de ligne*, pas la police
+    // (mesuré au pixel le 13/06/2026 : ghost vs texte hôte dans Slack/Brave/
+    // Signal, ratio ~1,27 ; Slack 19px → 15pt Lato). L'ancien ÷1,05 rendait
+    // le ghost ~1,27× trop gros sur tout hôte Chromium/Electron. 18 → ~14,17.
     let f = OverlayWindow.estimatedFont(forCaretRectHeight: 18)
     #expect(f != nil)
-    #expect(abs((f?.pointSize ?? 0) - 18.0 / 1.05) < 0.01)
+    #expect(abs((f?.pointSize ?? 0) - 18.0 / OverlayWindow.caretRectToFontRatio) < 0.01)
 }
 
 @MainActor
 @Test func overlayEstimatedFontClampsExtremes() {
-    // Tiny line heights (e.g. 8pt rect) clamp up to 12pt minimum so the
+    // Tiny line heights (e.g. 6pt rect) clamp up to the 11pt minimum so the
     // ghost never renders sub-readable.
     let small = OverlayWindow.estimatedFont(forCaretRectHeight: 6)
-    #expect((small?.pointSize ?? 0) == 12)
+    #expect((small?.pointSize ?? 0) == 11)
     // Degenerate line-box rects on empty lines (e.g. 200pt) are capped at
     // 20pt — a conservative ceiling so the ghost never blows up. The
     // per-bundle reliable-font cache (SouffleuseAppDelegate) is the primary
