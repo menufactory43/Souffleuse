@@ -1,5 +1,6 @@
 import Foundation
 import SouffleuseCore
+import SouffleuseCorpus  // TypingHistoryEntry — nommé explicitement pour le snapshot JSON + le mode diag
 import SouffleuseLlama
 import SouffleuseLog
 import SouffleusePersonalization
@@ -58,6 +59,108 @@ let kRepeatLastN: Int32 = {
 }()
 
 func err(_ s: String) { FileHandle.standardError.write(Data((s + "\n").utf8)) }
+
+// ===== BEAM-CORE PATH (SOUFFLEUSE_REPLAY_BEAM=1) ============================
+// Quand le flag est posé, la génération LLM du diag passe par le MÊME moteur que
+// la prod par défaut (`ModelRuntime.generateGhostBeam` → `BeamGhostEngine`) au
+// lieu du greedy `runLLM`. Correctif de représentativité : en prod
+// `SuggestionPolicy.Tuning.beamCoreEnabled` est ON, donc TOUT le ghost (frontière
+// ET mid-mot) sort du beam ; le greedy est le fallback mort. Mesurer la justesse
+// sur le greedy donnait des chiffres non représentatifs.
+//
+// On reproduit `generateGhostBeam` en mode STATELESS par entrée (pas de réserve /
+// session — `ghost(prompt:requiredPrefix:maxWidth:)` frais à chaque appel ; la
+// réserve n'est qu'une optim de perf en frappe vivante et ne change pas le ghost
+// produit). Mêmes pièces que la prod : `BeamGhostShaper.{sentenceArmed,
+// beamConfigChoice,buildPrompt,selectGhost}`, même `beamWidth`, même formule de
+// bias. Le moteur EMPRUNTE le modèle déjà chargé dans `LlamaEngine` (poids
+// partagés, vocab identique) et reçoit le MÊME corpus train que le greedy.
+let kReplayBeam = ProcessInfo.processInfo.environment["SOUFFLEUSE_REPLAY_BEAM"] == "1"
+
+/// `beamWidth` de PROD : `BeamConfig.ghostCore().maxSearchWidth` (défaut 2,
+/// env-overridable via `SOUFFLEUSE_BEAM_K`) — exactement ce que `ModelRuntime`
+/// passe à `beamConfigChoice`. Lu une fois.
+let kBeamWidth = BeamConfig.ghostCore().maxSearchWidth
+
+/// Reproduit `ModelRuntime.generateGhostBeam` pour UNE entrée, sans état (pas de
+/// réserve). Renvoie la string ghost FINALE (déjà post-filtrée/sélectionnée comme
+/// en prod), ou "" si gaté / silence G2 / boundary non armée.
+///
+/// Parité prod (generateGhostBeam) :
+///   1. bias : `strength × LlamaSampling.personalizationGainScale`, posé via
+///      `setBiasStrength` (même formule que la voie greedy).
+///   2. garde G2 : `BeamGhostShaper.sentenceArmed(userTail:)` → "" sinon.
+///   3. config : `BeamGhostShaper.beamConfigChoice(userTail:, beamWidth: kBeamWidth)`
+///      → requiredPrefix / isBoundary / width.
+///   4. prompt : `BeamGhostShaper.buildPrompt(customInstr:"", ctxPrefix:, llmTail:)`.
+///      Le diag n'a ni persona ni texte après caret → customInstr="" afterCaret=nil.
+///   5. génération : `ghost(prompt:requiredPrefix:maxWidth:width)` (stateless).
+///   6. sélection/post-filtre : `BeamGhostShaper.selectGhost(...)` sur les
+///      candidats (`BeamResult.candidates`, champ `.ghost`), afterCaret=nil —
+///      hors mid-line, post-filtre du seul best, byte-identique à la prod.
+func runBeam(
+    beam: BeamGhostEngine,
+    userTail: String,
+    customInstr: String = "",
+    ctxPrefix: String = "",
+    personalizationStrength: Float
+) async -> String {
+    // (1) bias — même formule que generateGhostBeam (perso × gain scale).
+    await beam.setBiasStrength(personalizationStrength * LlamaSampling.personalizationGainScale)
+
+    // (2) G2 : reprise après le point.
+    guard BeamGhostShaper.sentenceArmed(userTail: userTail) else { return "" }
+
+    // (3) config beam (mid-mot → requiredPrefix + K plein ; frontière → K=1).
+    let choice = BeamGhostShaper.beamConfigChoice(userTail: userTail, beamWidth: kBeamWidth)
+
+    // (4) prompt — slots prose, comme la prod. `customInstr` = le persona réel de
+    // l'app (monté en tête « Contexte : … » par buildPrompt) — c'est le slot
+    // qui ancre le modèle en français et que le diag laissait à vide. `ctxPrefix`
+    // (app/window/OCR) reste "" en mode diag held-out : c'est du contexte
+    // DYNAMIQUE (focus courant) hors-périmètre de ce replay offline.
+    let prompt = BeamGhostShaper.buildPrompt(
+        customInstr: customInstr, ctxPrefix: ctxPrefix, llmTail: userTail)
+
+    if ProcessInfo.processInfo.environment["DUMP_PROMPT"] != nil {
+        err("=== BEAM PROMPT for \(userTail.debugDescription) (K=\(choice.width) req=\(choice.requiredPrefix.debugDescription)) ===\n\(prompt)\n=== END PROMPT ===")
+    }
+
+    // (5) génération stateless (pas de réserve — fresh ghost par entrée).
+    let result = await beam.ghost(prompt: prompt,
+                                  requiredPrefix: choice.requiredPrefix,
+                                  maxWidth: choice.width)
+
+    // (6) sélection + post-filtre — verbatim generateGhostBeam. caretAfterSpace
+    // dérivé du tail ; afterCaret nil (le diag n'a pas de texte après curseur).
+    let caretAfterSpace = userTail.last == " " || userTail.last == "\t"
+    let rawCandidates = result.candidates.isEmpty
+        ? [result.best?.ghost ?? ""]
+        : result.candidates.map(\.ghost)
+    let ghost = BeamGhostShaper.selectGhost(
+        rawCandidates: rawCandidates, isBoundary: choice.isBoundary,
+        caretAfterSpace: caretAfterSpace, userTail: userTail,
+        maxWords: kMaxWords, afterCaret: nil)
+
+    if ProcessInfo.processInfo.environment["DUMP_RAW"] != nil {
+        err("BEAM RAW for \(userTail.debugDescription): best=\((result.best?.ghost ?? "").debugDescription) → selected=\(ghost.debugDescription)")
+    }
+    return ghost
+}
+
+/// Best ghost BRUT (pré-post-filtre) du beam — pour le diagnostic
+/// d'over-suppression (le pendant beam de « le greedy renvoie raw quand le gate
+/// vide tout »). Même prompt/config/bias que `runBeam`, mais retourne
+/// `result.best.ghost` sans selectGhost. "" si G2 silence ou aucun candidat.
+func beamBestRaw(beam: BeamGhostEngine, userTail: String, strength: Float) async -> String {
+    await beam.setBiasStrength(strength * LlamaSampling.personalizationGainScale)
+    guard BeamGhostShaper.sentenceArmed(userTail: userTail) else { return "" }
+    let choice = BeamGhostShaper.beamConfigChoice(userTail: userTail, beamWidth: kBeamWidth)
+    let prompt = BeamGhostShaper.buildPrompt(customInstr: "", ctxPrefix: "", llmTail: userTail)
+    let result = await beam.ghost(prompt: prompt, requiredPrefix: choice.requiredPrefix, maxWidth: choice.width)
+    return result.best?.ghost ?? ""
+}
+// ===== END BEAM-CORE PATH ==================================================
 
 // MARK: - JSON scenario schema
 
@@ -196,14 +299,19 @@ func parsePredictLog(_ path: String) -> [String] {
 func runLLM(
     engine: LlamaEngine,
     userTail: String,
-    ctxPrefix: String = ""
+    customInstr: String = "",   // persona réel (parité A/B avec le beam) — slot « Contexte : … »
+    ctxPrefix: String = "",
+    personalizationStrength: Float = kPersonalizationStrength  // diag passe 1.0/env
 ) async -> String {
-    // BARE prompt by default — empty system / ctx / field / customInstr. JSON
+    // `customInstr` = le persona réel de l'app (par défaut "" hors diag, pour les
+    // hooks FORCE_LLM/EXPMID qui sondent le prompt nu). En diag il reçoit le MÊME
+    // persona que le beam → parité de tête de prompt entre les deux moteurs. JSON
     // mode injects `ctxPrefix` so the model sees the same "App X, window Y"
-    // shape it would in the live app. `beforeCursor` = userTail.
+    // shape it would in the live app. `ctxPrefix` (app/window/OCR) reste dynamique
+    // et hors-périmètre du diag offline. `beforeCursor` = userTail.
     let prompt = LlamaPromptBuilder.buildLlamaPrompt(
         system: "",
-        customInstr: "",
+        customInstr: customInstr,
         ctxPrefix: ctxPrefix,
         fieldContext: "",
         afterCursor: "",
@@ -244,7 +352,7 @@ func runLLM(
             temperature: 0,
             repeatPenalty: kRepeatPenalty,
             repeatLastN: kRepeatLastN,
-            personalizationStrength: kPersonalizationStrength,  // env-overridable; default 0
+            personalizationStrength: personalizationStrength,  // env-overridable; default 0 (diag: 1.0)
             banMarkup: true,
             banDigitsLeading: true,
             banEmoji: true,
@@ -279,9 +387,444 @@ func runLLM(
     return acc.lastEmitted
 }
 
+// MARK: - Entry source (store vs snapshot)
+
+/// Charge les entrées d'historique soit depuis un snapshot JSON local
+/// (`SOUFFLEUSE_CORPUS_SNAPSHOT`), soit depuis le vrai store chiffré (Keychain).
+///
+/// Le snapshot existe pour itérer sans rouvrir le Keychain à chaque run :
+/// l'utilisateur exporte une fois (`SOUFFLEUSE_EXPORT_SNAPSHOT`) puis travaille
+/// sur le fichier. Quand le snapshot est fourni, on ne touche JAMAIS le store —
+/// donc aucun accès Keychain, conformément à l'invariant de privacy.
+func loadEntries() async -> [TypingHistoryEntry] {
+    let envns = ProcessInfo.processInfo.environment
+    if let snapPath = envns["SOUFFLEUSE_CORPUS_SNAPSHOT"], !snapPath.isEmpty {
+        guard let data = FileManager.default.contents(atPath: snapPath) else {
+            err("FATAL: SOUFFLEUSE_CORPUS_SNAPSHOT introuvable à \(snapPath)")
+            exit(1)
+        }
+        do {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601  // symétrique de l'export
+            let decoded = try decoder.decode([TypingHistoryEntry].self, from: data)
+            err("[snapshot] loaded \(decoded.count) entries (no keychain)")
+            return decoded
+        } catch {
+            err("FATAL: décodage du snapshot échoué (\(snapPath)): \(error)")
+            exit(1)
+        }
+    }
+    // Voie normale — vrai historique chiffré (seul accès Keychain).
+    let store = TypingHistoryStore()
+    let loaded = await store.allEntries()
+
+    // Export one-shot : c'est l'UNIQUE accès Keychain attendu de ce run. On
+    // sérialise puis on sort, l'utilisateur itère ensuite via le snapshot.
+    if let outPath = envns["SOUFFLEUSE_EXPORT_SNAPSHOT"], !outPath.isEmpty {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        do {
+            let data = try encoder.encode(loaded)
+            try data.write(to: URL(fileURLWithPath: outPath))
+            err("[snapshot] exported \(loaded.count) entries to \(outPath)")
+        } catch {
+            err("FATAL: écriture du snapshot échouée (\(outPath)): \(error)")
+            exit(1)
+        }
+        exit(0)
+    }
+    return loaded
+}
+
+// MARK: - Diagnostic (qualité held-out sur la vraie historique)
+
+/// Normalise un texte pour comparaison casse/accents-insensible (NFD puis
+/// suppression des diacritiques, minuscules). Utilisé pour le test de préfixe.
+func foldDiacritics(_ s: String) -> String {
+    s.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
+}
+
+/// Extrait le premier « run de mots » : la séquence initiale de caractères-mots
+/// (lettres, `'`, `-`), en sautant les espaces de tête. Sert de cible/comparaison
+/// principale (le 1er mot prime). Renvoie "" si rien d'alphabétique.
+func firstWordRun(_ s: String) -> String {
+    func isWord(_ c: Character) -> Bool { c.isLetter || c == "'" || c == "-" }
+    var out = ""
+    var started = false
+    for c in s {
+        if isWord(c) { out.append(c); started = true }
+        else if started { break }
+        else if c == " " || c == "\t" || c == "\n" { continue }
+        else { break }  // ponctuation/chiffre en tête → pas de run de mots
+    }
+    return out
+}
+
+/// CORRECT si le 1er run de mots du ghost préfixe celui de la vérité (ou
+/// l'inverse), insensible casse/accents. Capture « fis » → « fiscal » comme
+/// l'utilisateur le vivrait (continuation valide).
+func ghostMatchesTruth(ghost: String, truth: String) -> Bool {
+    let g = foldDiacritics(firstWordRun(ghost))
+    let t = foldDiacritics(firstWordRun(truth))
+    guard !g.isEmpty, !t.isEmpty else { return false }
+    return g.hasPrefix(t) || t.hasPrefix(g)
+}
+
+/// Catégorise un ghost FAUX (heuristiques, plusieurs tags possibles) pour savoir
+/// quel levier tirer. `prefix`=contextBefore, `truth`=accepted, `gated`=ghost
+/// vidé par le gate.
+func failureTags(prefix: String, ghost: String, truth: String, gated: Bool) -> [String] {
+    var tags: [String] = []
+    let g = ghost.trimmingCharacters(in: .whitespacesAndNewlines)
+    let trimmedPrefix = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    // vide/gaté — rien à afficher (le gate a supprimé ou le modèle n'a rien sorti).
+    if g.isEmpty || gated {
+        tags.append("vide/gaté")
+    } else if g.count <= 2 {
+        tags.append("tronqué")
+    }
+
+    // début-de-phrase — contexte vide ou se terminant par . ! ? (pas de continuation
+    // de mot, la perso a peu de signal).
+    if trimmedPrefix.isEmpty || (trimmedPrefix.last.map { ".!?".contains($0) } ?? false) {
+        tags.append("début-de-phrase")
+    }
+
+    // nom-propre-attendu — la vérité démarre par une majuscule en milieu de phrase
+    // (le contexte ne finit pas par une ponctuation de fin).
+    if let tf = truth.trimmingCharacters(in: .whitespaces).first, tf.isUppercase,
+       !trimmedPrefix.isEmpty, !(trimmedPrefix.last.map { ".!?".contains($0) } ?? false) {
+        tags.append("nom-propre-attendu")
+    }
+
+    if !g.isEmpty {
+        // chiffre/montant — un chiffre collé à €/$/% dans le ghost.
+        let chars = Array(g)
+        for (i, c) in chars.enumerated() where c.isNumber {
+            let prev = i > 0 ? chars[i - 1] : " "
+            let nextC = i + 1 < chars.count ? chars[i + 1] : " "
+            if "€$%".contains(prev) || "€$%".contains(nextC) { tags.append("chiffre/montant"); break }
+        }
+        // markup — résidu de balisage que le base model imite parfois.
+        if g.contains("<") || g.contains(">") || g.contains("**") || g.contains("_") {
+            tags.append("markup")
+        }
+        // hors-sujet — aucun mot du ghost partagé avec la vérité.
+        let truthWords = Set(foldDiacritics(truth)
+            .split(whereSeparator: { !($0.isLetter || $0.isNumber) })
+            .map(String.init).filter { $0.count >= 2 })
+        let ghostWords = foldDiacritics(g)
+            .split(whereSeparator: { !($0.isLetter || $0.isNumber) })
+            .map(String.init).filter { $0.count >= 2 }
+        let shared = ghostWords.contains { truthWords.contains($0) }
+        if !shared, !ghostWords.isEmpty { tags.append("hors-sujet") }
+
+        // bon-mais-différent — mot français plausible (alpha, ≥3 lettres) qui n'est
+        // tombé dans AUCUNE autre catégorie d'échec. Distingue « valide mais pas la
+        // vérité littérale » de « mauvais » → sous-estime la vraie qualité.
+        let alphaOnly = g.allSatisfy { $0.isLetter || $0 == "'" || $0 == "-" || $0 == " " }
+        let firstRun = firstWordRun(g)
+        if tags.isEmpty, alphaOnly, firstRun.count >= 3 {
+            tags.append("bon-mais-différent")
+        }
+    }
+
+    if tags.isEmpty { tags.append("autre") }
+    return tags
+}
+
+/// Génère le ghost pour une entrée de test via le MÊME chemin que le replay
+/// normal : instant d'abord, LLM en repli. Renvoie (ghost, source, gated).
+/// `gated` = le LLM a produit du texte mais `onLLMChunk` l'a rejeté (gate).
+func diagGenerate(
+    engine: LlamaEngine,
+    beam: BeamGhostEngine?,   // non-nil ssi SOUFFLEUSE_REPLAY_BEAM=1 → voie prod
+    prefix: String,
+    train: [TypingHistoryEntry],
+    wordCompleter: WordCompleter,
+    maxWords: Int,
+    strength: Float,
+    persona: String   // customInstr réel (persona de l'app), monté en tête « Contexte : … »
+) async -> (ghost: String, source: String, gated: Bool) {
+    // Stage 1 — instant (corpus recall / word-complete / history).
+    let instant: GhostUpdate? = await MainActor.run {
+        SuggestionPolicyEngine(maxWords: maxWords)
+            .routeInstant(userTail: prefix, historySnapshot: train, wordCompleter: wordCompleter)
+    }
+    if let route = instant, !route.text.isEmpty {
+        return (route.text, "instant:" + sourceLabel(route.source), false)
+    }
+    // Stage 2 — BEAM CORE (SOUFFLEUSE_REPLAY_BEAM=1) : voie de génération PAR DÉFAUT
+    // de la prod. `runBeam` reproduit `generateGhostBeam` stateless ; il applique
+    // DÉJÀ le gate du chemin beam (G2 + selectGhost/beamPostFilter), donc sa sortie
+    // EST le ghost final — pas de `onLLMChunk` ensuite (le beam ne passe pas par lui
+    // en prod). `gated` = le beam a produit un best mais le post-filtre l'a vidé.
+    if let beam = beam {
+        let ghost = await runBeam(beam: beam, userTail: prefix, customInstr: persona, ctxPrefix: "",
+                                  personalizationStrength: strength)
+        if !ghost.isEmpty {
+            return (ghost, "beam", false)
+        }
+        // Best non-vide mais post-filtre/G2 l'a tué → cas « gaté » (sur-suppression).
+        // On régénère le best brut pour le diagnostic d'over-suppression, comme la
+        // voie greedy renvoie `raw` quand le gate vide tout.
+        let bestRaw = await beamBestRaw(beam: beam, userTail: prefix, strength: strength)
+        if !bestRaw.isEmpty { return (bestRaw, "beam", true) }
+        return ("", "beam", false)  // beam silencieux — pas un cas « gaté »
+    }
+    // Stage 2 (fallback A/B) — LLM greedy (profil prod historique : temp 0, bans
+    // markup/digits/emoji, strength = SOUFFLEUSE_REPLAY_STRENGTH ou 1.0).
+    let raw = await runLLM(engine: engine, userTail: prefix, customInstr: persona, ctxPrefix: "", personalizationStrength: strength)
+    if raw.isEmpty {
+        return ("", "llm", false)  // modèle silencieux — pas un cas « gaté »
+    }
+    let update: GhostUpdate? = await MainActor.run {
+        SuggestionPolicyEngine(maxWords: maxWords).onLLMChunk(raw, userTail: prefix)
+    }
+    if let u = update, !u.text.isEmpty {
+        return (u.text, "llm", false)
+    }
+    // Le LLM a produit du texte mais le gate l'a tué → sur-suppression potentielle.
+    return (raw, "llm", true)
+}
+
+/// Mode diagnostic complet : split 80/20, perso held-out, génération via le vrai
+/// chemin, catégorisation des échecs, agrégats sur stdout.
+func runDiagnostic(engine: LlamaEngine, entries: [TypingHistoryEntry]) async {
+    let envns = ProcessInfo.processInfo.environment
+
+    // FIDÉLITÉ PROMPT — la prod (BeamGhostShaper.buildPrompt / LlamaPromptBuilder)
+    // injecte DEUX slots non-vides que le diag laissait à vide : le persona
+    // (customInstr, monté en tête « Contexte : … ») et la strength réelle. Sans
+    // eux, le diag produit du charabia que la prod ne produit pas
+    // (« nous calc » → diag « calcool » vs app « calculons le nombre »).
+    //
+    // Les valeurs RÉELLES vivent dans le domaine UserDefaults de l'APP
+    // (`app.cocotypist.Souffleuse`), PAS le domaine standard du diag. Lecture
+    // sans mot de passe via le suite name.
+    let appDefaults = UserDefaults(suiteName: "app.cocotypist.Souffleuse")
+    let appPersona = appDefaults?.string(forKey: "customAIInstructions")
+    // `personalizationStrength` est stocké en STRING par l'app (ex. "1.5802…").
+    let appStrength: Float? = appDefaults?.string(forKey: "personalizationStrength").flatMap { Float($0) }
+    let persoEnabled = appDefaults?.bool(forKey: "personalizedSuggestionsEnabled") ?? false
+
+    // strength : env override (comportement existant) > valeur réelle de l'app > 1.0.
+    let diagStrength: Float = {
+        if let s = envns["SOUFFLEUSE_REPLAY_STRENGTH"], let f = Float(s) { return f }
+        return appStrength ?? 1.0
+    }()
+
+    // persona : env override > customAIInstructions de l'app > "". Escape hatch :
+    // SOUFFLEUSE_REPLAY_NOPERSONA=1 force "" pour reproduire l'ancien prompt nu (A/B).
+    let persona: String = {
+        if envns["SOUFFLEUSE_REPLAY_NOPERSONA"] == "1" { return "" }
+        if let p = envns["SOUFFLEUSE_REPLAY_PERSONA"] { return p }
+        return appPersona ?? ""
+    }()
+
+    // Log sur err uniquement — JAMAIS le texte du persona sur stdout (dev-only,
+    // mais on garde l'invariant : seul le COMPTE de chars sort, pas la prose).
+    err("[diag] persona injecté (\(persona.count) chars), strength=\(String(format: "%.2f", diagStrength)), persoEnabled=\(persoEnabled)")
+
+    // Split déterministe 80/20 : index % 5 == 0 → test, sinon train.
+    // FULLCORPUS (SOUFFLEUSE_REPLAY_FULLCORPUS=1) : le bias/recall voit TOUT le
+    // corpus (comme l'app LIVE), pas seulement 80%. Held-out mesure la
+    // GÉNÉRALISATION (texte inédit) ; full-corpus mesure le VÉCU prod (l'app
+    // rappelle/biaise depuis l'historique COMPLET, y compris ce que tu viens de
+    // taper). En full-corpus, un cas test présent dans l'historique fait un
+    // rappel instant comme en prod — c'est voulu (fidélité au vécu).
+    let fullCorpus = ProcessInfo.processInfo.environment["SOUFFLEUSE_REPLAY_FULLCORPUS"] == "1"
+    var train: [TypingHistoryEntry] = []
+    var test: [TypingHistoryEntry] = []
+    for (i, e) in entries.enumerated() {
+        if i % 5 == 0 { test.append(e) } else { train.append(e) }
+    }
+    if fullCorpus { train = entries }   // bias/recall = historique complet (parité LIVE)
+    err("[diag] entries=\(entries.count) train=\(train.count) test=\(test.count) fullCorpus=\(fullCorpus)")
+
+    // Held-out : la perso ne voit que le train. Full-corpus : elle voit tout.
+    let trainCorpus = train.map { $0.contextBefore.isEmpty ? $0.accepted : $0.contextBefore + " " + $0.accepted }
+    await engine.setCorpus(trainCorpus)
+
+    // BEAM CORE (SOUFFLEUSE_REPLAY_BEAM=1) : charge le moteur prod en EMPRUNTANT le
+    // modèle déjà résident dans `engine` (poids partagés, vocab identique → ids de
+    // corpus identiques) et lui pose le MÊME corpus train. Config = `ghostCore()`
+    // (le profil que `ModelRuntime` charge en prod : K=2 env-aware). nil si le flag
+    // est absent → `diagGenerate` reste sur la voie greedy.
+    var beam: BeamGhostEngine? = nil
+    if kReplayBeam {
+        let b = BeamGhostEngine(config: .ghostCore())
+        var loaded = false
+        if let borrowed = await engine.borrowModel() {
+            loaded = await b.load(borrowedModel: borrowed, contextTokens: 2048)
+        }
+        if !loaded {
+            // Repli : charge le modèle depuis le même fichier que le greedy.
+            loaded = await b.load(modelPath: kGGUFPath, contextTokens: 2048)
+        }
+        guard loaded else {
+            err("FATAL: SOUFFLEUSE_REPLAY_BEAM=1 mais le BeamGhostEngine n'a pas chargé.")
+            exit(1)
+        }
+        await b.setCorpus(trainCorpus)
+        beam = b
+        err("[diag] BEAM CORE actif (K=\(kBeamWidth), config ghostCore).")
+    }
+
+    let wordCompleter = WordCompleter()
+    let showExamples = ProcessInfo.processInfo.environment["SOUFFLEUSE_SHOW_EXAMPLES"] == "1"
+
+    var nTested = 0
+    var nCorrect = 0
+    // Justesse par source : (corrects, total).
+    var bySource: [String: (correct: Int, total: Int)] = [:]
+    // Comptes de catégories d'échec.
+    var failCats: [String: Int] = [:]
+    var nFalse = 0
+    var nGoodButDifferent = 0
+    var nGated = 0
+    var nGatedWouldBeCorrect = 0
+    // Exemples (collectés seulement si demandés) : prefix tronqué | ghost | truth | cat.
+    var examples: [(String, String, String, String)] = []
+    // Dump COMPLET (SOUFFLEUSE_REPLAY_DUMP=/path) : chaque cas test, pour un juge
+    // d'INTENTION externe (cohérence ≠ match exact). Dev-only, texte brut local,
+    // jamais committé — même périmètre que SHOW_EXAMPLES.
+    let dumpPath = ProcessInfo.processInfo.environment["SOUFFLEUSE_REPLAY_DUMP"]
+    var dumpRows: [[String: Any]] = []
+
+    for e in test {
+        let prefix = e.contextBefore
+        let truth = e.accepted
+        guard !prefix.isEmpty, !truth.isEmpty else { continue }
+        nTested += 1
+
+        let (ghost, source, gated) = await diagGenerate(
+            engine: engine, beam: beam, prefix: prefix, train: train,
+            wordCompleter: wordCompleter, maxWords: kMaxWords, strength: diagStrength,
+            persona: persona
+        )
+
+        let correct = ghostMatchesTruth(ghost: ghost, truth: truth)
+        if correct { nCorrect += 1 }
+
+        var srcStat = bySource[source] ?? (0, 0)
+        srcStat.total += 1
+        if correct { srcStat.correct += 1 }
+        bySource[source] = srcStat
+
+        if dumpPath != nil {
+            dumpRows.append([
+                "prefix": prefix,
+                "ghost": ghost,
+                "truth": truth,
+                "source": source,
+                "exact": correct,
+                "gated": gated,
+            ])
+        }
+
+        if gated {
+            nGated += 1
+            // Sur-suppression : le ghost brut (avant gate) aurait-il été correct ?
+            if correct { nGatedWouldBeCorrect += 1 }
+        }
+
+        if !correct {
+            nFalse += 1
+            let tags = failureTags(prefix: prefix, ghost: ghost, truth: truth, gated: gated)
+            for t in tags { failCats[t, default: 0] += 1 }
+            if tags.contains("bon-mais-différent") { nGoodButDifferent += 1 }
+            if showExamples, examples.count < 15 {
+                let shortPrefix = String(prefix.suffix(40))
+                examples.append((shortPrefix, ghost, truth, tags.joined(separator: ",")))
+            }
+        }
+    }
+
+    // SORTIE — agrégats uniquement (aucun texte utilisateur sauf SHOW_EXAMPLES).
+    let pct = nTested == 0 ? 0 : nCorrect * 100 / nTested
+    print("=== DIAG (held-out 80/20) ===")
+    print("n_test=\(nTested) corrects=\(nCorrect) pertinence_globale=\(pct)%")
+
+    print("--- par SOURCE (corrects/total, taux) ---")
+    for (src, stat) in bySource.sorted(by: { $0.value.total > $1.value.total }) {
+        let rate = stat.total == 0 ? 0 : stat.correct * 100 / stat.total
+        print("\(src): \(stat.correct)/\(stat.total) (\(rate)%)")
+    }
+
+    print("--- catégories d'ÉCHEC (count, triées) ---")
+    for (cat, count) in failCats.sorted(by: { $0.value > $1.value }) {
+        print("\(cat): \(count)")
+    }
+
+    let goodPct = nFalse == 0 ? 0 : nGoodButDifferent * 100 / nFalse
+    print("bon-mais-différent parmi les faux: \(nGoodButDifferent)/\(nFalse) (\(goodPct)%) = sous-estimation de la vraie qualité")
+    print("ghosts gatés: \(nGated) — dont AURAIENT été corrects (sur-suppression): \(nGatedWouldBeCorrect)")
+
+    if let dumpPath, let data = try? JSONSerialization.data(withJSONObject: dumpRows, options: [.prettyPrinted, .sortedKeys]) {
+        try? data.write(to: URL(fileURLWithPath: dumpPath))
+        err("[diag] dump écrit: \(dumpPath) (\(dumpRows.count) cas)")
+    }
+
+    if showExamples {
+        print("--- exemples (prefix…|ghost|truth|catégorie) ---")
+        for (p, g, t, c) in examples {
+            print("…\(p) | \(g) | \(t) | \(c)")
+        }
+    }
+    print("=============================")
+}
+
+// MARK: - Audit garde mid-mot (catch vs faux positifs)
+
+/// Rejoue la garde de cohérence mid-mot RETIRÉE (2026-05-27) —
+/// `OutputFilter.midWordCandidate` + `TypoDetector.isValidWord` — sur un dump
+/// de cas beam (SOUFFLEUSE_REPLAY_DUMP). Compte les ghosts qu'elle DROPPERAIT
+/// (fusion `partiel+tête` invalide fr+en) et les liste pour classer catch
+/// (non-mots) vs faux positif (bon ghost, ex. jargon/nom propre). Pas de modèle
+/// requis. Dev-only, texte brut local.
+func runMidwordAudit(dumpPath: String) {
+    guard let data = try? Data(contentsOf: URL(fileURLWithPath: dumpPath)),
+          let rows = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else {
+        err("FATAL: dump illisible: \(dumpPath)"); exit(1)
+    }
+    let typo = TypoDetector()
+    var nGhost = 0, nMidword = 0
+    var drops: [(p: String, g: String, t: String, cand: String)] = []
+    for r in rows {
+        let prefix = (r["prefix"] as? String) ?? ""
+        let ghost = (r["ghost"] as? String) ?? ""
+        guard !ghost.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
+        nGhost += 1
+        guard let candidate = OutputFilter.midWordCandidate(userTail: prefix, ghost: ghost) else { continue }
+        nMidword += 1
+        if !typo.isValidWord(candidate, language: nil) {
+            drops.append((prefix, ghost, (r["truth"] as? String) ?? "", candidate))
+        }
+    }
+    print("=== AUDIT GARDE MID-MOT (midWordCandidate + isValidWord fr+en) ===")
+    print("cas avec ghost non-vide : \(nGhost)")
+    print("cas mid-mot (candidate non-nil) : \(nMidword)")
+    print("WOULD-DROP (fusion invalide) : \(drops.count)")
+    print("--- cas droppés (…prefix | ghost | truth | =fusion) ---")
+    for d in drops {
+        print("…\(String(d.p.suffix(30))) | \(d.g) | \(String(d.t.prefix(20))) | =\(d.cand)")
+    }
+    print("=============================")
+}
+
 // MARK: - Main
 
 func main() async {
+    // Audit garde mid-mot (SOUFFLEUSE_MIDWORD_AUDIT=/path/dump.json) — sort avant
+    // tout chargement de modèle (pure analyse du dump).
+    if let auditPath = ProcessInfo.processInfo.environment["SOUFFLEUSE_MIDWORD_AUDIT"] {
+        runMidwordAudit(dumpPath: auditPath)
+        exit(0)
+    }
+
     // 1. Load the real GGUF into the real engine.
     let engine = LlamaEngine()
     let ok = await engine.load(modelPath: kGGUFPath, contextTokens: 2048)
@@ -292,9 +835,19 @@ func main() async {
 
     // 2. Real encrypted typing history (Keychain + history.db). Warn + continue
     //    empty on failure — privacy invariant: only TypingHistoryStore touches
-    //    the db.
-    let store = TypingHistoryStore()
-    let entries = await store.allEntries()
+    //    the db. `loadEntries()` choisit snapshot (sans Keychain) vs store, et
+    //    gère l'export one-shot (exit après écriture).
+    let entries = await loadEntries()
+
+    // 2.bis DIAGNOSTIC — mesure de qualité held-out sur la VRAIE historique.
+    //   Split 80/20 déterministe, perso entraînée sur le train seul, vérité =
+    //   ce que l'utilisateur a réellement écrit. Sort après le rapport (n'entre
+    //   jamais dans le replay normal).
+    if ProcessInfo.processInfo.environment["SOUFFLEUSE_REPLAY_DIAG"] == "1" {
+        await runDiagnostic(engine: engine, entries: entries)
+        exit(0)
+    }
+
     if entries.isEmpty {
         err("WARN: typing history is empty (or failed to decrypt) — continuing with no corpus.")
     } else {

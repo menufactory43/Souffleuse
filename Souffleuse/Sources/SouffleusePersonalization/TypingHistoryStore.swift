@@ -319,6 +319,7 @@ public actor TypingHistoryStore {
         case secretLike       // SecretHeuristic.looksLikeSecret
         case fragment         // résidu live-consume ("s de", "t es")
         case truncatedFragment // mot tronqué mid-glue ("vér"+"ifi")
+        case artifact         // artefact machine (URL, email, fichier, CSV, tableau)
     }
 
     public nonisolated static func admissionRejection(
@@ -337,6 +338,15 @@ public actor TypingHistoryStore {
         // the user's own uncommon vocabulary (proper nouns, jargon), which is
         // exactly what personalization must learn. Only obvious fragments go.
         if looksLikeFragment(accepted) { return .fragment }
+        // Machine-artifact gate : reject what the raw-field `.prose` capture
+        // ingested but that is NOT prose — URLs, emails, filenames, CSV/table
+        // dumps, low-letter date/time rows. Language-AGNOSTIC (form, not language)
+        // so the user's legitimate FR *and* EN sentences are kept; only artifacts
+        // go. PRIVACY win: stops persisting customer emails / Stripe URLs /
+        // filenames into history.db. See looksLikeArtifact for the measured rates.
+        // TO REVERT: delete this guard, the .artifact case, looksLikeArtifact,
+        // pruneArtifacts, and its AppDelegate call site.
+        if looksLikeArtifact(accepted) { return .artifact }
         // Dictionary-aware truncated sub-word gate: if both contextBefore and
         // accepted share a word boundary (mid-word glue) AND the merged boundary
         // word is NOT valid AND accepted has no further segment, this is a
@@ -362,6 +372,7 @@ public actor TypingHistoryStore {
             case .secretLike: Log.info(.context, "history_skipped_secretlike")
             case .fragment: Log.info(.context, "history_skipped_fragment")
             case .truncatedFragment: Log.info(.context, "history_skipped_truncated_fragment")
+            case .artifact: Log.info(.context, "history_skipped_artifact")
             }
             return
         }
@@ -392,6 +403,41 @@ public actor TypingHistoryStore {
         if chars[0].isLetter, chars[1] == " " {
             let standalone: Set<Character> = ["a", "à", "y", "ô", "o", "A", "À", "Y", "Ô", "O"]
             return !standalone.contains(chars[0])
+        }
+        return false
+    }
+
+    /// True quand `accepted` est un **artefact machine** plutôt que de la prose :
+    /// URL, email, domaine, nom de fichier, dump CSV/tableau, ou ligne « pauvre en
+    /// lettres » (dates/horodatages/colonnes). Détection par **forme**, jamais par
+    /// langue — donc le FR ET l'EN légitimes du user passent ; seuls les artefacts
+    /// que la capture brute du champ (`.prose`) a avalés (dialogue fichier, barre
+    /// d'adresse, champ To:, tableau Binance) sont rejetés. Mesuré sur 1048 entrées
+    /// réelles : 84/226 `.prose` rejetés (noms de fichiers / emails / URLs), et
+    /// 1/822 `.accept` (un horodatage) — précision quasi parfaite. Pur, on-device.
+    static func looksLikeArtifact(_ accepted: String) -> Bool {
+        let s = accepted.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty else { return false }
+        let lower = s.lowercased()
+        // 1. URL / email / domaine réseau.
+        if lower.contains("http://") || lower.contains("https://") || lower.contains("www.") { return true }
+        if lower.contains("@"), lower.contains("."), !s.contains(" ") { return true }
+        if s.contains("/") || !s.contains(" "),
+           lower.range(of: #"[a-z0-9-]+\.(net|com|org|io|app|dev|co|fr)(/|$|\s)"#, options: .regularExpression) != nil {
+            return true
+        }
+        // 2. Nom de fichier (extension connue).
+        if lower.range(of: #"\.(pdf|csv|numbers|xlsx?|docx?|png|jpe?g|zip|json|txt|md)(\s|$|\))"#, options: .regularExpression) != nil { return true }
+        // 3. Densité de lettres trop faible (tableaux, chiffres, dates, symboles).
+        let letters = s.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count
+        let nonSpace = s.unicodeScalars.filter { !CharacterSet.whitespaces.contains($0) }.count
+        if nonSpace >= 8, Double(letters) / Double(nonSpace) < 0.55 { return true }
+        // 4. Dump CSV (guillemets-virgules) ou colonnes UI verticales (lignes courtes).
+        if s.contains("\",\"") || s.contains("\";\"") { return true }
+        let lines = s.split(separator: "\n")
+        if lines.count >= 3 {
+            let avg = lines.map(\.count).reduce(0, +) / lines.count
+            if avg <= 12 { return true }
         }
         return false
     }
@@ -657,6 +703,29 @@ public actor TypingHistoryStore {
         }
         let deleted = before - rowCount()
         Log.info(.context, "corpus_pruned", count: deleted)
+        return deleted
+    }
+
+    /// V4 corpus hygiene — one-time retroactive prune that aligns the existing
+    /// corpus with the new `.artifact` admission rule. Removes machine artifacts
+    /// (URLs, emails, filenames, CSV/table dumps, date/time rows) that the raw
+    /// `.prose` field capture ingested before the gate existed. PRIVACY win: stops
+    /// persisting customer emails / Stripe URLs / filenames in `history.db`. The
+    /// artifact test is too rich for SQL, so this iterates `allEntries()` and
+    /// deletes matches via `deleteDuplicate`. Idempotent; the caller gates it to
+    /// run once. Returns the number of rows deleted.
+    /// TO REVERT: delete this method, looksLikeArtifact, the .artifact case, and
+    /// the AppDelegate call site.
+    @discardableResult
+    public func pruneArtifacts() -> Int {
+        load()
+        guard db != nil else { return 0 }
+        let before = rowCount()
+        for entry in allEntries() where Self.looksLikeArtifact(entry.accepted) {
+            deleteDuplicate(of: entry)
+        }
+        let deleted = before - rowCount()
+        Log.info(.context, "corpus_artifacts_pruned", count: deleted)
         return deleted
     }
 

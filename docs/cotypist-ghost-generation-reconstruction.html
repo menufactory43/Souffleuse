@@ -1,0 +1,1798 @@
+<!doctype html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Cotypist — reconstruction du moteur de ghost</title>
+    <style>
+        :root {
+            color-scheme: light;
+            --paper: #f5f1e8;
+            --paper-2: #fffdf7;
+            --ink: #1a1c1b;
+            --muted: #626761;
+            --line: #c8c4b9;
+            --line-strong: #8e918a;
+            --green: #087f5b;
+            --green-soft: #d8eee5;
+            --blue: #2457c5;
+            --blue-soft: #dce6ff;
+            --orange: #d45113;
+            --orange-soft: #f8dfd1;
+            --yellow: #9b6a00;
+            --yellow-soft: #f6e9b8;
+            --red: #b32727;
+            --red-soft: #f4dada;
+            --shadow: 0 16px 44px rgba(28, 30, 28, 0.12);
+            --sans: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+            --serif: "Iowan Old Style", "Palatino Linotype", Palatino, serif;
+            --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            margin: 0;
+            background: var(--paper);
+            color: var(--ink);
+            font-family: var(--sans);
+            line-height: 1.5;
+        }
+
+        button,
+        input {
+            font: inherit;
+        }
+
+        button {
+            color: inherit;
+        }
+
+        a {
+            color: var(--blue);
+            text-underline-offset: 3px;
+        }
+
+        code {
+            font-family: var(--mono);
+            font-size: 0.92em;
+        }
+
+        .shell {
+            min-height: 100vh;
+            display: grid;
+            grid-template-columns: 244px minmax(0, 1fr);
+        }
+
+        .rail {
+            position: sticky;
+            top: 0;
+            height: 100vh;
+            padding: 28px 22px;
+            border-right: 1px solid var(--line);
+            background: #ebe7dd;
+            display: flex;
+            flex-direction: column;
+            gap: 28px;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-family: var(--mono);
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .brand-mark {
+            width: 18px;
+            height: 18px;
+            border: 2px solid var(--ink);
+            position: relative;
+        }
+
+        .brand-mark::after {
+            content: "";
+            position: absolute;
+            width: 7px;
+            height: 7px;
+            right: -5px;
+            bottom: -5px;
+            background: var(--orange);
+            border: 2px solid var(--paper);
+        }
+
+        .rail nav {
+            display: grid;
+            gap: 4px;
+        }
+
+        .rail nav a {
+            padding: 8px 10px;
+            color: var(--muted);
+            text-decoration: none;
+            border-left: 2px solid transparent;
+            font-size: 14px;
+        }
+
+        .rail nav a:hover,
+        .rail nav a.active {
+            color: var(--ink);
+            border-left-color: var(--orange);
+            background: rgba(255, 255, 255, 0.45);
+        }
+
+        .rail-note {
+            margin-top: auto;
+            padding-top: 18px;
+            border-top: 1px solid var(--line);
+            color: var(--muted);
+            font-family: var(--mono);
+            font-size: 11px;
+            line-height: 1.6;
+        }
+
+        main {
+            min-width: 0;
+        }
+
+        .wrap {
+            width: min(1180px, calc(100% - 56px));
+            margin: 0 auto;
+        }
+
+        .hero {
+            min-height: 72vh;
+            padding: 76px 0 46px;
+            border-bottom: 1px solid var(--line);
+            display: flex;
+            align-items: center;
+        }
+
+        .hero-grid {
+            width: 100%;
+            display: grid;
+            grid-template-columns: minmax(0, 1.15fr) minmax(340px, 0.85fr);
+            gap: 54px;
+            align-items: end;
+        }
+
+        .eyebrow {
+            margin: 0 0 16px;
+            color: var(--orange);
+            font-family: var(--mono);
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        h1,
+        h2,
+        h3 {
+            margin: 0;
+            letter-spacing: 0;
+        }
+
+        h1 {
+            max-width: 840px;
+            font-family: var(--serif);
+            font-size: clamp(54px, 7vw, 104px);
+            font-weight: 500;
+            line-height: 0.92;
+        }
+
+        .hero-copy {
+            max-width: 680px;
+            margin: 26px 0 0;
+            color: #444844;
+            font-size: 19px;
+            line-height: 1.65;
+        }
+
+        .verdict {
+            border-top: 3px solid var(--ink);
+            border-bottom: 1px solid var(--line-strong);
+            background: var(--paper-2);
+            box-shadow: var(--shadow);
+        }
+
+        .verdict-row {
+            display: grid;
+            grid-template-columns: 90px 1fr;
+            gap: 16px;
+            padding: 16px 18px;
+            border-bottom: 1px solid var(--line);
+        }
+
+        .verdict-row:last-child {
+            border-bottom: 0;
+        }
+
+        .verdict-key {
+            color: var(--muted);
+            font-family: var(--mono);
+            font-size: 11px;
+            text-transform: uppercase;
+        }
+
+        .verdict-value {
+            font-size: 14px;
+            font-weight: 650;
+        }
+
+        .section {
+            padding: 76px 0;
+            border-bottom: 1px solid var(--line);
+        }
+
+        .section-head {
+            display: grid;
+            grid-template-columns: minmax(220px, 0.38fr) minmax(0, 0.62fr);
+            gap: 42px;
+            margin-bottom: 38px;
+            align-items: start;
+        }
+
+        .section-no {
+            display: block;
+            margin-bottom: 10px;
+            color: var(--orange);
+            font-family: var(--mono);
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        h2 {
+            font-family: var(--serif);
+            font-size: clamp(36px, 4.2vw, 62px);
+            font-weight: 500;
+            line-height: 1;
+        }
+
+        .section-intro {
+            margin: 3px 0 0;
+            color: var(--muted);
+            font-size: 17px;
+            line-height: 1.7;
+        }
+
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 20px;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            min-height: 26px;
+            padding: 4px 8px;
+            border: 1px solid currentColor;
+            border-radius: 4px;
+            font-family: var(--mono);
+            font-size: 10px;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+
+        .badge.proved {
+            color: var(--green);
+            background: var(--green-soft);
+        }
+
+        .badge.inferred {
+            color: var(--yellow);
+            background: var(--yellow-soft);
+        }
+
+        .badge.unknown {
+            color: var(--red);
+            background: var(--red-soft);
+        }
+
+        .pipeline {
+            display: grid;
+            grid-template-columns: repeat(8, minmax(120px, 1fr));
+            overflow-x: auto;
+            border: 1px solid var(--line-strong);
+            background: var(--paper-2);
+        }
+
+        .stage {
+            position: relative;
+            min-height: 254px;
+            padding: 18px 16px;
+            border-right: 1px solid var(--line);
+            transition: background 180ms ease, color 180ms ease;
+        }
+
+        .stage:last-child {
+            border-right: 0;
+        }
+
+        .stage::after {
+            content: "→";
+            position: absolute;
+            top: 18px;
+            right: -9px;
+            z-index: 2;
+            width: 18px;
+            background: var(--paper-2);
+            color: var(--line-strong);
+            text-align: center;
+        }
+
+        .stage:last-child::after {
+            display: none;
+        }
+
+        .stage.active {
+            color: white;
+            background: var(--ink);
+        }
+
+        .stage-index {
+            color: var(--orange);
+            font-family: var(--mono);
+            font-size: 11px;
+            font-weight: 800;
+        }
+
+        .stage h3 {
+            margin-top: 34px;
+            font-size: 17px;
+            line-height: 1.2;
+        }
+
+        .stage p {
+            margin: 12px 0 0;
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.55;
+        }
+
+        .stage.active p {
+            color: #d7d9d6;
+        }
+
+        .stage .badge {
+            position: absolute;
+            left: 16px;
+            bottom: 16px;
+        }
+
+        .pipeline-toolbar,
+        .lab-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+            margin-top: 16px;
+        }
+
+        .button-group,
+        .mode-switch {
+            display: inline-flex;
+            border: 1px solid var(--line-strong);
+            background: var(--paper-2);
+        }
+
+        .icon-button,
+        .mode-button {
+            min-height: 40px;
+            border: 0;
+            border-right: 1px solid var(--line);
+            background: transparent;
+            cursor: pointer;
+        }
+
+        .icon-button:last-child,
+        .mode-button:last-child {
+            border-right: 0;
+        }
+
+        .icon-button {
+            width: 42px;
+            font-size: 18px;
+        }
+
+        .mode-button {
+            padding: 0 14px;
+            font-family: var(--mono);
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .icon-button:hover,
+        .mode-button:hover,
+        .mode-button.active {
+            background: var(--ink);
+            color: white;
+        }
+
+        .button-label {
+            color: var(--muted);
+            font-family: var(--mono);
+            font-size: 11px;
+        }
+
+        .engine-grid {
+            display: grid;
+            grid-template-columns: minmax(260px, 0.34fr) minmax(0, 0.66fr);
+            border: 1px solid var(--line-strong);
+            background: var(--paper-2);
+        }
+
+        .engine-spec {
+            padding: 24px;
+            border-right: 1px solid var(--line-strong);
+        }
+
+        .engine-spec h3,
+        .branch-panel h3 {
+            font-family: var(--mono);
+            font-size: 13px;
+            text-transform: uppercase;
+        }
+
+        .spec-table {
+            margin-top: 22px;
+            border-top: 1px solid var(--line);
+        }
+
+        .spec-row {
+            display: grid;
+            grid-template-columns: minmax(120px, 1fr) auto;
+            gap: 14px;
+            padding: 11px 0;
+            border-bottom: 1px solid var(--line);
+            font-size: 13px;
+        }
+
+        .spec-row span:first-child {
+            color: var(--muted);
+        }
+
+        .spec-row strong {
+            font-family: var(--mono);
+            font-size: 12px;
+        }
+
+        .branch-panel {
+            min-width: 0;
+            padding: 24px;
+        }
+
+        .input-line {
+            margin: 20px 0 18px;
+            padding: 17px 18px;
+            border: 1px solid var(--line);
+            background: #f0ede4;
+            font-family: var(--mono);
+            font-size: clamp(16px, 2vw, 22px);
+            white-space: nowrap;
+            overflow-x: auto;
+        }
+
+        .caret {
+            display: inline-block;
+            width: 2px;
+            height: 1.15em;
+            margin: 0 1px -0.18em;
+            background: var(--orange);
+            animation: blink 0.9s steps(1) infinite;
+        }
+
+        .ghost {
+            color: #8a8e89;
+        }
+
+        @keyframes blink {
+            50% {
+                opacity: 0;
+            }
+        }
+
+        .branch-list {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 8px;
+            min-height: 240px;
+        }
+
+        .branch {
+            position: relative;
+            min-height: 72px;
+            padding: 11px 12px 10px 16px;
+            border: 1px solid var(--line);
+            background: white;
+            overflow: hidden;
+            transition: opacity 180ms ease, transform 180ms ease, border-color 180ms ease;
+        }
+
+        .branch::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background: var(--blue);
+        }
+
+        .branch.winner {
+            border-color: var(--green);
+            background: var(--green-soft);
+        }
+
+        .branch.winner::before {
+            background: var(--green);
+        }
+
+        .branch.pruned {
+            opacity: 0.28;
+            transform: scale(0.98);
+        }
+
+        .branch.invalid {
+            opacity: 0.22;
+            border-style: dashed;
+        }
+
+        .branch-token {
+            display: block;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-family: var(--mono);
+            font-size: 12px;
+            font-weight: 800;
+            white-space: nowrap;
+        }
+
+        .branch-meta {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            margin-top: 9px;
+            color: var(--muted);
+            font-family: var(--mono);
+            font-size: 10px;
+        }
+
+        .score-track {
+            height: 3px;
+            margin-top: 8px;
+            background: #e4e2db;
+        }
+
+        .score-fill {
+            height: 100%;
+            background: var(--blue);
+            transition: width 240ms ease;
+        }
+
+        .winner .score-fill {
+            background: var(--green);
+        }
+
+        .lab-controls {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(180px, 1fr));
+            gap: 18px;
+            margin-top: 20px;
+        }
+
+        .control {
+            display: grid;
+            gap: 7px;
+        }
+
+        .control label {
+            display: flex;
+            justify-content: space-between;
+            color: var(--muted);
+            font-family: var(--mono);
+            font-size: 11px;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            accent-color: var(--orange);
+        }
+
+        .callout {
+            margin-top: 20px;
+            padding: 18px 20px;
+            border-left: 4px solid var(--orange);
+            background: var(--orange-soft);
+            font-size: 14px;
+        }
+
+        .scenario-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            border: 1px solid var(--line-strong);
+            background: var(--paper-2);
+        }
+
+        .scenario {
+            padding: 24px;
+            border-right: 1px solid var(--line-strong);
+        }
+
+        .scenario:last-child {
+            border-right: 0;
+        }
+
+        .scenario-kicker {
+            color: var(--orange);
+            font-family: var(--mono);
+            font-size: 11px;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+
+        .scenario h3 {
+            margin-top: 12px;
+            font-size: 22px;
+        }
+
+        .scenario p {
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        .mini-editor {
+            min-height: 88px;
+            margin: 20px 0;
+            padding: 14px;
+            border: 1px solid var(--line);
+            background: #f0ede4;
+            font-family: var(--mono);
+            font-size: 14px;
+            line-height: 1.7;
+        }
+
+        .rule-list {
+            display: grid;
+            gap: 10px;
+            margin: 0;
+            padding: 0;
+            list-style: none;
+        }
+
+        .rule-list li {
+            position: relative;
+            padding-left: 18px;
+            font-size: 13px;
+        }
+
+        .rule-list li::before {
+            content: "•";
+            position: absolute;
+            left: 0;
+            color: var(--orange);
+        }
+
+        .not-same {
+            margin-top: 28px;
+            display: grid;
+            grid-template-columns: 150px 1fr;
+            border-top: 1px solid var(--line-strong);
+            border-bottom: 1px solid var(--line-strong);
+        }
+
+        .not-same strong,
+        .not-same p {
+            margin: 0;
+            padding: 18px;
+        }
+
+        .not-same strong {
+            border-right: 1px solid var(--line);
+            font-family: var(--mono);
+            font-size: 12px;
+            text-transform: uppercase;
+        }
+
+        .not-same p {
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        .evidence-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        .evidence {
+            min-height: 170px;
+            padding: 20px;
+            border: 1px solid var(--line);
+            background: var(--paper-2);
+        }
+
+        .evidence h3 {
+            margin: 12px 0 8px;
+            font-size: 18px;
+        }
+
+        .evidence p {
+            margin: 0;
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        .evidence code {
+            display: block;
+            margin-top: 14px;
+            padding-top: 12px;
+            border-top: 1px solid var(--line);
+            color: #3e433f;
+            font-size: 11px;
+            overflow-wrap: anywhere;
+        }
+
+        .formula {
+            margin: 24px 0;
+            padding: 26px;
+            border: 1px solid var(--line-strong);
+            background: var(--ink);
+            color: white;
+            font-family: var(--mono);
+            overflow-x: auto;
+        }
+
+        .formula-main {
+            font-size: clamp(18px, 2.4vw, 30px);
+            white-space: nowrap;
+        }
+
+        .formula-note {
+            margin-top: 12px;
+            color: #c8ccc8;
+            font-size: 12px;
+        }
+
+        .unknowns {
+            width: 100%;
+            border-collapse: collapse;
+            border: 1px solid var(--line-strong);
+            background: var(--paper-2);
+            font-size: 14px;
+        }
+
+        .unknowns th,
+        .unknowns td {
+            padding: 14px 16px;
+            border-right: 1px solid var(--line);
+            border-bottom: 1px solid var(--line);
+            text-align: left;
+            vertical-align: top;
+        }
+
+        .unknowns th {
+            background: #e9e5da;
+            font-family: var(--mono);
+            font-size: 11px;
+            text-transform: uppercase;
+        }
+
+        .unknowns th:last-child,
+        .unknowns td:last-child {
+            border-right: 0;
+        }
+
+        .unknowns tr:last-child td {
+            border-bottom: 0;
+        }
+
+        .conclusion {
+            padding: 84px 0;
+            background: var(--ink);
+            color: white;
+        }
+
+        .conclusion-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 0.58fr) minmax(320px, 0.42fr);
+            gap: 60px;
+        }
+
+        .conclusion h2 {
+            max-width: 720px;
+        }
+
+        .conclusion p {
+            color: #c8ccc8;
+            font-size: 17px;
+            line-height: 1.7;
+        }
+
+        .answer-list {
+            display: grid;
+            gap: 1px;
+            background: #4d504d;
+            border: 1px solid #4d504d;
+        }
+
+        .answer {
+            display: grid;
+            grid-template-columns: 92px 1fr;
+            gap: 14px;
+            padding: 16px;
+            background: #252725;
+        }
+
+        .answer b {
+            color: #ff8b50;
+            font-family: var(--mono);
+            font-size: 11px;
+            text-transform: uppercase;
+        }
+
+        .answer span {
+            font-size: 14px;
+        }
+
+        footer {
+            padding: 34px 0 46px;
+            border-top: 1px solid #4d504d;
+            background: var(--ink);
+            color: #aeb3ae;
+            font-family: var(--mono);
+            font-size: 11px;
+        }
+
+        .footer-grid {
+            display: flex;
+            justify-content: space-between;
+            gap: 24px;
+        }
+
+        .footer-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 14px;
+        }
+
+        .footer-links a {
+            color: #d5dbd5;
+        }
+
+        @media (max-width: 1040px) {
+            .shell {
+                grid-template-columns: 1fr;
+            }
+
+            .rail {
+                position: sticky;
+                z-index: 10;
+                width: 100%;
+                height: auto;
+                padding: 12px 18px;
+                border-right: 0;
+                border-bottom: 1px solid var(--line);
+                flex-direction: row;
+                align-items: center;
+                overflow-x: auto;
+            }
+
+            .rail nav {
+                display: flex;
+                white-space: nowrap;
+            }
+
+            .rail nav a {
+                border-left: 0;
+                border-bottom: 2px solid transparent;
+            }
+
+            .rail nav a.active {
+                border-left-color: transparent;
+                border-bottom-color: var(--orange);
+            }
+
+            .rail-note {
+                display: none;
+            }
+
+            .hero {
+                min-height: auto;
+                padding-top: 58px;
+            }
+
+            .hero-grid,
+            .section-head,
+            .conclusion-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .hero-grid {
+                gap: 36px;
+            }
+
+            .section-head {
+                gap: 18px;
+            }
+
+            .scenario-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .scenario {
+                border-right: 0;
+                border-bottom: 1px solid var(--line-strong);
+            }
+
+            .scenario:last-child {
+                border-bottom: 0;
+            }
+        }
+
+        @media (max-width: 760px) {
+            .wrap {
+                width: min(100% - 28px, 1180px);
+            }
+
+            .brand {
+                flex: 0 0 auto;
+            }
+
+            h1 {
+                font-size: 54px;
+            }
+
+            .hero-copy {
+                font-size: 16px;
+            }
+
+            .section {
+                padding: 56px 0;
+            }
+
+            .engine-grid,
+            .evidence-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .engine-spec {
+                border-right: 0;
+                border-bottom: 1px solid var(--line-strong);
+            }
+
+            .branch-list {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .lab-controls {
+                grid-template-columns: 1fr;
+            }
+
+            .mode-switch {
+                width: 100%;
+            }
+
+            .mode-button {
+                flex: 1;
+                padding: 0 8px;
+            }
+
+            .not-same {
+                grid-template-columns: 1fr;
+            }
+
+            .not-same strong {
+                border-right: 0;
+                border-bottom: 1px solid var(--line);
+            }
+
+            .unknowns {
+                display: block;
+                overflow-x: auto;
+            }
+
+            .footer-grid {
+                flex-direction: column;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *,
+            *::before,
+            *::after {
+                scroll-behavior: auto !important;
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="shell">
+        <aside class="rail">
+            <div class="brand">
+                <span class="brand-mark" aria-hidden="true"></span>
+                <span>Cotypist / RE</span>
+            </div>
+            <nav aria-label="Sommaire">
+                <a href="#verdict">Verdict</a>
+                <a href="#pipeline">Pipeline</a>
+                <a href="#branches">Branches K</a>
+                <a href="#midword">Mid-word</a>
+                <a href="#preuves">Preuves</a>
+                <a href="#inconnues">Inconnues</a>
+            </nav>
+            <div class="rail-note">
+                Reconstruction locale<br>
+                Cotypist 2026.1.1 (74)<br>
+                Apple Silicon / llama.cpp<br>
+                9 juin 2026
+            </div>
+        </aside>
+
+        <main>
+            <section class="hero" id="verdict">
+                <div class="wrap hero-grid">
+                    <div>
+                        <p class="eyebrow">Rétro-ingénierie du chemin de génération</p>
+                        <h1>Le moteur de ghost de Cotypist.</h1>
+                        <p class="hero-copy">
+                            Cotypist exécute localement Gemma 3 1B via <code>llama.cpp</code>.
+                            Son binaire contient une recherche multi-séquence, des opérations de
+                            copie et d'élagage du cache KV, ainsi que des contraintes mid-word.
+                            Le binaire fixe <code>maxSearchWidth</code> et
+                            <code>maxResultWidth</code> à neuf, avec un maximum validé de neuf.
+                            Le chemin mid-word a été tracé dynamiquement:
+                            correspondance locale tant que la frappe suit le ghost, puis
+                            retokenisation et nouveau décodage à la première divergence.
+                        </p>
+                        <div class="legend" aria-label="Niveaux de certitude">
+                            <span class="badge proved">Prouvé</span>
+                            <span class="badge inferred">Inféré</span>
+                            <span class="badge unknown">Inconnu</span>
+                        </div>
+                    </div>
+
+                    <div class="verdict">
+                        <div class="verdict-row">
+                            <span class="verdict-key">Runtime</span>
+                            <span class="verdict-value">llama.cpp + GGUF local, pas MLX</span>
+                        </div>
+                        <div class="verdict-row">
+                            <span class="verdict-key">Recherche</span>
+                            <span class="verdict-value">K configuré = 9, largeur survivante variable</span>
+                        </div>
+                        <div class="verdict-row">
+                            <span class="verdict-key">Sélection</span>
+                            <span class="verdict-value">Seuil top-K inclusif prouvé; métrique active à confirmer</span>
+                        </div>
+                        <div class="verdict-row">
+                            <span class="verdict-key">Mid-word</span>
+                            <span class="verdict-value">Réutilisation locale, régénération sur divergence</span>
+                        </div>
+                        <div class="verdict-row">
+                            <span class="verdict-key">LoRA</span>
+                            <span class="verdict-value">Support présent, aucun adaptateur actif observé</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="section" id="pipeline">
+                <div class="wrap">
+                    <div class="section-head">
+                        <div>
+                            <span class="section-no">01 / chemin complet</span>
+                            <h2>Du caret au ghost.</h2>
+                        </div>
+                        <p class="section-intro">
+                            Cette chaîne combine ce qui est visible dans le binaire, les réglages
+                            locaux et la documentation de Cotypist. Lancez la séquence pour voir
+                            l'ordre logique. Certaines opérations peuvent se chevaucher en pratique.
+                        </p>
+                    </div>
+
+                    <div class="pipeline" id="pipelineTrack">
+                        <article class="stage active">
+                            <span class="stage-index">01</span>
+                            <h3>Observer l'édition</h3>
+                            <p>Texte avant et après le caret, application, fenêtre et état du champ via Accessibility.</p>
+                            <span class="badge proved">Prouvé</span>
+                        </article>
+                        <article class="stage">
+                            <span class="stage-index">02</span>
+                            <h3>Assembler le contexte</h3>
+                            <p>Instructions, historique local, presse-papiers et capture/OCR optionnels sous budgets.</p>
+                            <span class="badge proved">Prouvé</span>
+                        </article>
+                        <article class="stage">
+                            <span class="stage-index">03</span>
+                            <h3>Tokeniser</h3>
+                            <p>Préparer le prompt GGUF et déterminer un éventuel préfixe obligatoire en mid-word.</p>
+                            <span class="badge proved">Prouvé</span>
+                        </article>
+                        <article class="stage">
+                            <span class="stage-index">04</span>
+                            <h3>Réutiliser le KV</h3>
+                            <p>Le code sait conserver, copier et supprimer des séquences KV dans un contexte partagé.</p>
+                            <span class="badge proved">Prouvé</span>
+                        </article>
+                        <article class="stage">
+                            <span class="stage-index">05</span>
+                            <h3>Ouvrir les branches</h3>
+                            <p>Créer des candidats dans un batch partagé avec une largeur de recherche configurée à neuf.</p>
+                            <span class="badge proved">Prouvé statique</span>
+                        </article>
+                        <article class="stage">
+                            <span class="stage-index">06</span>
+                            <h3>Scorer et élaguer</h3>
+                            <p>Trier les scores décroissants puis conserver tout candidat au-dessus du seuil K−1 inclus.</p>
+                            <span class="badge proved">Prouvé statique</span>
+                        </article>
+                        <article class="stage">
+                            <span class="stage-index">07</span>
+                            <h3>Finaliser le texte</h3>
+                            <p>Appliquer longueurs, contraintes et arrêts; grouper les variantes partageant un préfixe.</p>
+                            <span class="badge inferred">Inféré</span>
+                        </article>
+                        <article class="stage">
+                            <span class="stage-index">08</span>
+                            <h3>Afficher et réutiliser</h3>
+                            <p>Un seul ghost au caret. Une frappe conforme consomme son préfixe sans décodage; une divergence relance le modèle.</p>
+                            <span class="badge proved">Prouvé</span>
+                        </article>
+                    </div>
+
+                    <div class="pipeline-toolbar">
+                        <div class="button-group" aria-label="Contrôle du pipeline">
+                            <button class="icon-button" id="pipelineReset" title="Revenir au début" aria-label="Revenir au début">↺</button>
+                            <button class="icon-button" id="pipelinePlay" title="Lire la séquence" aria-label="Lire la séquence">▶</button>
+                            <button class="icon-button" id="pipelineNext" title="Étape suivante" aria-label="Étape suivante">→</button>
+                        </div>
+                        <span class="button-label" id="pipelineStatus">Étape 1 / 8 — observation du champ</span>
+                    </div>
+                </div>
+            </section>
+
+            <section class="section" id="branches">
+                <div class="wrap">
+                    <div class="section-head">
+                        <div>
+                            <span class="section-no">02 / moteur de recherche</span>
+                            <h2>Le scénario des neuf branches.</h2>
+                        </div>
+                        <p class="section-intro">
+                            Cette visualisation applique la fonction de pruning reconstruite
+                            statiquement, pas une capture runtime. Le cap transmis est neuf, mais le
+                            nombre de survivants varie: les filtres peuvent le réduire et les ex æquo
+                            au seuil peuvent le faire dépasser K.
+                        </p>
+                    </div>
+
+                    <div class="engine-grid">
+                        <aside class="engine-spec">
+                            <h3>Paramètres reconstruits</h3>
+                            <div class="spec-table">
+                                <div class="spec-row"><span><code>maxSearchWidth</code></span><strong>9</strong></div>
+                                <div class="spec-row"><span><code>maxResultWidth</code></span><strong>9</strong></div>
+                                <div class="spec-row"><span><code>minBranchProbability</code></span><strong>0.05</strong></div>
+                                <div class="spec-row"><span><code>relativeCutoff</code></span><strong>1e-10</strong></div>
+                                <div class="spec-row"><span>Métrique de pruning</span><strong>total/moyen × logit/logprob</strong></div>
+                                <div class="spec-row"><span>Sélection aléatoire</span><strong>non déterminée</strong></div>
+                                <div class="spec-row"><span>Résultat visible</span><strong>1 ghost</strong></div>
+                            </div>
+                            <div class="callout">
+                                <strong>Simulation, pas télémétrie.</strong><br>
+                                Le cap K et la formule de seuil sont prouvés statiquement. Le nombre
+                                de séquences vivantes par ghost et les deux drapeaux choisissant la
+                                métrique n'ont pas encore été observés sur le chemin officiel.
+                            </div>
+                        </aside>
+
+                        <div class="branch-panel">
+                            <h3 id="labTitle">Après un espace — prochaine continuation</h3>
+                            <div class="input-line" id="labEditor" aria-live="polite"></div>
+                            <div class="branch-list" id="branchList" aria-label="Candidats internes"></div>
+
+                            <div class="lab-controls">
+                                <div class="control">
+                                    <label for="widthRange">
+                                        <span>Largeur cible K</span>
+                                        <output id="widthOutput">9</output>
+                                    </label>
+                                    <input id="widthRange" type="range" min="1" max="9" value="9">
+                                </div>
+                                <div class="control">
+                                    <label for="probRange">
+                                        <span>Seuil de branche</span>
+                                        <output id="probOutput">5 %</output>
+                                    </label>
+                                    <input id="probRange" type="range" min="1" max="25" value="5">
+                                </div>
+                            </div>
+
+                            <div class="lab-toolbar">
+                                <div class="mode-switch" aria-label="Scénario de génération">
+                                    <button class="mode-button active" data-mode="space">Après espace</button>
+                                    <button class="mode-button" data-mode="midword">Mid-word</button>
+                                    <button class="mode-button" data-mode="midline">Mid-line</button>
+                                </div>
+                                <div class="button-group" aria-label="Progression des tokens">
+                                    <button class="icon-button" id="tokenReset" title="Réinitialiser" aria-label="Réinitialiser">↺</button>
+                                    <button class="icon-button" id="tokenNext" title="Décoder un token" aria-label="Décoder un token">→</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="formula">
+                        <div class="formula-main">seuil = scoresTriésDécroissants[K − 1] · garder si score ≥ seuil</div>
+                        <div class="formula-note">
+                            Le pool contient les séquences actives et les résultats fraîchement
+                            terminés. La métrique est choisie parmi <code>totalLogit</code>,
+                            <code>averageLogit</code>, <code>totalLogprob</code> et
+                            <code>averageLogprob</code>. Si le pool contient moins de K éléments, le
+                            seuil devient une sentinelle très négative. La comparaison est stricte
+                            seulement pour le rejet: tous les ex æquo au seuil survivent. Avant ce
+                            classement, un token est rejeté si <code>p &lt; 0.05</code>; lorsqu'un
+                            score de référence existe, un second plancher applique
+                            <code>p ≥ 1e-10 × exp(scoreRéférence)</code>.
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="section" id="midword">
+                <div class="wrap">
+                    <div class="section-head">
+                        <div>
+                            <span class="section-no">03 / trois positions du caret</span>
+                            <h2>Mid-word n'est pas exactement pareil.</h2>
+                        </div>
+                        <p class="section-intro">
+                            Le même moteur de séquences et de scoring reste utilisé, mais l'espace
+                            de recherche change. En milieu de mot, Cotypist doit respecter les
+                            caractères déjà tapés. Le binaire expose précisément les notions
+                            <code>requiredPrefix</code> et <code>remainingRequiredPrefix</code>.
+                        </p>
+                    </div>
+
+                    <div class="scenario-grid">
+                        <article class="scenario">
+                            <span class="scenario-kicker">A / après espace</span>
+                            <h3>Décodage libre</h3>
+                            <div class="mini-editor">
+                                Je peux vous envoyer <span class="caret"></span><span class="ghost">le document demain matin.</span>
+                            </div>
+                            <ul class="rule-list">
+                                <li>Le prochain token n'a pas de préfixe lexical imposé.</li>
+                                <li>Les branches divergent immédiatement entre plusieurs formulations.</li>
+                                <li>Le meilleur candidat complet devient le ghost visible.</li>
+                            </ul>
+                        </article>
+
+                        <article class="scenario">
+                            <span class="scenario-kicker">B / mid-word</span>
+                            <h3>Décodage contraint</h3>
+                            <div class="mini-editor">
+                                Pouvez-vous conf<span class="caret"></span><span class="ghost">irmer le rendez-vous ?</span>
+                            </div>
+                            <ul class="rule-list">
+                                <li>Le fragment <code>conf</code> devient une contrainte de préfixe.</li>
+                                <li>Les tokens incompatibles sont rejetés ou perdent leur branche.</li>
+                                <li>Seul le suffixe non tapé, ici <code>irmer…</code>, est affiché.</li>
+                                <li>Une frappe conforme consomme le suffixe existant sans appel modèle.</li>
+                                <li>Une frappe divergente invalide le ghost puis déclenche tokenisation et décodage.</li>
+                            </ul>
+                        </article>
+
+                        <article class="scenario">
+                            <span class="scenario-kicker">C / mid-line</span>
+                            <h3>Contexte des deux côtés</h3>
+                            <div class="mini-editor">
+                                La réunion aura lieu <span class="caret"></span><span class="ghost">demain matin </span>dans la salle B.
+                            </div>
+                            <ul class="rule-list">
+                                <li>Le texte après le caret sert à éviter répétitions et collisions.</li>
+                                <li>Ce problème est distinct du mid-word.</li>
+                                <li>La profondeur exacte de prise en compte dépend du budget et du support de l'app.</li>
+                            </ul>
+                        </article>
+                    </div>
+
+                    <div class="not-same">
+                        <strong>Trace dynamique du 9 juin 2026</strong>
+                        <p>
+                            Sur le ghost <code>Paris.</code>, taper <code>P</code> réduit
+                            immédiatement l'affichage à <code>aris.</code> sans
+                            <code>llama_tokenize</code>, <code>llama_decode</code> ni mutation KV
+                            échantillonnée. Taper <code>X</code> laisse brièvement le suffixe obsolète,
+                            le retire avant 900 ms, puis exécute <code>llama_vocab::tokenize</code>,
+                            <code>llama_decode</code>, <code>llama_get_logits_ith</code> et un chemin
+                            interne <code>seq_rm</code>. La taille exacte de la fenêtre retokenisée
+                            reste à mesurer.
+                        </p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="section" id="preuves">
+                <div class="wrap">
+                    <div class="section-head">
+                        <div>
+                            <span class="section-no">04 / chaîne de preuve</span>
+                            <h2>Ce qui est réellement établi.</h2>
+                        </div>
+                        <p class="section-intro">
+                            Les cartes ci-dessous distinguent les symboles et comportements visibles
+                            dans l'application des conclusions architecturales. Les noms de fonctions
+                            llama sont particulièrement forts : ils exposent directement la gestion
+                            des séquences dans le cache du modèle.
+                        </p>
+                    </div>
+
+                    <div class="evidence-grid">
+                        <article class="evidence">
+                            <span class="badge proved">Prouvé</span>
+                            <h3>Runtime local llama.cpp</h3>
+                            <p>Le processus officiel mappe réellement un GGUF Gemma 3 1B base/PT Q5_K_M de 851 344 512 octets. Le bundle lie llama/ggml, Metal, BLAS et CPU.</p>
+                            <code>libllama · ggml-metal · ggml-blas · ggml-cpu</code>
+                        </article>
+
+                        <article class="evidence">
+                            <span class="badge proved">Prouvé</span>
+                            <h3>Primitives et callsites de séquences KV</h3>
+                            <p>Le binaire appelle explicitement les opérations de copie, retrait et conservation des séquences. Cela prouve la capacité multi-séquence, pas sa fréquence d'usage.</p>
+                            <code>llama_memory_seq_cp · llama_memory_seq_rm · llama_memory_seq_keep</code>
+                        </article>
+
+                        <article class="evidence">
+                            <span class="badge proved">Prouvé</span>
+                            <h3>État riche par candidat</h3>
+                            <p>Chaque séquence transporte texte tokenisé, scores cumulés et moyens, contraintes, arrêts et préfixe obligatoire restant.</p>
+                            <code>totalLogit · averageLogit · totalLogprob · averageLogprob · remainingRequiredPrefix</code>
+                        </article>
+
+                        <article class="evidence">
+                            <span class="badge proved">Prouvé statique</span>
+                            <h3>Pruning top-K déterministe</h3>
+                            <p>Le code trie le pool de scores par ordre décroissant, prend le score K−1 comme seuil, puis ne rejette que les scores strictement inférieurs.</p>
+                            <code>sort(descending) → threshold = scores[K - 1] → keep score ≥ threshold</code>
+                        </article>
+
+                        <article class="evidence">
+                            <span class="badge inferred">Inféré fort</span>
+                            <h3>Personnalisation par contexte et biais</h3>
+                            <p>Les préférences et l'historique local influencent le prompt et/ou les scores. Aucun adaptateur LoRA actif n'a été trouvé dans l'état local.</p>
+                            <code>encrypted local profile · previous user inputs · token/logit bias paths</code>
+                        </article>
+
+                        <article class="evidence">
+                            <span class="badge inferred">Inféré fort</span>
+                            <h3>Un ghost, plusieurs futurs en réserve</h3>
+                            <p>Le code permet de regrouper et recycler des alternatives. L'interface, elle, n'affiche qu'un seul ghost.</p>
+                            <code>prefix grouping · previous completion · result cache · sequence reuse</code>
+                        </article>
+
+                        <article class="evidence">
+                            <span class="badge proved">Prouvé</span>
+                            <h3>Limite de l'instrumentation</h3>
+                            <p>LLDB reste refusé. Une sonde à breakpoint matériel se charge dans la copie resignée sans patcher le texte, mais cette copie ne rejoint pas le chemin ghost autorisé par Accessibility.</p>
+                            <code>hardened runtime · breakpoint matériel · sample(1) · Ghidra ciblé</code>
+                        </article>
+
+                        <article class="evidence">
+                            <span class="badge proved">Prouvé</span>
+                            <h3>Bascule mid-word hybride</h3>
+                            <p>Une frappe conforme réduit le ghost sans calcul modèle. Une divergence déclenche retokenisation, retrait KV et nouveau décodage Gemma.</p>
+                            <code>match → suffix reuse · mismatch → tokenize → seq_rm → decode</code>
+                        </article>
+                    </div>
+                </div>
+            </section>
+
+            <section class="section" id="inconnues">
+                <div class="wrap">
+                    <div class="section-head">
+                        <div>
+                            <span class="section-no">05 / limites de la reconstruction</span>
+                            <h2>Ce qu'il faut encore creuser.</h2>
+                        </div>
+                        <p class="section-intro">
+                            La vision globale est suffisante pour reproduire l'architecture de
+                            génération. Les éléments restants servent surtout à atteindre une
+                            parité fine de ranking, de latence et de comportement aux frontières
+                            de tokens.
+                        </p>
+                    </div>
+
+                    <table class="unknowns">
+                        <thead>
+                            <tr>
+                                <th>Question</th>
+                                <th>État</th>
+                                <th>Méthode pour conclure</th>
+                                <th>Impact</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Métrique de pruning active</td>
+                                <td><span class="badge inferred">Partiel</span></td>
+                                <td>Observer les deux drapeaux qui choisissent total/moyen et logit/logprob à l'entrée du pruning.</td>
+                                <td>Ordre exact des candidats.</td>
+                            </tr>
+                            <tr>
+                                <td>Moment exact d'ouverture d'une nouvelle branche</td>
+                                <td><span class="badge inferred">Partiel</span></td>
+                                <td>Instrumenter un build autorisant l'attachement, ou obtenir un build de diagnostic signé par l'éditeur.</td>
+                                <td>Coût réel et diversité.</td>
+                            </tr>
+                            <tr>
+                                <td>Largeur K réellement active par ghost</td>
+                                <td><span class="badge inferred">Partiel</span></td>
+                                <td>Le K transmis vaut 9. Il reste à compter les tableaux actifs/terminés avec la sonde sur un lab conservant son autorisation Accessibility.</td>
+                                <td>Mesure le coût réel et les effets des ex æquo.</td>
+                            </tr>
+                            <tr>
+                                <td>Référence exacte du cutoff relatif</td>
+                                <td><span class="badge inferred">Partiel</span></td>
+                                <td>La comparaison <code>p ≥ 1e-10 × exp(scoreRéférence)</code> est visible; il reste à nommer précisément l'état portant ce score.</td>
+                                <td>Ouverture des branches très improbables.</td>
+                            </tr>
+                            <tr>
+                                <td>Fenêtre exacte de retokenisation mid-word</td>
+                                <td><span class="badge inferred">Partiel</span></td>
+                                <td>Tracer les arguments de tokenisation et la position <code>p0</code> du retrait KV sur plusieurs frontières SentencePiece.</td>
+                                <td>Qualité sur les mots partiellement tapés.</td>
+                            </tr>
+                            <tr>
+                                <td>Formule complète des biais de personnalisation</td>
+                                <td><span class="badge inferred">Partiel</span></td>
+                                <td>Comparer profils chiffrés, hooks de scoring et sorties sur corpus contrôlé.</td>
+                                <td>Imitation du style personnel.</td>
+                            </tr>
+                            <tr>
+                                <td>Règles exactes de terminaison et de troncature</td>
+                                <td><span class="badge inferred">Partiel</span></td>
+                                <td>Cartographier tous les stop predicates et les longueurs par type de champ.</td>
+                                <td>Longueur et propreté du ghost.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="conclusion">
+                <div class="wrap conclusion-grid">
+                    <div>
+                        <span class="section-no">Conclusion opérationnelle</span>
+                        <h2>Le pruning principal est reconstruit; son mode runtime reste à mesurer.</h2>
+                        <p>
+                            Pour reproduire Cotypist, le noyau n'est pas un modèle spécialisé par
+                            LoRA. C'est l'orchestration : contexte riche mais borné, cache KV,
+                            capacité multi-séquence, contraintes mid-word, ranking cumulatif et
+                            réutilisation. Le cap K, les pré-filtres et le seuil top-K sont établis.
+                            Le nombre vivant à chaque itération et la métrique sélectionnée restent
+                            les deux principales inconnues runtime.
+                        </p>
+                    </div>
+                    <div class="answer-list">
+                        <div class="answer"><b>K branches ?</b><span>Cap configuré et maximum: 9. Survivants: variables, pas encore comptés.</span></div>
+                        <div class="answer"><b>9 appels ?</b><span>Non démontré; le code permet un batch et un contexte partagés.</span></div>
+                        <div class="answer"><b>LoRA ?</b><span>Support possible, aucun LoRA actif observé.</span></div>
+                        <div class="answer"><b>Aléatoire ?</b><span>Le pruning observé est déterministe; la politique de proposition des tokens reste à isoler.</span></div>
+                        <div class="answer"><b>Mid-word ?</b><span>Hybride prouvé: suffixe consommé localement, régénération à la divergence.</span></div>
+                        <div class="answer"><b>Ghosts visibles ?</b><span>Un seul; les futurs internes restent une inférence forte.</span></div>
+                    </div>
+                </div>
+            </section>
+
+            <footer>
+                <div class="wrap footer-grid">
+                    <span>Document de reconstruction — observations locales + analyse statique Ghidra</span>
+                    <div class="footer-links">
+                        <a href="https://cotypist.app/help/privacy">Confidentialité Cotypist</a>
+                        <a href="https://cotypist.app/help/personalization">Personnalisation</a>
+                        <a href="https://github.com/NationalSecurityAgency/ghidra">Ghidra</a>
+                    </div>
+                </div>
+            </footer>
+        </main>
+    </div>
+
+    <script>
+        const pipelineStages = [...document.querySelectorAll(".stage")];
+        const pipelineStatus = document.querySelector("#pipelineStatus");
+        const stageLabels = [
+            "observation du champ",
+            "assemblage du contexte",
+            "tokenisation",
+            "réutilisation du cache KV",
+            "ouverture des branches",
+            "scoring et pruning",
+            "finalisation",
+            "affichage du ghost",
+        ];
+        let pipelineIndex = 0;
+        let pipelineTimer = null;
+
+        function setPipelineStage(index) {
+            pipelineIndex = Math.max(0, Math.min(index, pipelineStages.length - 1));
+            pipelineStages.forEach((stage, stageIndex) => {
+                stage.classList.toggle("active", stageIndex === pipelineIndex);
+            });
+            pipelineStages[pipelineIndex].scrollIntoView({
+                block: "nearest",
+                inline: "center",
+                behavior: "smooth",
+            });
+            pipelineStatus.textContent =
+                `Étape ${pipelineIndex + 1} / ${pipelineStages.length} — ${stageLabels[pipelineIndex]}`;
+        }
+
+        function stopPipeline() {
+            if (pipelineTimer) {
+                window.clearInterval(pipelineTimer);
+                pipelineTimer = null;
+                document.querySelector("#pipelinePlay").textContent = "▶";
+            }
+        }
+
+        document.querySelector("#pipelineReset").addEventListener("click", () => {
+            stopPipeline();
+            setPipelineStage(0);
+        });
+
+        document.querySelector("#pipelineNext").addEventListener("click", () => {
+            stopPipeline();
+            setPipelineStage((pipelineIndex + 1) % pipelineStages.length);
+        });
+
+        document.querySelector("#pipelinePlay").addEventListener("click", (event) => {
+            if (pipelineTimer) {
+                stopPipeline();
+                return;
+            }
+            event.currentTarget.textContent = "Ⅱ";
+            pipelineTimer = window.setInterval(() => {
+                if (pipelineIndex === pipelineStages.length - 1) {
+                    stopPipeline();
+                    return;
+                }
+                setPipelineStage(pipelineIndex + 1);
+            }, 950);
+        });
+
+        pipelineStages.forEach((stage, index) => {
+            stage.addEventListener("click", () => {
+                stopPipeline();
+                setPipelineStage(index);
+            });
+        });
+
+        const scenarios = {
+            space: {
+                title: "Après un espace — prochaine continuation",
+                before: "Je peux vous envoyer ",
+                typed: "",
+                after: "",
+                generations: [
+                    ["le", "la", "un", "une", "ça", "tout", "les", "ce", "notre"],
+                    ["le document", "la version", "un lien", "une copie", "ça demain", "tout cela", "les détails", "ce fichier", "notre proposition"],
+                    ["le document demain", "la version finale", "un lien sécurisé", "une copie complète", "ça demain matin", "tout cela ce soir", "les détails par mail", "ce fichier aujourd'hui", "notre proposition demain"],
+                ],
+                scores: [0.94, 0.83, 0.76, 0.67, 0.43, 0.35, 0.28, 0.18, 0.09],
+                probs: [0.24, 0.18, 0.14, 0.11, 0.09, 0.075, 0.062, 0.052, 0.045],
+                invalid: [],
+            },
+            midword: {
+                title: "Mid-word — requiredPrefix = « conf »",
+                before: "Pouvez-vous ",
+                typed: "conf",
+                after: "",
+                generations: [
+                    ["confirmer", "confondre", "conférer", "confier", "confus", "convenir", "répondre", "valider", "dire"],
+                    ["confirmer le", "confirmer votre", "confirmer que", "confirmer ce", "confirmer la", "convenir de", "répondre à", "valider le", "dire si"],
+                    ["confirmer le rendez-vous ?", "confirmer votre disponibilité ?", "confirmer que c'est bon ?", "confirmer ce point ?", "confirmer la réception ?", "convenir d'une date", "répondre rapidement", "valider le rendez-vous", "dire si c'est bon"],
+                ],
+                scores: [0.97, 0.91, 0.84, 0.78, 0.69, 0.31, 0.22, 0.12, 0.05],
+                probs: [0.28, 0.20, 0.16, 0.12, 0.09, 0.052, 0.041, 0.031, 0.018],
+                invalid: [5, 6, 7, 8],
+            },
+            midline: {
+                title: "Mid-line — contexte après caret = « dans la salle B. »",
+                before: "La réunion aura lieu ",
+                typed: "",
+                after: "dans la salle B.",
+                generations: [
+                    ["demain", "mardi", "à", "le", "finalement", "bien", "ici", "dans", "salle"],
+                    ["demain matin ", "mardi à 10 h ", "à 14 h ", "le 12 juin ", "finalement demain ", "bien demain ", "ici même ", "dans la ", "salle B "],
+                    ["demain matin ", "mardi à 10 h ", "à 14 h précises ", "le 12 juin ", "finalement demain ", "bien demain ", "ici même ", "dans la salle B ", "salle B "],
+                ],
+                scores: [0.95, 0.86, 0.79, 0.65, 0.48, 0.32, 0.19, 0.08, 0.03],
+                probs: [0.26, 0.19, 0.15, 0.105, 0.082, 0.061, 0.049, 0.038, 0.02],
+                invalid: [7, 8],
+            },
+        };
+
+        const labTitle = document.querySelector("#labTitle");
+        const labEditor = document.querySelector("#labEditor");
+        const branchList = document.querySelector("#branchList");
+        const widthRange = document.querySelector("#widthRange");
+        const probRange = document.querySelector("#probRange");
+        const widthOutput = document.querySelector("#widthOutput");
+        const probOutput = document.querySelector("#probOutput");
+        let mode = "space";
+        let tokenStep = 0;
+
+        function currentScenario() {
+            return scenarios[mode];
+        }
+
+        function pruningState() {
+            const scenario = currentScenario();
+            const k = Number(widthRange.value);
+            const probabilityThreshold = Number(probRange.value) / 100;
+            const eligibleScores = scenario.scores
+                .filter((_, index) =>
+                    !scenario.invalid.includes(index) &&
+                    scenario.probs[index] >= probabilityThreshold
+                )
+                .sort((left, right) => right - left);
+            const scoreThreshold = eligibleScores.length < k
+                ? Number.NEGATIVE_INFINITY
+                : eligibleScores[k - 1];
+            return { probabilityThreshold, scoreThreshold };
+        }
+
+        function candidateStatus(index) {
+            const scenario = currentScenario();
+            const { probabilityThreshold, scoreThreshold } = pruningState();
+            const invalid = scenario.invalid.includes(index);
+            const byProbability = scenario.probs[index] < probabilityThreshold;
+            const byWidth =
+                !invalid &&
+                !byProbability &&
+                scenario.scores[index] < scoreThreshold;
+            return {
+                invalid,
+                pruned: byWidth || byProbability || invalid,
+            };
+        }
+
+        function visibleWinnerIndex() {
+            const scenario = currentScenario();
+            return scenario.scores.reduce((winner, score, index) => {
+                if (candidateStatus(index).pruned) return winner;
+                if (winner < 0 || score > scenario.scores[winner]) return index;
+                return winner;
+            }, -1);
+        }
+
+        function renderedGhost(candidate) {
+            const scenario = currentScenario();
+            if (mode === "midword" && candidate.startsWith(scenario.typed)) {
+                return candidate.slice(scenario.typed.length);
+            }
+            return candidate;
+        }
+
+        function renderLab() {
+            const scenario = currentScenario();
+            const generation = scenario.generations[tokenStep];
+            const winner = visibleWinnerIndex();
+            labTitle.textContent = scenario.title;
+            widthOutput.textContent = widthRange.value;
+            probOutput.textContent = `${probRange.value} %`;
+
+            const ghostText = winner >= 0
+                ? renderedGhost(generation[winner])
+                : "aucune branche survivante";
+            labEditor.innerHTML =
+                `${escapeHTML(scenario.before)}${escapeHTML(scenario.typed)}` +
+                `<span class="caret"></span><span class="ghost">${escapeHTML(ghostText)}</span>` +
+                `${scenario.after ? `<span>${escapeHTML(scenario.after)}</span>` : ""}`;
+
+            branchList.replaceChildren();
+            generation.forEach((token, index) => {
+                const status = candidateStatus(index);
+                const branch = document.createElement("article");
+                branch.className = "branch";
+                if (status.invalid) branch.classList.add("invalid");
+                if (status.pruned) branch.classList.add("pruned");
+                if (index === winner) branch.classList.add("winner");
+
+                const reason = status.invalid
+                    ? "préfixe incompatible"
+                    : status.pruned
+                        ? "élaguée"
+                        : index === winner
+                            ? "ghost retenu"
+                            : `seq ${index + 1}`;
+
+                branch.innerHTML = `
+                    <span class="branch-token">${escapeHTML(token)}</span>
+                    <span class="branch-meta">
+                        <span>${reason}</span>
+                        <span>${scenario.scores[index].toFixed(2)}</span>
+                    </span>
+                    <div class="score-track">
+                        <div class="score-fill" style="width:${Math.round(scenario.scores[index] * 100)}%"></div>
+                    </div>
+                `;
+                branchList.appendChild(branch);
+            });
+        }
+
+        function escapeHTML(value) {
+            return value
+                .replaceAll("&", "&amp;")
+                .replaceAll("<", "&lt;")
+                .replaceAll(">", "&gt;")
+                .replaceAll('"', "&quot;");
+        }
+
+        document.querySelectorAll(".mode-button").forEach((button) => {
+            button.addEventListener("click", () => {
+                mode = button.dataset.mode;
+                tokenStep = 0;
+                document.querySelectorAll(".mode-button").forEach((item) => {
+                    item.classList.toggle("active", item === button);
+                });
+                renderLab();
+            });
+        });
+
+        widthRange.addEventListener("input", renderLab);
+        probRange.addEventListener("input", renderLab);
+
+        document.querySelector("#tokenReset").addEventListener("click", () => {
+            tokenStep = 0;
+            renderLab();
+        });
+
+        document.querySelector("#tokenNext").addEventListener("click", () => {
+            tokenStep = (tokenStep + 1) % currentScenario().generations.length;
+            renderLab();
+        });
+
+        const navLinks = [...document.querySelectorAll(".rail nav a")];
+        const observedSections = navLinks
+            .map((link) => document.querySelector(link.getAttribute("href")))
+            .filter(Boolean);
+
+        const observer = new IntersectionObserver((entries) => {
+            const visible = entries
+                .filter((entry) => entry.isIntersecting)
+                .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+            if (!visible) return;
+            navLinks.forEach((link) => {
+                link.classList.toggle(
+                    "active",
+                    link.getAttribute("href") === `#${visible.target.id}`,
+                );
+            });
+        }, {
+            rootMargin: "-25% 0px -60% 0px",
+            threshold: [0.05, 0.2, 0.5],
+        });
+
+        observedSections.forEach((section) => observer.observe(section));
+        renderLab();
+    </script>
+</body>
+</html>

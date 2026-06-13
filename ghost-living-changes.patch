@@ -1,0 +1,469 @@
+diff --git a/Souffleuse/Sources/Souffleuse/ModelRuntime.swift b/Souffleuse/Sources/Souffleuse/ModelRuntime.swift
+index b9d38be..29e1767 100644
+--- a/Souffleuse/Sources/Souffleuse/ModelRuntime.swift
++++ b/Souffleuse/Sources/Souffleuse/ModelRuntime.swift
+@@ -786,7 +786,12 @@ final class ModelRuntime {
+                 repeatPenalty: 1.3,
+                 repeatLastN: 64,
+                 seed: 0,
+-                personalizationStrength: 0,
++                // Biais corpus n-gram appris propagé sur le refill, à PARITÉ EXACTE
++                // avec le souffle initial (`midWordLongGhost`) : même gate
++                // `ghostCorpusBiasEnabled`, même cast `Float`. Les mots roulés
++                // héritent du style des accepts ; `0` quand la perso/bias est OFF.
++                personalizationStrength: SuggestionPolicy.Tuning.ghostCorpusBiasEnabled
++                    ? Float(request.personalizationStrength) : 0,
+                 banMarkup: true,
+                 banDigitsLeading: true,
+                 banEmoji: true,
+@@ -1100,7 +1105,7 @@ final class ModelRuntime {
+         beforeCursor: String,
+         examples: String = ""
+     ) -> String {
+-        LlamaPromptBuilder.buildLlamaPrompt(
++        let assembled = LlamaPromptBuilder.buildLlamaPrompt(
+             system: system,
+             customInstr: customInstr,
+             ctxPrefix: ctxPrefix,
+@@ -1109,5 +1114,12 @@ final class ModelRuntime {
+             beforeCursor: beforeCursor,
+             examples: examples
+         )
++        // DEV (SOUFFLEUSE_PREDICT_LOG) : dump le prompt EXACT envoyé à llama. Le
++        // `final_prompt` ne loggue que les SLOTS (sys/preamble/tail), pas la chaîne
++        // réelle tokenisée — ici on voit byte-pour-byte la position de beforeCursor,
++        // le préambule effectivement collé, et que `system` (l'instruction) est bien
++        // ABSENT du base model. `debugDescription` garde les \n sur une ligne unique.
++        PredictDebug.log("llama_prompt_real", assembled.debugDescription)
++        return assembled
+     }
+ }
+diff --git a/Souffleuse/Sources/Souffleuse/PredictorViewModel.swift b/Souffleuse/Sources/Souffleuse/PredictorViewModel.swift
+index b9f1bb6..5667498 100644
+--- a/Souffleuse/Sources/Souffleuse/PredictorViewModel.swift
++++ b/Souffleuse/Sources/Souffleuse/PredictorViewModel.swift
+@@ -12,7 +12,11 @@ import SouffleuseTyping
+ /// text to `/tmp/souffleuse-predict.log` — NEVER use in production builds
+ /// or check audit.sh's privacy rules; /tmp is acceptable for active debug.
+ /// Launch with: `SOUFFLEUSE_PREDICT_LOG=1 open .../Souffleuse.app`
+-private enum PredictDebug {
++///
++/// `internal` (pas `private`) : `ModelRuntime.buildLlamaPrompt` (autre fichier,
++/// même module) s'en sert pour dumper le prompt RÉEL envoyé à llama. Le lock
++/// rend l'appel sûr hors-main (génération sur Task détaché).
++enum PredictDebug {
+     static let enabled: Bool = ProcessInfo.processInfo.environment["SOUFFLEUSE_PREDICT_LOG"]?.isEmpty == false
+     static let path = "/tmp/souffleuse-predict.log"
+     static let lock = NSLock()
+@@ -213,6 +217,23 @@ final class PredictorViewModel {
+     /// (P1.3). `.other` ⇒ aucun scope (comportement historique).
+     @ObservationIgnored private var lastActiveDomain: DomainCluster = .other
+ 
++    /// Contexte persona du dernier `predict()`, mémorisé pour que le refill
++    /// glissant (`extendGhost`) PORTE la même persona que le souffle initial.
++    /// Avant ce cache, `extendGhost` construisait sa requête avec `ctxPrefix`/
++    /// `customInstr`/`fieldContext`/`afterCursor` codés à `""` — donc les mots
++    /// ROULÉS perdaient le contexte enrichi, les instructions custom et le champ,
++    /// dérivant vers le générique (le souffle vivant « sans contexte persona »).
++    /// On rejoue ces slots déjà trimés/assemblés par `predict()` (même grain que
++    /// `lastActiveDomain`) ; ils ne dépendent pas de l'`axSnapshot` que le refill
++    /// n'a pas. Coût TTFT quasi nul : ces slots étant byte-identiques à ceux de
++    /// `predict()`, le KV cache les sert chauds (reuse LCP) — le ghost roulant
++    /// gagne la persona sans re-prefill du contexte. Voie de récupération :
++    /// kill-switch `SOUFFLEUSE_REFILL_CTX_OFF` (cf. `ghostRefillContextEnabled`).
++    @ObservationIgnored private var lastContextPrefix: String = ""
++    @ObservationIgnored private var lastCustomInstr: String = ""
++    @ObservationIgnored private var lastFieldContextSlot: String = ""
++    @ObservationIgnored private var lastAfterCursorSlot: String = ""
++
+     /// Active GGUF model id (the real ghost engine). Mirrored from
+     /// `PreferencesStore.ggufModelID` at startup ; changed via `swapGGUF(to:)`.
+     private var ggufModelID: String = GGUFModelOption.defaultID
+@@ -744,6 +765,14 @@ final class PredictorViewModel {
+             return "Suite du texte (à ne pas répéter) : « \(after) »."
+         }()
+ 
++        // Mémorise le contexte persona pour le refill glissant (`extendGhost`).
++        // Ces slots sont déjà trimés/assemblés ; le refill les rejouera tels quels
++        // pour que les mots ROULÉS portent la même persona que le souffle initial.
++        lastContextPrefix = ctxPrefix
++        lastCustomInstr = customInstr
++        lastFieldContextSlot = fieldContextSlot
++        lastAfterCursorSlot = afterCursorSlot
++
+         let runtime = self.runtime
+ 
+         // If a previous LLM Task was running, its cancellation may have left
+@@ -1200,8 +1229,10 @@ final class PredictorViewModel {
+         // `predict()`, scopé sur le cluster du dernier predict (`lastActiveDomain`)
+         // pour que la continuation reste dans le bon registre. Gardé par le maître
+         // (`personalizationStrength`) — le style suit le toggle de perso. Le biais
+-        // corpus reste OFF sur le refill (`personalizationStrength: 0` ci-dessous,
+-        // orthogonal). Rank synchrone in-memory (<5ms) — hors chemin chaud TTFT.
++        // corpus n-gram est désormais ACTIF sur le refill (parité avec le souffle
++        // initial : `personalizationStrength` réel propagé jusqu'au sampler) — les
++        // mots roulés héritent du style appris des accepts, plus seulement le 1er
++        // souffle. Rank synchrone in-memory (<5ms) — hors chemin chaud TTFT.
+         var refillExamplesBlock = ""
+         if personalizationStrength > 0 && SuggestionPolicy.Tuning.examplesInjectionEnabled {
+             let prose = FewShotScoping.scopedExamplesPool(self.historySnapshot, activeDomain: lastActiveDomain)
+@@ -1214,16 +1245,34 @@ final class PredictorViewModel {
+             }
+         }
+ 
++        // Contexte persona REJOUÉ depuis le dernier `predict()` : le refill porte
++        // désormais le contexte enrichi (`lastContextPrefix`) et les instructions
++        // custom (`lastCustomInstr`) — au lieu des `""` qui rendaient les mots
++        // roulés génériques (« ghost vivant sans persona »). `personalizationStrength`
++        // réel rebranche aussi le biais corpus n-gram appris sur le refill, à parité
++        // avec le souffle initial. NB perf : `ctxPrefix` est byte-identique à celui
++        // de `predict()`, donc servi CHAUD par le KV cache (reuse LCP) — coût ~0 ;
++        // le seul re-prefill réel vient du slot `examplesBlock` (recalculé par
++        // similarité, déjà présent avant ce changement). NB `afterCursorSlot` : le
++        // base model Gemma est continuation L→R, `buildLlamaPrompt` IGNORE le slot
++        // afterCursor — propagé par symétrie mais sans effet sur la sortie.
++        // Voie de récupération (CLAUDE.md) : `SOUFFLEUSE_REFILL_CTX_OFF` ramène le
++        // refill « cheap » (prompt sans contexte) tout en gardant le ghost vivant.
++        let refillCtxOn = SuggestionPolicy.Tuning.ghostRefillContextEnabled
++        let ctxPrefixSlot = refillCtxOn ? lastContextPrefix : ""
++        let customInstrSlot = refillCtxOn ? lastCustomInstr : ""
++        let fieldSlot = refillCtxOn ? lastFieldContextSlot : ""
++        let afterSlot = refillCtxOn ? lastAfterCursorSlot : ""
+         let request = PredictRequest(
+             prefix: fullVisible,
+-            contextPrefix: "",
+-            customInstructions: "",
++            contextPrefix: ctxPrefixSlot,
++            customInstructions: customInstrSlot,
+             axSnapshotPlaceholder: nil,
+             axSnapshotHelp: nil,
+             axSnapshotRole: nil,
+             axSnapshotSubrole: nil,
+             axTextAfterCaret: nil,
+-            personalizationStrength: 0,
++            personalizationStrength: Double(personalizationStrength),
+             maxTokens: maxTokens,
+             maxWords: maxWords,
+             detectedLanguage: detectedLanguage,
+@@ -1233,10 +1282,10 @@ final class PredictorViewModel {
+             isInstructModel: isInstructModel,
+             systemMessage: systemMessage,
+             baseSystem: baseSystemPrompt,
+-            customInstr: "",
+-            ctxPrefix: "",
+-            fieldContextSlot: "",
+-            afterCursorSlot: "",
++            customInstr: customInstrSlot,
++            ctxPrefix: ctxPrefixSlot,
++            fieldContextSlot: fieldSlot,
++            afterCursorSlot: afterSlot,
+             basePreamble: "",
+             examplesBlock: refillExamplesBlock,
+             basePromptText: llmTail
+diff --git a/Souffleuse/Sources/Souffleuse/SouffleuseAppDelegate.swift b/Souffleuse/Sources/Souffleuse/SouffleuseAppDelegate.swift
+index a2d16b0..a75d60c 100644
+--- a/Souffleuse/Sources/Souffleuse/SouffleuseAppDelegate.swift
++++ b/Souffleuse/Sources/Souffleuse/SouffleuseAppDelegate.swift
+@@ -1837,13 +1837,16 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
+         }
+ 
+         let suggestion = predictor.suggestion
+-        // Freshness gate: only paint a suggestion that was generated for THIS
+-        // exact prefix. `predictor.suggestion` can outlive the prefix it was made
+-        // for — kept alive through a gating path while a fresh stream is pending
+-        // — and without this check it gets painted at the new caret (the
+-        // "Bonjour" repro: a start-of-message ghost re-shown at "…autre chose
+-        // pou"). The pending re-prediction repaints once it lands.
+-        guard Self.shouldRenderSuggestion(suggestion: suggestion,
++        // Freshness gate (relaxed for the inline rolling path): paint a suggestion
++        // generated for THIS exact prefix, OR a fresh partial you've STARTED
++        // CONSUMING — `predictedForPrefix` is a prefix of the live prefix and the
++        // chars typed since are the ghost's head → slice that head, paint the rest.
++        // Closes the bootstrap gap (a streaming partial dropped because the prefix
++        // advanced one keystroke before it ever painted/anchored). The anti-"Bonjour"
++        // guarantee holds — a stale ghost whose tail you did NOT type is still
++        // refused (see `renderableGhost`). The pending re-prediction repaints once
++        // it lands.
++        guard let renderGhost = Self.renderableGhost(suggestion: suggestion,
+                                           predictedForPrefix: predictor.predictedForPrefix,
+                                           currentPrefix: prefix),
+               let rect = rectForGhost else {
+@@ -1857,10 +1860,10 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
+         // côté GÉNÉRATION (PredictorViewModel) ratent — la cause du « essayer de… »
+         // invisible. Gaté `isActive` (zéro coût hors inspecteur ouvert) ; la dédup
+         // collapse les doublons avec les record PVM.
+-        if !suggestion.isEmpty {
++        if !renderGhost.isEmpty {
+             GhostInspector.shared.record(
+                 tail: prefix, verdict: .shown, source: self.predictor.suggestionSource,
+-                reason: "painted", content: suggestion)
++                reason: "painted", content: renderGhost)
+         }
+ 
+         // Ground-truth render trace (dev only, same env var as PredictDebug):
+@@ -1869,7 +1872,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
+         // gates suppressed.
+         if ProcessInfo.processInfo.environment["SOUFFLEUSE_PREDICT_LOG"]?.isEmpty == false {
+             let tail = String(prefix.suffix(40))
+-            let line = "[\(ISO8601DateFormatter().string(from: Date()))] overlay_shown userTail=\(tail.debugDescription) ghost=\(suggestion.debugDescription)\n"
++            let line = "[\(ISO8601DateFormatter().string(from: Date()))] overlay_shown userTail=\(tail.debugDescription) ghost=\(renderGhost.debugDescription)\n"
+             if let data = line.data(using: .utf8) {
+                 let path = "/tmp/souffleuse-predict.log"
+                 if let h = FileHandle(forWritingAtPath: path) {
+@@ -1878,15 +1881,16 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
+             }
+         }
+ 
+-        overlay.show(text: suggestion, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFontForOverlay)
++        overlay.show(text: renderGhost, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFontForOverlay)
+         interceptor.setActive(true)
+ 
+         // ── ANCRAGE D'UNE GÉNÉRATION FRAÎCHE (flag `midWordGhostRollingEnabled`) ──
+-        // On vient de peindre une suggestion produite POUR le préfixe courant
+-        // (`predictedForPrefix == prefix`, garanti par `shouldRenderSuggestion`). Si le
+-        // mode rolling est ON et que ce n'est pas déjà l'ancre courante, on pose la
+-        // borne gauche ici : base = préfixe qui a produit le ghost, full = base + ghost.
+-        // Tout backspace ultérieur jusqu'à `base` restaurera le ghost via le slice.
++        // On vient de peindre un ghost frais : entier si `predictedForPrefix == prefix`,
++        // ou sa TÊTE SLICÉE si on était déjà en train de le consommer (cf. `renderableGhost`).
++        // L'ancre se cale TOUJOURS sur le stamp : base = `predictedForPrefix` (préfixe qui a
++        // produit le ghost), full = base + suggestion ENTIÈRE. Le caret courant est donc DANS
++        // la fenêtre `[base, full)` et le live-consume du prochain tick slicera le même
++        // suffixe. Tout backspace jusqu'à `base` restaure le ghost entier.
+         if SuggestionPolicy.Tuning.midWordGhostRollingEnabled {
+             let freshBase = predictor.predictedForPrefix
+             let freshFull = freshBase + suggestion
+@@ -2865,6 +2869,39 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
+         !suggestion.isEmpty && predictedForPrefix == currentPrefix
+     }
+ 
++    /// Renderable ghost at the LIVE caret, or `nil` to hide — the relaxed sibling
++    /// of `shouldRenderSuggestion` used by the INLINE rolling path (the one that
++    /// owns the anchor / live-consume machinery). Two ways to paint:
++    ///
++    ///  • EXACT (`predictedForPrefix == currentPrefix`) → paint the whole
++    ///    suggestion, identical to `shouldRenderSuggestion`.
++    ///  • LIVE-CONSUME of a STILL-FRESH partial → `predictedForPrefix` is a strict
++    ///    prefix of `currentPrefix` AND the characters typed since generation start
++    ///    (`currentPrefix` minus the stamp) are the HEAD of the suggestion — i.e.
++    ///    you are typing this very ghost. Paint the suggestion MINUS that consumed
++    ///    head.
++    ///
++    /// This closes the bootstrap gap the strict boundary leaves: a fresh streaming
++    /// partial you start consuming BEFORE it ever painted/anchored is sliced and
++    /// shown (the inline anchor machinery then takes over) instead of being dropped
++    /// just because the prefix advanced one keystroke. The anti-"Bonjour"
++    /// guarantee holds: a stale ghost whose tail you did NOT type is still refused
++    /// — either `predictedForPrefix` is not a prefix of the live prefix, or the
++    /// consumed chars are not the ghost's head; both return `nil`. Case-sensitive
++    /// on purpose (consuming means typing the ghost's exact characters); a fully
++    /// consumed ghost (nothing left) also returns `nil`.
++    static func renderableGhost(suggestion: String,
++                                predictedForPrefix: String,
++                                currentPrefix: String) -> String? {
++        guard !suggestion.isEmpty else { return nil }
++        if predictedForPrefix == currentPrefix { return suggestion }
++        guard currentPrefix.hasPrefix(predictedForPrefix) else { return nil }
++        let consumed = String(currentPrefix.dropFirst(predictedForPrefix.count))
++        guard !consumed.isEmpty, suggestion.hasPrefix(consumed) else { return nil }
++        let remainder = String(suggestion.dropFirst(consumed.count))
++        return remainder.isEmpty ? nil : remainder
++    }
++
+     /// Mid-line ghost (opt-in, `midLineGhostEnabled`): the caret sits inside a
+     /// line, where the standard inline ghost is suppressed. We run the SAME
+     /// prefix-continuation prediction as the end-of-line path and float the
+diff --git a/Souffleuse/Sources/SouffleuseCore/LlamaPromptBuilder.swift b/Souffleuse/Sources/SouffleuseCore/LlamaPromptBuilder.swift
+index bb8774d..e0993cd 100644
+--- a/Souffleuse/Sources/SouffleuseCore/LlamaPromptBuilder.swift
++++ b/Souffleuse/Sources/SouffleuseCore/LlamaPromptBuilder.swift
+@@ -168,8 +168,14 @@ public enum LlamaPromptBuilder {
+         examples: String = ""
+     ) -> String {
+         var prefix = ""
++        // DEV A/B (hypothèse coherence) : un modèle base/pt imite le préambule prepended
++        // et peut dériver. `SOUFFLEUSE_NO_PERSONA` coupe le bloc « Contexte : <persona> » ;
++        // `SOUFFLEUSE_NO_CONTEXT` coupe app/fenêtre + champ. Absents → comportement normal.
++        let env = ProcessInfo.processInfo.environment
++        let dropPersona = env["SOUFFLEUSE_NO_PERSONA"] != nil
++        let dropContext = env["SOUFFLEUSE_NO_CONTEXT"] != nil
+         let trimmedInstr = customInstr.trimmingCharacters(in: .whitespacesAndNewlines)
+-        if !trimmedInstr.isEmpty { prefix += "Contexte : " + trimmedInstr + "\n\n" }
++        if !dropPersona, !trimmedInstr.isEmpty { prefix += "Contexte : " + trimmedInstr + "\n\n" }
+         // Few-shot prose injection (B-prompt, 2026-05-30). The retrieved block is
+         // the user's OWN past prose (SimilarHistoryRetrieval, `.prose` only). The
+         // injection-eval (SouffleuseInjectionEval) showed the RAW block anchors the
+@@ -182,8 +188,8 @@ public enum LlamaPromptBuilder {
+         // stays strictly last so the continuation still extends the caret text.
+         let trimmedExamples = examples.trimmingCharacters(in: .whitespacesAndNewlines)
+         if !trimmedExamples.isEmpty { prefix += trimmedExamples + "\n\n" }
+-        if !ctxPrefix.isEmpty { prefix += ctxPrefix + "\n\n" }
+-        if !fieldContext.isEmpty { prefix += fieldContext + "\n\n" }
++        if !dropContext, !ctxPrefix.isEmpty { prefix += ctxPrefix + "\n\n" }
++        if !dropContext, !fieldContext.isEmpty { prefix += fieldContext + "\n\n" }
+         // Strip a TRAILING space/tab from the text the model continues. A
+         // SentencePiece model emits the next token WITH its own leading space
+         // (" arriver"), so a space already present at the end derails greedy —
+diff --git a/Souffleuse/Sources/SouffleuseCore/SuggestionPolicy+Tuning.swift b/Souffleuse/Sources/SouffleuseCore/SuggestionPolicy+Tuning.swift
+index c532b32..44141fd 100644
+--- a/Souffleuse/Sources/SouffleuseCore/SuggestionPolicy+Tuning.swift
++++ b/Souffleuse/Sources/SouffleuseCore/SuggestionPolicy+Tuning.swift
+@@ -312,12 +312,18 @@ extension SuggestionPolicy {
+         }
+ 
+         /// `MW_STREAM_MIN` — nb de tokens minimum AVANT le premier partiel peint.
+-        /// Évite de flasher 1-2 tokens (« il faut plus que 2-3 tokens mid-mot ») : on
+-        /// attend un chunk consistant (~2-3 mots) puis on stream chaque token ensuite.
+-        /// Trop haut = on retombe vers le one-shot lent ; ~5 est l'équilibre.
++        /// **Défaut 2** (baissé de 5 le 2026-06-05 après éval fréquence). Mesure :
++        /// le pipeline PRODUIT un ghost cohérent ~80 % du temps (replay headless),
++        /// mais seulement ~16 % atteignent l'écran en usage live — la frappe
++        /// suivante (~100-125 ms entre touches) annule la génération AVANT que le
++        /// 5ᵉ token (~100-150 ms) existe. À 2 tokens (~40-50 ms) le 1er partiel
++        /// gagne la course contre l'inter-frappe → bien plus de ghosts affichés.
++        /// Coût assumé : flash de 1-2 tokens en frappe très rapide (toléré). Mettre
++        /// `MW_STREAM_MIN=1` pour le maximum de couverture, `=5` pour l'ancien
++        /// comportement anti-flash.
+         public static var ghostStreamMinTokens: Int {
+             if let s = ProcessInfo.processInfo.environment["MW_STREAM_MIN"], let v = Int(s) { return max(1, v) }
+-            return 5
++            return 2
+         }
+ 
+         /// `MW_LG_MAXTOKENS` — plafond de tokens de l'unique passe greedy du long-
+@@ -383,6 +389,20 @@ extension SuggestionPolicy {
+             return env["SOUFFLEUSE_LONGGHOST_OFF"] == nil && env["SOUFFLEUSE_ROLLING_OFF"] == nil
+         }
+ 
++        /// Injecte le contexte persona (ctxPrefix enrichi + instructions custom +
++        /// field) du dernier `predict()` dans le prompt du refill glissant, à parité
++        /// avec le souffle initial. **ON par défaut** — c'est le payoff qualité (le
++        /// ghost roulant cesse de dériver vers le générique). Coût TTFT quasi nul
++        /// dans le cas dominant : ctxPrefix est byte-identique à `predict()` donc
++        /// servi chaud par le KV cache (reuse LCP) ; le seul vrai re-prefill vient
++        /// du slot `examplesBlock` (recalculé par similarité, déjà présent avant ce
++        /// changement). Kill-switch `SOUFFLEUSE_REFILL_CTX_OFF` → refill « cheap »
++        /// d'origine (prompt sans contexte) : voie de récupération perf granulaire
++        /// qui garde le ghost vivant, exigée par l'invariant TTFT de CLAUDE.md.
++        public static var ghostRefillContextEnabled: Bool {
++            ProcessInfo.processInfo.environment["SOUFFLEUSE_REFILL_CTX_OFF"] == nil
++        }
++
+         /// `MW_ROLL_DEPTH` — profondeur (mots entiers) qu'on essaie de garder
+         /// affichée DEVANT le caret. Défaut 4. Clampé ≥ 1.
+         public static var ghostRollingTargetWords: Int {
+diff --git a/Souffleuse/Tests/SouffleuseTests/SuggestionFreshnessGateTests.swift b/Souffleuse/Tests/SouffleuseTests/SuggestionFreshnessGateTests.swift
+index a7d934f..b00ff18 100644
+--- a/Souffleuse/Tests/SouffleuseTests/SuggestionFreshnessGateTests.swift
++++ b/Souffleuse/Tests/SouffleuseTests/SuggestionFreshnessGateTests.swift
+@@ -67,3 +67,110 @@ struct SuggestionFreshnessGateTests {
+         ) == false)
+     }
+ }
++
++/// Relaxed inline render boundary — `renderableGhost`. Closes the BOOTSTRAP GAP:
++/// a fresh streaming partial you start consuming BEFORE it ever painted/anchored
++/// is sliced and shown, instead of being dropped by the strict equality boundary
++/// (which `shouldRenderSuggestion` keeps for the mid-line pill path). The
++/// anti-"Bonjour" guarantee must still hold.
++@MainActor
++@Suite("Relaxed render boundary — renderableGhost (live-consume slice)")
++struct RenderableGhostTests {
++
++    /// Exact stamp match → paint the whole suggestion (same as strict gate).
++    @Test("exact match → whole suggestion")
++    func exactMatchReturnsWholeSuggestion() {
++        #expect(SouffleuseAppDelegate.renderableGhost(
++            suggestion: "r vous aider ?",
++            predictedForPrefix: "…autre chose pou",
++            currentPrefix: "…autre chose pou"
++        ) == "r vous aider ?")
++    }
++
++    /// THE bootstrap fix: a fresh ghost "message," made for "Merci pour votre ",
++    /// you type "m" before it ever painted → slice the head, paint "essage,".
++    @Test("consuming a fresh partial mid-word → sliced remainder")
++    func slicesFreshPartialBeingConsumed() {
++        #expect(SouffleuseAppDelegate.renderableGhost(
++            suggestion: "message,",
++            predictedForPrefix: "Merci pour votre ",
++            currentPrefix: "Merci pour votre m"
++        ) == "essage,")
++    }
++
++    /// The exact case the strict gate (test 4 above) DROPS: typing the leading
++    /// space of " allez-vous ?". renderableGhost SAVES it → "allez-vous ?".
++    @Test("consuming a leading space → sliced (strict gate would drop)")
++    func slicesWhenConsumingLeadingSpace() {
++        #expect(SouffleuseAppDelegate.renderableGhost(
++            suggestion: " allez-vous ?",
++            predictedForPrefix: "Bonjour, comment",
++            currentPrefix: "Bonjour, comment "
++        ) == "allez-vous ?")
++    }
++
++    /// Anti-"Bonjour" #1 — stamp is NOT a prefix of the live caret (stale ghost
++    /// from a different position) → refused.
++    @Test("stale ghost (stamp not a prefix) → nil")
++    func refusesStaleDownstreamGhost() {
++        #expect(SouffleuseAppDelegate.renderableGhost(
++            suggestion: "Bonjour",
++            predictedForPrefix: "Bonjour,",
++            currentPrefix: "Bonjour,\n\nJe vous en prie. Puis-je faire autre chose pou"
++        ) == nil)
++    }
++
++    /// Anti-"Bonjour" #2 — even with an empty stamp (prefix of everything), the
++    /// chars typed since are NOT the ghost's head → refused. This is why the test
++    /// is "prefix AND consumed-is-ghost-head", not just "prefix of".
++    @Test("empty stamp but typed chars ≠ ghost head → nil")
++    func refusesWhenTypedCharsAreNotGhostHead() {
++        #expect(SouffleuseAppDelegate.renderableGhost(
++            suggestion: "Bonjour",
++            predictedForPrefix: "",
++            currentPrefix: "…autre chose pou"
++        ) == nil)
++    }
++
++    /// Divergence: you typed a char that is NOT the ghost's next char → refused
++    /// (you're not consuming THIS ghost, a fresh predict will replace it).
++    @Test("typed char diverges from ghost head → nil")
++    func refusesOnDivergence() {
++        #expect(SouffleuseAppDelegate.renderableGhost(
++            suggestion: "mange",
++            predictedForPrefix: "le chat ",
++            currentPrefix: "le chat d"
++        ) == nil)
++    }
++
++    /// Fully consumed (you typed the whole ghost) → nothing left → nil (hide).
++    @Test("fully consumed ghost → nil")
++    func refusesWhenFullyConsumed() {
++        #expect(SouffleuseAppDelegate.renderableGhost(
++            suggestion: " allez-vous ?",
++            predictedForPrefix: "Bonjour, comment",
++            currentPrefix: "Bonjour, comment allez-vous ?"
++        ) == nil)
++    }
++
++    /// Backspace (live prefix shorter than the stamp) → not a forward-consume →
++    /// nil here; the anchor/live-consume block handles backspace-restore upstream.
++    @Test("prefix shorter than stamp (backspace) → nil")
++    func refusesWhenPrefixShorterThanStamp() {
++        #expect(SouffleuseAppDelegate.renderableGhost(
++            suggestion: " allez-vous ?",
++            predictedForPrefix: "Bonjour, comment",
++            currentPrefix: "Bonjour, comm"
++        ) == nil)
++    }
++
++    /// Empty suggestion never paints.
++    @Test("empty suggestion → nil")
++    func refusesEmptySuggestion() {
++        #expect(SouffleuseAppDelegate.renderableGhost(
++            suggestion: "",
++            predictedForPrefix: "abc",
++            currentPrefix: "abc"
++        ) == nil)
++    }
++}

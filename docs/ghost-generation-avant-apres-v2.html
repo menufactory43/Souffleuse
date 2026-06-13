@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Souffleuse — Génération du ghost : avant la branche / après (état actuel)</title>
+<style>
+  :root{
+    --bg:#0f1117; --panel:#171a23; --panel2:#1d212c; --line:#2a3040;
+    --ink:#e6e9f0; --muted:#9aa3b2; --faint:#6b7280;
+    --ghost:#7d8597; --green:#54d27d; --red:#e0585b; --amber:#e0b341;
+    --blue:#5b9dff; --violet:#a98bff;
+    --mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.55;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1200px;margin:0 auto;padding:48px 28px 100px}
+  header h1{font-size:30px;margin:0 0 6px;letter-spacing:-.4px}
+  header .sub{color:var(--muted);font-size:15px;margin:0}
+  .banner{margin:22px 0 0;padding:16px 18px;border-radius:12px;border:1px solid #5a3a1a;
+    background:linear-gradient(0deg,#1c1409,#211810);display:flex;gap:14px;align-items:flex-start}
+  .banner .ic{font-size:22px;line-height:1}
+  .banner b{color:#f0c674}
+  .banner p{margin:0;color:#e8d9b0;font-size:13.5px}
+  .meta{margin-top:18px;display:flex;flex-wrap:wrap;gap:8px}
+  .pill{font:600 12px/1 var(--mono);padding:7px 11px;border-radius:99px;border:1px solid var(--line);background:var(--panel);color:var(--muted)}
+  .pill b{color:var(--ink)}
+  h2{font-size:21px;margin:56px 0 4px;letter-spacing:-.2px}
+  h2 .n{color:var(--violet);font:700 15px/1 var(--mono);margin-right:8px}
+  .lead{color:var(--muted);margin:0 0 22px;font-size:14.5px;max-width:80ch}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:860px){.cols{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  .card.before{border-color:#3a2730}.card.after{border-color:#273a30}
+  .card h3{margin:0;padding:14px 18px;font-size:13px;letter-spacing:.4px;text-transform:uppercase;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:9px}
+  .before h3{background:linear-gradient(0deg,transparent,#251820);color:#f0a8ac}
+  .after h3{background:linear-gradient(0deg,transparent,#16261c);color:#9ae6b4}
+  .tag{font:700 10px/1 var(--mono);padding:4px 7px;border-radius:6px}
+  .before .tag{background:#3a2027;color:#f0a8ac}.after .tag{background:#173326;color:#7fe0a3}
+  .card .body{padding:18px}
+  .flow{list-style:none;margin:0;padding:0;counter-reset:s}
+  .flow li{position:relative;padding:11px 0 11px 40px;border-bottom:1px dashed var(--line);font-size:14px}
+  .flow li:last-child{border-bottom:0}
+  .flow li::before{counter-increment:s;content:counter(s);position:absolute;left:0;top:10px;width:24px;height:24px;border-radius:7px;background:var(--panel2);border:1px solid var(--line);color:var(--muted);font:700 12px/24px var(--mono);text-align:center}
+  .flow li.dead::before{background:#2a1b20;border-color:#3a2730;color:#e0585b}
+  .flow li.dead{color:var(--faint)}
+  .flow li.hot::before{background:#15281d;border-color:#273a30;color:var(--green)}
+  .flow code,.ic-code{font-family:var(--mono);font-size:12.5px;background:#0c0e14;border:1px solid var(--line);padding:1px 5px;border-radius:5px;color:#cfd6e4}
+  .flow .why{display:block;color:var(--faint);font-size:12.5px;margin-top:3px}
+  .strike{text-decoration:line-through;text-decoration-color:#e0585b88}
+  .demo{background:#0c0e14;border:1px solid var(--line);border-radius:12px;padding:0;margin:14px 0 0;overflow:hidden}
+  .demo .bar{display:flex;gap:7px;padding:10px 13px;border-bottom:1px solid var(--line);background:#11141c}
+  .demo .bar i{width:11px;height:11px;border-radius:50%;display:inline-block}
+  .demo .bar .r{background:#e0585b}.demo .bar .y{background:#e0b341}.demo .bar .g{background:#54d27d}
+  .demo .bar span{margin-left:8px;color:var(--faint);font:600 11px/11px var(--mono);align-self:center}
+  .demo .screen{padding:20px 18px;font-family:var(--mono);font-size:16px;min-height:54px}
+  .typed{color:var(--ink)}.gh{color:var(--ghost)}
+  .caret{display:inline-block;width:2px;height:18px;background:var(--blue);vertical-align:-3px;margin:0 1px;animation:bl 1s steps(1) infinite}
+  @keyframes bl{50%{opacity:0}}
+  .nope{color:var(--red);font:600 12px/1 var(--mono)}
+  .demo .note{padding:10px 18px;border-top:1px solid var(--line);color:var(--muted);font-size:12.5px;background:#0a0c11}
+  .demo .note b.bad{color:var(--red)}.demo .note b.good{color:var(--green)}
+  table{width:100%;border-collapse:collapse;margin-top:14px;font-size:13.5px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-size:11px;letter-spacing:.5px;text-transform:uppercase;font-weight:700}
+  td code{font-family:var(--mono);font-size:12.5px;color:#cfd6e4}
+  .yes{color:var(--green);font-weight:700}.no{color:var(--red);font-weight:700}
+  .col-before{color:#f0a8ac}.col-after{color:#9ae6b4}
+  .flags{margin-top:16px;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .frow{display:grid;grid-template-columns:1.4fr .8fr 2fr;gap:0;border-bottom:1px solid var(--line)}
+  .frow:last-child{border-bottom:0}
+  .frow>div{padding:11px 14px;font-size:13px}
+  .frow .fname{font:600 12.5px/1.5 var(--mono);color:#cfd6e4}
+  .frow .fstate{font:700 11px/1 var(--mono);align-self:center}
+  .frow .fstate.on{color:var(--amber)}.frow .fstate.off{color:var(--faint)}
+  .frow .fdesc{color:var(--muted)}
+  .frow.head>div{color:var(--muted);font-size:11px;letter-spacing:.5px;text-transform:uppercase;font-weight:700;background:var(--panel2)}
+  .commits{margin-top:16px;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .commit{display:flex;gap:14px;padding:12px 16px;border-bottom:1px solid var(--line);align-items:baseline}
+  .commit:last-child{border-bottom:0}
+  .commit .sha{font:700 12px/1 var(--mono);color:var(--violet);min-width:62px}
+  .commit .msg{font-size:13.5px}.commit .msg b{color:var(--ink)}.commit .msg span{color:var(--muted)}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;margin:10px 0 0;color:var(--faint);font-size:12px}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:0}
+  .foot{margin-top:34px;padding:18px;background:var(--panel);border:1px solid var(--line);border-radius:12px;color:var(--muted);font-size:13px}
+  .foot b{color:var(--ink)}
+  .kbd{font:600 11px/1 var(--mono);background:#0c0e14;border:1px solid var(--line);border-bottom-width:2px;padding:3px 6px;border-radius:5px;color:#cfd6e4}
+  hr.sep{border:0;border-top:1px solid var(--line);margin:52px 0}
+  .twoState{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+  @media(max-width:860px){.twoState{grid-template-columns:1fr}}
+  .stateBox{border:1px solid var(--line);border-radius:12px;padding:16px;background:var(--panel)}
+  .stateBox h4{margin:0 0 6px;font-size:14px}
+  .stateBox.prod{border-color:#3a2730}.stateBox.flag{border-color:#273a30}
+  .stateBox .k{font:700 11px/1 var(--mono);padding:3px 7px;border-radius:6px;display:inline-block;margin-bottom:8px}
+  .stateBox.prod .k{background:#3a2027;color:#f0a8ac}.stateBox.flag .k{background:#173326;color:#7fe0a3}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Génération &amp; affichage du ghost — avant la branche / état actuel</h1>
+    <p class="sub">Branche <code class="ic-code" style="color:#a98bff">feat/midword-long-ghost</code> mergée dans <b>main</b> (8 commits) · même modèle (Gemma 3 1B Q5_K_M base, partagé avec Cotypist) · seul le <b>harnais</b> change.</p>
+
+    <div class="banner">
+      <div class="ic">⚠️</div>
+      <p><b>Lis ceci d'abord.</b> Tout le « après » de ce document est <b>derrière des flags OFF par défaut</b>. La <b>cascade F1/F2/F3 est toujours le chemin de PROD</b> (<span class="ic-code">midWordEscalationEnabled = ON</span>). Le binaire mergé est <b>byte-identique</b> à avant en prod : cascade + affichage après-espace, pas de flux glissant. Le « après » ne s'active qu'avec les variables d'env (voir §0). Le faire devenir le défaut = le <b>nettoyage final</b>, pas encore fait.</p>
+    </div>
+
+    <div class="meta">
+      <span class="pill">8 commits</span>
+      <span class="pill"><b>+1912</b> / −14 lignes</span>
+      <span class="pill">version <b>0.3.0 → 0.4.0</b></span>
+      <span class="pill">prod = <b>cascade (inchangée)</b></span>
+    </div>
+    <div class="legend">
+      <span><i style="background:#54d27d"></i>chemin « après » (flags ON)</span>
+      <span><i style="background:#e0585b"></i>chemin mort / cascade</span>
+      <span><i style="background:#7d8597"></i>ghost (gris, non validé)</span>
+      <span><i style="background:#e0b341"></i>flag activé pour le test</span>
+    </div>
+  </header>
+
+  <!-- 0. ÉTAT PROD -->
+  <h2><span class="n">00</span>État réel : prod vs flags</h2>
+  <p class="lead">La question clé : <b>la cascade est-elle désactivée en prod ? Non.</b> Elle reste le défaut. Voici précisément ce qui tourne sans variable d'env, et ce qu'il faut poser pour activer le « après ».</p>
+
+  <div class="flags">
+    <div class="frow head"><div>Flag</div><div>Défaut prod</div><div>Ce qu'il gate</div></div>
+    <div class="frow"><div class="fname">midWordEscalationEnabled</div><div class="fstate on">ON</div><div class="fdesc">la <b>cascade F1/F2/F3</b> mid-mot — kill-switch <code class="ic-code">SOUFFLEUSE_MIDWORD_ESCALATION_OFF</code></div></div>
+    <div class="frow"><div class="fname">SOUFFLEUSE_MIDWORD_LONGGHOST_ON</div><div class="fstate off">OFF</div><div class="fdesc">le <b>longghost unifié</b> (1 greedy healed) — remplace la cascade quand ON</div></div>
+    <div class="frow"><div class="fname">SOUFFLEUSE_GHOST_ROLLING</div><div class="fstate off">OFF</div><div class="fdesc">la <b>fenêtre glissante</b> + refill + ancre bidirectionnelle (le flux continu)</div></div>
+    <div class="frow"><div class="fname">SOUFFLEUSE_INSTANT_PAINT</div><div class="fstate off">OFF</div><div class="fdesc">peint dès que la suggestion change, sans attendre le poll (−50 ms)</div></div>
+    <div class="frow"><div class="fname">SOUFFLEUSE_AX_PUSH</div><div class="fstate off">OFF</div><div class="fdesc">détection par notifications AX (push) au lieu du poll 50 ms</div></div>
+    <div class="frow"><div class="fname">SOUFFLEUSE_GHOST_STREAM</div><div class="fstate off">OFF</div><div class="fdesc">streaming du longghost token-par-token (cas divergence)</div></div>
+  </div>
+
+  <div class="twoState">
+    <div class="stateBox prod">
+      <span class="k">PROD (aucune env)</span>
+      <h4>Cascade + streaming</h4>
+      <p style="margin:0;color:var(--muted);font-size:13px">Mid-mot incomplet → escalade F1/F2/F3 → souvent <code class="ic-code">midword_block</code> (rien). Après-espace → streaming. Affichage poll 50 ms. <b>Identique à avant la branche.</b></p>
+    </div>
+    <div class="stateBox flag">
+      <span class="k">FLAGS ON (le test)</span>
+      <h4>Longghost + flux glissant</h4>
+      <p style="margin:0;color:var(--muted);font-size:13px">Un seul chemin de génération, ghost continu au caret, fenêtre qui roule à droite, peinture instantanée. C'est ce qu'on a validé à l'usage.</p>
+    </div>
+  </div>
+
+  <hr class="sep">
+
+  <!-- 1. PIPELINE -->
+  <h2><span class="n">01</span>Le pipeline de génération LLM</h2>
+  <p class="lead">Avant : une cascade à 3 étages qui escaladait jusqu'à abandonner en mid-mot. Après : <b>une seule passe greedy « healed » + gates</b>, partagée par le mid-mot et l'après-espace.</p>
+  <div class="cols">
+    <div class="card before">
+      <h3><span class="tag">AVANT</span> Cascade d'escalade (= prod)</h3>
+      <div class="body">
+        <ol class="flow">
+          <li>L0 word-complete (NSSpellChecker) → si rappel, on montre <span class="why">instantané, pré-empte le LLM</span></li>
+          <li>L1 corpus (historique appris) → si rappel, on montre</li>
+          <li class="dead">Mid-mot incomplet → streaming <code>onLLMChunk</code><span class="why strike">étage F1 → F2 → F3, seuils de confiance croissants</span></li>
+          <li class="dead">Chaque étage rejette si <code>minFirstTokenProb</code> trop bas<span class="why">re-génère, re-juge, re-tente…</span></li>
+          <li class="dead"><code>midword_block</code> : si rien ne passe → <b>ghost vide</b><span class="why">« je tape au milieu d'un mot » = rien affiché</span></li>
+        </ol>
+        <p class="why" style="margin:14px 0 0">≈ 146 lignes · ~10 knobs · 3 chemins de génération.</p>
+      </div>
+    </div>
+    <div class="card after">
+      <h3><span class="tag">APRÈS</span> longghost unifié (flag)</h3>
+      <div class="body">
+        <ol class="flow">
+          <li>L0 word-complete → inchangé, pré-empte</li>
+          <li>L1 corpus → inchangé, pré-empte</li>
+          <li>Cache : <code>cache_hit</code> (re-frappe déterministe) · <code>cache_undo_hit</code> (texte effacé restauré)</li>
+          <li class="hot">Sinon → <code>midWordLongGhost()</code> : <b>UNE passe greedy</b><span class="why">temp 0 · seed 0 · repeatPenalty 1.3</span></li>
+          <li class="hot">token healing : <code>healPrefix = partiel</code> si mid-mot, <code>nil</code> à une frontière</li>
+          <li class="hot">gates : stripPrefixOverlap · espace v0.4 · dedup · anti-écho · clause-stop · cap N mots</li>
+          <li class="hot"><code>extendGhost()</code> : rolling refill — rallonge à droite pendant la conso</li>
+        </ol>
+        <p class="why" style="margin:14px 0 0">≈ 70 lignes utiles · 2 knobs · <b>1 chemin de génération</b>.</p>
+      </div>
+    </div>
+  </div>
+
+  <hr class="sep">
+
+  <!-- 2. AFFICHAGE + FLUX -->
+  <h2><span class="n">02</span>L'affichage : du « après-espace » au flux glissant</h2>
+  <p class="lead">Avant, le ghost ne se montrait de façon fiable qu'<b>après un espace</b> (mid-mot = <code>midword_block</code> = rien). Après, le ghost vit <b>en continu</b> mid-mot ET « roule » : <b>1 mot consommé = 1 mot rechargé à droite</b>, comme Cotypist.</p>
+  <div class="cols">
+    <div class="card before">
+      <h3><span class="tag">AVANT</span> mid-mot = silence</h3>
+      <div class="body">
+        <div class="demo">
+          <div class="bar"><i class="r"></i><i class="y"></i><i class="g"></i><span>tu tapes « généra »</span></div>
+          <div class="screen"><span class="typed">La généra</span><span class="caret"></span> &nbsp;<span class="nope">✗ aucun ghost</span></div>
+          <div class="note">Caret <b>au milieu</b> de « génération » → <code>midword_block</code> → <b class="bad">rien</b> tant que le mot n'est pas fini + espace.</div>
+        </div>
+        <div class="demo" style="margin-top:14px">
+          <div class="bar"><i class="r"></i><i class="y"></i><i class="g"></i><span>après l'espace</span></div>
+          <div class="screen"><span class="typed">La génération </span><span class="gh">est lente.</span><span class="caret"></span></div>
+          <div class="note">Il fallait finir le mot + espace. Et la fenêtre <b>ne roulait pas</b> : ghost figé jusqu'à consommation totale.</div>
+        </div>
+      </div>
+    </div>
+    <div class="card after">
+      <h3><span class="tag">APRÈS</span> continu + roulement (flag)</h3>
+      <div class="body">
+        <div class="demo">
+          <div class="bar"><i class="r"></i><i class="y"></i><i class="g"></i><span>tu tapes « généra »</span></div>
+          <div class="screen"><span class="typed">La généra</span><span class="gh">tion de lierres</span><span class="caret"></span></div>
+          <div class="note">Fragment incomplet → <code>healPrefix</code> → <b class="good">complète le mot</b> puis continue. Ghost visible <b>au milieu du mot</b>.</div>
+        </div>
+        <div class="demo" style="margin-top:14px">
+          <div class="bar"><i class="r"></i><i class="y"></i><i class="g"></i><span>tu suis le ghost → ça roule</span></div>
+          <div class="screen"><span class="typed">Je vais vendre des </span><span class="gh">produits de la marque</span><span class="caret"></span></div>
+          <div class="note">Tu tapes <b>vendre</b> → +1 mot à droite · <b>des</b> → +1 mot · etc. La fenêtre glisse, <b class="good">jamais vide</b> (refill pendant la conso).</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <hr class="sep">
+
+  <!-- 3. RÉACTIVITÉ -->
+  <h2><span class="n">03</span>Réactivité : du poll à la peinture instantanée</h2>
+  <p class="lead">Deux latences attaquées, chacune ~0–50 ms, toutes deux dues au <b>poll 50 ms</b>.</p>
+  <table>
+    <tr><th>Étape</th><th class="col-before">Avant (= prod)</th><th class="col-after">Après (flags)</th></tr>
+    <tr><td><b>Détection</b> d'une frappe</td><td class="col-before">poll 50 ms → jusqu'à +50 ms avant de lire l'AX</td><td class="col-after">notifications AX <b>push</b> (~0 ms) — comme Cotypist (vérifié dans son binaire : AXObserver + AXEnhancedUserInterface)</td></tr>
+    <tr><td><b>Affichage</b> d'une suggestion prête</td><td class="col-before">attend le prochain tick → +50 ms même quand le ghost est calculé</td><td class="col-after"><b>instant-paint</b> : observation sur <code>suggestion</code> → repeint tout de suite (cache, LLM, refill)</td></tr>
+    <tr><td>Bord <b>droit</b> (refill)</td><td class="col-before">attend le poll</td><td class="col-after">repeint immédiatement après l'append</td></tr>
+    <tr><td>Privacy</td><td colspan="2" style="color:var(--muted)">le push AX lit la <b>même source AX</b> déjà utilisée — zéro clavier. Pas de télémétrie (Cotypist, lui, embarque Sentry).</td></tr>
+  </table>
+
+  <hr class="sep">
+
+  <!-- 4. BUDGET -->
+  <h2><span class="n">04</span>Budget de ghost unifié</h2>
+  <p class="lead">Le longghost et le refill lisaient des constantes séparées qui <b>ignoraient</b> la préférence « Longueur du souffle » (pire : « Long » restait plafonné à 14 tokens). Désormais un <b>seul budget global</b> pilote tout depuis les Préférences.</p>
+  <table>
+    <tr><th>Préférence</th><th>Tokens</th><th>Mots</th><th>Pilote</th></tr>
+    <tr><td>Court</td><td><code>10</code></td><td><code>2</code></td><td rowspan="3" style="color:var(--muted)">longghost mid-mot <b>+</b> après-espace <b>+</b> profondeur de refill — un seul réglage</td></tr>
+    <tr><td><b>Moyen</b> (défaut)</td><td><code>14</code></td><td><code>~3</code> (« 2-4 mots »)</td></tr>
+    <tr><td>Long</td><td><code>40</code></td><td><code>20</code></td></tr>
+  </table>
+
+  <hr class="sep">
+
+  <!-- 5. COMMITS -->
+  <h2><span class="n">05</span>Les 8 commits mergés</h2>
+  <div class="commits">
+    <div class="commit"><span class="sha">0107a46</span><span class="msg"><b>Chemin mid-word simplifié derrière flag</b> — <span>1 greedy healed vs cascade F1/F2/F3</span></span></div>
+    <div class="commit"><span class="sha">6e4e4c3</span><span class="msg"><b>Roulement Cotypist</b> — <span>long-ghost unifié + refill glissant + stabilité</span></span></div>
+    <div class="commit"><span class="sha">23ba680</span><span class="msg"><b>Fenêtre glissante bidirectionnelle</b> — <span>restauration du texte tapé au backspace (high-water)</span></span></div>
+    <div class="commit"><span class="sha">302da2c</span><span class="msg"><b>Fix espace parasite mid-mot (v0.4)</b> — <span>décision d'espace sur signaux factuels, pas le dico</span></span></div>
+    <div class="commit"><span class="sha">a3328bf</span><span class="msg"><b>Instant-paint</b> — <span>peint dès que la suggestion change, sans attendre le poll</span></span></div>
+    <div class="commit"><span class="sha">e8c4f1e</span><span class="msg"><b>Détection AX push + bord droit + budget unifié</b> — <span>parité Cotypist sur la réactivité</span></span></div>
+    <div class="commit"><span class="sha">7d4faf8</span><span class="msg"><b>Flux glissant continu</b> — <span>refill pendant la conso + suppression du garde <code>planner.isCurrent</code> fautif</span></span></div>
+    <div class="commit"><span class="sha">00acc4f</span><span class="msg"><b>doc HTML</b> avant/après</span></div>
+  </div>
+
+  <div class="foot">
+    <b>L'endgame (pas encore fait).</b> Pour que le « après » devienne la prod, il faut <b>inverser les défauts</b> : rendre <code class="ic-code">midWordLongGhostEnabled</code> / <code class="ic-code">midWordGhostRollingEnabled</code> / instant-paint / AX-push ON par défaut, puis <b>supprimer la cascade</b> <code class="ic-code">esc*</code> / <code class="ic-code">midword_block</code> et le streaming legacy. Tant que ce n'est pas fait, la prod tourne l'ancien chemin et tout notre travail reste un opt-in derrière flags — totalement réversible. <br><br>
+    <b>Reste aussi en suspens :</b> la restauration au backspace est bornée à ~un mot (borne gauche <code class="ic-code">ghostAnchorBase</code>) — diagnostic à reprendre.
+  </div>
+
+</div>
+</body>
+</html>

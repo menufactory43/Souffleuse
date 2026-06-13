@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Souffleuse — Comment le ghost est proposé</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --panel2:#1c232d; --line:#2b333d;
+    --ink:#e6edf3; --mut:#9aa7b4; --dim:#6b7682;
+    --accent:#58a6ff; --green:#3fb950; --amber:#d29922; --red:#f85149;
+    --violet:#bc8cff; --mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    padding:40px 20px;
+  }
+  .wrap{max-width:980px;margin:0 auto}
+  h1{font-size:30px;margin:0 0 4px;letter-spacing:-.5px}
+  h1 .ghost{color:var(--dim)}
+  .sub{color:var(--mut);margin:0 0 36px;font-size:16px}
+  h2{font-size:20px;margin:44px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h2 .n{color:var(--accent);font-family:var(--mono);font-size:16px;margin-right:8px}
+  p{margin:0 0 14px}
+  code{font-family:var(--mono);font-size:.9em;background:var(--panel2);padding:1px 6px;border-radius:5px;color:var(--violet)}
+  .lead{color:var(--mut)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px 22px;margin:14px 0}
+
+  /* ── caption typing demo ── */
+  .demo{font-family:var(--mono);font-size:18px;background:#0a0d12;border:1px solid var(--line);
+    border-radius:10px;padding:18px 20px;margin:8px 0 24px}
+  .demo .typed{color:var(--ink)}
+  .demo .ghost{color:var(--dim);background:rgba(88,166,255,.08);border-radius:3px}
+  .demo .caret{display:inline-block;width:2px;height:1.1em;background:var(--accent);vertical-align:-2px;
+    animation:blink 1s steps(2) infinite;margin:0 1px}
+  @keyframes blink{50%{opacity:0}}
+  .demo small{display:block;color:var(--dim);font-family:-apple-system,sans-serif;font-size:12px;margin-top:10px}
+
+  /* ── cascade ── */
+  .stage{display:flex;gap:14px;align-items:flex-start;margin:0 0 10px}
+  .badge{flex:none;width:54px;height:54px;border-radius:12px;display:grid;place-items:center;
+    font-family:var(--mono);font-weight:700;font-size:18px}
+  .b0{background:rgba(63,185,80,.14);color:var(--green);border:1px solid rgba(63,185,80,.4)}
+  .b2{background:rgba(188,140,255,.14);color:var(--violet);border:1px solid rgba(188,140,255,.4)}
+  .stage .body{flex:1}
+  .stage h3{margin:6px 0 4px;font-size:16px}
+  .stage p{margin:0;color:var(--mut);font-size:14px}
+  .arrow{color:var(--dim);text-align:center;font-size:18px;margin:-2px 0 -2px 26px}
+
+  /* ── formula ── */
+  .formula{font-family:var(--mono);font-size:19px;text-align:center;padding:22px;
+    background:#0a0d12;border:1px solid var(--line);border-radius:10px;margin:8px 0}
+  .formula .src{color:var(--green)}
+  .formula .pre{color:var(--amber)}
+  .formula .len{color:var(--violet)}
+  .formula .op{color:var(--dim);margin:0 6px}
+  .factor-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:14px}
+  .factor{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:14px}
+  .factor .ttl{font-family:var(--mono);font-weight:700;font-size:14px;margin-bottom:4px}
+  .factor .rng{color:var(--dim);font-size:12px;font-family:var(--mono)}
+  .factor p{font-size:13px;color:var(--mut);margin:6px 0 0}
+
+  /* ── gate steps ── */
+  .gate{display:flex;gap:14px;align-items:center;background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;padding:14px 16px;margin:8px 0}
+  .gate .num{flex:none;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;
+    font-family:var(--mono);font-weight:700;font-size:14px;background:var(--panel2);color:var(--accent);border:1px solid var(--line)}
+  .gate .g{flex:1}
+  .gate .g b{font-size:15px}
+  .gate .g p{margin:2px 0 0;font-size:13px;color:var(--mut)}
+  .gate .ev{flex:none;font-family:var(--mono);font-size:11px;color:var(--amber);
+    background:rgba(210,153,34,.1);padding:3px 8px;border-radius:6px;white-space:nowrap}
+  .gate .ev.ok{color:var(--green);background:rgba(63,185,80,.1)}
+
+  /* ── tables ── */
+  table{width:100%;border-collapse:collapse;margin:8px 0;font-size:13.5px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line)}
+  th{color:var(--dim);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.4px}
+  td code{background:none;padding:0;color:var(--violet)}
+  td .val{font-family:var(--mono);color:var(--accent);font-weight:600}
+  tr:hover td{background:rgba(255,255,255,.02)}
+  .secn{color:var(--dim);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;
+    padding:18px 12px 6px}
+
+  .note{border-left:3px solid var(--accent);padding:10px 16px;background:rgba(88,166,255,.06);
+    border-radius:0 8px 8px 0;margin:16px 0;font-size:14px;color:var(--mut)}
+  .note b{color:var(--ink)}
+  footer{margin-top:50px;padding-top:18px;border-top:1px solid var(--line);color:var(--dim);font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Comment Souffleuse choisit le <span class="ghost">ghost</span> à afficher</h1>
+  <p class="sub">Le texte gris fantôme au curseur — d'où il vient, et pourquoi celui-là plutôt qu'un autre.</p>
+
+  <div class="demo">
+    <span class="typed">Bonjour, co</span><span class="ghost">mment allez-vous&nbsp;?</span><span class="caret"></span>
+    <small>En noir : ce que tu tapes. En gris : le ghost proposé. Tab pour accepter, Esc pour rejeter.</small>
+  </div>
+
+  <p class="lead">Pour chaque frappe, Souffleuse a <b>deux moyens</b> de produire une proposition : se souvenir
+  (rappel de ta propre frappe passée, <b>instantané, sans IA</b>) ou générer (le petit modèle local
+  llama.cpp). Une cascade décide lequel gagne, puis une série de garde-fous empêche d'afficher du bruit
+  ou de faire clignoter le ghost.</p>
+
+  <!-- ════════════════ CASCADE ════════════════ -->
+  <h2><span class="n">1</span>La cascade : se souvenir d'abord, générer ensuite</h2>
+
+  <div class="stage">
+    <div class="badge b0">L0<br>L1</div>
+    <div class="body">
+      <h3>Étage instant — le rappel corpus (zéro IA, &lt; 1 ms)</h3>
+      <p>Souffleuse cherche dans <b>ta propre prose déjà tapée</b> (historique chiffré) une phrase qui
+      commence pareil. Si le contexte qui matche est assez long, elle propose <b>directement</b> la suite
+      mémorisée. C'est le réflexe « à la Cotypist » : <code>Bonjour, co</code> → <code>mment allez-vous ?</code>,
+      rappelé tel quel, sans rien générer. → event <code>ghost_corpus_fastpath</code></p>
+    </div>
+  </div>
+  <div class="arrow">↓ &nbsp;pas de souvenir assez fort ?</div>
+  <div class="stage">
+    <div class="badge b2">L2</div>
+    <div class="body">
+      <h3>Étage génératif — le modèle local (llama.cpp)</h3>
+      <p>Le modèle génère la suite <b>token par token</b> en streaming. Chaque morceau qui arrive doit
+      passer les 4 garde-fous de la section 3 avant d'être affiché. Le ghost peut donc apparaître,
+      s'allonger, ou être remplacé au fil des tokens. → event <code>ghost_apply_llm</code></p>
+    </div>
+  </div>
+
+  <div class="note"><b>Règle d'or :</b> un souvenir fort a une « confiance » si haute (prior <span class="val">0.92</span>)
+  que le modèle ne peut que <b>le prolonger</b>, jamais l'écraser. On privilégie ce que TU as réellement écrit.</div>
+
+  <!-- ════════════════ SCORE ════════════════ -->
+  <h2><span class="n">2</span>Le score : une note de pertinence sur 1</h2>
+  <p class="lead">Chaque candidat (souvenir ou token IA) reçoit une note <code>value</code> ∈ [0, 1],
+  produit de trois facteurs :</p>
+
+  <div class="card">
+    <div class="formula">
+      <span class="op">value =</span>
+      <span class="src">sourcePrior</span><span class="op">×</span><span class="pre">prefixFit</span><span class="op">×</span><span class="len">lengthFit</span>
+    </div>
+    <div class="factor-grid">
+      <div class="factor">
+        <div class="ttl" style="color:var(--green)">sourcePrior</div>
+        <div class="rng">∈ [0, 1]</div>
+        <p>Confiance dans la <b>source</b>. Un souvenir vaut plus qu'une génération IA, qui vaut plus
+        qu'une complétion système.</p>
+      </div>
+      <div class="factor">
+        <div class="ttl" style="color:var(--amber)">prefixFit</div>
+        <div class="rng">∈ {0, 1}</div>
+        <p>Le ghost <b>s'enchaîne-t-il proprement</b> avec ce que tu viens de taper ? Soit oui (1), soit
+        non (0) — un raccord cassé est éliminé.</p>
+      </div>
+      <div class="factor">
+        <div class="ttl" style="color:var(--violet)">lengthFit</div>
+        <div class="rng">∈ [0, 1]</div>
+        <p>Courbe en cloche sur la <b>longueur</b>. 2 à 5 mots = idéal (1.0). Un seul mot ou une phrase
+        trop longue sont pénalisés.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════ GATES ════════════════ -->
+  <h2><span class="n">3</span>Les 4 garde-fous, à chaque token généré</h2>
+  <p class="lead">Quand le modèle streame, chaque morceau (<code>chunk</code>) traverse cette séquence.
+  Il faut passer les 4 pour s'afficher.</p>
+
+  <div class="gate">
+    <div class="num">0</div>
+    <div class="g"><b>Garde mi-mot</b>
+      <p>Si le curseur est <b>au milieu d'un mot incomplet</b> (« pr… », « C'es… »), on bloque l'IA :
+      le petit modèle devine trop souvent le mauvais mot. Sauf si le mot est déjà complet, ou si le
+      <i>token healing</i> reconstruit le mot entier proprement (« fis »+« cal » = « fiscal »).</p>
+    </div>
+    <div class="ev">ghost_midword_llm_block</div>
+  </div>
+
+  <div class="gate">
+    <div class="num">1</div>
+    <div class="g"><b>Plancher de pertinence</b>
+      <p>Le score doit dépasser le plancher <span class="val">0.25</span>. En dessous, c'est du bruit —
+      rejeté sans rien afficher.</p>
+    </div>
+    <div class="ev">ghost_gate_block</div>
+  </div>
+
+  <div class="gate">
+    <div class="num">2</div>
+    <div class="g"><b>Barre de remplacement (anti-clignotement)</b>
+      <p>S'il y a <b>déjà</b> un ghost affiché, le nouveau candidat doit le battre d'un facteur
+      <span class="val">×1.15</span> pour le remplacer. Sinon on garde l'ancien : le ghost reste stable
+      au lieu de sauter à chaque token. C'est l'event le plus fréquent dans tes logs (885×) — c'est sain.</p>
+    </div>
+    <div class="ev">ghost_keep_under_bar</div>
+  </div>
+
+  <div class="gate">
+    <div class="num">3</div>
+    <div class="g"><b>Détection « parasite »</b>
+      <p>Si un ghost est remplacé <b>moins de 0.8 s</b> après son apparition, il a clignoté trop vite
+      pour être lu : on le marque parasite pour le mesurer (qualité d'expérience).</p>
+    </div>
+    <div class="ev">ghost_classified_parasite</div>
+  </div>
+
+  <div class="gate">
+    <div class="num">✓</div>
+    <div class="g"><b>Anti-répétition</b>
+      <p>Un token qui ne fait que <b>redonner le mot déjà tapé</b> (« bonjour » → « bonjour ») est jeté ;
+      on retombe sur le ghost instant. Dans tes logs, c'est ce qui produit les rafales de
+      <code>ghost_dropped_repeat</code>.</p>
+    </div>
+    <div class="ev ok">→ affiché</div>
+  </div>
+
+  <!-- ════════════════ VARIABLES ════════════════ -->
+  <h2><span class="n">4</span>Les variables (valeurs réelles du code)</h2>
+  <p class="lead">Source unique : <code>SuggestionPolicy+Tuning.swift</code>. Aucun seuil n'est codé en dur ailleurs.</p>
+
+  <table>
+    <thead><tr><th>Variable</th><th>Valeur</th><th>Rôle</th></tr></thead>
+    <tbody>
+      <tr><td class="secn" colspan="3">Garde-fous d'affichage</td></tr>
+      <tr><td><code>gateFloor</code></td><td><span class="val">0.25</span></td><td>Plancher : score mini pour s'afficher</td></tr>
+      <tr><td><code>replacementBar</code></td><td><span class="val">1.15</span></td><td>Facteur à battre pour remplacer un ghost (anti-churn)</td></tr>
+      <tr><td><code>l2UpgradeDelta</code></td><td><span class="val">0.15</span></td><td>Bonus pour qu'une génération IA supplante un souvenir L1</td></tr>
+      <tr><td><code>parasiteWindow</code></td><td><span class="val">0.8 s</span></td><td>En-deçà, un remplacement est « parasite » (a clignoté)</td></tr>
+
+      <tr><td class="secn" colspan="3">Rappel corpus (souvenir instantané)</td></tr>
+      <tr><td><code>strongCorpusSourcePrior</code></td><td><span class="val">0.92</span></td><td>Confiance d'un souvenir fort (≈ imbattable par l'IA)</td></tr>
+      <tr><td><code>strongCorpusMatchMinChars</code></td><td><span class="val">16</span></td><td>Contexte mini (après espace) pour un rappel direct</td></tr>
+      <tr><td><code>midWordCorpusMatchMinChars</code></td><td><span class="val">8</span></td><td>Contexte mini en milieu de mot</td></tr>
+      <tr><td><code>corpusMicroCompletionMaxChars</code></td><td><span class="val">3</span></td><td>Sous N lettres engagées, l'IA peut remplacer le souvenir</td></tr>
+
+      <tr><td class="secn" colspan="3">Routage & milieu de mot</td></tr>
+      <tr><td><code>afterSpaceL1Bar</code></td><td><span class="val">0.6</span></td><td>Score mini d'un souvenir pour gagner après un espace</td></tr>
+      <tr><td><code>midWordLLMMinCompleteWordChars</code></td><td><span class="val">4</span></td><td>Longueur mini d'un mot « complet » pour laisser l'IA continuer</td></tr>
+      <tr><td><code>midWordHealingEnabled</code></td><td><span class="val">true</span></td><td>Token healing : reconstruit le mot depuis une frontière propre</td></tr>
+      <tr><td><code>wordCompleterEnabledRuntime</code></td><td><span class="val">off</span></td><td>Complétion système (L0) en pause — l'IA possède le milieu de mot</td></tr>
+
+      <tr><td class="secn" colspan="3">Génération</td></tr>
+      <tr><td><code>llmContextWindowChars</code></td><td><span class="val">1024</span></td><td>Caractères de contexte amont donnés au modèle</td></tr>
+      <tr><td><code>examplesInjectionEnabled</code></td><td><span class="val">true</span></td><td>Injecte ta prose comme exemples pour ancrer le style</td></tr>
+      <tr><td><code>ghostIdleUnloadSeconds</code></td><td><span class="val">60 s</span></td><td>Décharge le modèle (rend ~0,8 Go) après une pause de frappe</td></tr>
+
+      <tr><td class="secn" colspan="3">Priors de source (sourcePrior)</td></tr>
+      <tr><td><code>.history</code> (souvenir)</td><td><span class="val">0.75</span></td><td rowspan="5">Confiance par origine du candidat. Le souvenir &gt; cache &gt; undo &gt; IA &gt; complétion système.</td></tr>
+      <tr><td><code>.cache</code></td><td><span class="val">0.70</span></td></tr>
+      <tr><td><code>.undoCache</code></td><td><span class="val">0.65</span></td></tr>
+      <tr><td><code>.llm</code> (IA)</td><td><span class="val">0.60</span></td></tr>
+      <tr><td><code>.wordComplete</code></td><td><span class="val">0.55</span></td></tr>
+    </tbody>
+  </table>
+
+  <!-- ════════════════ LENGTHFIT ════════════════ -->
+  <h2><span class="n">5</span>La courbe de longueur (lengthFit)</h2>
+  <p class="lead">Pourquoi 3 mots valent mieux qu'un seul ou que dix : la note par nombre de mots.</p>
+  <table>
+    <thead><tr><th>Nombre de mots</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th><th>8</th><th>9+</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>lengthFit</b></td>
+        <td><span class="val">0.6</span></td>
+        <td><span class="val" style="color:var(--green)">1.0</span></td>
+        <td><span class="val" style="color:var(--green)">1.0</span></td>
+        <td><span class="val" style="color:var(--green)">1.0</span></td>
+        <td><span class="val" style="color:var(--green)">1.0</span></td>
+        <td><span class="val">0.85</span></td>
+        <td><span class="val">0.6</span></td>
+        <td><span class="val">0.6</span></td>
+        <td><span class="val" style="color:var(--red)">0.3</span></td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="lead">Sweet spot <b>2–5 mots</b> (note pleine). Un mot isolé est faible, une phrase de 9+ mots
+  est fortement pénalisée — trop long à lire en ghost.</p>
+
+  <!-- ════════════════ ANIMATED DEMO ════════════════ -->
+  <style>
+    .sim{background:#0a0d12;border:1px solid var(--line);border-radius:12px;overflow:hidden;margin:14px 0}
+    .sim-head{display:flex;align-items:center;gap:10px;padding:12px 18px;border-bottom:1px solid var(--line);
+      background:var(--panel)}
+    .sim-head .dot{width:11px;height:11px;border-radius:50%;background:#ff5f57;box-shadow:18px 0 0 #febc2e,36px 0 0 #28c840}
+    .sim-head .scn{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--dim)}
+    .sim-screen{padding:30px 26px;min-height:96px;font-family:var(--mono);font-size:20px;display:flex;align-items:center}
+    .sim-screen .t{color:var(--ink)}
+    #simGhost{transition:opacity .18s,color .18s,background .18s;border-radius:3px;padding:0 1px}
+    #simGhost.show{color:var(--dim);background:rgba(88,166,255,.10)}
+    #simGhost.reject{color:var(--red);background:rgba(248,81,73,.14);text-decoration:line-through}
+    #simGhost.accept{color:var(--green);background:rgba(63,185,80,.16)}
+    #simGhost.parasite{animation:parablink .16s steps(2) 4}
+    @keyframes parablink{50%{opacity:.15}}
+    .sim-cur{display:inline-block;width:2px;height:1.15em;background:var(--accent);vertical-align:-3px;
+      animation:blink 1s steps(2) infinite;margin:0 1px}
+    .sim-status{display:flex;align-items:center;gap:14px;padding:14px 18px;border-top:1px solid var(--line);
+      background:var(--panel)}
+    #simEvent{font-family:var(--mono);font-size:12px;padding:4px 10px;border-radius:7px;white-space:nowrap;
+      transition:.2s}
+    #simEvent.green{color:var(--green);background:rgba(63,185,80,.12)}
+    #simEvent.violet{color:var(--violet);background:rgba(188,140,255,.12)}
+    #simEvent.amber{color:var(--amber);background:rgba(210,153,34,.12)}
+    #simEvent.red{color:var(--red);background:rgba(248,81,73,.12)}
+    #simExpl{font-size:13.5px;color:var(--mut)}
+    .sim-legend{display:flex;flex-wrap:wrap;gap:16px;margin:10px 2px 0;font-size:12px;color:var(--dim)}
+    .sim-legend span{display:inline-flex;align-items:center;gap:6px}
+    .sim-legend i{width:10px;height:10px;border-radius:2px;display:inline-block}
+  </style>
+
+  <h2><span class="n">6</span>Le ghost en mouvement</h2>
+  <p class="lead">Une boucle qui rejoue les cas réels : souvenir instantané, streaming du modèle, candidat
+  rejeté sous la barre, parasite (remplacé trop vite), répétition jetée, puis acceptation au Tab.</p>
+
+  <div class="sim">
+    <div class="sim-head">
+      <span class="dot"></span>
+      <span class="scn" id="simScene">— champ texte —</span>
+    </div>
+    <div class="sim-screen">
+      <span class="t" id="simTyped"></span><span id="simGhost"></span><span class="sim-cur"></span>
+    </div>
+    <div class="sim-status">
+      <span id="simEvent" class="violet">prêt</span>
+      <span id="simExpl">La démo démarre…</span>
+    </div>
+  </div>
+  <div class="sim-legend">
+    <span><i style="background:var(--dim)"></i> ghost proposé</span>
+    <span><i style="background:var(--green)"></i> accepté (Tab)</span>
+    <span><i style="background:var(--red)"></i> rejeté / parasite</span>
+    <span><i style="background:var(--violet)"></i> génération IA</span>
+  </div>
+
+  <script>
+  (function(){
+    const T=document.getElementById('simTyped'),G=document.getElementById('simGhost'),
+          EV=document.getElementById('simEvent'),EX=document.getElementById('simExpl'),
+          SC=document.getElementById('simScene');
+    const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+    function ev(text,cls){EV.className=cls;EV.textContent=text;}
+    function expl(s){EX.textContent=s;}
+    function scene(s){SC.textContent='— '+s+' —';}
+    function ghost(text,cls){G.className=cls||'';G.textContent=text||'';}
+    async function type(str,base){T.textContent=base||'';for(const ch of str){T.textContent+=ch;await sleep(55);}}
+
+    async function corpus(){
+      scene('rappel corpus');ghost('');ev('prêt','violet');expl('Tu commences à taper…');
+      await type('Bonjour, co');
+      ev('ghost_corpus_fastpath','green');
+      expl('Phrase déjà tapée retrouvée → affichée instantanément, sans IA.');
+      ghost('mment allez-vous ?','show');await sleep(2000);
+    }
+    async function stream(){
+      scene('génération IA');ghost('');await type('Merci pour ');
+      ev('predict_ttft · 55 ms','violet');expl('Aucun souvenir : le modèle local démarre.');await sleep(500);
+      const toks=['votre',' retour',', je',' reviens',' vers vous'];let acc='';
+      ev('ghost_apply_llm','violet');
+      for(const t of toks){acc+=t;ghost(acc,'show');expl('Le modèle streame token par token — le ghost s\'allonge.');await sleep(420);}
+      await sleep(1100);
+    }
+    async function underBar(){
+      scene('garde-fou · barre');ghost('');await type('Je vous confirme que ');
+      ghost('le dossier est complet','show');ev('ghost_apply_llm','violet');
+      expl('Un ghost est affiché et stable.');await sleep(1300);
+      ev('ghost_keep_under_bar','amber');
+      expl('Un nouveau candidat arrive mais ne bat pas le score ×1.15 → ignoré, le ghost ne bouge pas.');
+      await sleep(2100);
+    }
+    async function parasite(){
+      scene('garde-fou · parasite');ghost('');await type('Bonjour ');
+      ghost('tout le monde','show');ev('ghost_apply_llm','violet');expl('Un premier ghost apparaît…');await sleep(500);
+      ghost('tout le monde','parasite');ev('ghost_classified_parasite','red');
+      expl('…remplacé en moins de 0,8 s : trop rapide pour être lu → marqué « parasite ».');await sleep(1700);
+    }
+    async function repeat(){
+      scene('anti-répétition');ghost('');await type('…je te dis bonjour');
+      ghost('bonjour','reject');ev('ghost_dropped_repeat','amber');
+      expl('Le modèle ne fait que redonner le mot déjà tapé → jeté.');await sleep(1700);
+      ghost('');expl('On retombe silencieusement sur le ghost instant.');await sleep(900);
+    }
+    async function accept(){
+      scene('acceptation');ghost('');await type('À bientôt et ');
+      ghost('merci encore','show');ev('ghost_apply_llm','violet');expl('Un bon ghost est proposé.');await sleep(1300);
+      ghost('merci encore','accept');ev('partial_accept · Tab','green');
+      expl('Tu presses Tab → le texte est inséré et appris pour la prochaine fois.');await sleep(1500);
+      T.textContent+='merci encore';ghost('');await sleep(800);
+    }
+    (async function loop(){
+      while(true){await corpus();await stream();await underBar();await parasite();await repeat();await accept();}
+    })();
+  })();
+  </script>
+
+  <!-- ════════════════ LOGS ════════════════ -->
+  <h2><span class="n">7</span>Lire les logs <span style="font-size:13px;color:var(--dim);font-family:var(--mono)">~/Library/Logs/Souffleuse.log</span></h2>
+  <p class="lead">Chaque ligne est un event JSON avec 5 champs seulement (<code>ts, level, module, event, count</code>)
+  — <b>jamais</b> ton texte. Voici comment relier les events aux étapes de la page. Les comptes viennent de
+  ta session du 31 mai (01:44 → 08:59).</p>
+
+  <table>
+    <thead><tr><th>Event</th><th>Étape</th><th>Session</th><th>Lecture</th></tr></thead>
+    <tbody>
+      <tr><td class="secn" colspan="4">⚙️ Modèle &amp; index — démarrage / cycle de vie</td></tr>
+      <tr><td><code>llama_loaded</code></td><td>chargement</td><td><span class="val">12</span></td><td>Le modèle a été (re)chargé 12× — normal avec l'idle-unload</td></tr>
+      <tr><td><code>ghost_idle_unload</code></td><td>RAM rendue</td><td><span class="val">9</span></td><td>Déchargé après 60 s sans frappe (rend ~0,8 Go)</td></tr>
+      <tr><td><code>ghost_warm_reload</code></td><td>réveil</td><td><span class="val">8</span></td><td>Rechargé dès la reprise de frappe</td></tr>
+      <tr><td><code>corpus_ngram_built</code> / <code>…suffix_array_built</code></td><td>index corpus</td><td><span class="val">95</span></td><td>L'index de rappel de ta prose, reconstruit par champ</td></tr>
+
+      <tr><td class="secn" colspan="4">💾 Étage instant — le souvenir (section 1, L0/L1)</td></tr>
+      <tr><td><code>ghost_corpus_fastpath</code></td><td>souvenir affiché</td><td><span class="val">231</span></td><td>231 ghosts servis <b>sans IA</b> — le réflexe « Cotypist »</td></tr>
+      <tr><td><code>ghost_corpus_recall_rejected</code></td><td>souvenir filtré</td><td><span class="val">10</span></td><td>Rappel tronqué rejeté → laisse la main à l'IA (qualité)</td></tr>
+      <tr><td><code>cache_hit</code></td><td>cache LLM</td><td><span class="val">17</span></td><td>Réutilisation d'une génération précédente</td></tr>
+
+      <tr><td class="secn" colspan="4">🤖 Génération — le modèle (section 1, L2)</td></tr>
+      <tr><td><code>predict_ttft</code></td><td>1er token</td><td><span class="val">330</span></td><td>330 générations · <code>count</code> = délai en ms (p50 ≈ 55 ms)</td></tr>
+      <tr><td><code>llm_done_stored</code></td><td>fin de stream</td><td><span class="val">330</span></td><td>Égal à predict_ttft → aucune génération fuie. <code>count:0</code> = rien d'utile produit</td></tr>
+      <tr><td><code>ghost_examples_injected</code></td><td>prompt</td><td><span class="val">249</span></td><td>Ta prose injectée comme exemples pour ancrer le style</td></tr>
+      <tr><td><code>token_heal_pop</code></td><td>token healing</td><td><span class="val">674</span></td><td>Reconstruction du mot depuis une frontière propre (gate 0)</td></tr>
+
+      <tr><td class="secn" colspan="4">🚦 Garde-fous d'affichage (section 3)</td></tr>
+      <tr><td><code>ghost_keep_under_bar</code></td><td>gate 2</td><td><span class="val">885</span></td><td><b>L'event #1, et c'est sain</b> : le ghost reste stable au lieu de clignoter</td></tr>
+      <tr><td><code>ghost_midword_healed</code></td><td>gate 0 ✓</td><td><span class="val">601</span></td><td>Mot mi-chemin reconstruit et admis (« fis »+« cal »)</td></tr>
+      <tr><td><code>ghost_midword_llm_block</code></td><td>gate 0 ✗</td><td><span class="val">243</span></td><td>IA bloquée sur un mot incomplet (anti mauvais-mot)</td></tr>
+      <tr><td><code>ghost_dropped_repeat</code></td><td>anti-répétition</td><td><span class="val">246</span></td><td>Token qui répète le mot tapé → jeté, fallback instant</td></tr>
+      <tr><td><code>ghost_apply_llm</code></td><td>affiché ✓</td><td><span class="val">260</span></td><td>Un token IA a passé les 4 gates et s'affiche</td></tr>
+      <tr><td><code>ghost_classified_parasite</code></td><td>gate 3</td><td><span class="val">176</span></td><td>Remplacé en &lt; 0,8 s · <code>count</code> = ms visibles</td></tr>
+      <tr><td><code>ghost_gate_block</code></td><td>gate 1</td><td><span class="val">37</span></td><td>Sous le plancher 0.25 · <code>count</code> = score ×100</td></tr>
+
+      <tr><td class="secn" colspan="4">✅ Acceptation &amp; nettoyage</td></tr>
+      <tr><td><code>partial_accept</code></td><td>Tab</td><td><span class="val">49</span></td><td>49 acceptations (totales ou par chunk) sur la session</td></tr>
+      <tr><td><code>cache_evict</code></td><td>cache</td><td><span class="val">197</span></td><td>Éviction FIFO du cache de prédiction (normal)</td></tr>
+      <tr><td><code>ghost_cleared_stale</code></td><td>nettoyage</td><td><span class="val">5</span></td><td>Ghost périmé effacé (préfixe changé sans nouvelle sortie)</td></tr>
+    </tbody>
+  </table>
+
+  <div class="note" style="border-left-color:var(--amber);background:rgba(210,153,34,.07)">
+    <b>🔎 Le signal à surveiller (vu dans ta session) :</b> deux cycles consécutifs où ~20
+    <code>ghost_dropped_repeat</code> s'enchaînent, suivis de <code>predict_ttft:35</code> +
+    <code>llm_done_stored:0</code>. Traduction : le modèle a généré 35 tokens qui ne faisaient que
+    <b>répéter le mot déjà tapé</b> → tout jeté, 0 stocké. Le garde-fou fait son boulot (fallback sur
+    l'instant), mais c'est de l'inférence gâchée. Si ça revient sur les mêmes préfixes, il y a une
+    optim à couper plus tôt. Active <code>SOUFFLEUSE_PREDICT_LOG</code> pour retrouver le contexte exact
+    (dev only, écrit dans <code>/tmp/souffleuse-predict.log</code>).
+  </div>
+
+  <div class="note"><b>En résumé :</b> le souvenir propose vite ce que tu as déjà écrit ; le modèle remplit
+  quand il n'y a pas de souvenir ; le score (<span class="src">source</span> × <span class="pre">raccord</span> × <span class="len">longueur</span>)
+  classe les candidats ; et 4 garde-fous empêchent d'afficher un mot incohérent ou de faire clignoter le ghost.</div>
+
+  <footer>
+    Souffleuse · pipeline d'affichage du ghost · valeurs extraites de
+    <code>SuggestionPolicy.swift</code> + <code>SuggestionPolicy+Tuning.swift</code>.
+  </footer>
+
+</div>
+</body>
+</html>

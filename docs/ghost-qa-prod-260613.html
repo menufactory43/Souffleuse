@@ -1,0 +1,726 @@
+<!doctype html><html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QA Ghost — Cocotypist / Souffleuse</title>
+<style>
+:root{--bg:#0d0f14;--panel:#161a22;--panel2:#1d222c;--ink:#e7ebf0;--mut:#8a93a3;
+--grey:#6b7280;--accent:#6dc2ca;--ok:#3fb950;--warn:#d29922;--bug:#f85149;--line:#262c38;}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(1200px 600px at 70% -10%,#19202b,var(--bg));
+color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;}
+.wrap{max-width:1040px;margin:0 auto;padding:48px 24px 80px}
+header h1{font-size:30px;margin:0 0 6px;letter-spacing:-.02em}
+header .meta{color:var(--mut);font-size:13px}
+.verdict{background:linear-gradient(135deg,#13241f,#161a22);border:1px solid #1f3b30;
+border-radius:16px;padding:26px 28px;margin:28px 0 12px}
+.verdict h2{margin:0 0 10px;font-size:20px;color:var(--ok)}
+.verdict p{margin:6px 0;color:#c7d0db}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:26px 0}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px}
+.kpi .n{font-size:28px;font-weight:700;letter-spacing:-.02em}
+.kpi .l{color:var(--mut);font-size:12.5px;margin-top:3px}
+.kpi.ok .n{color:var(--ok)} .kpi.bug .n{color:var(--bug)} .kpi.warn .n{color:var(--warn)}
+h2{font-size:19px;margin:42px 0 4px;letter-spacing:-.01em}
+.sub{color:var(--mut);margin:0 0 18px;font-size:13.5px}
+.callout{border-radius:14px;padding:18px 20px;margin:18px 0;border:1px solid var(--line);background:var(--panel)}
+.callout.bug{border-color:#5b2326;background:#1c1416}
+.callout.fix{border-color:#234b3a;background:#10201a}
+.callout h3{margin:0 0 8px;font-size:15px}
+.callout.bug h3{color:var(--bug)} .callout.fix h3{color:var(--ok)}
+.callout code{background:#0a0c10;padding:2px 6px;border-radius:5px;color:#ffd9a0;font-size:13px}
+.phrase{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+padding:14px 16px;margin:12px 0}
+.ph-head{display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+.ph-head .cat{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--accent);
+border:1px solid #234;border-radius:20px;padding:2px 10px}
+.ph-head .ph{font-weight:600;color:#cfd7e2}
+.step{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;padding:5px 8px;border-radius:8px}
+.step+.step{margin-top:2px}
+.step.v-bug{background:#1c1416} .step.v-warn{background:#1c1810} .step.v-ok{background:#101a13}
+.pfx{color:#aeb6c2;font-family:"SF Mono",ui-monospace,Menlo,monospace;font-size:13px}
+.car{color:var(--accent);font-weight:700;animation:b 1s steps(1) infinite}
+@keyframes b{50%{opacity:0}}
+.ghost{color:var(--grey);font-family:"SF Mono",ui-monospace,Menlo,monospace;font-size:13px;
+font-style:italic}
+.badge{font-size:10.5px;padding:1px 8px;border-radius:20px;font-weight:700;letter-spacing:.03em}
+.badge.v-ok{background:#10301d;color:var(--ok)}
+.badge.v-warn{background:#2a2210;color:var(--warn)}
+.badge.v-bug{background:#2a1416;color:var(--bug)}
+.note{flex-basis:100%;color:var(--mut);font-size:12.5px;margin:2px 0 2px 4px}
+table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13.5px}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line)}
+th{color:var(--mut);font-weight:600}
+td.ok{color:var(--ok)} td.bug{color:var(--bug)}
+footer{margin-top:50px;color:var(--mut);font-size:12.5px;border-top:1px solid var(--line);padding-top:18px}
+.legend{display:flex;gap:18px;flex-wrap:wrap;margin:8px 0 0;color:var(--mut);font-size:12.5px}
+.legend span b{color:var(--ink)}
+</style></head><body><div class="wrap">
+<header>
+<h1>Test du ghost en conditions réelles — Cocotypist / Souffleuse</h1>
+<div class="meta">2026-06-13 · instance prod (Release) · TextEdit · modèle Gemma 3 1B base · 64 phrases tapées · ghost capturé via <code style="color:#ffd9a0">souffleuse-predict.log</code></div>
+</header>
+
+<div class="verdict">
+<h2>Verdict — aucune des deux fonctions suspectes n'est responsable</h2>
+<p><b>« Elon Mua au lieu de Musk » n'est pas reproduit.</b> Sur 64 phrases (accords, intention, noms propres, sens) en perso ON <i>et</i> OFF, zéro corruption de nom propre, zéro faute d'accord.</p>
+<p><b>Personnalisation blanchie et utile.</b> Le seul bug reproductible (markup HTML) apparaît à l'identique perso désactivée. La perso, elle, fait ressortir les bons termes : « Musk », « Ledger Nano », « Trade Republic », « Mélanie ».</p>
+<p><b>Le ton est hors-sujet</b> (moteur séparé, ne touche jamais le ghost inline).</p>
+<p style="color:var(--ok);font-weight:600;margin-top:10px">→ Ne décoche rien. Le défaut réel à corriger est ailleurs (ci-dessous).</p>
+</div>
+
+<div class="kpis">
+<div class="kpi ok"><div class="n">0</div><div class="l">corruption nom propre (/19 noms propres testés)</div></div>
+<div class="kpi ok"><div class="n">0</div><div class="l">faute d'accord (/22 cas d'accord)</div></div>
+<div class="kpi bug"><div class="n">1</div><div class="l">bug reproductible (markup rejoué)</div></div>
+<div class="kpi warn"><div class="n">5</div><div class="l">scories de polish (fuites de contexte)</div></div>
+</div>
+
+<div class="callout bug">
+<h3>🔴 Le seul vrai bug : du markup HTML rejoué dans le ghost</h3>
+<p><span class="pfx">Pour déclarer mes impôts j'utilise<span class="car">|</span></span> → <span class="ghost">&lt;strong&gt;mot&lt;/strong&gt;</span></p>
+<p style="margin-top:10px;color:#c7d0db"><b>Mécanisme (tracé) :</b> l'<code>overlay_shown</code> est émis <i>sans</i> <code>chunk_applied</code> préalable → le ghost vient du chemin <b>instant-recall L1</b> qui rejoue un verbatim du corpus. Tu as dû coller/saisir du HTML un jour ; l'entrée est ressortie telle quelle. Le filtre <code>banMarkup</code> ne protège que la génération LLM, pas ce chemin de rappel direct — d'où la fuite, <b>identique perso ON et OFF</b>.</p>
+</div>
+
+<div class="callout fix">
+<h3>✅ Fix proposé (≈ 0 ms, ne touche pas la perso)</h3>
+<p>Passer le ghost du chemin instant-recall par le même <code>OutputFilter</code> (strip markup / chunk filter) que la sortie LLM, avant affichage. Post-filtre pur → aucun impact sur le budget ~200 ms. Optionnel : assainir les entrées contenant du markup à l'écriture dans l'historique.</p>
+</div>
+
+<h2>Latence</h2>
+<p class="sub">Le ghost est apparu de façon réactive à chaque frappe (fenêtre de stabilisation 1,4 s toujours suffisante). Beaucoup de ghosts proviennent du cache / rappel instant (TTFT négligeable) ; la voie LLM reste calibrée sur la baseline ~200 ms inchangée — aucune régression introduite par ce test.</p>
+
+<h2>Comparaison perso ON vs OFF — mêmes phrases</h2>
+<table>
+<tr><th>Préfixe</th><th>Perso OFF</th><th>Perso ON (1.58)</th></tr>
+<tr><td>…c'est Elon</td><td class="ok">Elon Musk.</td><td class="ok">Musk.</td></tr>
+<tr><td>…s'appelle Emmanuel</td><td class="ok">Emmanuel Macron.</td><td class="ok">Macron.</td></tr>
+<tr><td>…préféré reste le</td><td class="ok">le Ledger Nano</td><td class="ok">Ledger Nano</td></tr>
+<tr><td>…que tu m'as</td><td class="ok">envoyé est</td><td class="ok">envoyé est</td></tr>
+<tr><td>…impôts j'utilise</td><td class="bug">&lt;strong&gt;mot&lt;/strong&gt;</td><td class="bug">&lt;strong&gt;mot&lt;/strong&gt;</td></tr>
+</table>
+<p class="sub">Le markup fuit dans les deux colonnes → indépendant de la perso. Les noms propres sont corrects dans les deux → pas de « Mua ».</p>
+
+<div class="legend"><span><b style="color:var(--ok)">✓</b> bon</span><span><b style="color:var(--warn)">à surveiller</b> scorie</span><span><b style="color:var(--bug)">BUG</b> défaut</span><span><span class="car">|</span> position du curseur</span></div>
+
+<section><h2>Passe 1 — perso ON (strength 1.58)</h2><p class="sub">Ta configuration réelle. 22 phrases, ghost capturé à chaque mot.</p><div class="phrase cat-accord">
+      <div class="ph-head"><span class="cat">accord</span><span class="ph">Les nouvelles données sont</span></div>
+      <div class="step ">
+          <span class="pfx">Les nouvelles <span class="car">|</span></span>
+          <span class="ghost">opérations sont aff</span></div><div class="step ">
+          <span class="pfx">Les nouvelles données <span class="car">|</span></span>
+          <span class="ghost">sont affichées dans</span></div></div><div class="phrase cat-accord">
+      <div class="ph-head"><span class="cat">accord</span><span class="ph">Une grande partie des clients ont</span></div>
+      <div class="step ">
+          <span class="pfx">Une <span class="car">|</span></span>
+          <span class="ghost">fois la synchron</span></div><div class="step ">
+          <span class="pfx">Une grande <span class="car">|</span></span>
+          <span class="ghost">partie de la</span></div><div class="step ">
+          <span class="pfx">Une grande partie des <span class="car">|</span></span>
+          <span class="ghost">problèmes de synchron</span></div><div class="step ">
+          <span class="pfx">Une grande partie des clients <span class="car">|</span></span>
+          <span class="ghost">de mon service</span></div><div class="step ">
+          <span class="pfx">Une grande partie des clients ont<span class="car">|</span></span>
+          <span class="ghost"> des problèmes</span></div></div><div class="phrase cat-accord">
+      <div class="ph-head"><span class="cat">accord</span><span class="ph">Les fichiers que je vous ai</span></div>
+      <div class="step ">
+          <span class="pfx">Les <span class="car">|</span></span>
+          <span class="ghost">nouvelles données sont</span></div><div class="step ">
+          <span class="pfx">Les fichiers <span class="car">|</span></span>
+          <span class="ghost">sont en .</span></div><div class="step ">
+          <span class="pfx">Les fichiers que <span class="car">|</span></span>
+          <span class="ghost">vous avez sous</span></div><div class="step ">
+          <span class="pfx">Les fichiers que je <span class="car">|</span></span>
+          <span class="ghost">vous propose</span></div><div class="step ">
+          <span class="pfx">Les fichiers que je vous ai<span class="car">|</span></span>
+          <span class="ghost"> fournis sont</span></div></div><div class="phrase cat-accord">
+      <div class="ph-head"><span class="cat">accord</span><span class="ph">Ce sont des solutions vraiment</span></div>
+      <div class="step ">
+          <span class="pfx">Ce sont <span class="car">|</span></span>
+          <span class="ghost">des opérations de</span></div><div class="step ">
+          <span class="pfx">Ce sont des solutions <span class="car">|</span></span>
+          <span class="ghost">pour les problèmes</span></div><div class="step v-warn">
+          <span class="pfx">Ce sont des solutions vraiment<span class="car">|</span></span>
+          <span class="ghost"> inutiles, mais</span><span class="badge v-warn">à surveiller</span><div class="note">Sens négatif inattendu « inutiles ».</div></div></div><div class="phrase cat-accord">
+      <div class="ph-head"><span class="cat">accord</span><span class="ph">La réunion a été reportée à</span></div>
+      <div class="step ">
+          <span class="pfx">La réunion <span class="car">|</span></span>
+          <span class="ghost">est terminée, vous</span></div><div class="step ">
+          <span class="pfx">La réunion a été <span class="car">|</span></span>
+          <span class="ghost">annulée, le paiement</span></div><div class="step ">
+          <span class="pfx">La réunion a été reportée <span class="car">|</span></span>
+          <span class="ghost">à 14h30.</span></div></div><div class="phrase cat-accord">
+      <div class="ph-head"><span class="cat">accord</span><span class="ph">Les mesures que nous avons</span></div>
+      <div class="step ">
+          <span class="pfx">Les <span class="car">|</span></span>
+          <span class="ghost">fichiers que je</span></div><div class="step ">
+          <span class="pfx">Les mesures <span class="car">|</span></span>
+          <span class="ghost">de la fenêtre</span></div><div class="step ">
+          <span class="pfx">Les mesures que <span class="car">|</span></span>
+          <span class="ghost">j\&#x27;ai besoin de</span></div><div class="step ">
+          <span class="pfx">Les mesures que nous <span class="car">|</span></span>
+          <span class="ghost">avons prises pour</span></div></div><div class="phrase cat-accord">
+      <div class="ph-head"><span class="cat">accord</span><span class="ph">Toutes les factures ont été</span></div>
+      <div class="step ">
+          <span class="pfx">Toutes <span class="car">|</span></span>
+          <span class="ghost">les lignes sont</span></div><div class="step ">
+          <span class="pfx">Toutes les factures <span class="car">|</span></span>
+          <span class="ghost">sont en format</span></div><div class="step v-ok">
+          <span class="pfx">Toutes les factures ont <span class="car">|</span></span>
+          <span class="ghost">été révisées et</span><span class="badge v-ok">✓</span><div class="note">Accord féminin pluriel « révisées » ✓</div></div></div><div class="phrase cat-intention">
+      <div class="ph-head"><span class="cat">intention</span><span class="ph">Bonjour, je vous écris pour</span></div>
+      <div class="step ">
+          <span class="pfx">Bonjour, je vous <span class="car">|</span></span>
+          <span class="ghost">remercie pour votre</span></div><div class="step ">
+          <span class="pfx">Bonjour, je vous écris <span class="car">|</span></span>
+          <span class="ghost">pour vous demander</span></div></div><div class="phrase cat-intention">
+      <div class="ph-head"><span class="cat">intention</span><span class="ph">Suite à notre échange, je reviens vers vous concernant</span></div>
+      <div class="step ">
+          <span class="pfx">Suite <span class="car">|</span></span>
+          <span class="ghost">à la correction</span></div><div class="step ">
+          <span class="pfx">Suite à notre <span class="car">|</span></span>
+          <span class="ghost">intervention, vous pouvez</span></div><div class="step ">
+          <span class="pfx">Suite à notre échange, <span class="car">|</span></span>
+          <span class="ghost">je vous propose</span></div><div class="step ">
+          <span class="pfx">Suite à notre échange, je reviens <span class="car">|</span></span>
+          <span class="ghost">vers vous des</span></div><div class="step ">
+          <span class="pfx">Suite à notre échange, je reviens vers vous concernant<span class="car">|</span></span>
+          <span class="ghost"> le remboursement de</span></div></div><div class="phrase cat-intention">
+      <div class="ph-head"><span class="cat">intention</span><span class="ph">N&#x27;hésitez pas à me contacter si</span></div>
+      <div class="step ">
+          <span class="pfx">N&#x27;hésitez <span class="car">|</span></span>
+          <span class="ghost">pas à me</span></div></div><div class="phrase cat-intention">
+      <div class="ph-head"><span class="cat">intention</span><span class="ph">Je vous remercie de votre</span></div>
+      <div class="step ">
+          <span class="pfx">Je vous <span class="car">|</span></span>
+          <span class="ghost">remercie pour votre</span></div><div class="step ">
+          <span class="pfx">Je vous remercie de <span class="car">|</span></span>
+          <span class="ghost">votre réponse.</span></div></div><div class="phrase cat-intention">
+      <div class="ph-head"><span class="cat">intention</span><span class="ph">Pourriez-vous me confirmer la</span></div>
+      <div class="step ">
+          <span class="pfx">Pourriez-vous <span class="car">|</span></span>
+          <span class="ghost">m\&#x27;envoyer le fichier</span></div><div class="step ">
+          <span class="pfx">Pourriez-vous me <span class="car">|</span></span>
+          <span class="ghost">retranscrire le message</span></div><div class="step ">
+          <span class="pfx">Pourriez-vous me confirmer <span class="car">|</span></span>
+          <span class="ghost">que la</span></div><div class="step ">
+          <span class="pfx">Pourriez-vous me confirmer la<span class="car">|</span></span>
+          <span class="ghost"> correction de</span></div></div><div class="phrase cat-intention">
+      <div class="ph-head"><span class="cat">intention</span><span class="ph">Je reste à votre</span></div>
+      <div class="step ">
+          <span class="pfx">Je reste <span class="car">|</span></span>
+          <span class="ghost">à votre disposition</span></div></div><div class="phrase cat-nom-propre">
+      <div class="ph-head"><span class="cat">nom-propre</span><span class="ph">Le patron de Tesla c&#x27;est Elon</span></div>
+      <div class="step ">
+          <span class="pfx">Le patron <span class="car">|</span></span>
+          <span class="ghost">de l\&#x27;entreprise a</span></div><div class="step ">
+          <span class="pfx">Le patron de Tesla <span class="car">|</span></span>
+          <span class="ghost">a été très</span></div><div class="step ">
+          <span class="pfx">Le patron de Tesla c&#x27;est <span class="car">|</span></span>
+          <span class="ghost">un peu comme</span></div><div class="step v-ok">
+          <span class="pfx">Le patron de Tesla c&#x27;est Elon<span class="car">|</span></span>
+          <span class="ghost"> Musk.</span><span class="badge v-ok">✓</span><div class="note">Nom propre correct ✓ (pas de « Mua »)</div></div></div><div class="phrase cat-nom-propre">
+      <div class="ph-head"><span class="cat">nom-propre</span><span class="ph">Le président de la République s&#x27;appelle Emmanuel</span></div>
+      <div class="step ">
+          <span class="pfx">Le président <span class="car">|</span></span>
+          <span class="ghost">de la République</span></div><div class="step v-ok">
+          <span class="pfx">Le président de la République s&#x27;appelle <span class="car">|</span></span>
+          <span class="ghost">Emmanuel Macron.</span><span class="badge v-ok">✓</span><div class="note">« Emmanuel Macron » ✓</div></div></div><div class="phrase cat-nom-propre">
+      <div class="ph-head"><span class="cat">nom-propre</span><span class="ph">Pour mes paiements crypto je passe par</span></div>
+      <div class="step ">
+          <span class="pfx">Pour <span class="car">|</span></span>
+          <span class="ghost">les corrections manu</span></div><div class="step ">
+          <span class="pfx">Pour mes <span class="car">|</span></span>
+          <span class="ghost">corrections, je vous</span></div><div class="step ">
+          <span class="pfx">Pour mes paiements <span class="car">|</span></span>
+          <span class="ghost">, je suis</span></div><div class="step ">
+          <span class="pfx">Pour mes paiements crypto <span class="car">|</span></span>
+          <span class="ghost">, je ne</span></div><div class="step ">
+          <span class="pfx">Pour mes paiements crypto je <span class="car">|</span></span>
+          <span class="ghost">1000€ pour 1</span></div><div class="step ">
+          <span class="pfx">Pour mes paiements crypto je passe <span class="car">|</span></span>
+          <span class="ghost">par un logiciel</span></div></div><div class="phrase cat-nom-propre">
+      <div class="ph-head"><span class="cat">nom-propre</span><span class="ph">Mon wallet hardware préféré reste le</span></div>
+      <div class="step ">
+          <span class="pfx">Mon <span class="car">|</span></span>
+          <span class="ghost">adresse mail est</span></div><div class="step ">
+          <span class="pfx">Mon wallet <span class="car">|</span></span>
+          <span class="ghost">est en anglais</span></div><div class="step ">
+          <span class="pfx">Mon wallet hardware <span class="car">|</span></span>
+          <span class="ghost">est en mode</span></div><div class="step ">
+          <span class="pfx">Mon wallet hardware préféré <span class="car">|</span></span>
+          <span class="ghost">est Ledger Nano</span></div><div class="step v-ok">
+          <span class="pfx">Mon wallet hardware préféré reste le<span class="car">|</span></span>
+          <span class="ghost"> Ledger Nano</span><span class="badge v-ok">✓</span><div class="note">Terme perso « Ledger Nano » ✓</div></div></div><div class="phrase cat-nom-propre">
+      <div class="ph-head"><span class="cat">nom-propre</span><span class="ph">Le langage de programmation du projet est</span></div>
+      <div class="step ">
+          <span class="pfx">Le langage <span class="car">|</span></span>
+          <span class="ghost">est le suivant</span></div><div class="step v-warn">
+          <span class="pfx">Le langage de <span class="car">|</span></span>
+          <span class="ghost">113 est le</span><span class="badge v-warn">à surveiller</span><div class="note">« 113 » fuite du titre de fenêtre « Sans titre 113.rtf ».</div></div><div class="step ">
+          <span class="pfx">Le langage de programmation <span class="car">|</span></span>
+          <span class="ghost">est le même</span></div><div class="step ">
+          <span class="pfx">Le langage de programmation du <span class="car">|</span></span>
+          <span class="ghost">logiciel est</span></div><div class="step ">
+          <span class="pfx">Le langage de programmation du projet <span class="car">|</span></span>
+          <span class="ghost">est C++</span></div></div><div class="phrase cat-nom-propre">
+      <div class="ph-head"><span class="cat">nom-propre</span><span class="ph">Cet été nous repartons en vacances à</span></div>
+      <div class="step ">
+          <span class="pfx">Cet <span class="car">|</span></span>
+          <span class="ghost">outil permet de</span></div><div class="step ">
+          <span class="pfx">Cet été <span class="car">|</span></span>
+          <span class="ghost">, j\&#x27;ai un</span></div><div class="step ">
+          <span class="pfx">Cet été nous <span class="car">|</span></span>
+          <span class="ghost">avons eu un</span></div><div class="step ">
+          <span class="pfx">Cet été nous repartons <span class="car">|</span></span>
+          <span class="ghost">en vacances, et</span></div><div class="step ">
+          <span class="pfx">Cet été nous repartons en vacances <span class="car">|</span></span>
+          <span class="ghost">, et je</span></div><div class="step ">
+          <span class="pfx">Cet été nous repartons en vacances à<span class="car">|</span></span>
+          <span class="ghost"> la mer</span></div></div><div class="phrase cat-sens">
+      <div class="ph-head"><span class="cat">sens</span><span class="ph">Le calcul de la plus-value se fait en</span></div>
+      <div class="step ">
+          <span class="pfx">Le calcul <span class="car">|</span></span>
+          <span class="ghost">est simple :</span></div><div class="step ">
+          <span class="pfx">Le calcul de <span class="car">|</span></span>
+          <span class="ghost">vos plus-values prend</span></div><div class="step ">
+          <span class="pfx">Le calcul de la <span class="car">|</span></span>
+          <span class="ghost">somme est simple</span></div><div class="step ">
+          <span class="pfx">Le calcul de la plus-value <span class="car">|</span></span>
+          <span class="ghost">est automatique, il</span></div><div class="step ">
+          <span class="pfx">Le calcul de la plus-value se fait <span class="car">|</span></span>
+          <span class="ghost">en fonction de</span></div></div><div class="phrase cat-sens">
+      <div class="ph-head"><span class="cat">sens</span><span class="ph">Pour déclarer mes impôts j&#x27;utilise</span></div>
+      <div class="step ">
+          <span class="pfx">Pour <span class="car">|</span></span>
+          <span class="ghost">les corrections manu</span></div><div class="step ">
+          <span class="pfx">Pour déclarer <span class="car">|</span></span>
+          <span class="ghost">un solde nég</span></div><div class="step ">
+          <span class="pfx">Pour déclarer mes <span class="car">|</span></span>
+          <span class="ghost">coordonnées, je vous</span></div><div class="step ">
+          <span class="pfx">Pour déclarer mes impôts <span class="car">|</span></span>
+          <span class="ghost">, je vais</span></div><div class="step v-bug">
+          <span class="pfx">Pour déclarer mes impôts j&#x27;utilise<span class="car">|</span></span>
+          <span class="ghost"> &lt;strong&gt;mot&lt;/strong&gt;</span><span class="badge v-bug">BUG</span><div class="note">Markup HTML rejoué verbatim depuis le corpus (chemin instant-recall, contourne banMarkup). Identique perso ON/OFF.</div></div></div><div class="phrase cat-sens">
+      <div class="ph-head"><span class="cat">sens</span><span class="ph">Avant toute correction manuelle, merci de</span></div>
+      <div class="step ">
+          <span class="pfx">Avant <span class="car">|</span></span>
+          <span class="ghost">de commencer, il</span></div><div class="step ">
+          <span class="pfx">Avant toute <span class="car">|</span></span>
+          <span class="ghost">correction manuelle</span></div><div class="step ">
+          <span class="pfx">Avant toute correction manuelle, <span class="car">|</span></span>
+          <span class="ghost">merci de relancer</span></div></div></section>
+<section><h2>Passe 2 — perso OFF (counterfactual)</h2><p class="sub">Personnalisation désactivée. Mêmes phrases — pour isoler ce que la perso change.</p><div class="phrase cat-accord">
+      <div class="ph-head"><span class="cat">accord</span><span class="ph">Les nouvelles données sont</span></div>
+      <div class="step ">
+          <span class="pfx">Les nouvelles <span class="car">|</span></span>
+          <span class="ghost">sont en français</span></div><div class="step ">
+          <span class="pfx">Les nouvelles données <span class="car">|</span></span>
+          <span class="ghost">sont :</span></div></div><div class="phrase cat-accord">
+      <div class="ph-head"><span class="cat">accord</span><span class="ph">Une grande partie des clients ont</span></div>
+      <div class="step ">
+          <span class="pfx">Une <span class="car">|</span></span>
+          <span class="ghost">fois le fichier</span></div><div class="step ">
+          <span class="pfx">Une grande <span class="car">|</span></span>
+          <span class="ghost">partie de mes</span></div><div class="step ">
+          <span class="pfx">Une grande partie des clients <span class="car">|</span></span>
+          <span class="ghost">de mon entreprise</span></div><div class="step ">
+          <span class="pfx">Une grande partie des clients ont<span class="car">|</span></span>
+          <span class="ghost"> des problèmes</span></div></div><div class="phrase cat-accord">
+      <div class="ph-head"><span class="cat">accord</span><span class="ph">Les fichiers que je vous ai</span></div>
+      <div class="step ">
+          <span class="pfx">Les <span class="car">|</span></span>
+          <span class="ghost">nouvelles données sont</span></div><div class="step ">
+          <span class="pfx">Les fichiers <span class="car">|</span></span>
+          <span class="ghost">sont des documents</span></div><div class="step ">
+          <span class="pfx">Les fichiers que <span class="car">|</span></span>
+          <span class="ghost">je peux créer</span></div><div class="step ">
+          <span class="pfx">Les fichiers que je vous <span class="car">|</span></span>
+          <span class="ghost">propose sont des</span></div><div class="step ">
+          <span class="pfx">Les fichiers que je vous ai<span class="car">|</span></span>
+          <span class="ghost"> envoyés sont</span></div></div><div class="phrase cat-accord">
+      <div class="ph-head"><span class="cat">accord</span><span class="ph">Ce sont des solutions vraiment</span></div>
+      <div class="step ">
+          <span class="pfx">Ce sont <span class="car">|</span></span>
+          <span class="ghost">des textes que</span></div><div class="step ">
+          <span class="pfx">Ce sont des solutions <span class="car">|</span></span>
+          <span class="ghost">pour les problèmes</span></div><div class="step v-warn">
+          <span class="pfx">Ce sont des solutions vraiment<span class="car">|</span></span>
+          <span class="ghost"> le detour et</span><span class="badge v-warn">à surveiller</span><div class="note">Sens négatif inattendu « inutiles ».</div></div></div><div class="phrase cat-accord">
+      <div class="ph-head"><span class="cat">accord</span><span class="ph">La réunion a été reportée à</span></div>
+      <div class="step ">
+          <span class="pfx">La réunion <span class="car">|</span></span>
+          <span class="ghost">de travail est</span></div><div class="step ">
+          <span class="pfx">La réunion a été <span class="car">|</span></span>
+          <span class="ghost">très intéressante.</span></div><div class="step ">
+          <span class="pfx">La réunion a été reportée <span class="car">|</span></span>
+          <span class="ghost">à 14h30.</span></div></div><div class="phrase cat-accord">
+      <div class="ph-head"><span class="cat">accord</span><span class="ph">Les mesures que nous avons</span></div>
+      <div class="step ">
+          <span class="pfx">Les <span class="car">|</span></span>
+          <span class="ghost">fichiers que je</span></div><div class="step ">
+          <span class="pfx">Les mesures <span class="car">|</span></span>
+          <span class="ghost">de la fenêtre</span></div><div class="step ">
+          <span class="pfx">Les mesures que <span class="car">|</span></span>
+          <span class="ghost">j\&#x27;ai prises pour</span></div><div class="step ">
+          <span class="pfx">Les mesures que nous <span class="car">|</span></span>
+          <span class="ghost">avons prises pour</span></div></div><div class="phrase cat-accord">
+      <div class="ph-head"><span class="cat">accord</span><span class="ph">Toutes les factures ont été</span></div>
+      <div class="step ">
+          <span class="pfx">Toutes <span class="car">|</span></span>
+          <span class="ghost">les lignes sont</span></div><div class="step ">
+          <span class="pfx">Toutes les factures <span class="car">|</span></span>
+          <span class="ghost">sont en format</span></div><div class="step v-ok">
+          <span class="pfx">Toutes les factures ont <span class="car">|</span></span>
+          <span class="ghost">été envoyées par</span><span class="badge v-ok">✓</span><div class="note">Accord féminin pluriel « révisées » ✓</div></div></div><div class="phrase cat-intention">
+      <div class="ph-head"><span class="cat">intention</span><span class="ph">Bonjour, je vous écris pour</span></div>
+      <div class="step ">
+          <span class="pfx">Bonjour, je <span class="car">|</span></span>
+          <span class="ghost">voulais vous remercier</span></div><div class="step ">
+          <span class="pfx">Bonjour, je vous <span class="car">|</span></span>
+          <span class="ghost">propose de travailler</span></div><div class="step ">
+          <span class="pfx">Bonjour, je vous écris <span class="car">|</span></span>
+          <span class="ghost">pour vous demander</span></div></div><div class="phrase cat-intention">
+      <div class="ph-head"><span class="cat">intention</span><span class="ph">Suite à notre échange, je reviens vers vous concernant</span></div>
+      <div class="step ">
+          <span class="pfx">Suite <span class="car">|</span></span>
+          <span class="ghost">à une demande</span></div><div class="step ">
+          <span class="pfx">Suite à notre <span class="car">|</span></span>
+          <span class="ghost">discussion, je vous</span></div><div class="step ">
+          <span class="pfx">Suite à notre échange, <span class="car">|</span></span>
+          <span class="ghost">je vous propose</span></div><div class="step ">
+          <span class="pfx">Suite à notre échange, je reviens <span class="car">|</span></span>
+          <span class="ghost">vers vous des</span></div><div class="step ">
+          <span class="pfx">Suite à notre échange, je reviens vers vous concernant<span class="car">|</span></span>
+          <span class="ghost"> le remboursement de</span></div></div><div class="phrase cat-intention">
+      <div class="ph-head"><span class="cat">intention</span><span class="ph">N&#x27;hésitez pas à me contacter si</span></div>
+      <div class="step ">
+          <span class="pfx">N&#x27;hésitez <span class="car">|</span></span>
+          <span class="ghost">pas à me</span></div><div class="step ">
+          <span class="pfx">N&#x27;hésitez pas à me contacter si<span class="car">|</span></span>
+          <span class="ghost"> vous avez</span></div></div><div class="phrase cat-intention">
+      <div class="ph-head"><span class="cat">intention</span><span class="ph">Je vous remercie de votre</span></div>
+      <div class="step ">
+          <span class="pfx">Je vous <span class="car">|</span></span>
+          <span class="ghost">propose de lire</span></div><div class="step ">
+          <span class="pfx">Je vous remercie <span class="car">|</span></span>
+          <span class="ghost">d\&#x27;avance pour votre</span></div><div class="step v-warn">
+          <span class="pfx">Je vous remercie de votre<span class="car">|</span></span>
+          <span class="ghost"> compte Binance au</span><span class="badge v-warn">à surveiller</span><div class="note">Intention incohérente : « compte Binance » injecté hors-sujet (perso OFF — vient de l&#x27;injection d&#x27;exemples).</div></div></div><div class="phrase cat-intention">
+      <div class="ph-head"><span class="cat">intention</span><span class="ph">Pourriez-vous me confirmer la</span></div>
+      <div class="step ">
+          <span class="pfx">Pourriez-vous <span class="car">|</span></span>
+          <span class="ghost">m\&#x27;aider à corr</span></div><div class="step ">
+          <span class="pfx">Pourriez-vous me <span class="car">|</span></span>
+          <span class="ghost">donner quelques</span></div><div class="step ">
+          <span class="pfx">Pourriez-vous me confirmer <span class="car">|</span></span>
+          <span class="ghost">que la</span></div><div class="step ">
+          <span class="pfx">Pourriez-vous me confirmer la<span class="car">|</span></span>
+          <span class="ghost"> présence de</span></div></div><div class="phrase cat-intention">
+      <div class="ph-head"><span class="cat">intention</span><span class="ph">Je reste à votre</span></div>
+      <div class="step ">
+          <span class="pfx">Je reste <span class="car">|</span></span>
+          <span class="ghost">à votre disposition</span></div></div><div class="phrase cat-nom-propre">
+      <div class="ph-head"><span class="cat">nom-propre</span><span class="ph">Le patron de Tesla c&#x27;est Elon</span></div>
+      <div class="step ">
+          <span class="pfx">Le patron de Tesla <span class="car">|</span></span>
+          <span class="ghost">, Elon Musk</span></div><div class="step ">
+          <span class="pfx">Le patron de Tesla c&#x27;est <span class="car">|</span></span>
+          <span class="ghost">Elon Musk.</span></div></div><div class="phrase cat-nom-propre">
+      <div class="ph-head"><span class="cat">nom-propre</span><span class="ph">Le président de la République s&#x27;appelle Emmanuel</span></div>
+      <div class="step ">
+          <span class="pfx">Le président <span class="car">|</span></span>
+          <span class="ghost">de la République</span></div><div class="step v-ok">
+          <span class="pfx">Le président de la République s&#x27;appelle <span class="car">|</span></span>
+          <span class="ghost">Emmanuel Macron.</span><span class="badge v-ok">✓</span><div class="note">« Emmanuel Macron » ✓</div></div></div><div class="phrase cat-nom-propre">
+      <div class="ph-head"><span class="cat">nom-propre</span><span class="ph">Pour mes paiements crypto je passe par</span></div>
+      <div class="step ">
+          <span class="pfx">Pour <span class="car">|</span></span>
+          <span class="ghost">commencer, je vais</span></div><div class="step ">
+          <span class="pfx">Pour mes <span class="car">|</span></span>
+          <span class="ghost">textes, je préf</span></div><div class="step ">
+          <span class="pfx">Pour mes paiements <span class="car">|</span></span>
+          <span class="ghost">, je préf</span></div><div class="step ">
+          <span class="pfx">Pour mes paiements crypto <span class="car">|</span></span>
+          <span class="ghost">, je préf</span></div><div class="step ">
+          <span class="pfx">Pour mes paiements crypto je <span class="car">|</span></span>
+          <span class="ghost">n\&#x27;utilise pas</span></div><div class="step ">
+          <span class="pfx">Pour mes paiements crypto je passe <span class="car">|</span></span>
+          <span class="ghost">par un site</span></div></div><div class="phrase cat-nom-propre">
+      <div class="ph-head"><span class="cat">nom-propre</span><span class="ph">Mon wallet hardware préféré reste le</span></div>
+      <div class="step ">
+          <span class="pfx">Mon <span class="car">|</span></span>
+          <span class="ghost">texte est en</span></div><div class="step ">
+          <span class="pfx">Mon wallet <span class="car">|</span></span>
+          <span class="ghost">est vide, je</span></div><div class="step ">
+          <span class="pfx">Mon wallet hardware <span class="car">|</span></span>
+          <span class="ghost">est un Samsung</span></div><div class="step ">
+          <span class="pfx">Mon wallet hardware préféré <span class="car">|</span></span>
+          <span class="ghost">est Ledger Nano</span></div><div class="step ">
+          <span class="pfx">Mon wallet hardware préféré reste <span class="car">|</span></span>
+          <span class="ghost">le Ledger Nano</span></div></div><div class="phrase cat-nom-propre">
+      <div class="ph-head"><span class="cat">nom-propre</span><span class="ph">Le langage de programmation du projet est</span></div>
+      <div class="step ">
+          <span class="pfx">Le langage <span class="car">|</span></span>
+          <span class="ghost">utilisé est le</span></div><div class="step v-warn">
+          <span class="pfx">Le langage de <span class="car">|</span></span>
+          <span class="ghost">l\&#x27;éditeur est</span><span class="badge v-warn">à surveiller</span><div class="note">« 113 » fuite du titre de fenêtre « Sans titre 113.rtf ».</div></div><div class="step ">
+          <span class="pfx">Le langage de programmation <span class="car">|</span></span>
+          <span class="ghost">utilisé est Python</span></div><div class="step ">
+          <span class="pfx">Le langage de programmation du <span class="car">|</span></span>
+          <span class="ghost">programme est le</span></div><div class="step ">
+          <span class="pfx">Le langage de programmation du projet <span class="car">|</span></span>
+          <span class="ghost">est le langage</span></div></div><div class="phrase cat-nom-propre">
+      <div class="ph-head"><span class="cat">nom-propre</span><span class="ph">Cet été nous repartons en vacances à</span></div>
+      <div class="step ">
+          <span class="pfx">Cet <span class="car">|</span></span>
+          <span class="ghost">article est un</span></div><div class="step ">
+          <span class="pfx">Cet été <span class="car">|</span></span>
+          <span class="ghost">, j\&#x27;ai eu</span></div><div class="step ">
+          <span class="pfx">Cet été nous <span class="car">|</span></span>
+          <span class="ghost">avons eu un</span></div><div class="step ">
+          <span class="pfx">Cet été nous repartons <span class="car">|</span></span>
+          <span class="ghost">en vacances, et</span></div><div class="step ">
+          <span class="pfx">Cet été nous repartons en vacances <span class="car">|</span></span>
+          <span class="ghost">, et je</span></div><div class="step ">
+          <span class="pfx">Cet été nous repartons en vacances à<span class="car">|</span></span>
+          <span class="ghost"> l\&#x27;étranger.</span></div></div><div class="phrase cat-sens">
+      <div class="ph-head"><span class="cat">sens</span><span class="ph">Le calcul de la plus-value se fait en</span></div>
+      <div class="step ">
+          <span class="pfx">Le calcul <span class="car">|</span></span>
+          <span class="ghost">de la moyenne</span></div><div class="step ">
+          <span class="pfx">Le calcul de la plus-value <span class="car">|</span></span>
+          <span class="ghost">est très simple</span></div><div class="step ">
+          <span class="pfx">Le calcul de la plus-value se <span class="car">|</span></span>
+          <span class="ghost">100% est très</span></div><div class="step ">
+          <span class="pfx">Le calcul de la plus-value se fait <span class="car">|</span></span>
+          <span class="ghost">en fonction de</span></div></div><div class="phrase cat-sens">
+      <div class="ph-head"><span class="cat">sens</span><span class="ph">Pour déclarer mes impôts j&#x27;utilise</span></div>
+      <div class="step ">
+          <span class="pfx">Pour <span class="car">|</span></span>
+          <span class="ghost">commencer, je vais</span></div><div class="step ">
+          <span class="pfx">Pour déclarer <span class="car">|</span></span>
+          <span class="ghost">un texte, il</span></div><div class="step ">
+          <span class="pfx">Pour déclarer mes <span class="car">|</span></span>
+          <span class="ghost">compétences, je vous</span></div><div class="step ">
+          <span class="pfx">Pour déclarer mes impôts <span class="car">|</span></span>
+          <span class="ghost">, je dois</span></div><div class="step v-bug">
+          <span class="pfx">Pour déclarer mes impôts j&#x27;utilise<span class="car">|</span></span>
+          <span class="ghost"> &lt;strong&gt;mot&lt;/strong&gt;</span><span class="badge v-bug">BUG</span><div class="note">Markup HTML rejoué verbatim depuis le corpus (chemin instant-recall, contourne banMarkup). Identique perso ON/OFF.</div></div></div><div class="phrase cat-sens">
+      <div class="ph-head"><span class="cat">sens</span><span class="ph">Avant toute correction manuelle, merci de</span></div>
+      <div class="step ">
+          <span class="pfx">Avant <span class="car">|</span></span>
+          <span class="ghost">de commencer, je</span></div><div class="step ">
+          <span class="pfx">Avant toute <span class="car">|</span></span>
+          <span class="ghost">correction manuelle</span></div><div class="step ">
+          <span class="pfx">Avant toute correction manuelle, <span class="car">|</span></span>
+          <span class="ghost">merci de relancer</span></div></div></section>
+<section><h2>Passe 3 — chasse ciblée noms propres + accords (perso ON)</h2><p class="sub">20 phrases dures : noms propres, participes, accords pronominaux, healing mid-mot.</p><div class="phrase cat-nom-propre">
+      <div class="ph-head"><span class="cat">nom-propre</span><span class="ph">J&#x27;ai transféré les fonds vers mon compte</span></div>
+      <div class="step ">
+          <span class="pfx">J&#x27;ai <span class="car">|</span></span>
+          <span class="ghost">donc modifié de</span></div><div class="step ">
+          <span class="pfx">J&#x27;ai transféré <span class="car">|</span></span>
+          <span class="ghost">le texte de</span></div><div class="step ">
+          <span class="pfx">J&#x27;ai transféré les <span class="car">|</span></span>
+          <span class="ghost">données de la</span></div><div class="step ">
+          <span class="pfx">J&#x27;ai transféré les fonds <span class="car">|</span></span>
+          <span class="ghost">de l\&#x27;entreprise vers</span></div><div class="step ">
+          <span class="pfx">J&#x27;ai transféré les fonds vers <span class="car">|</span></span>
+          <span class="ghost">un compte banc</span></div><div class="step ">
+          <span class="pfx">J&#x27;ai transféré les fonds vers mon <span class="car">|</span></span>
+          <span class="ghost">compte bancaire, sur</span></div></div><div class="phrase cat-nom-propre">
+      <div class="ph-head"><span class="cat">nom-propre</span><span class="ph">Le nouveau patron de Twitter s&#x27;appelle Elon</span></div>
+      <div class="step ">
+          <span class="pfx">Le nouveau <span class="car">|</span></span>
+          <span class="ghost">texte est aff</span></div><div class="step ">
+          <span class="pfx">Le nouveau patron <span class="car">|</span></span>
+          <span class="ghost">est :</span></div><div class="step ">
+          <span class="pfx">Le nouveau patron de Twitter <span class="car">|</span></span>
+          <span class="ghost">est un peu</span></div><div class="step ">
+          <span class="pfx">Le nouveau patron de Twitter s&#x27;appelle <span class="car">|</span></span>
+          <span class="ghost">\&quot;Twitter\&quot; et il</span></div><div class="step ">
+          <span class="pfx">Le nouveau patron de Twitter s&#x27;appelle Elon<span class="car">|</span></span>
+          <span class="ghost"> Musk.</span></div></div><div class="phrase cat-nom-propre">
+      <div class="ph-head"><span class="cat">nom-propre</span><span class="ph">Notre logiciel de fiscalité crypto c&#x27;est</span></div>
+      <div class="step ">
+          <span class="pfx">Notre <span class="car">|</span></span>
+          <span class="ghost">logiciel est en</span></div><div class="step ">
+          <span class="pfx">Notre logiciel de <span class="car">|</span></span>
+          <span class="ghost">synchronisation est en</span></div><div class="step ">
+          <span class="pfx">Notre logiciel de fiscalité <span class="car">|</span></span>
+          <span class="ghost">est en ligne</span></div><div class="step ">
+          <span class="pfx">Notre logiciel de fiscalité crypto <span class="car">|</span></span>
+          <span class="ghost">est en version</span></div><div class="step ">
+          <span class="pfx">Notre logiciel de fiscalité crypto c&#x27;est<span class="car">|</span></span>
+          <span class="ghost"> une application</span></div></div><div class="phrase cat-nom-propre">
+      <div class="ph-head"><span class="cat">nom-propre</span><span class="ph">Mon broker actions de référence reste</span></div>
+      <div class="step ">
+          <span class="pfx">Mon <span class="car">|</span></span>
+          <span class="ghost">adresse mail est</span></div><div class="step ">
+          <span class="pfx">Mon broker <span class="car">|</span></span>
+          <span class="ghost">est en ligne</span></div><div class="step ">
+          <span class="pfx">Mon broker actions de référence <span class="car">|</span></span>
+          <span class="ghost">est le broker</span></div><div class="step v-ok">
+          <span class="pfx">Mon broker actions de référence reste<span class="car">|</span></span>
+          <span class="ghost"> Trade Republic pour</span><span class="badge v-ok">✓</span><div class="note">Terme perso « Trade Republic » ✓</div></div></div><div class="phrase cat-nom-propre">
+      <div class="ph-head"><span class="cat">nom-propre</span><span class="ph">La blockchain que je préfère pour les NFT c&#x27;est</span></div>
+      <div class="step ">
+          <span class="pfx">La blockchain <span class="car">|</span></span>
+          <span class="ghost">est en cours</span></div><div class="step ">
+          <span class="pfx">La blockchain que <span class="car">|</span></span>
+          <span class="ghost">vous avez sous</span></div><div class="step ">
+          <span class="pfx">La blockchain que je <span class="car">|</span></span>
+          <span class="ghost">veux récupérer est</span></div><div class="step ">
+          <span class="pfx">La blockchain que je préfère <span class="car">|</span></span>
+          <span class="ghost">est celle de</span></div><div class="step ">
+          <span class="pfx">La blockchain que je préfère pour <span class="car">|</span></span>
+          <span class="ghost">les transactions est</span></div><div class="step ">
+          <span class="pfx">La blockchain que je préfère pour les NFT <span class="car">|</span></span>
+          <span class="ghost">est celle de</span></div><div class="step ">
+          <span class="pfx">La blockchain que je préfère pour les NFT c&#x27;est<span class="car">|</span></span>
+          <span class="ghost"> celle de</span></div></div><div class="phrase cat-nom-propre">
+      <div class="ph-head"><span class="cat">nom-propre</span><span class="ph">Ma collègue sur ce dossier s&#x27;appelle</span></div>
+      <div class="step ">
+          <span class="pfx">Ma collègue <span class="car">|</span></span>
+          <span class="ghost">a fait une</span></div><div class="step ">
+          <span class="pfx">Ma collègue sur <span class="car">|</span></span>
+          <span class="ghost">le forum a</span></div><div class="step v-warn">
+          <span class="pfx">Ma collègue sur ce <span class="car">|</span></span>
+          <span class="ghost">10/06/2025 à </span><span class="badge v-warn">à surveiller</span><div class="note">Date « 10/06/2025 » qui fuit en plein milieu de phrase.</div></div><div class="step ">
+          <span class="pfx">Ma collègue sur ce dossier <span class="car">|</span></span>
+          <span class="ghost">a fait une</span></div><div class="step ">
+          <span class="pfx">Ma collègue sur ce dossier s&#x27;appelle<span class="car">|</span></span>
+          <span class="ghost"> \&quot;Mélanie\&quot; et</span></div></div><div class="phrase cat-nom-propre">
+      <div class="ph-head"><span class="cat">nom-propre</span><span class="ph">Le projet sur lequel je bosse s&#x27;appelle</span></div>
+      <div class="step ">
+          <span class="pfx">Le projet <span class="car">|</span></span>
+          <span class="ghost">est en cours</span></div><div class="step ">
+          <span class="pfx">Le projet sur <span class="car">|</span></span>
+          <span class="ghost">lequel vous travail</span></div><div class="step ">
+          <span class="pfx">Le projet sur lequel je <span class="car">|</span></span>
+          <span class="ghost">travaille est un</span></div><div class="step ">
+          <span class="pfx">Le projet sur lequel je bosse <span class="car">|</span></span>
+          <span class="ghost">est un projet</span></div></div><div class="phrase cat-nom-propre">
+      <div class="ph-head"><span class="cat">nom-propre</span><span class="ph">Pour le staking je passe par</span></div>
+      <div class="step ">
+          <span class="pfx">Pour <span class="car">|</span></span>
+          <span class="ghost">les corrections manu</span></div><div class="step ">
+          <span class="pfx">Pour le <span class="car">|</span></span>
+          <span class="ghost">1er paragraphe, il</span></div><div class="step ">
+          <span class="pfx">Pour le staking <span class="car">|</span></span>
+          <span class="ghost">, il faut</span></div><div class="step ">
+          <span class="pfx">Pour le staking je passe <span class="car">|</span></span>
+          <span class="ghost">par le site</span></div></div><div class="phrase cat-accord">
+      <div class="ph-head"><span class="cat">accord</span><span class="ph">Les présentations que j&#x27;ai</span></div>
+      <div class="step ">
+          <span class="pfx">Les <span class="car">|</span></span>
+          <span class="ghost">opérations sont :</span></div><div class="step ">
+          <span class="pfx">Les présentations <span class="car">|</span></span>
+          <span class="ghost">sont des documents</span></div><div class="step ">
+          <span class="pfx">Les présentations que <span class="car">|</span></span>
+          <span class="ghost">vous avez sous</span></div><div class="step ">
+          <span class="pfx">Les présentations que j&#x27;ai<span class="car">|</span></span>
+          <span class="ghost">me le plus</span></div></div><div class="phrase cat-accord">
+      <div class="ph-head"><span class="cat">accord</span><span class="ph">Cette fonctionnalité a été</span></div>
+      <div class="step ">
+          <span class="pfx">Cette <span class="car">|</span></span>
+          <span class="ghost">fois, je vais</span></div><div class="step ">
+          <span class="pfx">Cette fonctionnalité <span class="car">|</span></span>
+          <span class="ghost">est disponible dans</span></div><div class="step ">
+          <span class="pfx">Cette fonctionnalité a <span class="car">|</span></span>
+          <span class="ghost">été ajoutée en</span></div></div><div class="phrase cat-accord">
+      <div class="ph-head"><span class="cat">accord</span><span class="ph">Les utilisateurs se sont</span></div>
+      <div class="step ">
+          <span class="pfx">Les <span class="car">|</span></span>
+          <span class="ghost">opérations sont :</span></div><div class="step v-warn">
+          <span class="pfx">Les utilisateurs <span class="car">|</span></span>
+          <span class="ghost">de Windows 1</span><span class="badge v-warn">à surveiller</span><div class="note">« Windows 1 » tronqué / hors-sujet.</div></div><div class="step ">
+          <span class="pfx">Les utilisateurs se <span class="car">|</span></span>
+          <span class="ghost">plaignent de</span></div><div class="step v-ok">
+          <span class="pfx">Les utilisateurs se sont<span class="car">|</span></span>
+          <span class="ghost"> trompés de</span><span class="badge v-ok">✓</span><div class="note">Accord pronominal « trompés » ✓</div></div></div><div class="phrase cat-accord">
+      <div class="ph-head"><span class="cat">accord</span><span class="ph">Le fichier PDF que tu m&#x27;as</span></div>
+      <div class="step ">
+          <span class="pfx">Le fichier <span class="car">|</span></span>
+          <span class="ghost">est en format</span></div><div class="step ">
+          <span class="pfx">Le fichier PDF <span class="car">|</span></span>
+          <span class="ghost">est en format</span></div><div class="step ">
+          <span class="pfx">Le fichier PDF que <span class="car">|</span></span>
+          <span class="ghost">vous avez sous</span></div><div class="step v-ok">
+          <span class="pfx">Le fichier PDF que tu m&#x27;as<span class="car">|</span></span>
+          <span class="ghost"> envoyé est</span><span class="badge v-ok">✓</span><div class="note">Accord participe « envoyé » ✓</div></div></div><div class="phrase cat-accord">
+      <div class="ph-head"><span class="cat">accord</span><span class="ph">Les photos qu&#x27;elle a</span></div>
+      <div class="step ">
+          <span class="pfx">Les <span class="car">|</span></span>
+          <span class="ghost">opérations sont :</span></div><div class="step ">
+          <span class="pfx">Les photos <span class="car">|</span></span>
+          <span class="ghost">sont en format</span></div><div class="step ">
+          <span class="pfx">Les photos qu&#x27;elle <span class="car">|</span></span>
+          <span class="ghost">vous envoie sont</span></div><div class="step v-ok">
+          <span class="pfx">Les photos qu&#x27;elle a<span class="car">|</span></span>
+          <span class="ghost">ffiche sont celles</span><span class="badge v-ok">✓</span><div class="note">Healing mid-mot « affiche » ✓</div></div></div><div class="phrase cat-accord">
+      <div class="ph-head"><span class="cat">accord</span><span class="ph">Nous nous sommes</span></div>
+      <div class="step ">
+          <span class="pfx">Nous <span class="car">|</span></span>
+          <span class="ghost">avons un problème</span></div><div class="step ">
+          <span class="pfx">Nous nous <span class="car">|</span></span>
+          <span class="ghost">sommes retrouvés à</span></div></div><div class="phrase cat-accord">
+      <div class="ph-head"><span class="cat">accord</span><span class="ph">Les décisions qui ont été</span></div>
+      <div class="step ">
+          <span class="pfx">Les <span class="car">|</span></span>
+          <span class="ghost">opérations sont :</span></div><div class="step ">
+          <span class="pfx">Les décisions <span class="car">|</span></span>
+          <span class="ghost">sont prises par</span></div><div class="step ">
+          <span class="pfx">Les décisions qui <span class="car">|</span></span>
+          <span class="ghost">sont prises par</span></div><div class="step ">
+          <span class="pfx">Les décisions qui ont <span class="car">|</span></span>
+          <span class="ghost">été prises sont</span></div></div><div class="phrase cat-intention">
+      <div class="ph-head"><span class="cat">intention</span><span class="ph">Je t&#x27;envoie le contrat dès que</span></div>
+      <div class="step ">
+          <span class="pfx">Je t&#x27;envoie <span class="car">|</span></span>
+          <span class="ghost">un fichier avec</span></div><div class="step ">
+          <span class="pfx">Je t&#x27;envoie le <span class="car">|</span></span>
+          <span class="ghost">un fichier</span></div><div class="step ">
+          <span class="pfx">Je t&#x27;envoie le contrat <span class="car">|</span></span>
+          <span class="ghost">en pièce join</span></div><div class="step ">
+          <span class="pfx">Je t&#x27;envoie le contrat dès <span class="car">|</span></span>
+          <span class="ghost">que je le</span></div></div><div class="phrase cat-intention">
+      <div class="ph-head"><span class="cat">intention</span><span class="ph">Le rendez-vous est confirmé pour</span></div>
+      <div class="step ">
+          <span class="pfx">Le rendez-vous <span class="car">|</span></span>
+          <span class="ghost">est fixé pour</span></div><div class="step ">
+          <span class="pfx">Le rendez-vous est confirmé <span class="car">|</span></span>
+          <span class="ghost">, vous pouvez</span></div><div class="step ">
+          <span class="pfx">Le rendez-vous est confirmé pour<span class="car">|</span></span>
+          <span class="ghost"> le 1</span></div></div><div class="phrase cat-intention">
+      <div class="ph-head"><span class="cat">intention</span><span class="ph">Merci beaucoup d&#x27;avoir pris le temps de</span></div>
+      <div class="step ">
+          <span class="pfx">Merci <span class="car">|</span></span>
+          <span class="ghost">pour votre réponse</span></div><div class="step ">
+          <span class="pfx">Merci beaucoup <span class="car">|</span></span>
+          <span class="ghost">pour votre aide</span></div><div class="step ">
+          <span class="pfx">Merci beaucoup d&#x27;avoir <span class="car">|</span></span>
+          <span class="ghost">pris le temps</span></div></div><div class="phrase cat-sens">
+      <div class="ph-head"><span class="cat">sens</span><span class="ph">Le taux de TVA applicable est de</span></div>
+      <div class="step ">
+          <span class="pfx">Le taux <span class="car">|</span></span>
+          <span class="ghost">de change est</span></div><div class="step ">
+          <span class="pfx">Le taux de TVA <span class="car">|</span></span>
+          <span class="ghost">est de 2</span></div><div class="step ">
+          <span class="pfx">Le taux de TVA applicable <span class="car">|</span></span>
+          <span class="ghost">est de 2</span></div></div><div class="phrase cat-sens">
+      <div class="ph-head"><span class="cat">sens</span><span class="ph">Il faut multiplier le montant par</span></div>
+      <div class="step ">
+          <span class="pfx">Il faut <span class="car">|</span></span>
+          <span class="ghost">que tu a</span></div><div class="step ">
+          <span class="pfx">Il faut multiplier <span class="car">|</span></span>
+          <span class="ghost">par</span></div><div class="step ">
+          <span class="pfx">Il faut multiplier le <span class="car">|</span></span>
+          <span class="ghost">nombre de lignes</span></div><div class="step ">
+          <span class="pfx">Il faut multiplier le montant <span class="car">|</span></span>
+          <span class="ghost">de la transaction</span></div></div></section>
+
+<footer>
+Méthodologie : frappe automatisée mot-par-mot dans TextEdit (AppleScript), ghost réel lu via le trace dev <code>SOUFFLEUSE_PREDICT_LOG</code> (overlay_shown). Données brutes : 3 fichiers JSON, 64 phrases, ~190 ghosts. Aucune donnée d'historique imprimée. Probe d'investigation ajouté à <code>SouffleuseRealPersoEval</code> (PASS C mid-word, hors audit).<br>
+Recommandation : conserver la personnalisation (utile + sûre) ; corriger le rejeu de markup sur le chemin instant-recall.
+</footer>
+</div></body></html>

@@ -1,0 +1,148 @@
+<!doctype html><html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>QA Ghost v3 — milieu de mot</title>
+<style>
+:root{--bg:#0d0f14;--panel:#161a22;--ink:#e7ebf0;--mut:#8a93a3;--grey:#6b7280;--accent:#6dc2ca;--ok:#3fb950;--warn:#d29922;--bug:#f85149;--line:#262c38}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(1200px 600px at 70% -10%,#19202b,var(--bg));color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif}
+.wrap{max-width:1060px;margin:0 auto;padding:48px 24px 90px}
+h1{font-size:29px;margin:0 0 6px;letter-spacing:-.02em}.meta{color:var(--mut);font-size:13px}
+.verdict{background:linear-gradient(135deg,#13241f,#161a22);border:1px solid #1f3b30;border-radius:16px;padding:24px 26px;margin:26px 0}
+.verdict h2{margin:0 0 10px;font-size:19px;color:var(--ok)}.verdict p{margin:6px 0;color:#c7d0db}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:24px 0}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}
+.kpi .n{font-size:26px;font-weight:700}.kpi .l{color:var(--mut);font-size:12px;margin-top:3px}
+.kpi.ok .n{color:var(--ok)}.kpi.bug .n{color:var(--bug)}.kpi.warn .n{color:var(--warn)}
+h2{font-size:19px;margin:38px 0 6px}.sub{color:var(--mut);margin:0 0 16px;font-size:13.5px}
+table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--mut);font-weight:600}
+td.ok{color:var(--ok)}td.bug{color:var(--bug);background:#1c1416}
+.pfx{color:#aeb6c2;font-family:"SF Mono",ui-monospace,Menlo,monospace;font-size:12px}
+.exp{color:var(--accent);font-family:ui-monospace,Menlo,monospace;font-size:12px}
+.car{color:var(--accent);font-weight:700}.cat{color:var(--mut);font-size:11px}
+.callout{border-radius:14px;padding:18px 20px;margin:16px 0;border:1px solid var(--line);background:var(--panel)}
+.callout.fix{border-color:#234b3a;background:#10201a}.callout.fix h3{color:var(--ok);margin:0 0 8px}
+.callout code{background:#0a0c10;padding:2px 6px;border-radius:5px;color:#ffd9a0;font-size:13px}
+.lst{display:flex;flex-direction:column;gap:3px;margin:8px 0 20px}
+.li{display:flex;gap:10px;align-items:baseline;padding:4px 8px;border-radius:7px;flex-wrap:wrap}
+.li.ok{background:#101a13}.li.bug{background:#1c1416}
+.ghost{color:var(--grey);font-family:ui-monospace,Menlo,monospace;font-size:12.5px;font-style:italic}
+footer{margin-top:46px;color:var(--mut);font-size:12.5px;border-top:1px solid var(--line);padding-top:18px}
+</style></head><body><div class="wrap">
+<h1>Ghost en milieu de mot — couverture complète</h1>
+<div class="meta">2026-06-13 · v3 · TextEdit · Gemma 3 1B base · déclencheur mid-mot = saisie + espace→backspace (casse le type-along) · 20 cas × perso ON/OFF</div>
+
+<div class="verdict">
+<h2>Le « Elon Mua » est un défaut du modèle de base mid-mot — et la perso le CORRIGE</h2>
+<p><b>En perso OFF</b>, « Elon Mu| » produit <code>ş.</code> (garbage), « Led| » part sur « Zeppelin 1969 » : c'est le <b>modèle de base + le token-healing</b> qui dérape sur la fin d'un mot.</p>
+<p><b>En perso ON</b>, ces mêmes cas ressortent corrects — « Musk », « Ledger », « Binance » — parce que le corpus les ré-ancre. <b>La personnalisation est un filet de sécurité mid-mot, pas la cause du bruit.</b> (14/20 vs 11/20.)</p>
+<p><b>Défaut résiduel commun ON+OFF</b> : les mots peu fréquents / composés se cassent (« personnelles »→person·elles, « rendez-vous »→rendez-vû, « Étretat »→Étre·st). → cible de correction : healing + garde de cohérence mid-mot.</p>
+</div>
+
+<div class="kpis">
+<div class="kpi ok"><div class="n">14/20</div><div class="l">mid-mot corrects — perso ON</div></div>
+<div class="kpi warn"><div class="n">11/20</div><div class="l">mid-mot corrects — perso OFF</div></div>
+<div class="kpi bug"><div class="n">6</div><div class="l">mots cassés (non-mots / divergence)</div></div>
+<div class="kpi ok"><div class="n">4/4</div><div class="l">accords mid-mot corrects</div></div>
+</div>
+
+<h2>Matrice mid-mot — perso ON vs OFF</h2>
+<p class="sub">Le curseur est <b>à l'intérieur</b> du dernier mot. Vert = complétion correcte du mot ; rouge = divergence/mot cassé.</p>
+<table>
+<tr><th>Préfixe (curseur mid-mot)</th><th>attendu</th><th>perso ON</th><th>perso OFF</th><th>cat.</th></tr>
+<tr>
+      <td class="pfx">…Il y a un gros problè<span class="car">|</span></td>
+      <td class="exp">me</td>
+      <td class="ok">me avec la</td><td class="ok">me avec le</td>
+      <td class="cat">commun</td></tr><tr>
+      <td class="pfx">…Joyeux anniv<span class="car">|</span></td>
+      <td class="exp">ersaire</td>
+      <td class="ok">ersaire</td><td class="ok">ersaire à toi</td>
+      <td class="cat">commun</td></tr><tr>
+      <td class="pfx">…beaucoup pour votre patien<span class="car">|</span></td>
+      <td class="exp">ce</td>
+      <td class="ok">ce et votre</td><td class="ok">ce et votre</td>
+      <td class="cat">commun</td></tr><tr>
+      <td class="pfx">…ous dans les meilleurs dél<span class="car">|</span></td>
+      <td class="exp">ais</td>
+      <td class="ok">ais.</td><td class="ok">ais.</td>
+      <td class="cat">commun</td></tr><tr>
+      <td class="pfx">…c&#x27;est tout à fait nor<span class="car">|</span></td>
+      <td class="exp">mal</td>
+      <td class="bug"> maux.</td><td class="bug"> végien.</td>
+      <td class="cat">commun</td></tr><tr>
+      <td class="pfx">…ns vos informations person<span class="car">|</span></td>
+      <td class="exp">nelles</td>
+      <td class="bug"> elles et ne</td><td class="bug"> elles et respect</td>
+      <td class="cat">commun</td></tr><tr>
+      <td class="pfx">…rouverez votre rapport fis<span class="car">|</span></td>
+      <td class="exp">cal</td>
+      <td class="ok"> ca.</td><td class="bug"> rt.</td>
+      <td class="cat">commun</td></tr><tr>
+      <td class="pfx">…it demain pour le rendez-v<span class="car">|</span></td>
+      <td class="exp">ous</td>
+      <td class="bug"> û</td><td class="ok">ous, à 1</td>
+      <td class="cat">commun</td></tr><tr>
+      <td class="pfx">…e est vraiment très conten<span class="car">|</span></td>
+      <td class="exp">te</td>
+      <td class="ok">te de vous</td><td class="ok">te de voir</td>
+      <td class="cat">accord</td></tr><tr>
+      <td class="pfx">… documents sont bien envoy<span class="car">|</span></td>
+      <td class="exp">és</td>
+      <td class="ok">és, merci de</td><td class="ok">és, mais je</td>
+      <td class="cat">accord</td></tr><tr>
+      <td class="pfx">…photos qu&#x27;elle a affi<span class="car">|</span></td>
+      <td class="exp">chées</td>
+      <td class="ok">chées sont celles</td><td class="ok">chées sont des</td>
+      <td class="cat">accord</td></tr><tr>
+      <td class="pfx">…La facture a été pay<span class="car">|</span></td>
+      <td class="exp">ée</td>
+      <td class="ok">ée le 1</td><td class="ok"> ée par mon</td>
+      <td class="cat">accord</td></tr><tr>
+      <td class="pfx">…e Tesla c&#x27;est Elon Mu<span class="car">|</span></td>
+      <td class="exp">sk</td>
+      <td class="ok">sk.</td><td class="bug"> ş.</td>
+      <td class="cat">nom-propre</td></tr><tr>
+      <td class="pfx">…#x27;appelle Emmanuel Macr<span class="car">|</span></td>
+      <td class="exp">on</td>
+      <td class="ok">on.</td><td class="ok">on.</td>
+      <td class="cat">nom-propre</td></tr><tr>
+      <td class="pfx">… crypto j&#x27;utilise Bin<span class="car">|</span></td>
+      <td class="exp">ance</td>
+      <td class="ok"> ance, je ne</td><td class="ok"> ance.</td>
+      <td class="cat">nom-propre</td></tr><tr>
+      <td class="pfx">…hardware c&#x27;est un Led<span class="car">|</span></td>
+      <td class="exp">ger</td>
+      <td class="ok">ger</td><td class="bug"> Zeppelin 1969.</td>
+      <td class="cat">nom-propre</td></tr><tr>
+      <td class="pfx">…je bosse c&#x27;est Cocoty<span class="car">|</span></td>
+      <td class="exp">pist</td>
+      <td class="bug">ping, un logiciel</td><td class="bug">le, un jeu</td>
+      <td class="cat">nom-propre</td></tr><tr>
+      <td class="pfx">…On part en vacances à Étre<span class="car">|</span></td>
+      <td class="exp">tat</td>
+      <td class="bug">st, on a</td><td class="bug">r, et on</td>
+      <td class="cat">nom-propre</td></tr><tr>
+      <td class="pfx">…dois déclarer mes plus-val<span class="car">|</span></td>
+      <td class="exp">ues</td>
+      <td class="bug"> eurs et mes</td><td class="bug"> eurs et mes</td>
+      <td class="cat">sens</td></tr><tr>
+      <td class="pfx">…Le montant de la transac<span class="car">|</span></td>
+      <td class="exp">tion</td>
+      <td class="ok">tions manquent à</td><td class="bug">iton est de</td>
+      <td class="cat">sens</td></tr>
+</table>
+
+<div class="callout fix">
+<h3>✅ Direction de correction (mid-mot)</h3>
+<p>1. <b>Durcir le token-healing</b> : interdire un ghost qui démarre par une espace (abandon du partiel tapé) ou qui forme un non-mot (« ş », « vû ») — le garde de cohérence <code>TypoDetector</code> existe, l'étendre au chemin mid-mot.<br>
+2. <b>Garder la perso</b> : elle rattrape les termes du corpus mid-mot. Ne pas la désactiver.<br>
+3. Re-test au même harnais (matrice ci-dessus) après fix → viser 18-20/20.</p>
+</div>
+
+<h2>Détail des complétions</h2>
+<h3>Perso ON (1.58)</h3><div class="lst"><div class="li ok"><span class="pfx">…Il y a un gros problè|</span> <span class="exp">+me</span> <span class="ghost">me avec la</span></div><div class="li ok"><span class="pfx">…Joyeux anniv|</span> <span class="exp">+ersaire</span> <span class="ghost">ersaire</span></div><div class="li ok"><span class="pfx">…i beaucoup pour votre patien|</span> <span class="exp">+ce</span> <span class="ghost">ce et votre</span></div><div class="li ok"><span class="pfx">… vous dans les meilleurs dél|</span> <span class="exp">+ais</span> <span class="ghost">ais.</span></div><div class="li bug"><span class="pfx">…, c&#x27;est tout à fait nor|</span> <span class="exp">+mal</span> <span class="ghost"> maux.</span></div><div class="li bug"><span class="pfx">…eons vos informations person|</span> <span class="exp">+nelles</span> <span class="ghost"> elles et ne</span></div><div class="li ok"><span class="pfx">… trouverez votre rapport fis|</span> <span class="exp">+cal</span> <span class="ghost"> ca.</span></div><div class="li bug"><span class="pfx">…voit demain pour le rendez-v|</span> <span class="exp">+ous</span> <span class="ghost"> û</span></div><div class="li ok"><span class="pfx">…lle est vraiment très conten|</span> <span class="exp">+te</span> <span class="ghost">te de vous</span></div><div class="li ok"><span class="pfx">…es documents sont bien envoy|</span> <span class="exp">+és</span> <span class="ghost">és, merci de</span></div><div class="li ok"><span class="pfx">…s photos qu&#x27;elle a affi|</span> <span class="exp">+chées</span> <span class="ghost">chées sont celles</span></div><div class="li ok"><span class="pfx">…La facture a été pay|</span> <span class="exp">+ée</span> <span class="ghost">ée le 1</span></div><div class="li ok"><span class="pfx">… de Tesla c&#x27;est Elon Mu|</span> <span class="exp">+sk</span> <span class="ghost">sk.</span></div><div class="li ok"><span class="pfx">…s&#x27;appelle Emmanuel Macr|</span> <span class="exp">+on</span> <span class="ghost">on.</span></div><div class="li ok"><span class="pfx">…ts crypto j&#x27;utilise Bin|</span> <span class="exp">+ance</span> <span class="ghost"> ance, je ne</span></div><div class="li ok"><span class="pfx">…t hardware c&#x27;est un Led|</span> <span class="exp">+ger</span> <span class="ghost">ger</span></div><div class="li bug"><span class="pfx">…l je bosse c&#x27;est Cocoty|</span> <span class="exp">+pist</span> <span class="ghost">ping, un logiciel</span></div><div class="li bug"><span class="pfx">…On part en vacances à Étre|</span> <span class="exp">+tat</span> <span class="ghost">st, on a</span></div><div class="li bug"><span class="pfx">…e dois déclarer mes plus-val|</span> <span class="exp">+ues</span> <span class="ghost"> eurs et mes</span></div><div class="li ok"><span class="pfx">…Le montant de la transac|</span> <span class="exp">+tion</span> <span class="ghost">tions manquent à</span></div></div>
+<h3>Perso OFF</h3><div class="lst"><div class="li ok"><span class="pfx">…Il y a un gros problè|</span> <span class="exp">+me</span> <span class="ghost">me avec le</span></div><div class="li ok"><span class="pfx">…Joyeux anniv|</span> <span class="exp">+ersaire</span> <span class="ghost">ersaire à toi</span></div><div class="li ok"><span class="pfx">…i beaucoup pour votre patien|</span> <span class="exp">+ce</span> <span class="ghost">ce et votre</span></div><div class="li ok"><span class="pfx">… vous dans les meilleurs dél|</span> <span class="exp">+ais</span> <span class="ghost">ais.</span></div><div class="li bug"><span class="pfx">…, c&#x27;est tout à fait nor|</span> <span class="exp">+mal</span> <span class="ghost"> végien.</span></div><div class="li bug"><span class="pfx">…eons vos informations person|</span> <span class="exp">+nelles</span> <span class="ghost"> elles et respect</span></div><div class="li bug"><span class="pfx">… trouverez votre rapport fis|</span> <span class="exp">+cal</span> <span class="ghost"> rt.</span></div><div class="li ok"><span class="pfx">…voit demain pour le rendez-v|</span> <span class="exp">+ous</span> <span class="ghost">ous, à 1</span></div><div class="li ok"><span class="pfx">…lle est vraiment très conten|</span> <span class="exp">+te</span> <span class="ghost">te de voir</span></div><div class="li ok"><span class="pfx">…es documents sont bien envoy|</span> <span class="exp">+és</span> <span class="ghost">és, mais je</span></div><div class="li ok"><span class="pfx">…s photos qu&#x27;elle a affi|</span> <span class="exp">+chées</span> <span class="ghost">chées sont des</span></div><div class="li ok"><span class="pfx">…La facture a été pay|</span> <span class="exp">+ée</span> <span class="ghost"> ée par mon</span></div><div class="li bug"><span class="pfx">… de Tesla c&#x27;est Elon Mu|</span> <span class="exp">+sk</span> <span class="ghost"> ş.</span></div><div class="li ok"><span class="pfx">…s&#x27;appelle Emmanuel Macr|</span> <span class="exp">+on</span> <span class="ghost">on.</span></div><div class="li ok"><span class="pfx">…ts crypto j&#x27;utilise Bin|</span> <span class="exp">+ance</span> <span class="ghost"> ance.</span></div><div class="li bug"><span class="pfx">…t hardware c&#x27;est un Led|</span> <span class="exp">+ger</span> <span class="ghost"> Zeppelin 1969.</span></div><div class="li bug"><span class="pfx">…l je bosse c&#x27;est Cocoty|</span> <span class="exp">+pist</span> <span class="ghost">le, un jeu</span></div><div class="li bug"><span class="pfx">…On part en vacances à Étre|</span> <span class="exp">+tat</span> <span class="ghost">r, et on</span></div><div class="li bug"><span class="pfx">…e dois déclarer mes plus-val|</span> <span class="exp">+ues</span> <span class="ghost"> eurs et mes</span></div><div class="li bug"><span class="pfx">…Le montant de la transac|</span> <span class="exp">+tion</span> <span class="ghost">iton est de</span></div></div>
+
+<footer>Harnais étendu : capture mid-mot fiable via le geste espace→backspace (mirroir du cache produit), ghost réel lu via <code>SOUFFLEUSE_PREDICT_LOG</code>. Couvre désormais boundary + mid-mot, perso ON/OFF. Prochaine étape : corriger le healing/garde mid-mot, puis valider sur cette matrice.</footer>
+</div></body></html>
