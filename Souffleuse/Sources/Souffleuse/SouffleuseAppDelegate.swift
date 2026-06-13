@@ -3552,8 +3552,14 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // pour que la fenêtre glissante maintienne la MÊME longueur que le ghost initial —
         // un seul budget global, pas un réglage de refill séparé. Override DEV
         // MW_ROLL_DEPTH optionnel (défaut = la préférence utilisateur).
+        // Profondeur cible de la fenêtre vivante. En Long, le beam plafonne la
+        // génération à `longGhostMaxWords` (8, validé par SouffleuseMaxWordsEval) :
+        // viser `predictor.maxWords` (20) ferait sur-générer/dériver les recharges.
+        // On cap donc le target au MÊME plafond que le seed. Moyen/Court inchangés.
+        let isLong = predictor.maxWords >= BeamGhostShaper.longGhostTriggerWords
+        let prefTarget = isLong ? BeamGhostShaper.longGhostMaxWords : predictor.maxWords
         let targetWords = ProcessInfo.processInfo.environment["MW_ROLL_DEPTH"]
-            .flatMap { Int($0) }.map { max(1, $0) } ?? predictor.maxWords
+            .flatMap { Int($0) }.map { max(1, $0) } ?? prefTarget
         let wantWords = targetWords - remainderWords
         guard wantWords >= 1 else { return }
 
