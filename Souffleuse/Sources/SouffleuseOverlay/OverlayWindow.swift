@@ -445,10 +445,31 @@ public final class OverlayWindow {
     /// size — feeding that in would produce a ghost ~3× too big. The per-bundle
     /// reliable-font cache in `SouffleuseAppDelegate` is the primary mitigation;
     /// this clamp is the secondary safety net.
-    static let caretRectToFontRatio: CGFloat = 1.27
-    static func estimatedFont(forCaretRectHeight height: CGFloat) -> NSFont? {
+    /// Line-box → font-size ratio. The caret rect height AX gives us is the
+    /// line box, not the font box; we divide by this to recover a usable point
+    /// size. Pixel-measured against the host's own glyphs (cap height vs the
+    /// rendered ghost) in the two hosts where AX exposes no font at all —
+    /// Signal (Electron) and Intercom-in-Brave (Chromium), 13/06/2026 — both
+    /// land at ~1.15 (e.g. Signal's 17 px caret = ~15 pt font). The previous
+    /// 1.27 rendered the ghost ~10–15 % too small in both. No AX/OCR signal
+    /// recovers the real font in these hosts (AX font attribute nil, TextMarker
+    /// unsupported → kAXErrorAttributeUnsupported, OCR needs Screen Recording),
+    /// so this derived ratio is the only permission-free path to size parity.
+    static let caretRectToFontRatio: CGFloat = 1.15
+
+    /// Per-bundle override of `caretRectToFontRatio`, for hosts whose composer
+    /// line-height departs from the ~1.15 norm. Empty today — both measured
+    /// hosts matched the default — but the seam stays so a future outlier is a
+    /// one-line addition rather than a refactor.
+    static let caretRectToFontRatioByBundle: [String: CGFloat] = [:]
+
+    public static func caretRectToFontRatio(for bundleID: String?) -> CGFloat {
+        bundleID.flatMap { caretRectToFontRatioByBundle[$0] } ?? caretRectToFontRatio
+    }
+
+    public static func estimatedFont(forCaretRectHeight height: CGFloat, bundleID: String? = nil) -> NSFont? {
         guard height > 1 else { return nil }
-        let estimated = height / caretRectToFontRatio
+        let estimated = height / caretRectToFontRatio(for: bundleID)
         let clamped = max(11, min(20, estimated))
         return .systemFont(ofSize: clamped)
     }

@@ -1584,10 +1584,17 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 lastReliableFontByBundle[bundleID] = font
                 return font
             }
-            // Both reliable sources nil — reuse the last known font for this
-            // bundle if available (typical on empty lines in Notes/TextEdit
-            // where AX stops reporting the font).
-            return lastReliableFontByBundle[bundleID]
+            // No reliable source — reuse the last known font for this bundle if
+            // we have one (typical on empty lines in Notes/TextEdit where AX
+            // stops reporting the font). Otherwise estimate from the caret-rect
+            // height using the PER-BUNDLE line-box→font ratio (Electron hosts
+            // like Signal need a tighter ratio than the 1.27 browser default).
+            // The estimate is never cached — it's deterministic from the rect,
+            // so the reliable-font cache can never be polluted by a guess.
+            if let cached = lastReliableFontByBundle[bundleID] { return cached }
+            return rectForGhost.flatMap {
+                OverlayWindow.estimatedFont(forCaretRectHeight: $0.height, bundleID: bundleID)
+            }
         }()
 
         // We've cleared every gate: focused, AX-trusted, not blocklisted, real
