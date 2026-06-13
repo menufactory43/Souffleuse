@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Souffleuse — Ghost : carte des redondances &amp; arbre cible</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1d212b; --line:#2a2f3a;
+    --ink:#e6e9ef; --dim:#9aa3b2; --faint:#6b7280;
+    --live:#4ec9a8; --live-bg:#10241e;
+    --dead:#d04648; --dead-bg:#241012;
+    --indirect:#597dce; --indirect-bg:#101727;
+    --warn:#d27d2c; --cue:#d0695d;
+    --mono:'SF Mono',ui-monospace,'JetBrains Mono',Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.6}
+  .wrap{max-width:1020px;margin:0 auto;padding:48px 28px 120px}
+  header.doc{border-bottom:1px solid var(--line);padding-bottom:22px;margin-bottom:8px}
+  h1{font-size:28px;margin:0 0 6px;letter-spacing:-.02em;font-weight:680}
+  h1 .sub{color:var(--cue)}
+  .lede{color:var(--dim);max-width:760px}
+  .meta{color:var(--faint);font-size:12.5px;margin-top:12px;font-family:var(--mono)}
+  h2{font-size:20px;margin:48px 0 6px;letter-spacing:-.01em;display:flex;gap:10px;align-items:baseline}
+  h2 .n{font-family:var(--mono);font-size:13px;color:var(--cue)}
+  h3{font-size:15.5px;margin:24px 0 8px}
+  p{margin:10px 0} .dim{color:var(--dim)}
+  code{font-family:var(--mono);font-size:.86em;background:var(--panel2);padding:1px 6px;border-radius:5px;border:1px solid var(--line)}
+  .file{font-family:var(--mono);font-size:11px;color:var(--faint)}
+  .legend{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0}
+  .chip{font-size:12px;font-family:var(--mono);padding:4px 11px;border-radius:20px;border:1px solid}
+  .c-live{color:var(--live);background:var(--live-bg);border-color:#1f4d3f}
+  .c-dead{color:var(--dead);background:var(--dead-bg);border-color:#4d2022}
+  .c-ind{color:var(--indirect);background:var(--indirect-bg);border-color:#26334d}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--faint);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.04em}
+  tr:hover td{background:#14171e}
+  .tag{display:inline-block;font-family:var(--mono);font-size:10.5px;padding:2px 8px;border-radius:5px;font-weight:600;white-space:nowrap}
+  .t-live{color:var(--live);background:var(--live-bg)}
+  .t-dead{color:var(--dead);background:var(--dead-bg)}
+  .t-ind{color:var(--indirect);background:var(--indirect-bg)}
+  pre{background:#0b0d11;border:1px solid var(--line);border-radius:12px;padding:16px 18px;overflow-x:auto;
+      font-family:var(--mono);font-size:12.5px;line-height:1.7;color:#cdd6e4;margin:14px 0}
+  pre .c{color:#6a7384;font-style:italic} pre .lbl{color:var(--cue)}
+  pre .dead{color:var(--dead);opacity:.85} pre .live{color:var(--live)} pre .ind{color:var(--indirect)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:14px 0}
+  .card.dead{border-color:#4d2022;background:#1a1011}
+  .card.warn{border-color:#4d381f;background:#1a150e}
+  .card h4{margin:0 0 6px;font-size:14px}
+  .card.dead h4{color:var(--dead)} .card.warn h4{color:var(--warn)}
+  ul.tight{margin:8px 0;padding-left:20px} ul.tight li{margin:4px 0;font-size:13.5px;color:var(--dim)}
+  ul.tight li b{color:var(--ink)}
+  .num{font-family:var(--mono);font-size:34px;font-weight:700;line-height:1}
+  .statgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:18px 0}
+  @media(max-width:680px){.statgrid{grid-template-columns:1fr}.wrap{padding:32px 18px}}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .stat .lab{font-size:12px;color:var(--dim);margin-top:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="doc">
+  <h1>Ghost — <span class="sub">carte des redondances &amp; arbre cible</span></h1>
+  <p class="lede">Réponse à « trop de voies ? ». La séparation DIRECT/LLM est saine. Mais une partie des
+  ~7 voies est en réalité de l'<b>échafaudage A/B mort dans la config shippée</b> — réductible sans perte.</p>
+  <div class="meta">vérifié dans le code · defaults shippés (aucune var d'env) · 5 juin 2026</div>
+  <div class="legend">
+    <span class="chip c-live">● LIVE — actif par défaut</span>
+    <span class="chip c-dead">● MORT — seulement via kill-switch env</span>
+    <span class="chip c-ind">● INDIRECT — modifie entrée/décode</span>
+  </div>
+</header>
+
+<div class="statgrid">
+  <div class="stat"><div class="num" style="color:var(--live)">5</div><div class="lab">voies LIVE qui produisent vraiment un ghost</div></div>
+  <div class="stat"><div class="num" style="color:var(--dead)">3</div><div class="lab">voies MORTES par défaut (A/B / kill-switch)</div></div>
+  <div class="stat"><div class="num" style="color:var(--indirect)">4</div><div class="lab">aides INDIRECTES (jamais un ghost seules)</div></div>
+</div>
+
+<!-- =============================== -->
+<h2><span class="n">01</span> Ce qui tourne vraiment vs ce qui dort</h2>
+<table>
+  <thead><tr><th>Voie</th><th>État (défaut)</th><th>Pourquoi</th></tr></thead>
+  <tbody>
+    <tr><td><b>L0 lexique appris</b></td><td><span class="t-live tag">LIVE</span></td><td>Mots déjà appris, gate = lexique non vide</td></tr>
+    <tr><td><b>L1 corpus fast-path</b></td><td><span class="t-live tag">LIVE</span></td><td>Match fort sur ta prose passée (prior 0.92)</td></tr>
+    <tr><td><b>L1 historique exact</b></td><td><span class="t-live tag">LIVE</span></td><td>Sous-chaîne exacte de l'historique</td></tr>
+    <tr><td><b>Cache hit + undo-as-ghost</b></td><td><span class="t-live tag">LIVE</span></td><td>Mémo FIFO 32 + restauration au backspace</td></tr>
+    <tr><td><b>Long-ghost (mid-mot / après-espace)</b></td><td><span class="t-live tag">LIVE</span></td><td><code>midWordLongGhostEnabled</code> ON par défaut</td></tr>
+    <tr><td><b>Streaming LLM (L2)</b></td><td><span class="t-live tag">LIVE</span></td><td>Le décode llama.cpp normal, dernier recours</td></tr>
+    <tr style="background:#160e0f"><td><b>Escalade mid-mot F1/F2/F3</b></td><td><span class="t-dead tag">MORT</span></td><td>Atteint <b>seulement</b> si <code>SOUFFLEUSE_LONGGHOST_OFF</code></td></tr>
+    <tr style="background:#160e0f"><td><b>F3 — fallback dico (commonCompletion)</b></td><td><span class="t-dead tag">MORT</span></td><td>Dans l'escalade → doublement inatteignable</td></tr>
+    <tr style="background:#160e0f"><td><b>L0 word-completer (NSSpellChecker)</b></td><td><span class="t-dead tag">MORT</span></td><td>ON <b>seulement</b> si <code>SOUFFLEUSE_WORDCOMPLETER</code></td></tr>
+    <tr><td><b>n-gram bias</b></td><td><span class="t-ind tag">INDIRECT</span></td><td>Biais de logits (si <code>personalizationStrength&gt;0</code>)</td></tr>
+    <tr><td><b>few-shot examples</b></td><td><span class="t-ind tag">INDIRECT</span></td><td>Prose injectée au prompt (ON)</td></tr>
+    <tr><td><b>typo / prefix-fix</b></td><td><span class="t-ind tag">INDIRECT</span></td><td>Nettoie l'entrée du modèle (ON)</td></tr>
+    <tr><td><b>KV-cache reuse</b></td><td><span class="t-ind tag">INDIRECT</span></td><td>Baisse le TTFT</td></tr>
+  </tbody>
+</table>
+
+<!-- =============================== -->
+<h2><span class="n">02</span> La redondance n°1 — deux moteurs mid-word</h2>
+<div class="card dead">
+  <h4>⚑ L'escalade F1/F2/F3 est du code mort dans la config shippée</h4>
+  <p class="dim">Le bloc mid-word (<code>PredictorViewModel.swift:851</code>) teste <code>if midWordLongGhostEnabled</code>
+  — <b>ON par défaut</b> — et <code>return</code> dans la branche long-ghost (ligne 903). La branche escalade
+  (<code>midWordEscalate()</code>, ligne 905) n'est atteinte <b>que si</b> <code>SOUFFLEUSE_LONGGHOST_OFF</code> est posé.</p>
+</div>
+
+<pre><span class="c">// PredictorViewModel.swift — bloc mid-word (résumé)</span>
+if useMidWordEscalation || useAfterSpaceLongGhost {
+    if <span class="live">midWordLongGhostEnabled</span> {          <span class="c">// ON par défaut</span>
+        lg = await runtime.<span class="live">midWordLongGhost(...)</span>   <span class="c">// ← chemin VIVANT</span>
+        ... return                            <span class="c">// (ligne 903)</span>
+    }
+    <span class="dead">esc = await runtime.midWordEscalate(...)   // ← F1 greedy+dico</span>
+    <span class="dead">  ... F2 : K branches stochastiques + vote modal</span>
+    <span class="dead">  ... F3 : wordCompleter.commonCompletion()  // fallback dico</span>
+}                                             <span class="c">// tout ce bloc dead par défaut</span></pre>
+
+<p class="dim">Concrètement, dorment par défaut : <code>ModelRuntime.midWordEscalate()</code> (F1/F2),
+la logique de branches/vote, et le fallback F3 (<code>commonCompletion</code>) — soit plusieurs centaines de
+lignes gardées uniquement comme <b>filet A/B</b> pour rebasculer si le long-ghost déçoit.</p>
+
+<!-- =============================== -->
+<h2><span class="n">03</span> Redondances secondaires</h2>
+<ul class="tight">
+  <li><b>L0 word-completer (système)</b> — <code>wordCompleterEnabledRuntime</code> est <b>OFF par défaut</b>
+      (<code>SOUFFLEUSE_WORDCOMPLETER</code> requis). La branche L0 « word-complete » de <code>routeInstant</code>
+      ne tire jamais en prod. Le type <code>WordCompleter</code> ne sert plus qu'au F3 mort (et au mid-word healing).
+      <span class="file">SuggestionPolicy+Tuning.swift:47 · SuggestionPolicy.swift:991</span></li>
+  <li><b>Paires « jumelles » — défendables</b> : <code>cache hit</code> + <code>undo-as-ghost</code>, et
+      <code>corpus fast-path</code> + <code>history exact</code>. Elles se ressemblent mais chacune gère une
+      <b>frontière distincte</b> (mid-mot vs après-espace) ou une source distincte. À garder, mais c'est ce qui
+      <i>densifie visuellement</i> l'arbre et donne l'impression de « trop de voies ».</li>
+  <li><b>INDIRECT bien séparé</b> : n-gram / few-shot / typo-fix / KV-reuse ne sont pas des voies de
+      génération — les compter comme telles gonfle artificiellement le total à 7+.</li>
+</ul>
+
+<!-- =============================== -->
+<h2><span class="n">04</span> Arbre cible (si l'A/B long-ghost est conclu)</h2>
+<p class="dim">Hypothèse : le long-ghost a gagné l'A/B et « le LLM contextuel possède le mid-word » (rationale déjà
+écrit dans le code). Alors on retire l'échafaudage :</p>
+
+<pre><span class="c">predict(prefix)</span>
+│ GATES (≥3 chars · canGenerate · pas mid-mot bloquant)
+│
+├─ <span class="live">INSTANT DIRECT</span>
+│   ├─ L0 lexique appris        <span class="c">// mid-mot</span>
+│   ├─ L1 corpus fast-path      <span class="c">// prior 0.92</span>
+│   └─ L1 historique exact      <span class="c">// après-espace</span>
+│
+├─ <span class="live">CACHE DIRECT</span>
+│   └─ hit + undo-as-ghost
+│
+├─ <span class="live">LONG-GHOST</span>  (mid-mot / après-espace, instant vide)   <span class="c">// 1 moteur, plus 2</span>
+│
+└─ <span class="live">STREAMING LLM (L2)</span>  + Relevance Gate
+
+<span class="dead">— SUPPRIMÉ : midWordEscalate() F1/F2, F3 commonCompletion</span>
+<span class="dead">— SUPPRIMÉ : branche L0 word-completer (routeInstant)</span>
+<span class="ind">— inchangé : n-gram · few-shot · typo-fix · KV-reuse (INDIRECT)</span></pre>
+
+<p class="dim">Résultat : <b>7 voies affichées → 4 blocs</b>, suppression du double moteur mid-word et du completer mort.
+Le front-loading de confiance (sources sûres avant LLM) — le cœur du produit — est <b>intact</b>.</p>
+
+<div class="card warn">
+  <h4>Décision à prendre (pas automatique)</h4>
+  <p class="dim">L'escalade et le word-completer sont des <b>kill-switches A/B volontaires</b>. Les retirer suppose
+  que tu considères l'A/B clos. Si tu veux garder l'option de rebascule, on les laisse — mais on peut au minimum
+  <b>les marquer explicitement « legacy / A/B »</b> et sortir <code>midWordEscalate</code> du chemin chaud
+  pour alléger la lecture. Avant suppression : vérifier les autres usages de <code>WordCompleter</code>
+  (mid-word healing) pour ne pas casser le healing.</p>
+</div>
+
+<p class="meta" style="margin-top:36px">Sources : PredictorViewModel.swift:466,492,851‑930 · SuggestionPolicy+Tuning.swift:47,172,250,275 · ModelRuntime.swift:347,502.</p>
+
+</div>
+</body>
+</html>

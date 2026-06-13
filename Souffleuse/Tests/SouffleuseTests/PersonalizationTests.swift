@@ -298,6 +298,34 @@ struct AdmissionRejectionTests {
         #expect(reject("la premiere ", "entrée du menu") == nil)
     }
 
+    @Test("artefact machine rejeté ; prose FR/EN légitime admise")
+    func rejectsArtifactKeepsBilingualProse() {
+        // Artefacts capturés du champ (.prose) → .artifact.
+        #expect(reject("", "Binance-Historial-de-transacciones UTC (4).numbers") == .artifact)
+        #expect(reject("", "deenakaan@gmail.com") == .artifact)
+        #expect(reject("", "https://dashboard.stripe.com/subscriptions") == .artifact)
+        #expect(reject("", "2025-04-07 07:37:15") == .artifact)
+        // Prose légitime — FR ET EN (user bilingue) — jamais touchée par le gate.
+        #expect(reject("", "If he can find the missing transaction, we will correct it.") == nil)
+        #expect(reject("", "Puis-je avoir votre relevé Binance ?") == nil)
+    }
+
+    @Test("looksLikeArtifact — signatures positives et négatives")
+    func looksLikeArtifactSignatures() {
+        // Positifs : URL, email, domaine, fichiers, low-letter, CSV.
+        #expect(TypingHistoryStore.looksLikeArtifact("https://souffleuse.app"))
+        #expect(TypingHistoryStore.looksLikeArtifact("gabriel.turpin@waltio.co"))
+        #expect(TypingHistoryStore.looksLikeArtifact("hdk.op-mgmt.net/accounts"))
+        #expect(TypingHistoryStore.looksLikeArtifact("Resumen (27).pdf"))
+        #expect(TypingHistoryStore.looksLikeArtifact("Inventario - 2026-06-09T171741.825.xlsx"))
+        #expect(TypingHistoryStore.looksLikeArtifact("03-06-2026"))
+        #expect(TypingHistoryStore.looksLikeArtifact("\"ormazioni\",\"Stato\""))
+        // Négatifs : vraie prose FR et EN, vocabulaire métier, ponctuation normale.
+        #expect(!TypingHistoryStore.looksLikeArtifact("Le transfert n'a pas été effectué."))
+        #expect(!TypingHistoryStore.looksLikeArtifact("For me it's a good solution."))
+        #expect(!TypingHistoryStore.looksLikeArtifact("Waltio est un logiciel de gestion des impôts."))
+    }
+
     @Test("ordre des gardes : secret prime sur fragment (parité append)")
     func gateOrderMatchesDisk() {
         // Un secret qui commencerait aussi par un fragment-like doit sortir en

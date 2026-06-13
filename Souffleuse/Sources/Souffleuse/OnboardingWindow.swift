@@ -18,6 +18,7 @@ enum OnboardingStep: Int, CaseIterable {
     case language
     case voice
     case howItWorks
+    case commands
     case done
 
     // MARK: Progression
@@ -30,11 +31,12 @@ enum OnboardingStep: Int, CaseIterable {
         case .language: return 2
         case .voice: return 3
         case .howItWorks: return 4
+        case .commands: return 5
         }
     }
 
-    /// Nombre total d'étapes intermédiaires (toujours 4 pour Souffleuse).
-    static let intermediateCount = 4
+    /// Nombre total d'étapes intermédiaires (permissions → commandes).
+    static let intermediateCount = 5
 
     // MARK: Taille de fenêtre préférée
 
@@ -48,6 +50,7 @@ enum OnboardingStep: Int, CaseIterable {
         case .language:    return CGSize(width: 480, height: 420)
         case .voice:       return CGSize(width: 520, height: 480)
         case .howItWorks:  return CGSize(width: 500, height: 460)
+        case .commands:    return CGSize(width: 540, height: 600)
         case .done:        return CGSize(width: 480, height: 400)
         }
     }
@@ -60,6 +63,57 @@ enum OnboardingStep: Int, CaseIterable {
 
     var next: OnboardingStep? {
         OnboardingStep(rawValue: rawValue + 1)
+    }
+}
+
+// MARK: - Flow decision (pure, testable)
+
+/// Mode du wizard. `full` = intro complète (premier lancement ou reprise) ;
+/// `permissionsOnly` = revisit où SEULES des permissions manquent → une étape,
+/// pas de réintro (inspiré de Cap : ne pas refaire tout le wizard pour un trou
+/// de TCC après une MAJ macOS).
+enum OnboardingMode: Equatable {
+    case full
+    case permissionsOnly
+}
+
+/// Décision pure « quel mode, quelle étape de départ ». Extraite de
+/// `makeOnboardingWindow` pour être testable sans AppKit ni permissions réelles.
+struct OnboardingPlan: Equatable {
+    let mode: OnboardingMode
+    let initialStep: OnboardingStep
+
+    /// - `isFresh` : override dev `SOUFFLEUSE_ONBOARDING=fresh`.
+    /// - `alreadyOnboarded` : complétion versionnée déjà écrite.
+    /// - `ghostReady` : le GGUF du souffle est sur le disque.
+    /// - `savedStep` : étape persistée pour la reprise (clé `onboardingProgressStep2`).
+    static func resolve(
+        isFresh: Bool,
+        alreadyOnboarded: Bool,
+        axGranted: Bool,
+        inputMonitoringGranted: Bool,
+        ghostReady: Bool,
+        savedStep: Int
+    ) -> OnboardingPlan {
+        // Fresh : on repart de zéro, intro complète.
+        if isFresh {
+            return OnboardingPlan(mode: .full, initialStep: .welcome)
+        }
+        let missingRequiredPermission = !axGranted || !inputMonitoringGranted
+        // Revisit où seules des permissions manquent ET le souffle est déjà là :
+        // mode permissions-only, on n'a rien d'autre à (re)faire.
+        if alreadyOnboarded, missingRequiredPermission, ghostReady {
+            return OnboardingPlan(mode: .permissionsOnly, initialStep: .permissions)
+        }
+        // Revisit où une permission requise manque MAIS le souffle aussi (quitté
+        // avant la fin du téléchargement) : wizard complet, mais on saute droit
+        // aux permissions plutôt que de refaire l'intro.
+        if alreadyOnboarded, missingRequiredPermission {
+            return OnboardingPlan(mode: .full, initialStep: .permissions)
+        }
+        // Reprise normale à l'étape persistée (clampée à une étape valide).
+        let step = OnboardingStep(rawValue: savedStep) ?? .welcome
+        return OnboardingPlan(mode: .full, initialStep: step)
     }
 }
 
@@ -85,6 +139,9 @@ private extension Color {
 @Observable
 final class OnboardingModel {
     var currentStep: OnboardingStep
+    /// Mode permissions-only : le wizard se réduit à la seule étape permissions
+    /// (revisit où il ne manque que des autorisations). Fixé à l'init, immuable.
+    let permissionsOnly: Bool
     // Permission states — rafraîchis par poll 1 s depuis show()
     var axGranted: Bool = false
     var imGranted: Bool = false
@@ -92,9 +149,10 @@ final class OnboardingModel {
     // Langue sélectionnée
     var selectedLanguage: PrimaryLanguage
 
-    init(initialStep: OnboardingStep, initialLanguage: PrimaryLanguage) {
+    init(initialStep: OnboardingStep, initialLanguage: PrimaryLanguage, permissionsOnly: Bool = false) {
         self.currentStep = initialStep
         self.selectedLanguage = initialLanguage
+        self.permissionsOnly = permissionsOnly
     }
 
     func refreshPermissions() {
@@ -130,26 +188,85 @@ private struct OnboardingRootView: View {
 
     @ViewBuilder
     private var content: some View {
-        switch model.currentStep {
-        case .welcome:
-            terminalLayout { WelcomeStepView(onStart: advance) }
-        case .done:
-            terminalLayout {
-                DoneStepView(
-                    manager: manager,
-                    ghostProvider: ghostProvider,
-                    ghostReady: ghostReady,
-                    axGranted: model.axGranted,
-                    imGranted: model.imGranted,
-                    onFinished: {
-                        onFinished()
-                        close()
-                    }
-                )
+        // Revisit « permissions-only » : on court-circuite tout le wizard et on
+        // ne montre que l'étape permissions avec un pied dédié.
+        if model.permissionsOnly {
+            permissionsOnlyLayout
+        } else {
+            switch model.currentStep {
+            case .welcome:
+                terminalLayout { WelcomeStepView(onStart: advance) }
+            case .done:
+                terminalLayout {
+                    DoneStepView(
+                        manager: manager,
+                        ghostProvider: ghostProvider,
+                        ghostReady: ghostReady,
+                        axGranted: model.axGranted,
+                        imGranted: model.imGranted,
+                        onFinished: {
+                            onFinished()
+                            close()
+                        }
+                    )
+                }
+            default:
+                scrollLayout
             }
-        default:
-            scrollLayout
         }
+    }
+
+    // MARK: Permissions-only layout (revisit)
+
+    /// Revisit où seules des permissions manquent : une seule étape, ni pips ni
+    /// Retour. Le pied est un unique bouton « Continuer vers Souffleuse » qui
+    /// termine le wizard dès qu'Accessibilité + Surveillance des entrées sont là.
+    private var permissionsOnlyLayout: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    // Pourquoi l'utilisateur revoit cet écran : rassurer, pas culpabiliser.
+                    Text("macOS a peut-être désactivé une autorisation après une mise à jour. Réactivez-la et Souffleuse reprend là où elle en était.")
+                        .font(.system(size: 13, design: .serif))
+                        .italic()
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 30)
+
+                    PermissionsStepView(
+                        axGranted: model.axGranted,
+                        imGranted: model.imGranted,
+                        screenGranted: model.screenGranted
+                    )
+                }
+                .padding(.horizontal, 36)
+                .padding(.bottom, 16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Divider()
+
+            HStack {
+                Spacer(minLength: 0)
+                Button("Continuer vers Souffleuse") {
+                    onFinished()
+                    close()
+                }
+                .buttonStyle(SangDeBoeufButtonStyle())
+                .controlSize(.large)
+                .disabled(!corePermissionsGranted)
+                .help(corePermissionsGranted ? "" : "Accordez Accessibilité et Surveillance des entrées pour continuer.")
+            }
+            .padding(.horizontal, 36)
+            .padding(.top, 12)
+            .padding(.bottom, 24)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Les deux permissions requises sont accordées (gate « peut continuer/finir »).
+    private var corePermissionsGranted: Bool {
+        model.axGranted && model.imGranted
     }
 
     // MARK: Terminal layout
@@ -224,6 +341,8 @@ private struct OnboardingRootView: View {
             )
         case .howItWorks:
             HowItWorksStepView(canTryGhost: canTryGhost)
+        case .commands:
+            CommandsStepView()
         case .welcome, .done:
             EmptyView()
         }
@@ -235,8 +354,9 @@ private struct OnboardingRootView: View {
     private var stepFooter: some View {
         switch model.currentStep {
         case .permissions:
+            // Pas de « Passer » ici : l'étape EST de débloquer les permissions.
             OnboardingFooter(
-                canContinue: model.axGranted && model.imGranted,
+                canContinue: corePermissionsGranted,
                 continueHint: "Accordez Accessibilité et Surveillance des entrées pour continuer.",
                 onBack: retreat,
                 onContinue: advance
@@ -244,6 +364,7 @@ private struct OnboardingRootView: View {
         case .language:
             OnboardingFooter(
                 canContinue: true,
+                onSkip: skipAction,
                 onBack: retreat,
                 onContinue: advance
             )
@@ -251,18 +372,42 @@ private struct OnboardingRootView: View {
             OnboardingFooter(
                 canContinue: voiceCanContinue,
                 continueHint: "Téléchargez la voix (ou laissez-la se télécharger) pour continuer.",
+                onSkip: skipAction,
                 onBack: retreat,
                 onContinue: advance
             )
         case .howItWorks:
             OnboardingFooter(
                 canContinue: true,
+                onSkip: skipAction,
+                onBack: retreat,
+                onContinue: advance
+            )
+        case .commands:
+            OnboardingFooter(
+                canContinue: true,
+                onSkip: skipAction,
                 onBack: retreat,
                 onContinue: advance
             )
         case .welcome, .done:
             EmptyView()
         }
+    }
+
+    // MARK: Passer l'intro
+
+    /// Échappatoire pour les revenants : dès que les permissions requises sont
+    /// là, on peut sauter le reste de l'intro et filer à l'étape finale (qui
+    /// porte encore « Lancer au login » + le CTA). `nil` tant que les permissions
+    /// manquent — on ne propose pas de passer un wizard encore inutilisable.
+    private var skipAction: (() -> Void)? {
+        corePermissionsGranted ? { skipToDone() } : nil
+    }
+
+    private func skipToDone() {
+        model.currentStep = .done
+        onProgress(OnboardingStep.done.rawValue)
     }
 
     // MARK: Gate voix
@@ -323,6 +468,8 @@ private struct OnboardingProgressHeader: View {
 private struct OnboardingFooter: View {
     var canContinue: Bool = true
     var continueHint: String = ""
+    /// Présent → affiche un « Passer l'intro » discret au centre (revenants).
+    var onSkip: (() -> Void)? = nil
     let onBack: () -> Void
     let onContinue: () -> Void
 
@@ -331,6 +478,16 @@ private struct OnboardingFooter: View {
             Button("Retour") { onBack() }
                 .controlSize(.large)
             Spacer(minLength: 0)
+            if let onSkip {
+                // Échappatoire discrète : gris, sans cadre, pour ne pas concurrencer
+                // l'action primaire « Continuer ».
+                Button("Passer l'intro") { onSkip() }
+                    .buttonStyle(.plain)
+                    .controlSize(.large)
+                    .foregroundStyle(.secondary)
+                    .help("Vous connaissez déjà Souffleuse — filez à la fin.")
+                Spacer(minLength: 0)
+            }
             Button("Continuer") { onContinue() }
                 .buttonStyle(SangDeBoeufButtonStyle())
                 .controlSize(.large)
@@ -847,6 +1004,136 @@ private struct HowBullet: View {
     }
 }
 
+// MARK: - Step: Commands (pour aller plus loin)
+
+/// Étape de découverte des commandes texte : le picker `//`, les emojis `:` et
+/// la traduction au raccourci. Purement informative (pas d'essai live ici) —
+/// les déclencheurs exacts sont calqués sur SlashTransformDetector / EmojiExpander
+/// / TranslationHotKey pour ne jamais mentir sur la syntaxe.
+private struct CommandsStepView: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Pour aller plus loin")
+                    .font(.system(size: 22, weight: .semibold, design: .serif))
+                Text("Au-delà du souffle, Souffleuse corrige, reformule, traduit et glisse des emojis — sans quitter votre clavier.")
+                    .font(.system(size: 13, design: .serif))
+                    .italic()
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            // Le couteau suisse texte : // au début d'un mot.
+            CommandCard(
+                trigger: "//",
+                title: "Corriger, reformuler, traduire",
+                subtitle: "Tapez // au début d'un mot, puis un chiffre — ou décrivez ce que vous voulez."
+            ) {
+                VStack(alignment: .leading, spacing: 6) {
+                    SlashIntent(number: "1", label: "Corriger", detail: "orthographe et grammaire")
+                    SlashIntent(number: "2", label: "Raccourcir", detail: "plus court, même sens")
+                    SlashIntent(number: "3", label: "Reformuler", detail: "autrement, plus clair")
+                    SlashIntent(number: "4", label: "Changer le ton", detail: "selon l'app où vous écrivez")
+                    SlashIntent(number: "5", label: "Traduire", detail: "vers la langue de la conversation")
+                }
+                .padding(.top, 2)
+            }
+
+            // Emojis : deux-points + nom.
+            CommandCard(
+                trigger: ":",
+                title: "Glisser un emoji",
+                subtitle: "Tapez : puis un nom — :sourire: — ou commencez (:sou) et choisissez d'un chiffre."
+            )
+
+            // Traduction au vol : raccourci global.
+            CommandCard(
+                trigger: "⌥⌘T",
+                title: "Traduire le champ",
+                subtitle: "Traduit tout le champ d'un raccourci. ⌘⇧→ change la langue cible, ⌘↩ applique."
+            )
+
+            Text("Tout est rappelé dans les Préférences — rien à mémoriser maintenant.")
+                .font(.system(size: 12))
+                .foregroundStyle(.tertiary)
+                .padding(.top, 2)
+        }
+    }
+}
+
+/// Carte « commande » : une pastille mono pour le déclencheur, un titre, un
+/// sous-titre, et un contenu détaillé optionnel (la liste des intentions de `//`).
+private struct CommandCard<Extra: View>: View {
+    let trigger: String
+    let title: String
+    let subtitle: String
+    @ViewBuilder var extra: () -> Extra
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                Text(trigger)
+                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color.sangDeBoeuf.opacity(0.12))
+                    )
+                    .foregroundStyle(Color.sangDeBoeuf)
+                    .fixedSize()
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.system(size: 14, weight: .semibold))
+                    Text(subtitle)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            extra()
+                .padding(.leading, 4)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+                .shadow(color: .black.opacity(0.04), radius: 2, y: 1)
+        )
+    }
+}
+
+/// Carte sans contenu détaillé (emoji, traduction) — overload `EmptyView`.
+extension CommandCard where Extra == EmptyView {
+    init(trigger: String, title: String, subtitle: String) {
+        self.init(trigger: trigger, title: title, subtitle: subtitle) { EmptyView() }
+    }
+}
+
+/// Une ligne d'intention du picker `//` : chiffre + libellé + précision.
+private struct SlashIntent: View {
+    let number: String
+    let label: String
+    let detail: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(number)
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .frame(width: 18, height: 18)
+                .background(Circle().fill(Color.secondary.opacity(0.15)))
+                .foregroundStyle(.secondary)
+            Text(label)
+                .font(.system(size: 13, weight: .medium))
+            Text("· \(detail)")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+    }
+}
+
 // MARK: - Step: Done
 
 @MainActor
@@ -977,13 +1264,14 @@ final class OnboardingWindow {
         onGhostInstalled: (@MainActor () -> Void)? = nil,
         onFinished: @escaping @MainActor () -> Void,
         initialStep: Int = 0,
+        permissionsOnly: Bool = false,
         onProgress: @escaping @MainActor (Int) -> Void
     ) {
         self.onGhostInstalled = onGhostInstalled
         self.ghostReady = ghostReady
 
         let step = OnboardingStep(rawValue: initialStep) ?? .welcome
-        let mdl = OnboardingModel(initialStep: step, initialLanguage: initialLanguage)
+        let mdl = OnboardingModel(initialStep: step, initialLanguage: initialLanguage, permissionsOnly: permissionsOnly)
         self.model = mdl
 
         let window = NSWindow(

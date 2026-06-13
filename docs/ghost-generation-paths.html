@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Souffleuse — Chemins de génération du ghost (état actuel)</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1d212b; --line:#2a2f3a;
+    --ink:#e6e9ef; --dim:#9aa3b2; --faint:#6b7280;
+    --direct:#4ec9a8; --direct-bg:#10241e;
+    --llm:#d27d2c; --llm-bg:#241a10;
+    --indirect:#597dce; --indirect-bg:#101727;
+    --gate:#d04648; --gate-bg:#241012;
+    --red:#8c2b21; --cue:#d0695d;
+    --code:#cdd6e4; --kw:#c586c0; --str:#ce9178; --num:#b5cea8; --com:#6a7384;
+    --mono:'SF Mono',ui-monospace,'JetBrains Mono',Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+       font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1080px;margin:0 auto;padding:48px 28px 120px}
+  header.doc{border-bottom:1px solid var(--line);padding-bottom:24px;margin-bottom:8px}
+  h1{font-size:30px;margin:0 0 6px;letter-spacing:-.02em;font-weight:680}
+  h1 .sub{color:var(--cue)}
+  .lede{color:var(--dim);font-size:15px;max-width:760px}
+  .meta{color:var(--faint);font-size:12.5px;margin-top:14px;font-family:var(--mono)}
+  h2{font-size:21px;margin:54px 0 6px;letter-spacing:-.01em;display:flex;align-items:baseline;gap:10px}
+  h2 .n{font-family:var(--mono);font-size:13px;color:var(--cue);font-weight:600}
+  h3{font-size:16px;margin:30px 0 10px;color:var(--ink)}
+  p{margin:10px 0}
+  .dim{color:var(--dim)}
+  code{font-family:var(--mono);font-size:.88em;background:var(--panel2);
+       padding:1px 6px;border-radius:5px;color:var(--code);border:1px solid var(--line)}
+  .file{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+  .legend{display:flex;flex-wrap:wrap;gap:10px;margin:18px 0 6px}
+  .chip{font-size:12px;font-family:var(--mono);padding:4px 11px;border-radius:20px;border:1px solid}
+  .c-direct{color:var(--direct);background:var(--direct-bg);border-color:#1f4d3f}
+  .c-llm{color:var(--llm);background:var(--llm-bg);border-color:#4d381f}
+  .c-indirect{color:var(--indirect);background:var(--indirect-bg);border-color:#26334d}
+  .c-gate{color:var(--gate);background:var(--gate-bg);border-color:#4d2022}
+
+  /* pipeline flow */
+  .flow{display:flex;flex-direction:column;gap:0;margin:22px 0}
+  .step{display:flex;gap:16px;align-items:flex-start;position:relative;padding:0 0 18px 0}
+  .step .rail{display:flex;flex-direction:column;align-items:center;flex:0 0 28px}
+  .step .dot{width:13px;height:13px;border-radius:50%;background:var(--panel2);
+             border:2px solid var(--cue);margin-top:6px;z-index:1}
+  .step .bar{width:2px;flex:1;background:var(--line);margin-top:2px}
+  .step:last-child .bar{display:none}
+  .step .body{flex:1;background:var(--panel);border:1px solid var(--line);
+              border-radius:12px;padding:14px 16px}
+  .step .body h4{margin:0 0 4px;font-size:14.5px}
+  .step .body .seg{font-family:var(--mono);font-size:11px;color:var(--cue);text-transform:uppercase;letter-spacing:.05em}
+  .step .body p{margin:6px 0 0;font-size:13.5px;color:var(--dim)}
+
+  /* code block */
+  pre{background:#0b0d11;border:1px solid var(--line);border-radius:12px;
+      padding:16px 18px;overflow-x:auto;font-family:var(--mono);font-size:12.5px;
+      line-height:1.65;color:var(--code);margin:14px 0}
+  pre .k{color:var(--kw)} pre .s{color:var(--str)} pre .n{color:var(--num)}
+  pre .c{color:var(--com);font-style:italic} pre .lbl{color:var(--cue)}
+  pre .drop{color:var(--gate);text-decoration:line-through;opacity:.7}
+
+  /* table */
+  table{width:100%;border-collapse:collapse;margin:18px 0;font-size:13px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--faint);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;
+     position:sticky;top:0;background:var(--bg)}
+  td code{font-size:11.5px}
+  tr:hover td{background:#14171e}
+  .tag{display:inline-block;font-family:var(--mono);font-size:10.5px;padding:2px 8px;border-radius:5px;font-weight:600;white-space:nowrap}
+  .t-direct{color:var(--direct);background:var(--direct-bg)}
+  .t-llm{color:var(--llm);background:var(--llm-bg)}
+  .t-indirect{color:var(--indirect);background:var(--indirect-bg)}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:14px 0}
+  .card.warn{border-color:#4d381f;background:#1a150e}
+  .card.danger{border-color:#4d2022;background:#1a1011}
+  .card h4{margin:0 0 6px;font-size:14px}
+  .card.warn h4{color:var(--llm)} .card.danger h4{color:var(--cue)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:720px){.grid2{grid-template-columns:1fr}}
+  ul.tight{margin:8px 0;padding-left:20px} ul.tight li{margin:3px 0;font-size:13.5px;color:var(--dim)}
+  ul.tight li b{color:var(--ink);font-weight:600}
+  .kbd{font-family:var(--mono);font-size:11px;background:var(--panel2);border:1px solid var(--line);
+       border-bottom-width:2px;border-radius:5px;padding:1px 6px}
+  .toc{columns:2;gap:24px;margin:16px 0 8px;font-size:13.5px}
+  @media(max-width:720px){.toc{columns:1}}
+  .toc a{color:var(--indirect);text-decoration:none} .toc a:hover{text-decoration:underline}
+  .anchor{color:var(--faint);font-size:13px;text-decoration:none;margin-left:8px;opacity:0}
+  h2:hover .anchor{opacity:1}
+  .note{font-size:12.5px;color:var(--faint);font-style:italic}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="doc">
+  <h1>Le ghost de Souffleuse — <span class="sub">tous les chemins de génération</span></h1>
+  <p class="lede">Cartographie de l'état actuel du code : par où passe une suggestion (« ghost »),
+     ce qui est affiché <b>directement</b> (sans LLM) vs <b>envoyé au LLM</b>, et le
+     <b>format littéral exact</b> du prompt / before-cursor que reçoit le modèle.</p>
+  <div class="meta">branche feat/ghost-inspector-source · vérifié dans le code · 5 juin 2026</div>
+  <div class="legend">
+    <span class="chip c-direct">● DIRECT — affiché sans LLM</span>
+    <span class="chip c-llm">● LLM — streaming llama.cpp</span>
+    <span class="chip c-indirect">● INDIRECT — modifie l'entrée/le décode</span>
+    <span class="chip c-gate">● GATE — bloque / filtre</span>
+  </div>
+</header>
+
+<nav class="toc">
+  <a href="#vue">1 · Vue d'ensemble (5 segments)</a><br>
+  <a href="#capture">2 · Capture : before/after-cursor</a><br>
+  <a href="#arbre">3 · Arbre de décision (7 voies)</a><br>
+  <a href="#table">4 · Table des voies (DIRECT vs LLM)</a><br>
+  <a href="#prompt">5 · Le prompt EXACT envoyé au LLM</a><br>
+  <a href="#contexte">6 · Contexte enrichi (format prose)</a><br>
+  <a href="#sortie">7 · Filtres de sortie &amp; troncature</a><br>
+  <a href="#constantes">8 · Constantes &amp; réglages</a>
+</nav>
+
+<!-- ============================================================ -->
+<h2 id="vue"><span class="n">01</span> Vue d'ensemble — le ghost en 5 segments <a class="anchor" href="#vue">#</a></h2>
+<p class="dim">Une frappe traverse cinq segments. Le LLM n'est que l'un des producteurs possibles, et il est
+souvent court-circuité par une voie directe (cache, corpus, lexique) plus rapide et plus sûre.</p>
+
+<div class="flow">
+  <div class="step"><div class="rail"><div class="dot"></div><div class="bar"></div></div>
+    <div class="body"><div class="seg">Segment 1 · déclenchement + capture</div>
+      <h4>Poll 50 ms → AXSnapshot → debounce 15 ms</h4>
+      <p><code>SouffleuseAppDelegate.tick()</code> tourne à 20 Hz. À chaque frappe on lit un
+      <code>AXSnapshot</code> (texte, caretIndex, rect, role…), on extrait le <b>before-cursor</b>,
+      puis un debounce de 15 ms appelle <code>predictor.predict(...)</code>. Chaque nouveau préfixe
+      annule le Task en vol (generation counter).
+      <span class="file">SouffleuseAppDelegate.swift · AXClient.swift</span></p></div></div>
+
+  <div class="step"><div class="rail"><div class="dot"></div><div class="bar"></div></div>
+    <div class="body"><div class="seg">Segment 2 · enrichissement</div>
+      <h4>ContextEnricher → prose simple (app · clipboard · OCR)</h4>
+      <p>Actor à cache TTL 5 s par bundle. Assemble app/fenêtre (toujours), clipboard (opt-in, blocklisté),
+      OCR écran (opt-in, off par défaut). Sérialisé en <b>prose inline</b>, jamais en <code>[Label:]</code>.
+      <span class="file">SouffleuseContext/ContextEnricher.swift</span></p></div></div>
+
+  <div class="step"><div class="rail"><div class="dot"></div><div class="bar"></div></div>
+    <div class="body"><div class="seg">Segment 3 · décision</div>
+      <h4>PredictorViewModel — 7 voies, priorité L0 → L1 → cache → LLM</h4>
+      <p>Le cœur : décide si le ghost vient d'une voie <span class="t-direct tag">DIRECT</span>
+      (lexique, corpus, cache) ou du <span class="t-llm tag">LLM</span>. La première voie qui réussit gagne.
+      <span class="file">PredictorViewModel.swift · SuggestionPolicy.swift</span></p></div></div>
+
+  <div class="step"><div class="rail"><div class="dot"></div><div class="bar"></div></div>
+    <div class="body"><div class="seg">Segment 4 · prompt + génération</div>
+      <h4>buildLlamaPrompt → llama.cpp (streaming token par token)</h4>
+      <p>Si on tombe sur le LLM : construction d'un prompt <b>texte brut</b> (modèle base/PT),
+      décodage streaming, KV-cache réutilisé entre frappes.
+      <span class="file">LlamaPromptBuilder.swift · ModelRuntime.swift · LlamaEngine.swift</span></p></div></div>
+
+  <div class="step"><div class="rail"><div class="dot"></div></div>
+    <div class="body"><div class="seg">Segment 5 · filtres + affichage</div>
+      <h4>ChunkFilter/OutputFilter → troncature → OverlayWindow (ghost gris)</h4>
+      <p>Chaque token est filtré (markup, écho, dégénéré), tronqué (1 phrase / N mots),
+      puis rendu en gris au caret. <span class="kbd">Tab</span> accepte, <span class="kbd">Esc</span> rejette.
+      <span class="file">ChunkFilter.swift · OutputFilter.swift · OverlayWindow.swift</span></p></div></div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="capture"><span class="n">02</span> Capture — ce qu'on lit, before/after-cursor <a class="anchor" href="#capture">#</a></h2>
+<p>Seul type qui franchit la frontière AX : <code>AXSnapshot</code> (immuable, Sendable).
+Le « before-cursor » (le préfixe) est <code>String(text.prefix(caretIndex))</code>, capé à 2048 chars côté predictor.</p>
+
+<table>
+  <thead><tr><th>Champ AXSnapshot</th><th>Contenu</th><th>Usage ghost</th></tr></thead>
+  <tbody>
+    <tr><td><code>text</code> + <code>caretIndex</code></td><td>Texte complet du champ + position du caret</td><td><span class="t-direct tag">→ before-cursor</span> : le LLM voit les <b>1024 derniers chars</b> ; le <code>userTail</code> de 2048 sert au cache/anti-répétition</td></tr>
+    <tr><td><code>textAfterCaret</code></td><td>Suffixe après le caret (capé 500 chars)</td><td><span class="tag" style="color:var(--gate);background:var(--gate-bg)">calculé mais NON envoyé au modèle base</span></td></tr>
+    <tr><td><code>role</code> / <code>subrole</code></td><td>Type de champ (AXTextField, AXSecureTextField…)</td><td>Slot <code>fieldContext</code> (« Champ : … »)</td></tr>
+    <tr><td><code>placeholder</code> / <code>help</code></td><td>Indices AX du champ</td><td>Slot <code>fieldContext</code></td></tr>
+    <tr><td><code>caretRect</code> / <code>caretFont</code></td><td>Rect écran du caret (cascade 4 stratégies) + police</td><td>Placement de l'overlay (pas le prompt)</td></tr>
+    <tr><td><code>bundleID</code> / <code>windowTitle</code></td><td>App focalisée + titre fenêtre</td><td>Gating + contexte enrichi</td></tr>
+  </tbody>
+</table>
+
+<div class="card danger">
+  <h4>⚠︎ Le texte APRÈS le curseur n'atteint pas le modèle ghost</h4>
+  <p class="dim">Le slot <code>afterCursorSlot</code> (« Suite du texte (à ne pas répéter) : « … » ») est bien
+  construit dans <code>PredictorViewModel</code> et passé à <code>buildLlamaPrompt(afterCursor:)</code>
+  — mais le corps de <code>buildLlamaPrompt</code> <b>ne l'utilise jamais</b> (tout comme le prompt
+  <code>system</code> anglais). Sur le modèle ghost par défaut (Gemma base/PT), seul le texte
+  <i>avant</i> le curseur est continué. <span class="file">LlamaPromptBuilder.swift:88‑128</span></p>
+</div>
+
+<h3>Gardes qui empêchent tout predict</h3>
+<ul class="tight">
+  <li><b>App au premier plan</b> (Souffleuse active) · <b>AX non trusted</b> · <b>champ sécurisé</b> (AXSecureTextField → text=nil) · <b>champ de recherche</b></li>
+  <li><b>Bundle blocklisté</b> (Terminal, iTerm, 1Password, Keychain, Zed…) · <b>allowlist = disabled</b> pour l'app</li>
+  <li><b>Préfixe &lt; 3 chars</b> (trimmed) · <b>caret en plein mot</b> (non-whitespace juste après) · <b>texte « dismissed » par Esc</b></li>
+  <li><b>Moteur non chargé</b> (<code>canGenerate == llamaReady == false</code>) · <b>pas encore tapé depuis le focus</b></li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="arbre"><span class="n">03</span> Arbre de décision — 7 voies, par priorité <a class="anchor" href="#arbre">#</a></h2>
+<p class="dim">Évalué de haut en bas dans <code>PredictorViewModel.predict()</code>. La première voie qui produit
+un ghost valide gagne ; le LLM est le dernier recours.</p>
+
+<pre><span class="c">predict(prefix)</span>
+│
+├─ <span class="lbl">GATES</span>  préfixe &lt; 3 chars · !canGenerate · champ vide sans indice  →  <span class="drop">RETURN</span>
+│
+├─ <span class="lbl">VOIE 1 — INSTANT (L0/L1)</span>          policy.routeInstant()
+│   ├─ <span class="k">mid-mot incomplet ?</span>
+│   │    ├─ <b>L0 lexique appris</b>      lexicon.completion()      <span class="t-direct tag">DIRECT</span>  prior 0.80
+│   │    ├─ <b>L0 word-completer</b>      NSSpellChecker (flag OFF) <span class="t-direct tag">DIRECT</span>  prior 0.55
+│   │    └─ <b>L1 corpus fort (≥8c)</b>   strongCorpusMatch()       <span class="t-direct tag">DIRECT</span>  prior 0.92 ★
+│   └─ <span class="k">après-espace / vide ?</span>
+│        ├─ <b>L1 corpus fort (≥12c)</b>  strongCorpusMatch()       <span class="t-direct tag">DIRECT</span>  prior 0.92 ★
+│        └─ <b>L1 historique exact</b>    historyExactSubstring()   <span class="t-direct tag">DIRECT</span>  prior 0.75 (≥0.6)
+│
+├─ <span class="lbl">VOIE 2 — CACHE</span>                      CompletionCache (FIFO 32)
+│   ├─ <b>cache hit</b>        lookup(userTail) ≥ 0.55           <span class="t-direct tag">DIRECT</span>  prior 0.70
+│   └─ <b>undo-as-ghost</b>    longestExtendingKey ≥ 0.30        <span class="t-direct tag">DIRECT</span>  prior 0.65
+│        <span class="c">// absorbe le cycle « espace → backspace »</span>
+│
+├─ <span class="lbl">VOIE 3 — MID-WORD / LONG-GHOST</span>     (si instantGhost vide)
+│   ├─ <b>long-ghost</b>   midWordLongGhost()  1 passe greedy + healing   <span class="t-llm tag">LLM</span> (off-main)
+│   └─ <b>escalade F1/F2/F3</b>  greedy → branches vote → fallback dico   <span class="t-llm tag">LLM</span>
+│        <span class="c">// remplace le streaming LLM normal sur mot incomplet</span>
+│
+└─ <span class="lbl">VOIE 4 — STREAMING LLM (L2)</span>       runtime.generate() → llama.cpp
+    pour chaque token :
+      ├─ Relevance Gate (D-07)  score ≥ 0.25 · replacement bar ×1.15     <span class="t-llm tag">LLM</span> prior 0.60
+      ├─ mid-word block · dedup · stub guard · echo guards
+      └─ <span class="t-direct tag">emit</span> chunk filtré  →  overlay
+
+<span class="c">Voies transverses (jamais un ghost à elles seules) :</span>
+  • <b>n-gram bias</b>        biais de logits pendant le décode LLM       <span class="t-indirect tag">INDIRECT</span>
+  • <b>few-shot examples</b>  prose de l'historique injectée au prompt    <span class="t-indirect tag">INDIRECT</span>
+  • <b>typo / prefix-fix</b>  nettoie l'ENTRÉE du modèle (pas l'affichage) <span class="t-indirect tag">INDIRECT</span>
+  • <b>KV-cache reuse</b>     extend/trim/invalidate → baisse le TTFT      <span class="t-indirect tag">INDIRECT</span>
+</pre>
+<p class="note">★ prior 0.92 = quasi imbattable : un corpus fort coupe court au LLM. Les flags (escalade, long-ghost, word-completer) sont surchargeables par variables d'env <code>SOUFFLEUSE_*</code> / <code>MW_*</code>.</p>
+
+<!-- ============================================================ -->
+<h2 id="table"><span class="n">04</span> Table des voies — DIRECT vs LLM <a class="anchor" href="#table">#</a></h2>
+<table>
+  <thead><tr><th>Voie</th><th>Condition</th><th>Sortie</th><th>Prior.</th><th>Log</th></tr></thead>
+  <tbody>
+    <tr><td><b>L0 lexique appris</b></td><td>mid-mot + mot déjà appris</td><td><span class="t-direct tag">DIRECT</span></td><td>0.80</td><td><code>ghost_learned_word</code></td></tr>
+    <tr><td><b>L0 word-completer</b></td><td>mid-mot + flag ON (off déf.)</td><td><span class="t-direct tag">DIRECT</span></td><td>0.55</td><td><code>ghost_word_complete</code></td></tr>
+    <tr><td><b>L1 corpus fast-path</b></td><td>match fort ≥8/12 chars, qualité OK</td><td><span class="t-direct tag">DIRECT</span></td><td>0.92</td><td><code>ghost_corpus_fastpath</code></td></tr>
+    <tr><td><b>L1 historique exact</b></td><td>après-espace, score ≥ 0.6</td><td><span class="t-direct tag">DIRECT</span></td><td>0.75</td><td><code>ghost_history_match</code></td></tr>
+    <tr><td><b>Cache hit</b></td><td><code>lookup(userTail)</code> ≥ 0.55</td><td><span class="t-direct tag">DIRECT</span></td><td>0.70</td><td><code>cache_hit</code></td></tr>
+    <tr><td><b>Undo-as-ghost</b></td><td>clé plus longue ≥ 0.30</td><td><span class="t-direct tag">DIRECT</span></td><td>0.65</td><td><code>cache_undo_hit</code></td></tr>
+    <tr><td><b>Long-ghost / escalade</b></td><td>mot incomplet + instant vide</td><td><span class="t-llm tag">LLM</span></td><td>—</td><td><code>ghost_midword_longghost_*</code></td></tr>
+    <tr><td><b>Streaming LLM</b></td><td>tout le reste, gate ≥ 0.25</td><td><span class="t-llm tag">LLM</span></td><td>0.60</td><td><code>ghost_apply_llm</code></td></tr>
+    <tr><td><b>N-gram bias</b></td><td><code>personalizationStrength &gt; 0</code></td><td><span class="t-indirect tag">INDIRECT</span></td><td>—</td><td><code>ghost_examples_injected</code></td></tr>
+    <tr><td><b>Typo / prefix-fix</b></td><td><code>prefixCorrectionEnabled</code></td><td><span class="t-indirect tag">INDIRECT</span></td><td>—</td><td>—</td></tr>
+    <tr><td><b>KV-cache reuse</b></td><td>contexte stable</td><td><span class="t-indirect tag">INDIRECT</span></td><td>—</td><td><code>kv_prefill_reuse</code></td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="prompt"><span class="n">05</span> Le prompt EXACT envoyé au LLM <a class="anchor" href="#prompt">#</a></h2>
+<p>Le GGUF ghost par défaut est le <b>modèle base / pré-entraîné</b> (Gemma 3 1B, <code>finetune = pt</code>) —
+le même fichier que Cotypist. Un modèle base n'a jamais vu de chat-template ni de markers FIM : on le nourrit
+en <b>texte brut</b> qu'il continue. Tous les chemins ghost de <code>ModelRuntime</code> appellent
+<code>buildLlamaPrompt</code>.</p>
+
+<h3>Structure littérale (chaque bloc optionnel, séparateur <code>\n\n</code>)</h3>
+<pre><span class="c">// si customInstr (personnalisation) non vide :</span>
+<span class="lbl">Contexte : </span>{customInstructions}
+
+<span class="c">// si examples (prose de l'historique, SimilarHistoryRetrieval) :</span>
+{examples bruts, sans label}
+
+<span class="c">// si ctxPrefix (contexte enrichi — voir §6) :</span>
+{App …, window "…". Clipboard: …. On screen: ….}
+
+<span class="c">// si fieldContext (annotations du champ) :</span>
+<span class="lbl">Champ :</span> {label}.
+<span class="lbl">Placeholder :</span> « {placeholder} ».
+<span class="lbl">Aide :</span> « {help} ».
+
+<span class="drop">Suite du texte (à ne pas répéter) : « {afterCursor} ».   ← CONSTRUIT MAIS JAMAIS UTILISÉ</span>
+<span class="drop">{system : prompt autocomplete anglais}                   ← CONSTRUIT MAIS JAMAIS UTILISÉ</span>
+
+{beforeCursor}<span class="c">  ← 1024 derniers chars du préfixe corrigé · TOUJOURS EN DERNIER · espace/tab final retiré</span></pre>
+
+<div class="grid2">
+  <div class="card">
+    <h4>Cas minimal — « Bonjour je vous »</h4>
+    <pre style="margin:8px 0 0">Bonjour je vous</pre>
+    <p class="note" style="margin-top:8px">Texte brut, rien d'autre. Tokenisé avec BOS :
+    <code>[BOS] Bonjour je vous</code>.</p>
+  </div>
+  <div class="card">
+    <h4>Pourquoi retirer l'espace final ?</h4>
+    <p class="dim" style="font-size:13px">Un modèle SentencePiece émet le token suivant <i>avec</i> son
+    espace de tête (« <code>&nbsp;arriver</code> »). Un espace déjà présent fait boucler le greedy.
+    « on va y&nbsp;» → bloque ; « on va y » → «&nbsp;arriver.&nbsp;».</p>
+  </div>
+</div>
+
+<h3>Cas riche (perso + few-shot + champ)</h3>
+<pre><span class="lbl">Contexte : </span>Je m'appelle Gabriel et j'aime la programmation.
+
+Bonjour,
+J'aimerais discuter de…
+
+Bonsoir,
+Je vous écris au sujet de…
+
+App Mail, window "Re: Réunion Q4".
+
+<span class="lbl">Champ :</span> zone de message.
+<span class="lbl">Placeholder :</span> « Votre réponse… ».
+
+Bonjour</pre>
+<p class="note"><code>customInstr</code> est injecté en <b>prose française « Contexte : »</b>, jamais comme une commande
+impérative (un modèle base ne suit pas d'ordres). Le prompt système anglais (« You are an inline autocomplete… »)
+n'existe que pour un éventuel modèle <i>instruct</i> ; sur le base par défaut il est ignoré.
+<span class="file">LlamaPromptBuilder.swift:29‑42, 95‑129 · ModelRuntime.swift:386/553/726/846</span></p>
+
+<!-- ============================================================ -->
+<h2 id="contexte"><span class="n">06</span> Contexte enrichi — format prose <a class="anchor" href="#contexte">#</a></h2>
+<p>Assemblé par <code>ContextEnricher</code> (actor, cache TTL 5 s/bundle), sérialisé en <b>prose inline</b>
+pour ne pas inciter le modèle base à imiter une structure <code>[Label:]</code>. Devient le slot <code>ctxPrefix</code>.</p>
+
+<pre><span class="c">// EnrichedContext.prefix — sortie possible :</span>
+App Intercom (support client), window "Inbox · Intercom". Clipboard: infos remboursement. On screen: Le client demande un remboursement.</pre>
+
+<table>
+  <thead><tr><th>Source</th><th>Activation</th><th>Extraction</th><th>Cap</th></tr></thead>
+  <tbody>
+    <tr><td><b>App + fenêtre</b></td><td><span class="t-direct tag">toujours</span></td><td>Nom d'app (raffiné web-app : « Brave » → « Intercom »), titre nettoyé</td><td>—</td></tr>
+    <tr><td><b>Clipboard</b></td><td>opt-in · blocklist (1Password, banques…) · fail-closed si bundle inconnu</td><td>Sanitize newlines, rejet bas-signal (hash/UUID/montant nu)</td><td>200 chars</td></tr>
+    <tr><td><b>Écran (OCR)</b></td><td>opt-in · <b>OFF par défaut</b> · TCC Screen Recording</td><td>Capture 1280px → Vision OCR (accurate) → clustering « dernière bulle » → nettoyage UI</td><td>240 chars</td></tr>
+  </tbody>
+</table>
+<p class="note">Côté prompt, le slot <code>contextPrefix</code> a un budget de ~150 tokens (machinerie
+<code>SouffleusePrompt</code>) et peut être <b>évincé en premier</b> si le budget global de 1024 tokens déborde.
+<span class="file">ContextEnricher.swift · ClipboardReader.swift · VisionOCR.swift</span></p>
+
+<!-- ============================================================ -->
+<h2 id="sortie"><span class="n">07</span> Filtres de sortie &amp; troncature <a class="anchor" href="#sortie">#</a></h2>
+<p>Chaque token brut (LLM ou direct) passe par <code>ChunkFilter</code>/<code>OutputFilter</code> avant l'affichage.
+La génération s'arrête sur fin de phrase ou plafond de mots.</p>
+
+<div class="grid2">
+  <div class="card">
+    <h4>Filtres (rejet / nettoyage)</h4>
+    <ul class="tight">
+      <li><b>strip prefix overlap</b> — le modèle recopie le préfixe, on l'enlève</li>
+      <li><b>markup / markdown / emoji / digits</b> — bannis (sampler + post-filtre)</li>
+      <li><b>écho préfixe / phrase récente</b> → <code>reset</code> (clear ghost)</li>
+      <li><b>dégénéré</b> (« 1. », bullet, consonne seule) → drop, continue</li>
+      <li><b>écho d'instruction / de contexte</b> (fuite clipboard/OCR) → drop</li>
+      <li><b>élision pendante</b> (« l' », « peut- ») → retirée</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h4>Troncature (longueur)</h4>
+    <ul class="tight">
+      <li><b>fin de phrase</b> — coupe à <code>. ? ! …</code> → stop</li>
+      <li><b>plafond de mots</b> — <code>maxWords</code> mots entiers → stop</li>
+      <li>réglage <code>CompletionLength</code> :<br>
+        court = 2 mots · <b>moyen = 3 (défaut)</b> · long = 20</li>
+      <li><b>emit only when changed</b> — pas de repaint si identique</li>
+    </ul>
+  </div>
+</div>
+
+<h3>Affichage &amp; acceptation</h3>
+<ul class="tight">
+  <li><b>OverlayWindow</b> — NSPanel non-activant, label gris (<code>tertiaryLabel</code>) ancré juste après le caret ;
+      police = celle du host (via AX) sinon estimée depuis la hauteur du caret.</li>
+  <li><b>CaretResolver</b> — 4 couches (AX rect → métriques calibrées → défauts → OCR async) pour les hosts sans bounds par char (Chromium, contenteditable).</li>
+  <li><span class="kbd">Tab</span> accepte (mot partiel ou ligne entière selon prefs) → <code>AXClient.inject()</code> ; <span class="kbd">Esc</span> rejette. Cancel-on-keystroke droppe les chunks périmés.</li>
+  <li><b>GhostInspector</b> (dev) — journalise chaque décision : verdict (AFFICHÉ/GATÉ/DROP/STUB), source (L0/L1/cache/LLM), motif, score (prior·prefixFit·lengthFit).</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="constantes"><span class="n">08</span> Constantes &amp; réglages clés <a class="anchor" href="#constantes">#</a></h2>
+<table>
+  <thead><tr><th>Constante</th><th>Valeur</th><th>Rôle</th></tr></thead>
+  <tbody>
+    <tr><td>Poll timer</td><td><code>50 ms</code> (20 Hz)</td><td>Détection de frappe</td></tr>
+    <tr><td>Predict debounce</td><td><code>15 ms</code></td><td>Stabilisation avant predict (KV warm ~24 ms TTFT)</td></tr>
+    <tr><td><b>Fenêtre LLM (before-cursor)</b></td><td><code>1024 chars</code></td><td>Ce que le modèle voit réellement (<code>llmTail</code>) — A/B validé : 512 trop court, 2048 = +185 ms pour rien</td></tr>
+    <tr><td>userTail (bookkeeping)</td><td><code>2048 chars</code></td><td>Clé de cache + anti-répétition + scoring (PAS l'entrée du LLM)</td></tr>
+    <tr><td>After-cursor cap</td><td><code>500 chars</code></td><td>capturé (mais non envoyé au base)</td></tr>
+    <tr><td>Contexte moteur (n_ctx)</td><td><code>4096 tokens</code></td><td>Gemma 3 1B → 32k natif : large marge sous le plafond</td></tr>
+    <tr><td>Min préfixe</td><td><code>3 chars</code></td><td>Seuil sous lequel pas de predict</td></tr>
+    <tr><td>Budget prompt global</td><td><code>1024 tokens</code></td><td>before-cursor 200 · contexte 150 · champ 60…</td></tr>
+    <tr><td>Cache predict</td><td><code>FIFO 32</code></td><td>cache_hit / undo-as-ghost</td></tr>
+    <tr><td>maxWords (défaut)</td><td><code>3</code> (moyen)</td><td>Plafond principal de longueur</td></tr>
+    <tr><td>Gate floor LLM</td><td><code>0.25</code></td><td>Score min pour afficher un chunk LLM</td></tr>
+    <tr><td>Replacement bar</td><td><code>×1.15</code></td><td>Un nouveau ghost doit battre l'actuel de 15 %</td></tr>
+  </tbody>
+</table>
+
+<div class="card warn" style="margin-top:30px">
+  <h4>À retenir</h4>
+  <p class="dim">Le ghost n'est <b>pas</b> « toujours du LLM ». Dans l'usage courant, beaucoup de suggestions
+  sortent <b>directement</b> du cache, du corpus personnel ou du lexique — sans toucher llama.cpp — et le LLM
+  ne tranche que quand aucune voie directe ne s'applique. Et même quand le LLM génère, il ne reçoit
+  <b>que les 1024 derniers caractères avant le curseur</b> (+ perso/contexte/exemples) en prose brute :
+  ni le texte d'après le curseur, ni un prompt système, ne lui sont transmis sur le modèle base par défaut.
+  (Le <code>userTail</code> de 2048 chars, lui, ne sert qu'au cache et à l'anti-répétition.)</p>
+</div>
+
+<p class="meta" style="margin-top:40px">Généré pour Souffleuse · code lu sur feat/ghost-inspector-source ·
+chemins vérifiés dans LlamaPromptBuilder.swift, PredictorViewModel.swift, ModelRuntime.swift, ContextEnricher.swift, ChunkFilter.swift.</p>
+
+</div>
+</body>
+</html>

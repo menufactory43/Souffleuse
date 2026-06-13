@@ -1,0 +1,31 @@
+{
+  "name": "souffleuse-video",
+  "private": true,
+  "scripts": {
+    "studio": "remotion studio src/index.ts",
+    "render": "remotion render src/index.ts Souffleuse out/souffleuse.mp4",
+    "render:rafale": "remotion render src/index.ts SouffleuseRafale out/souffleuse-rafale.mp4",
+    "render:cafe": "remotion render src/index.ts SouffleuseCafe out/souffleuse-cafe.mp4",
+    "render:cafe:vertical": "remotion render src/index.ts SouffleuseCafeVertical out/souffleuse-cafe-vertical.mp4",
+    "render:defi": "remotion render src/index.ts DefiTabVertical out/defi-tab-vertical.mp4",
+    "render:defi:16x9": "remotion render src/index.ts DefiTab16x9 out/defi-tab-16x9.mp4",
+    "son:rafale": "node scripts/make-bande-son-rafale.mjs",
+    "capture": "bash scripts/capture-ghost.sh",
+    "son:cafe": "node scripts/make-bande-son-cafe.mjs",
+    "publish": "node scripts/publish.mjs",
+    "render:screencast": "remotion render src/index.ts ScreencastVertical out/screencast-vertical.mp4",
+    "render:screencast:16x9": "remotion render src/index.ts Screencast16x9 out/screencast-16x9.mp4",
+    "son:screencast": "node scripts/make-bande-son-screencast.mjs"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.0",
+    "@remotion/google-fonts": "^4.0.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "remotion": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0",
+    "typescript": "^5.5.0"
+  }
+}

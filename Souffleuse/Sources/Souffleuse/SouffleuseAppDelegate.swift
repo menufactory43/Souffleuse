@@ -607,6 +607,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         if let env = ProcessInfo.processInfo.environment["SOUFFLEUSE_ONBOARDING"] {
             if env == "fresh" {
                 UserDefaults.standard.removeObject(forKey: "onboardingProgressStep")
+                UserDefaults.standard.removeObject(forKey: "onboardingProgressStep2")
                 return true
             }
             if env == "1" { return true }
@@ -639,22 +640,23 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
         // Reprise : si SOUFFLEUSE_ONBOARDING=fresh, on repart de l'étape 0.
         let isFresh = ProcessInfo.processInfo.environment["SOUFFLEUSE_ONBOARDING"] == "fresh"
-        // Un utilisateur DÉJÀ onboardé qu'on rouvre uniquement parce qu'une permission
-        // requise a sauté : on l'amène droit à l'étape permissions plutôt que de lui
-        // refaire l'intro. Le titre de l'étape (« Ce qu'il faut autoriser ») suffit à
-        // contextualiser. La complétion versionnée n'est pas touchée — onFinished la
-        // réécrira en sortie.
         let alreadyOnboarded = UserDefaults.standard.bool(forKey: "onboardingDone")
             || UserDefaults.standard.integer(forKey: "onboardingCompletedVersion") >= Self.onboardingVersion
-        let missingRequiredPermission = !AXClient.isTrusted || !inputMonitoringGranted
-        let resumeStep: Int
-        if isFresh {
-            resumeStep = 0
-        } else if alreadyOnboarded && missingRequiredPermission {
-            resumeStep = OnboardingStep.permissions.rawValue
-        } else {
-            resumeStep = UserDefaults.standard.integer(forKey: "onboardingProgressStep")
-        }
+        // Décision pure (mode + étape de départ), testée dans OnboardingFlowTests :
+        //  - revisit où SEULES des permissions manquent (souffle déjà là) → mode
+        //    permissions-only : une étape, pas de réintro ;
+        //  - revisit où le souffle manque aussi → wizard complet, saut aux permissions ;
+        //  - sinon, reprise normale à l'étape persistée.
+        // Clé de reprise renommée `…Step2` : l'insertion de l'étape « commandes » a
+        // décalé les rawValues, l'ancienne valeur ne pointerait plus au bon endroit.
+        let plan = OnboardingPlan.resolve(
+            isFresh: isFresh,
+            alreadyOnboarded: alreadyOnboarded,
+            axGranted: AXClient.isTrusted,
+            inputMonitoringGranted: inputMonitoringGranted,
+            ghostReady: GGUFModelOption.option(forID: store.ggufModelID).isResolvable,
+            savedStep: UserDefaults.standard.integer(forKey: "onboardingProgressStep2")
+        )
         return OnboardingWindow(
             modelDownloads: store.modelDownloads,
             ghostProvider: ghostProvider,
@@ -692,10 +694,11 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 // Complétion versionnée écrite ICI, à la fin du wizard — jamais à l'ouverture.
                 UserDefaults.standard.set(Self.onboardingVersion, forKey: "onboardingCompletedVersion")
             },
-            initialStep: resumeStep,
+            initialStep: plan.initialStep.rawValue,
+            permissionsOnly: plan.mode == .permissionsOnly,
             onProgress: { step in
                 // Persiste l'étape atteinte pour la reprise après un relancement forcé par macOS.
-                UserDefaults.standard.set(step, forKey: "onboardingProgressStep")
+                UserDefaults.standard.set(step, forKey: "onboardingProgressStep2")
             }
         )
     }

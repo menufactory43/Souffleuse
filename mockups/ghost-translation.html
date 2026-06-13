@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Souffleuse — Deux fantômes · maquette</title>
+<style>
+  :root{
+    --bg:#15110d; --panel:#1d1813; --ink:#efe6da; --dim:#9b8e7e;
+    --ghost:#7d7264; --amber:#e8a13c; --amber-soft:#3a2c16;
+    --green:#7fb069; --line:#2c241b; --hud:#191f24; --hud-line:#2a3540;
+    --serif:Georgia,'Times New Roman',serif;
+    --mono:'SF Mono',ui-monospace,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:radial-gradient(1200px 600px at 70% -10%, #241c13 0%, var(--bg) 55%);
+    color:var(--ink); font-family:var(--mono); font-size:15px; line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1180px;margin:0 auto;padding:32px 24px 80px}
+  header h1{font-family:var(--serif);font-weight:600;font-size:30px;margin:0 0 4px;letter-spacing:.2px}
+  header h1 .em{color:var(--amber);font-style:italic}
+  header p{color:var(--dim);margin:0 0 26px;max-width:720px}
+  .grid{display:grid;grid-template-columns:1.5fr .8fr;gap:24px}
+  @media (max-width:960px){.grid{grid-template-columns:1fr}}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px}
+  .card h3{font-family:var(--serif);font-weight:600;margin:0 0 14px;font-size:16px}
+
+  .stage{min-height:440px;display:flex;flex-direction:column;gap:14px}
+  .msg-in{align-self:flex-start;max-width:62%;background:#241d15;border:1px solid var(--line);
+    border-radius:14px 14px 14px 4px;padding:10px 13px;color:#d8cdbd}
+  .msg-in .who{font-size:11px;color:var(--amber);letter-spacing:.4px;text-transform:uppercase;margin-bottom:4px}
+  .msg-in .lang{font-size:11px;color:var(--dim);float:right}
+
+  /* espace de travail Intercom : composer (gauche) + détails (droite) */
+  .work{margin-top:auto;position:relative;display:flex;gap:0;align-items:stretch}
+  .composer{flex:1.55;border:1px solid var(--line);border-radius:12px 0 0 12px;background:#120e0a;
+    padding:12px 14px;display:flex;flex-direction:column;min-height:150px}
+  .rep-head{font-size:12px;color:#cfc3b2;margin-bottom:8px}
+  .rep-head b{color:var(--ink)}
+  .field{flex:1;min-height:40px;font-size:16px;line-height:1.55;white-space:pre-wrap;word-break:break-word;color:var(--ink)}
+  .field .placeholder{color:#5d5345}
+  .toolbar{display:flex;align-items:center;justify-content:space-between;margin-top:10px;border-top:1px solid #221a12;padding-top:9px}
+  .toolbar .icons{display:flex;gap:13px;opacity:.5;font-size:13px}
+  .toolbar .send{font-size:13px;color:#6f6557}
+  .details{flex:1;border:1px solid var(--line);border-left:none;border-radius:0 12px 12px 0;
+    background:#161109;padding:12px 14px;font-size:12.5px;color:#5e564a}
+  .details .row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #1d160d}
+  .details .row b{color:#8a7e6b;font-weight:500}
+  .details .all{margin-top:8px;color:#7a6e5b;font-weight:600}
+
+  .committed{color:var(--ink)}
+  .frghost{color:var(--ghost);font-style:italic}
+  .kbdmini{font-style:normal;font-size:10px;color:var(--ghost);border:1px solid var(--line);
+    border-radius:4px;padding:0 3px;margin-left:5px;vertical-align:1px}
+  .caret{display:inline-block;width:2px;height:1.05em;background:var(--amber);vertical-align:-2px;
+    animation:blink 1s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+
+  /* ---------- HUD flottant (panneau séparé, ancré, déplaçable) ---------- */
+  .hud{position:absolute;top:18px;right:-8px;width:290px;z-index:5;
+    background:var(--hud);border:1px solid var(--hud-line);border-radius:12px;
+    box-shadow:0 14px 38px rgba(0,0,0,.5);}
+  .hud-grip{display:flex;align-items:center;justify-content:space-between;padding:7px 11px;
+    border-bottom:1px solid var(--hud-line);cursor:grab;user-select:none}
+  .hud-grip:active{cursor:grabbing}
+  .hud-grip .dots{color:#41505c;letter-spacing:1px;font-size:13px}
+  .chip{background:var(--amber-soft);border:1px solid var(--amber);color:var(--amber);
+    font-size:11px;padding:2px 9px;border-radius:20px;letter-spacing:.5px;cursor:pointer}
+  .chip b{color:var(--ink)}
+  .hud-engine{font-size:9.5px;color:#5e7385;letter-spacing:.4px;text-transform:uppercase}
+  .hud-engine::before{content:"◴ ";color:#6dc2ca}
+  .hud-pad{padding:10px 12px 12px}
+  .hud-body{font-size:15px;line-height:1.6;color:#cfe0ec;min-height:22px}
+  .hud-clause{transition:opacity .25s}
+  .hud-clause.shimmer{opacity:.35;color:#6dc2ca}
+  .hud-caret{display:inline-block;width:2px;height:1.05em;background:#6dc2ca;vertical-align:-2px;
+    animation:blink 1s steps(1) infinite}
+  .risk{background:rgba(232,161,60,.18);border-bottom:1.5px dotted var(--amber);color:#f3d6a4;
+    border-radius:2px;padding:0 1px;cursor:help}
+  .hud-foot{display:none;margin-top:10px;padding-top:9px;border-top:1px dashed var(--hud-line);font-size:11.5px}
+  .guard{color:#9fb8a0}
+  .guard .shield{margin-right:5px}
+  .guard .ok{color:var(--green)}
+  .guard .warn{color:#d27d2c;font-weight:600}
+  .risknote{margin-top:6px;font-size:11px;color:var(--amber)}
+  .hud.sent{border-color:var(--green)}
+  .sent-msg{color:var(--green);font-size:13px;padding:12px}
+  .persist{position:absolute;z-index:6;font-size:11px;color:var(--green);background:#16241a;
+    border:1px solid var(--green);border-radius:8px;padding:4px 9px;opacity:0;transition:opacity .3s;
+    pointer-events:none;white-space:nowrap}
+  .persist.show{opacity:1}
+  .persist::before{content:"📌 "}
+
+  .keys{margin-top:12px;font-size:12px;color:var(--dim);display:flex;gap:18px;flex-wrap:wrap}
+  .keys b{color:var(--ink)}
+  kbd{background:#2a2017;border:1px solid var(--amber-soft);border-bottom-width:2px;border-radius:5px;
+    padding:1px 6px;font-size:11px;color:var(--amber)}
+  .commitRow{margin-top:10px;display:none}
+  .commitRow button{background:var(--green);color:#10180e;border:none;border-radius:9px;
+    padding:9px 16px;font-family:var(--serif);font-weight:600;font-size:14px;cursor:pointer}
+
+  .controls .row{margin-bottom:18px}
+  .controls .row > .label{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
+  .seg{display:flex;gap:6px;flex-wrap:wrap}
+  .seg button{flex:1;min-width:80px;background:#1a140e;color:var(--dim);border:1px solid var(--line);
+    border-radius:9px;padding:9px 8px;font-family:var(--mono);font-size:12.5px;cursor:pointer;transition:.15s}
+  .seg button:hover{border-color:var(--ghost);color:var(--ink)}
+  .seg button.on{background:var(--amber-soft);border-color:var(--amber);color:var(--amber)}
+  .play{width:100%;background:var(--amber);color:#1a1109;border:none;border-radius:10px;padding:12px;
+    font-family:var(--serif);font-weight:600;font-size:15px;cursor:pointer;letter-spacing:.3px}
+  .play:active{transform:translateY(1px)}
+  .mini{width:100%;margin-top:8px;background:transparent;color:var(--dim);border:1px solid var(--line);
+    border-radius:8px;padding:7px;font-family:var(--mono);font-size:12px;cursor:pointer}
+  .mini:hover{color:var(--ink);border-color:var(--ghost)}
+  .legend{margin-top:18px;font-size:12.5px;color:var(--dim);border-top:1px solid var(--line);padding-top:14px}
+  .legend .l{display:flex;gap:9px;margin-bottom:9px;align-items:flex-start}
+  .legend .sw{width:14px;height:14px;border-radius:4px;flex:none;margin-top:2px}
+  .legend b{color:var(--ink)}
+  .map{margin-top:14px;font-size:11.5px;color:var(--ghost);line-height:1.7;border-top:1px solid var(--line);padding-top:12px}
+  .map code{color:var(--amber);background:var(--amber-soft);padding:1px 5px;border-radius:4px}
+  footer{margin-top:30px;color:var(--ghost);font-size:12px;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Les <span class="em">deux fantômes</span></h1>
+    <p>Ghost <b>FR inline</b> (⚡ base, instantané) pour la vitesse · HUD <b>cible</b> (◴ instruct paresseux) docké
+       <b>à droite du champ</b>, sur la zone détails — <b>déplaçable à la poignée ⠿</b> et <b>mémorisé par app</b>.
+       Il surligne les mots douteux et garde tes termes métier. Maquette scriptée.</p>
+  </header>
+
+  <div class="grid">
+    <!-- SCÈNE -->
+    <div class="card">
+      <h3>La scène — Intercom (Brave)</h3>
+      <div class="stage">
+        <div class="msg-in">
+          <div class="who">Client · Waltio <span class="lang" id="custLang">DE</span></div>
+          <div id="custMsg">…</div>
+        </div>
+
+        <div class="work" id="work">
+          <!-- composer (gauche) -->
+          <div class="composer">
+            <div class="rep-head">⚑ <b>Répondre</b> ⌄</div>
+            <div class="field" id="field"><span class="placeholder">Utiliser ⌘K pour les raccourcis</span><span class="caret"></span></div>
+            <div class="toolbar">
+              <div class="icons">⚡ 🔖 🙂 📖 📎 🅰 ▥</div>
+              <div class="send">Envoyer ⌄</div>
+            </div>
+          </div>
+          <!-- détails client (droite) -->
+          <div class="details">
+            <div class="row"><b>Waltio plan</b><span>PLN100</span></div>
+            <div class="row"><b>Waltio add ons</b><span>—</span></div>
+            <div class="row"><b>Stripe last charge</b><span>—</span></div>
+            <div class="row"><b>Stripe plan</b><span>—</span></div>
+            <div class="all">Tout voir</div>
+          </div>
+
+          <!-- HUD flottant déplaçable -->
+          <div class="hud" id="hud" style="display:none">
+            <div class="hud-grip" id="grip">
+              <span class="dots">⠿</span>
+              <span class="chip" id="chip">FR → <b>DE</b> ▾</span>
+              <span class="hud-engine">instruct · paresseux</span>
+            </div>
+            <div class="hud-pad">
+              <div class="hud-body"><span id="hudTarget"></span><span class="hud-caret"></span></div>
+              <div class="hud-foot" id="hudFoot">
+                <div class="guard" id="hudGuard"></div>
+                <div class="risknote" id="hudRisk"></div>
+              </div>
+            </div>
+          </div>
+          <div class="persist" id="persist"></div>
+        </div>
+
+        <div class="keys">
+          <span><kbd>⇥</kbd> accepter le mot <b>français</b></span>
+          <span><kbd>⌘↩</kbd> envoyer en <b id="keyLang">allemand</b></span>
+          <span style="color:#6e6456">glisse le HUD par la poignée ⠿</span>
+        </div>
+        <div class="commitRow" id="commitRow">
+          <button id="commit">⌘↩ &nbsp;Envoyer en <span id="commitLang">allemand</span></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- CONTRÔLES -->
+    <div class="card controls">
+      <h3>Réglages de la maquette</h3>
+
+      <div class="row">
+        <div class="label">Langue du client (→ cible auto)</div>
+        <div class="seg" id="scenSeg">
+          <button data-scen="de" class="on">🇩🇪 Allemand</button>
+          <button data-scen="en">🇬🇧 Anglais</button>
+          <button data-scen="ja">🇯🇵 Japonais</button>
+        </div>
+      </div>
+
+      <button class="play" id="play">▶ Jouer la scène</button>
+      <button class="mini" id="resetPos">↺ Réinitialiser la position du HUD</button>
+
+      <div class="legend">
+        <div class="l"><span class="sw" style="background:#6dc2ca"></span>
+          <span><b>HUD à droite</b> — panneau séparé, ancré au <b>cadre du champ</b> (ne tremble pas à la frappe). Sur la zone détails = ne couvre rien d'utile.</span></div>
+        <div class="l"><span class="sw" style="background:#41505c"></span>
+          <span><b>Poignée ⠿</b> — glisse-le où tu veux. On stocke un <b>ancrage relatif</b> {bord, écart}, pas une position absolue.</span></div>
+        <div class="l"><span class="sw" style="background:#7fb069"></span>
+          <span><b>Mémorisé par app</b> — la place est retenue par bundleID (Brave, Slack, Mail…). Tu reviens : il reprend sa place.</span></div>
+        <div class="l"><span class="sw" style="background:#e8a13c"></span>
+          <span><b>B</b> mots à risque surlignés · <b>C</b> garde-fou termes métier — gratuits, une seule passe.</span></div>
+      </div>
+
+      <div class="map">
+        HUD → <code>TranslationOverlayWindow</code> (NSPanel non-activating)<br>
+        ancrage par app → <code>HUDAnchorStore</code> JSON (clé bundleID)<br>
+        cadre du champ → <code>AXClient</code> · suit le rect, pas le caret<br>
+        traduction + logprobs → 2ᵉ <code>LlamaEngine</code> instruct (paresseux)<br>
+        cible auto → <code>ContextEnricher</code> + <code>NaturalLanguage</code>
+      </div>
+    </div>
+  </div>
+
+  <footer>Souffleuse · maquette « deux fantômes » · 100% local, aucun réseau · scriptée à des fins de design</footer>
+</div>
+
+<script>
+const SCEN = {
+  de:{ code:"DE", word:"allemand", bundle:"com.brave.Browser", sep:" ",
+    cust:"Hallo, ich kann meine Krypto-Steuererklärung nicht exportieren. Können Sie helfen?",
+    src:["Bonjour, je comprends votre souci.","Pouvez-vous vérifier que vous avez bien connecté votre wallet","avant l'export ?"],
+    tgt:["Hallo, ich verstehe Ihr Anliegen.","Können Sie prüfen, ob Sie Ihr Wallet korrekt verbunden haben,","bevor Sie exportieren?"],
+    risky:["Wallet"], guard:[{name:"Wallet", ok:true},{name:"export", ok:true}] },
+  en:{ code:"EN", word:"anglais", bundle:"com.brave.Browser", sep:" ",
+    cust:"Hi, my transactions from Binance are missing in the report.",
+    src:["Désolé pour la gêne.","Réimportez votre fichier Binance, les transactions manquantes apparaîtront","après synchronisation."],
+    tgt:["Sorry for the inconvenience.","Re-import your Binance file, the missing transactions will appear","after syncing."],
+    risky:["syncing"], guard:[{name:"Binance", ok:true},{name:"fichier → file", ok:true}] },
+  ja:{ code:"JA", word:"japonais", bundle:"com.brave.Browser", sep:"",
+    cust:"確定申告のデータをエクスポートできません。手伝ってもらえますか？",
+    src:["Je m'en occupe tout de suite.","Allez dans Réglages puis Export, et choisissez le format","de votre administration fiscale."],
+    tgt:["すぐに対応いたします。","設定からエクスポートを開き、税務当局の形式を選択して","ください。"],
+    risky:["税務当局"], guard:[{name:"Réglages → 設定", ok:true},{name:"Export → エクスポート", ok:true}] }
+};
+
+let scen="de", token=0;
+const $=id=>document.getElementById(id);
+const esc=s=>s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const reEsc=s=>s.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+
+function setScenario(){
+  const s=SCEN[scen];
+  $("custLang").textContent=s.code;
+  $("custMsg").textContent=s.cust;
+  $("chip").innerHTML=`FR → <b>${s.code}</b> ▾`;
+  $("keyLang").textContent=s.word;
+  $("commitLang").textContent=s.word;
+  reset();
+}
+function reset(){
+  token++;
+  $("field").innerHTML='<span class="placeholder">Utiliser ⌘K pour les raccourcis</span><span class="caret"></span>';
+  $("hud").style.display="none";
+  $("hud").classList.remove("sent");
+  $("hud").innerHTML=HUD_HTML;            // restaure la structure (au cas où commit l'a remplacée)
+  rebind();
+  $("hudTarget").innerHTML="";
+  $("hudFoot").style.display="none";
+  $("commitRow").style.display="none";
+}
+
+const HUD_HTML = $("hud") ? $("hud").innerHTML : "";
+
+function renderField(committed, ghost){
+  const g = ghost ? `<span class="frghost">${esc(ghost)}</span><span class="kbdmini">⇥</span>` : "";
+  $("field").innerHTML = `<span class="committed">${esc(committed)}</span><span class="caret"></span>${g}`;
+}
+function splitClause(c){
+  const w=c.split(" ");
+  const cut=Math.max(1, Math.round(w.length*0.45));
+  return [w.slice(0,cut).join(" "), (cut<w.length? " "+w.slice(cut).join(" ") : "")];
+}
+function renderTargetClause(text, risky){
+  let html=esc(text);
+  for(const w of risky){ html=html.replace(new RegExp("("+reEsc(esc(w))+")"),'<mark class="risk" title="confiance basse — vérifie ce terme">$1</mark>'); }
+  return html;
+}
+async function hudAppend(t, i, my){
+  const s=SCEN[scen];
+  const span=document.createElement("span");
+  span.className="hud-clause shimmer";
+  span.innerHTML=(i? s.sep : "")+renderTargetClause(t, s.risky);
+  $("hudTarget").appendChild(span);
+  await sleep(300);
+  if(my!==token) return;
+  span.classList.remove("shimmer");
+}
+
+async function play(){
+  reset();
+  const my=token, s=SCEN[scen];
+  $("hud").style.display="block";
+  let committed="";
+  for(let i=0;i<s.src.length;i++){
+    let [typed,ghost]=splitClause(s.src[i]);
+    if(i>0) typed=" "+typed;
+    for(const ch of typed){ if(my!==token)return; committed+=ch; renderField(committed,""); await sleep(24); }
+    if(my!==token)return;
+    renderField(committed, ghost); await sleep(560);
+    if(my!==token)return;
+    committed+=ghost; renderField(committed,""); await sleep(180);
+    await sleep(120);
+    await hudAppend(s.tgt[i], i, my);
+  }
+  if(my!==token)return;
+  const items=s.guard.map(g=>`<span>${esc(g.name)} ${g.ok?'<span class="ok">✓</span>':'<span class="warn">⚠</span>'}</span>`).join(" &nbsp;·&nbsp; ");
+  $("hudGuard").innerHTML=`<span class="shield">🛡</span> termes préservés : ${items}`;
+  $("hudRisk").innerHTML = s.risky.length ? `⚠ ${s.risky.length} terme incertain surligné — un coup d'œil avant d'envoyer.` : "";
+  $("hudFoot").style.display="block";
+  $("commitRow").style.display="block";
+}
+
+// ---------- drag + persistance par app ----------
+let dragging=false, offX=0, offY=0;
+function rebind(){
+  const grip=$("grip"); if(!grip) return;
+  grip.onmousedown=e=>{
+    dragging=true;
+    const r=$("hud").getBoundingClientRect();
+    offX=e.clientX-r.left; offY=e.clientY-r.top;
+    e.preventDefault();
+  };
+}
+window.addEventListener("mousemove",e=>{
+  if(!dragging) return;
+  const work=$("work").getBoundingClientRect();
+  let x=e.clientX-work.left-offX, y=e.clientY-work.top-offY;
+  x=Math.max(-12, Math.min(x, work.width-120));
+  y=Math.max(-12, Math.min(y, work.height-40));
+  const hud=$("hud");
+  hud.style.left=x+"px"; hud.style.top=y+"px"; hud.style.right="auto";
+});
+window.addEventListener("mouseup",()=>{
+  if(!dragging) return;
+  dragging=false;
+  const s=SCEN[scen], hud=$("hud").getBoundingClientRect(), work=$("work").getBoundingClientRect();
+  const edge = (hud.left-work.left) > (work.right-hud.right) ? "droite" : "gauche";
+  const p=$("persist");
+  p.textContent=`Position mémorisée pour Brave · ${s.bundle} (bord ${edge})`;
+  p.style.left=Math.max(0,($("hud").offsetLeft))+"px";
+  p.style.top=(($("hud").offsetTop||0)+$("hud").offsetHeight+8)+"px";
+  p.classList.add("show");
+  clearTimeout(window._pt); window._pt=setTimeout(()=>p.classList.remove("show"),2600);
+});
+
+$("scenSeg").addEventListener("click",e=>{
+  const b=e.target.closest("button"); if(!b)return;
+  [...$("scenSeg").children].forEach(x=>x.classList.remove("on")); b.classList.add("on");
+  scen=b.dataset.scen; setScenario();
+});
+$("play").addEventListener("click",play);
+$("resetPos").addEventListener("click",()=>{
+  const hud=$("hud"); hud.style.left="auto"; hud.style.right="-8px"; hud.style.top="18px";
+  $("persist").classList.remove("show");
+});
+$("commit").addEventListener("click",()=>{
+  const s=SCEN[scen];
+  $("field").innerHTML=`<span class="committed">${esc(s.tgt.join(s.sep))}</span>`;
+  const hud=$("hud"); hud.classList.add("sent");
+  hud.innerHTML=`<div class="sent-msg">✓ Réplique partie en ${s.word}<br><span style="color:#6e8a6e">ta source FR a été remplacée à l'envoi</span></div>`;
+  $("commitRow").style.display="none";
+});
+window.addEventListener("keydown",e=>{ if(e.key==="Tab") e.preventDefault(); });
+
+rebind();
+setScenario();
+</script>
+</body>
+</html>

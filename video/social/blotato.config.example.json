@@ -1,0 +1,26 @@
+{
+  "_README": "Copie ce fichier vers social/blotato.config.json (gitignoré) et remplis-le. Récupère les accountId via: node scripts/publish.mjs --accounts. Héberge les .mp4 publiquement (voir social/README.md) et mets leurs URLs dans assets.*.url.",
+  "apiKey": "REMPLACE_PAR_TA_CLE_BLOTATO",
+  "link": "https://souffleuse.app",
+  "assets": {
+    "vertical": {
+      "url": "https://TON-HOST/souffleuse-cafe-vertical.mp4"
+    },
+    "wide": {
+      "url": "https://TON-HOST/souffleuse-cafe.mp4"
+    }
+  },
+  "captions": {
+    "default": "Dans un café bondé, la dictée vocale parle tout haut 🗣️\nSouffleuse, elle, souffle la suite de ta phrase — en silence, 100% sur ton Mac. Tab, et c'est dit. 🤫⌨️\n\n{LINK}\n\n#Souffleuse #Mac #macOS #productivité #écriture #IA #onDevice #frenchtech",
+    "tiktok": "POV : t'es dans un café bondé et tu peux pas dicter à voix haute 🤫\nSouffleuse souffle la suite de ta phrase, en silence, 100% sur ton Mac. Tab, et c'est dit ⌨️\n#Souffleuse #Mac #macOS #productivité #IA #frenchtech #astuce",
+    "instagram": "Dans un café bondé, la dictée vocale parle tout haut 🗣️\nSouffleuse souffle la suite de ta phrase — en silence, 100% sur ton Mac. Tab, et c'est dit. 🤫⌨️\n\n#Souffleuse #Mac #macOS #productivité #écriture #IA #onDevice #frenchtech",
+    "twitter": "Café bondé : la dictée vocale parle tout fort.\nSouffleuse souffle la suite de ta phrase — en silence, 100% on-device sur Mac. Tab, et c'est dit. 🤫⌨️\n{LINK}",
+    "youtube": "Souffleuse — l'assistant de frappe local pour Mac. Dans un café bondé, la dictée vocale parle tout haut ; Souffleuse souffle la suite de ta phrase, en silence et 100% sur ton appareil. Tab, et c'est dit.\n{LINK}\n#Souffleuse #Mac #macOS #productivité"
+  },
+  "targets": [
+    {"platform": "tiktok", "accountId": "REMPLACE", "asset": "vertical", "isAiGenerated": false, "enabled": true},
+    {"platform": "instagram", "accountId": "REMPLACE", "asset": "vertical", "enabled": true},
+    {"platform": "youtube", "accountId": "REMPLACE", "asset": "vertical", "title": "Souffleuse — le souffleur de frappe pour Mac (café bondé)", "enabled": false},
+    {"platform": "twitter", "accountId": "REMPLACE", "asset": "wide", "enabled": true}
+  ]
+}

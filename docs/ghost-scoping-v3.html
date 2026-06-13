@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Souffleuse — Récupérer, scoper, styler (v3)</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --panel2:#1c232d; --line:#2b333d;
+    --ink:#e6edf3; --mut:#9aa7b4; --dim:#6b7682;
+    --accent:#58a6ff; --green:#3fb950; --amber:#d29922; --red:#f85149;
+    --violet:#bc8cff; --mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:40px 20px}
+  .wrap{max-width:980px;margin:0 auto}
+  h1{font-size:30px;margin:0 0 4px;letter-spacing:-.5px}
+  h1 .v{color:var(--dim);font-family:var(--mono);font-size:18px}
+  .sub{color:var(--mut);margin:0 0 10px;font-size:16px}
+  .stamp{color:var(--dim);font-family:var(--mono);font-size:12px;margin:0 0 36px}
+  h2{font-size:20px;margin:48px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h2 .n{color:var(--accent);font-family:var(--mono);font-size:16px;margin-right:8px}
+  h2 .new{font-size:11px;font-family:var(--mono);background:rgba(63,185,80,.16);color:var(--green);
+    border:1px solid rgba(63,185,80,.4);border-radius:20px;padding:2px 9px;margin-left:10px;vertical-align:3px}
+  p{margin:0 0 14px}
+  b{color:var(--ink)}
+  code{font-family:var(--mono);font-size:.9em;background:var(--panel2);padding:1px 6px;border-radius:5px;color:var(--violet)}
+  .lead{color:var(--mut)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px 22px;margin:14px 0}
+  .note{background:rgba(88,166,255,.07);border:1px solid rgba(88,166,255,.3);border-radius:10px;
+    padding:14px 18px;margin:18px 0;color:var(--mut)}
+  .note .val{color:var(--accent);font-family:var(--mono);font-weight:700}
+  .val{color:var(--accent);font-family:var(--mono);font-weight:700}
+
+  /* ── typing demo ── */
+  .demo{font-family:var(--mono);font-size:18px;background:#0a0d12;border:1px solid var(--line);
+    border-radius:10px;padding:18px 20px;margin:8px 0 6px}
+  .demo .typed{color:var(--ink)}
+  .demo .ghost{color:var(--dim);background:rgba(63,185,80,.10);border-radius:3px}
+  .demo .caret{display:inline-block;width:2px;height:1.1em;background:var(--accent);vertical-align:-2px;
+    animation:blink 1s steps(2) infinite;margin:0 1px}
+  @keyframes blink{50%{opacity:0}}
+  .demo small{display:block;color:var(--dim);font-family:-apple-system,sans-serif;font-size:12px;margin-top:12px}
+  .demo .key{border:1px solid var(--line);border-radius:5px;padding:0 6px;font-size:11px;color:var(--mut);background:var(--panel2)}
+
+  /* ── cascade ── */
+  .stage{display:flex;gap:14px;align-items:flex-start;margin:0 0 8px}
+  .badge{flex:none;width:56px;height:56px;border-radius:12px;display:grid;place-items:center;
+    font-family:var(--mono);font-weight:700;font-size:15px;line-height:1.1;text-align:center}
+  .b0{background:rgba(63,185,80,.14);color:var(--green);border:1px solid rgba(63,185,80,.4)}
+  .b1{background:rgba(210,153,34,.14);color:var(--amber);border:1px solid rgba(210,153,34,.4)}
+  .b2{background:rgba(188,140,255,.14);color:var(--violet);border:1px solid rgba(188,140,255,.4)}
+  .stage .body{flex:1}
+  .stage h3{margin:4px 0 4px;font-size:16px}
+  .stage p{margin:0;color:var(--mut);font-size:14px}
+  .stage .prior{float:right;font-family:var(--mono);font-size:12px;color:var(--dim)}
+  .arrow{color:var(--dim);text-align:center;font-size:14px;margin:2px 0 2px 28px;font-style:italic}
+
+  /* ── clusters ── */
+  .clusters{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin:14px 0}
+  .cl{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+  .cl .k{font-family:var(--mono);font-weight:700;font-size:14px}
+  .cl .apps{color:var(--dim);font-size:12px;margin-top:4px}
+  .cl.web{border-color:rgba(88,166,255,.55);background:rgba(88,166,255,.08)}
+  .cl.web .k{color:var(--accent)}
+  .cl.chat{border-color:rgba(248,81,73,.5);background:rgba(248,81,73,.07)}
+  .cl.chat .k{color:var(--red)}
+  .cl .tag{font-size:10px;font-family:var(--mono);float:right}
+  .cl.chat .tag{color:var(--red)}
+  .cl.web .tag{color:var(--accent)}
+
+  /* ── flow (privacy boundary) ── */
+  .flow{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:#0a0d12;border:1px solid var(--line);
+    border-radius:10px;padding:18px;margin:10px 0;font-size:14px}
+  .flow .box{border:1px solid var(--line);border-radius:8px;padding:10px 14px;background:var(--panel)}
+  .flow .box.ok{border-color:rgba(63,185,80,.5)}
+  .flow .box .h{font-family:var(--mono);font-size:12px;color:var(--mut);margin-bottom:3px}
+  .flow .arr{color:var(--dim);font-size:20px}
+  .flow .out{color:var(--green);font-weight:700}
+  .flow .blocked{margin-top:8px;font-size:12px;color:var(--dim);font-family:var(--mono)}
+  .flow .blocked s{color:var(--red);text-decoration-color:rgba(248,81,73,.7)}
+
+  /* ── A/B ── */
+  .ab{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}
+  .ab .col{border:1px solid var(--line);border-radius:10px;padding:14px 16px;background:var(--panel)}
+  .ab .col.base{}
+  .ab .col.styled{border-color:rgba(63,185,80,.45);background:rgba(63,185,80,.05)}
+  .ab .tag{font-family:var(--mono);font-size:11px;letter-spacing:.5px;text-transform:uppercase;margin-bottom:8px}
+  .ab .base .tag{color:var(--dim)}
+  .ab .styled .tag{color:var(--green)}
+  .ab .g{font-family:var(--mono);font-size:14px;color:var(--ink)}
+  .ab .g .pre{color:var(--dim)}
+  .abctx{font-family:var(--mono);font-size:13px;color:var(--mut);margin:4px 0 0}
+
+  /* ── stats ── */
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:14px 0}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;text-align:center}
+  .stat .big{font-family:var(--mono);font-size:26px;font-weight:700}
+  .stat .lbl{color:var(--mut);font-size:12px;margin-top:4px}
+  .stat .delta{font-size:11px;font-family:var(--mono);color:var(--dim)}
+  .g-grn{color:var(--green)} .g-amb{color:var(--amber)} .g-acc{color:var(--accent)} .g-vio{color:var(--violet)}
+
+  /* ── split read/write ── */
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:14px 0}
+  .half{border-radius:12px;padding:18px 20px;border:1px solid var(--line)}
+  .half.read{border-color:rgba(63,185,80,.45);background:rgba(63,185,80,.05)}
+  .half.write{border-color:rgba(248,81,73,.4);background:rgba(248,81,73,.05)}
+  .half h3{margin:0 0 8px;font-size:16px}
+  .half.read h3{color:var(--green)} .half.write h3{color:var(--red)}
+  .half ul{margin:6px 0 0;padding-left:18px;color:var(--mut);font-size:14px}
+  .half li{margin:4px 0}
+
+  .foot{color:var(--dim);font-size:13px;margin-top:48px;padding-top:16px;border-top:1px solid var(--line);
+    font-family:var(--mono)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Souffleuse <span class="ghost" style="color:var(--dim)">— récupérer · scoper · styler</span> <span class="v">v3</span></h1>
+  <p class="sub">Comment le ghost choisit ce qu'il propose — et ce qui a changé avec le <b>scoping par registre</b>.</p>
+  <p class="stamp">màj de session · scoping domaine (PR #4) · style few-shot (PR #6) · mesuré sur corpus réel (1924 entrées)</p>
+
+  <!-- ════════ DEMO ════════ -->
+  <div class="demo">
+    <span class="typed">Bonjour, puis-je avoir votre fichier </span><span class="ghost">Binance de toutes les années&nbsp;?</span><span class="caret"></span>
+    <small>Tu tapes en gris foncé clair — le <span style="color:var(--green)">ghost</span> est proposé en surbrillance. <span class="key">Tab</span> accepte · <span class="key">→</span> mot par mot · <span class="key">Esc</span> rejette. 100% local, aucun réseau.</small>
+  </div>
+
+  <!-- ════════ 1. CASCADE ════════ -->
+  <h2><span class="n">1</span>La cascade : tes mots d'abord, ton style ensuite</h2>
+  <p class="lead">À chaque frappe, trois étages sont tentés dans l'ordre. Le premier qui a une réponse assez sûre gagne.</p>
+
+  <div class="stage">
+    <div class="badge b0">L0</div>
+    <div class="body">
+      <span class="prior">prior 0.80</span>
+      <h3>Lexique appris — tes mots exacts (zéro IA)</h3>
+      <p>Tes <b>termes distinctifs</b> (marques, noms propres, jargon) appris de ton historique. Tu tapes
+      <code>Bin</code> → il colle <code>ance</code> = <b>Binance</b>. Mesuré : <b>29/30</b> termes ressortent
+      (Waltio, Phemex, MEXC, Ledger, USDT…). Le base model les ignore ; ce lexique gère « tes mots ».</p>
+    </div>
+  </div>
+  <div class="arrow">↓ pas de terme appris ?</div>
+  <div class="stage">
+    <div class="badge b1">L1</div>
+    <div class="body">
+      <span class="prior">prior 0.92</span>
+      <h3>Rappel corpus — tes phrases exactes (zéro IA, &lt; 1 ms)</h3>
+      <p>Cherche dans <b>ta prose déjà tapée</b> une phrase qui commence pareil et propose la suite mémorisée,
+      tel quel. <b>Désormais scopé par registre</b> (§2) : ne rappelle que ta prose du <b>même type d'app</b>.
+      Prior <span class="val">0.92</span> imbattable → le modèle ne peut que <b>le prolonger</b>, jamais l'écraser.</p>
+    </div>
+  </div>
+  <div class="arrow">↓ aucun souvenir assez fort ?</div>
+  <div class="stage">
+    <div class="badge b2">L2</div>
+    <div class="body">
+      <span class="prior">llama.cpp</span>
+      <h3>Génération — le modèle local, stylé par ta plume</h3>
+      <p>Gemma 3 1B génère la suite token par token. <b>Nouveau</b> : on lui injecte d'abord <b>3-5 de tes vraies
+      phrases du même registre</b> comme exemples de style (§3) — sur le ghost initial <i>et</i> sur sa
+      continuation glissante. Le ghost sonne plus « toi » au lieu de générique.</p>
+    </div>
+  </div>
+
+  <div class="note"><b>L'idée Cotypist, version scopée :</b> on privilégie ce que <b>TU</b> as réellement écrit
+  (L0/L1), et quand il faut générer, on conditionne le modèle sur <b>ton style du bon contexte</b>. Zéro
+  fine-tuning, 100% récupération.</div>
+
+  <!-- ════════ 2. SCOPING ════════ -->
+  <h2><span class="n">2</span>Le scoping par registre <span class="new">NOUVEAU</span></h2>
+  <p class="lead">Avant, tout ton historique vivait dans un seul pool : ton support FR, ton code, tes messages privés
+  mélangés. Maintenant, l'app où tu tapes est classée dans un <b>registre générique</b>, et le ghost ne pioche que
+  dans le même.</p>
+
+  <div class="clusters">
+    <div class="cl web"><span class="tag">← ici</span><div class="k">.web</div><div class="apps">Brave, Chrome, Safari, Arc…</div></div>
+    <div class="cl"><div class="k">.code</div><div class="apps">Xcode, VSCode, Terminal, Codex…</div></div>
+    <div class="cl chat"><span class="tag">privé</span><div class="k">.chat</div><div class="apps">Signal, iMessage, WhatsApp…</div></div>
+    <div class="cl"><div class="k">.work</div><div class="apps">Slack, Teams</div></div>
+    <div class="cl"><div class="k">.mail</div><div class="apps">Mail, Spark, Outlook…</div></div>
+    <div class="cl"><div class="k">.docs</div><div class="apps">Notes, Pages, Obsidian…</div></div>
+    <div class="cl"><div class="k">.other</div><div class="apps">inconnu → pas de scope</div></div>
+  </div>
+
+  <div class="flow">
+    <div class="box"><div class="h">tu tapes dans</div>Brave <span style="color:var(--dim)">→ <b style="color:var(--accent)">.web</b></span></div>
+    <div class="arr">→</div>
+    <div class="box ok"><div class="h">ghost puise dans</div>ta prose <b class="out">.web</b> uniquement</div>
+    <div style="flex-basis:100%"></div>
+    <div class="blocked">jamais : <s>une ligne Signal privée</s> · <s>un bout de code Codex</s> · <s>un canal Slack</s> → <b style="color:var(--green)">le privé ne fuit pas, et la précision monte</b></div>
+  </div>
+
+  <p class="lead">C'est un <b>cluster générique</b> (type d'app), pas un rôle métier : ça marche pour n'importe qui.
+  Le privé (<code>.chat</code>) a une frontière dure — il n'est jamais utilisé comme rappel ni comme exemple de
+  style ailleurs.</p>
+
+  <!-- ════════ 3. FEW-SHOT ════════ -->
+  <h2><span class="n">3</span>Le few-shot stylé : montrer ta plume au modèle <span class="new">NOUVEAU</span></h2>
+  <p class="lead">Quand aucun souvenir exact ne matche (≈ 80% des cas), le modèle génère. Pour qu'il sonne « toi », on
+  glisse dans son prompt <b>3-5 de tes vraies phrases du même registre</b>, les plus proches de ce que tu écris là.
+  Filtrées : pas de salutations, pas de fragments, et <b>pas d'URLs/chemins</b> (le navigateur en colle beaucoup —
+  ~40% du pool — ça diluait ton « style »).</p>
+
+  <p class="lead">Effet mesuré (A/B réel, même modèle, seul le few-shot diffère) :</p>
+  <div class="ab">
+    <div class="col base">
+      <div class="tag">sans ta plume</div>
+      <div class="g"><span class="pre">…Ravis d'avoir pu </span>vous aider&nbsp;!</div>
+    </div>
+    <div class="col styled">
+      <div class="tag">avec ta plume ✓</div>
+      <div class="g"><span class="pre">…Ravis d'avoir pu </span>vous accompagner pour bien démarrer, nous lui transmettons vos compliments. L'équipe reste…</div>
+    </div>
+  </div>
+  <p class="abctx">few-shot injecté : 3 de tes vrais messages support (« Ravis que Gabriel ait pu vous accompagner… »)
+  → le modèle reprend ton registre, ton vocabulaire, ton ton support pro.</p>
+
+  <div class="note"><b>Honnête :</b> sur un Gemma 1B, l'effet est <b>réel mais modéré</b> — franc quand une vraie phrase
+  support similaire existe, absent quand rien ne matche. Le levier suivant = <b>plus de prose support propre</b>
+  dans le pool (re-seed <code>--as-bundle</code> + capture live).</div>
+
+  <!-- ════════ 4. CHIFFRES ════════ -->
+  <h2><span class="n">4</span>Les chiffres, mesurés sur ton vrai corpus</h2>
+  <div class="stats">
+    <div class="stat"><div class="big g-grn">90%</div><div class="lbl">précision du rappel (scopé)</div><div class="delta">85% → 90% &nbsp;(+5 pts)</div></div>
+    <div class="stat"><div class="big g-acc">29/30</div><div class="lbl">tes termes distinctifs ressortis</div><div class="delta">Binance, Waltio, Phemex…</div></div>
+    <div class="stat"><div class="big g-amb">15%</div><div class="lbl">taux de déclenchement</div><div class="delta">~1 ghost de rappel sur 7</div></div>
+    <div class="stat"><div class="big g-vio">~860</div><div class="lbl">entrées de pollution retirées</div><div class="delta">Codex .code + Signal .chat</div></div>
+  </div>
+  <p class="lead">Le scoping échange un peu de couverture (20%→15% de déclenchement) contre de la <b>précision</b>
+  (85%→90%) — et la couverture perdue était surtout de la pollution cross-registre (rappeler une ligne privée dans
+  ton navigateur). Le privé est désormais cloisonné par construction.</p>
+
+  <!-- ════════ 5. PAS ENCORE ════════ -->
+  <h2><span class="n">5</span>Ce qui est fait — et ce qui ne l'est pas encore</h2>
+  <p class="lead">Cette session a réparé comment le ghost <b>utilise</b> ton corpus (lecture). Comment ton corpus
+  <b>se remplit</b> (écriture/capture) reste le prochain chantier.</p>
+
+  <div class="split">
+    <div class="half read">
+      <h3>✓ Lecture — corrigé</h3>
+      <ul>
+        <li>Recall &amp; few-shot <b>scopés par registre</b></li>
+        <li>Privé (<code>.chat</code>) jamais mélangé ailleurs</li>
+        <li>Style few-shot actif sur tout le chemin (initial + refill)</li>
+        <li>URLs/chemins exclus du pool de style</li>
+        <li>Code mort n-gram MLX supprimé</li>
+      </ul>
+    </div>
+    <div class="half write">
+      <h3>✗ Écriture — à venir (P1.5)</h3>
+      <ul>
+        <li>Capture <b>OFF par défaut</b> → le corpus ne grossit pas en live</li>
+        <li>Quand ON : capte <b>tout</b> (y compris Signal privé) — pas de garde</li>
+        <li>Pas d'onboarding / consentement</li>
+        <li>Re-seed Intercom (<code>--as-bundle</code>) prêt mais à lancer</li>
+        <li>Modèle FR plus fort (Qwen 2.5 base) : à évaluer</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="note"><b>En clair :</b> le ghost sait maintenant <b>bien utiliser</b> tes données et <b>protéger ton
+  privé</b>. Mais pour qu'il devienne nettement plus « toi », il faut <b>activer + garder la capture</b> (P1.5) et
+  <b>enrichir le pool support</b> (re-seed). Le mécanisme est prêt ; il lui faut du carburant propre.</div>
+
+  <p class="foot">Souffleuse · ghost local-LLM · cascade L0 lexique / L1 rappel scopé / L2 llama.cpp stylé ·
+  parité Cotypist par récupération, zéro fine-tuning.</p>
+
+</div>
+</body>
+</html>
