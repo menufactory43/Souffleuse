@@ -1517,9 +1517,12 @@ final class PredictorViewModel {
         // conditionnée sur tout le texte visible), pas le greedy — cohérent avec le
         // ghost beam et c'est lui qui garde le living ghost vivant pendant la conso.
         LatencyTrace.mark("refill_begin", key: LatencyTrace.key(fullVisible))
+        // Long : la rallonge doit générer le bon nombre de mots ET finir propre
+        // (même cap/trim que le seed). `self.maxWords` porte la préférence.
+        let isLong = self.maxWords >= BeamGhostShaper.longGhostTriggerWords
         let extension_ = SuggestionPolicy.Tuning.beamCoreEnabled
-            ? await runtime.extendGhostBeam(request: request, maxWords: maxWords)
-            : await runtime.extendGhost(request: request, maxWords: maxWords)
+            ? await runtime.extendGhostBeam(request: request, maxWords: maxWords, isLong: isLong)
+            : await runtime.extendGhost(request: request, maxWords: maxWords, isLong: isLong)
         LatencyTrace.mark("refill_end", key: LatencyTrace.key(fullVisible), info: extension_?.count ?? 0)
         // NOTE : on ne re-checke PLUS `planner.isCurrent(myGeneration)` ici. Ce garde
         // jetait des refills VALIDES : dès que tu finis de consommer un mot, `predict()`

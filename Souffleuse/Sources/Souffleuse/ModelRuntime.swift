@@ -1151,7 +1151,7 @@ final class ModelRuntime {
     /// pour la concaténation). C'est ce refill qui MAINTIENT le living ghost vivant
     /// pendant la consommation (sinon la fenêtre fond à zéro → « pas live »).
     /// Renvoie le texte à APPENDRE au reste, ou nil si rien d'exploitable.
-    func extendGhostBeam(request: PredictRequest, maxWords: Int) async -> String? {
+    func extendGhostBeam(request: PredictRequest, maxWords: Int, isLong: Bool = false) async -> String? {
         guard beamReady else { return nil }
         // NB réserve (SOUFFLEUSE_BEAM_RESERVE) : ce refill passe par `generateBeam`
         // qui recycle les seqs de branches → la réserve est droppée à chaque
@@ -1169,8 +1169,14 @@ final class ModelRuntime {
             ? Float(request.personalizationStrength) * LlamaSampling.personalizationGainScale
             : 0
         await beamEngine.setBiasStrength(beamBias)
+        // En Long, la rallonge doit générer autant de mots que la fenêtre en réclame
+        // (`maxWords` = wantWords), pas le cap court par défaut (3) — sinon le living
+        // ghost retombe à ~3 mots pendant la conso. nil en Court/Moyen ⇒ inchangé.
+        let genW: Int? = isLong ? max(1, maxWords) : nil
+        let genT: Int? = isLong ? (max(1, maxWords) * 4 + 2) : nil
         GpuGate.shared.ghostBegan()
-        let result = await beamEngine.ghost(prompt: prompt, requiredPrefix: "", maxWidth: 1)
+        let result = await beamEngine.ghost(prompt: prompt, requiredPrefix: "", maxWidth: 1,
+                                            genMaxTokens: genT, genMaxWords: genW)
         GpuGate.shared.ghostEnded()
         if Task.isCancelled { return nil }
         // Trace de latence : prompt/LCP du refill — symétrique des marques seed,
@@ -1181,7 +1187,7 @@ final class ModelRuntime {
         LatencyTrace.mark("refill_decode_ms", key: LatencyTrace.key(request.prefix), info: result.decodeMillis)
         var ext = BeamGhostShaper.beamPostFilter(
             rawGhost: result.best?.ghost ?? "", isBoundary: true, caretAfterSpace: false,
-            userTail: request.userTail, maxWords: maxWords)
+            userTail: request.userTail, maxWords: maxWords, trimDanglingTail: isLong)
         // Mid-line : un refill qui recopie le texte après le caret réintroduirait
         // la duplication que `selectGhost` vient d'éviter au seed — même coupe.
         // `axTextAfterCaret` est nil sur le chemin end-of-line → no-op.
@@ -1192,7 +1198,7 @@ final class ModelRuntime {
         return ext
     }
 
-    func extendGhost(request: PredictRequest, maxWords: Int) async -> String? {
+    func extendGhost(request: PredictRequest, maxWords: Int, isLong: Bool = false) async -> String? {
         guard llamaReady else { return nil }
         let prompt = ModelRuntime.buildLlamaPrompt(
             system: request.systemMessage,
@@ -1254,6 +1260,12 @@ final class ModelRuntime {
         if words.count > max(1, maxWords) {
             let hadLeadingSpace = result.first == " "
             result = words.prefix(max(1, maxWords)).joined(separator: " ")
+            if hadLeadingSpace, result.first != " ", !result.isEmpty { result = " " + result }
+        }
+        // Long : rogne la queue pendante (mots-outils traînants) comme le seed.
+        if isLong {
+            let hadLeadingSpace = result.first == " "
+            result = BeamGhostShaper.trimBackToCleanStop(result)
             if hadLeadingSpace, result.first != " ", !result.isEmpty { result = " " + result }
         }
         result = OutputFilter.singleLine(result)
