@@ -237,6 +237,13 @@ public enum BeamGhostShaper {
     public static let longGhostMaxWords = 8
     public static let longGhostMaxTokens = longGhostMaxWords * 4 + 2
 
+    /// Recharge INCRÉMENTALE de la fenêtre vivante en Long : on regénère par petits
+    /// pas (`longGhostRefillStepWords` mots) dès qu'on descend d'un pas sous la
+    /// cible, au lieu d'un gros chunk rare (8 mots ⇒ ~530 ms de decode). Le prefill
+    /// étant réutilisé (LCP), des recharges plus nombreuses mais courtes divisent la
+    /// latence PAR recharge sans surcoût notable, et lissent la fenêtre.
+    public static let longGhostRefillStepWords = 4
+
     /// Mots-outils FR : un ghost long qui se termine là-dessus est tronqué de façon
     /// incohérente (« …pour la », « …et »). `trimBackToCleanStop` les lâche en fin.
     private static let trailingFunctionWords: Set<String> = [

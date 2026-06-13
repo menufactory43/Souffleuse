@@ -3546,21 +3546,32 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         guard !ghostRefillInFlight else { return }
         let remainder = partialRemainder
         let remainderWords = Self.wholeWordCount(remainder)
-        // Recharge uniquement quand le reste passe SOUS le plancher de mots.
-        guard remainderWords < SuggestionPolicy.Tuning.ghostRollingMinWords else { return }
-        // Profondeur cible = la préférence « Longueur du souffle » (predictor.maxWords),
-        // pour que la fenêtre glissante maintienne la MÊME longueur que le ghost initial —
-        // un seul budget global, pas un réglage de refill séparé. Override DEV
-        // MW_ROLL_DEPTH optionnel (défaut = la préférence utilisateur).
         // Profondeur cible de la fenêtre vivante. En Long, le beam plafonne la
         // génération à `longGhostMaxWords` (8, validé par SouffleuseMaxWordsEval) :
         // viser `predictor.maxWords` (20) ferait sur-générer/dériver les recharges.
         // On cap donc le target au MÊME plafond que le seed. Moyen/Court inchangés.
+        // Override DEV MW_ROLL_DEPTH optionnel (défaut = la préférence utilisateur).
         let isLong = predictor.maxWords >= BeamGhostShaper.longGhostTriggerWords
         let prefTarget = isLong ? BeamGhostShaper.longGhostMaxWords : predictor.maxWords
         let targetWords = ProcessInfo.processInfo.environment["MW_ROLL_DEPTH"]
             .flatMap { Int($0) }.map { max(1, $0) } ?? prefTarget
-        let wantWords = targetWords - remainderWords
+        // Recharge INCRÉMENTALE (Long) : on regénère par petits pas (`stepCap` mots)
+        // dès qu'on descend d'un pas sous la cible, au lieu d'un gros chunk rare
+        // (8 mots ⇒ ~530 ms de decode). Le prefill étant réutilisé (LCP), des
+        // recharges plus nombreuses mais courtes divisent la latence PAR recharge et
+        // lissent la fenêtre. Moyen/Court : plancher + recharge au plein budget
+        // (byte-identique : `min(target, target-rem)` == `target-rem`). Override
+        // DEV MW_ROLL_STEP optionnel.
+        let stepCap = isLong
+            ? (ProcessInfo.processInfo.environment["MW_ROLL_STEP"]
+                .flatMap { Int($0) }.map { max(1, $0) } ?? BeamGhostShaper.longGhostRefillStepWords)
+            : targetWords
+        let rollFloor = isLong
+            ? max(SuggestionPolicy.Tuning.ghostRollingMinWords, targetWords - stepCap)
+            : SuggestionPolicy.Tuning.ghostRollingMinWords
+        // Recharge quand le reste passe SOUS le plancher.
+        guard remainderWords < rollFloor else { return }
+        let wantWords = min(stepCap, targetWords - remainderWords)
         guard wantWords >= 1 else { return }
 
         // Snapshot de l'état pour re-valider à la complétion (anti-stale-append).
