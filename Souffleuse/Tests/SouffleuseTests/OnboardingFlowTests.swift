@@ -50,12 +50,10 @@ struct OnboardingFlowTests {
         #expect(OnboardingStep.commands.intermediateIndex == 5)
     }
 
-    @Test("toutes les étapes ont une taille préférée non dégénérée")
-    func preferredSizesValid() {
-        for step in OnboardingStep.allCases {
-            #expect(step.preferredSize.width > 0)
-            #expect(step.preferredSize.height > 0)
-        }
+    @Test("la fenêtre a une taille fixe non dégénérée (plus de resize par étape)")
+    func windowSizeFixed() {
+        #expect(OnboardingStep.windowSize.width > 0)
+        #expect(OnboardingStep.windowSize.height > 0)
     }
 
     // MARK: - Plan : premier lancement / fresh
