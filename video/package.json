@@ -15,7 +15,9 @@
     "publish": "node scripts/publish.mjs",
     "render:screencast": "remotion render src/index.ts ScreencastVertical out/screencast-vertical.mp4",
     "render:screencast:16x9": "remotion render src/index.ts Screencast16x9 out/screencast-16x9.mp4",
-    "son:screencast": "node scripts/make-bande-son-screencast.mjs"
+    "render:screencast:square": "remotion render src/index.ts ScreencastSquare out/screencast-square.mp4",
+    "son:screencast": "node scripts/make-bande-son-screencast.mjs",
+    "son:defi": "node scripts/make-bande-son-defi.mjs"
   },
   "dependencies": {
     "@remotion/cli": "^4.0.0",
