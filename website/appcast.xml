@@ -8,7 +8,7 @@
     réutilisée à chaque release ; edSignature + length DOIVENT être régénérés en
     même temps que le DMG uploadé, sinon Sparkle rejette le fichier.
 
-  Régénérer la signature :  deploy/make-appcast-entry.sh website/Souffleuse.dmg
+  Régénérer la signature :  deploy/make-appcast-entry.sh website/dl/Souffleuse.dmg
 -->
 <rss version="2.0"
      xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
@@ -20,27 +20,25 @@
     <language>fr</language>
 
     <item>
-      <title>Version 0.8.1</title>
-      <pubDate>Sat, 13 Jun 2026 23:28:42 +0000</pubDate>
-      <sparkle:version>0.8.1</sparkle:version>
-      <sparkle:shortVersionString>0.8.1</sparkle:shortVersionString>
+      <title>Version 0.9.0</title>
+      <pubDate>Sun, 14 Jun 2026 18:39:51 +0000</pubDate>
+      <sparkle:version>0.9.0</sparkle:version>
+      <sparkle:shortVersionString>0.9.0</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
       <description><![CDATA[
-        <h2>Souffleuse 0.8.1</h2>
+        <h2>Souffleuse 0.9.0</h2>
         <ul>
-          <li><b>Le souffle, plus rapide.</b> Les suggestions longues s'affichent environ deux fois plus vite (recharge incrémentale de la fenêtre « Long »).</li>
-          <li><b>Plus juste en plein mot.</b> La suggestion reste cohérente quand vous écrivez au milieu d'un mot — noms propres et termes repris sans accroc.</li>
-          <li><b>Des suggestions plus complètes.</b> Le souffle peut aller jusqu'à une phrase entière, sans déraper.</li>
+          <li><b>Souffleuse parle anglais.</b> L'interface est désormais bilingue : elle suit automatiquement la langue de votre Mac (français ou anglais), sans réglage à faire.</li>
           <li>Comme toujours : 100 % sur votre Mac, rien ne part en ligne, et tout s'éteint d'un interrupteur.</li>
         </ul>
         <p>macOS 14+ · Apple Silicon · 100 % on-device.</p>
       ]]></description>
-      <!-- Signé le 2026-06-13 (build Developer ID, NOTARISÉ + staplé). -->
-      <!-- Régénérer à chaque release : deploy/make-appcast-entry.sh website/Souffleuse.dmg -->
+      <!-- Signé le 2026-06-14 (build Developer ID, NON notarisé). -->
+      <!-- Régénérer à chaque release : deploy/make-appcast-entry.sh website/dl/Souffleuse.dmg -->
       <enclosure
         url="https://souffleuse.app/Souffleuse.dmg"
-        sparkle:edSignature="+LLUokfWf6pnNDH5COY7Cvq+aeavACqh9vXu0SHvnOy0hfZyvrNY20tukq1QZ5O2BiwsoOFKorpEFXhVQBcICQ=="
-        length="7441171"
+        sparkle:edSignature="5cFguav4baRJvayfZ3I0IfDoOCYWExm67L+gV3BK9mWRPWbGa+spXb+8ma/BVAEMxwM4w5DCbC1egPgKtsxzBQ=="
+        length="7504859"
         type="application/octet-stream" />
     </item>
 
