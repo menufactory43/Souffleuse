@@ -290,14 +290,6 @@ let package = Package(
             ]
         ),
         .executableTarget(
-            name: "SouffleuseAmorceEval",
-            dependencies: [
-                "SouffleuseCore",
-                "SouffleuseLlama",
-                "SouffleuseLog",
-            ]
-        ),
-        .executableTarget(
             name: "SouffleusePrimerBench",
             dependencies: [
                 "SouffleuseCore",
@@ -315,14 +307,6 @@ let package = Package(
         ),
         .executableTarget(
             name: "SouffleuseEchoEval",
-            dependencies: [
-                "SouffleuseCore",
-                "SouffleuseLlama",
-                "SouffleuseLog",
-            ]
-        ),
-        .executableTarget(
-            name: "SouffleuseBeamAmortizedEval",
             dependencies: [
                 "SouffleuseCore",
                 "SouffleuseLlama",
