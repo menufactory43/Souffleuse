@@ -590,47 +590,6 @@ final class ModelRuntime {
         return ext
     }
 
-
-    /// Une passe d'escalade (greedy ou branche) : génère, renvoie le mot de tête +
-    /// la confiance top-1 si demandée. Pas de `GpuGate` ici — le bracketing est
-    /// fait UNE fois par `midWordEscalate`. `temperature 0` = greedy déterministe ;
-    /// `> 0` = branche stochastique seedée (`topP 0.9`).
-    private func runEscalationPass(
-        prompt: String, partial: String, cap: Int,
-        temperature: Float, seed: UInt32, captureP1: Bool
-    ) async -> (lead: String, p1: Double?, fullLine: String) {
-        final class Acc: @unchecked Sendable { var text = "" }
-        let acc = Acc()
-        let metrics = await llamaEngine.generate(
-            prompt: prompt,
-            maxTokens: cap,
-            sampling: LlamaSampling(
-                temperature: temperature,
-                repeatPenalty: 1.3,
-                repeatLastN: 64,
-                seed: seed,
-                personalizationStrength: 0,
-                topP: temperature > 0 ? 0.9 : 0,
-                banMarkup: true,
-                banDigitsLeading: true,
-                banEmoji: true,
-                minFirstTokenProb: captureP1 ? Float(SuggestionPolicy.Tuning.escFirstTokenProbEpsilon) : 0,
-                healPrefix: partial.isEmpty ? nil : partial
-            )
-        ) { piece in
-            if Task.isCancelled { return false }
-            acc.text += piece
-            return true
-        }
-        let oneLine = acc.text.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? acc.text
-        // `lead` = mot de tête dé-fragmenté (gardien du vote, inchangé) ; `fullLine`
-        // = le texte greedy complet d'une ligne (C1 : sert la CONTINUATION mot+suite
-        // quand le mot est confirmé). Les branches ne lisent que `lead` pour voter.
-        return (SuggestionPolicy.midWordLeadWordDefrag(oneLine, partial: partial),
-                metrics.firstTokenProb, oneLine)
-    }
-
-
     /// Assembles the prompt for **raw text continuation**.
     ///
     /// The shipped GGUF is the **base / pretrained** Gemma 3 (`finetune = pt`),
