@@ -42,12 +42,41 @@ struct DayStat: Codable, Sendable, Equatable {
 }
 
 /// Enveloppe versionnée sur disque (`usage-ledger.json`). Porte l'historique
-/// journalier + l'accumulateur global de cadence (toutes sessions confondues).
+/// journalier + l'accumulateur global de cadence + les cumuls « depuis
+/// l'installation » (toutes sessions confondues).
 private struct LedgerFile: Codable {
-    var version: Int = 1
+    var version: Int = 2
     var cadenceTypedChars: Int = 0
     var cadenceTypedMillis: Double = 0
+    /// Cumuls lifetime — vivent HORS de `days` car ce dernier est plafonné à
+    /// `ledgerHistoryDays` : un total « depuis l'installation » dérivé de `days`
+    /// cesserait de grossir au-delà d'un mois (anti-pattern rétention — le levier,
+    /// c'est un chiffre qui ne fait que monter).
+    var lifetimeKeystrokesSaved: Int = 0
+    var lifetimeGhostsAccepted: Int = 0
     var days: [DayStat] = []
+
+    enum CodingKeys: String, CodingKey {
+        case version, cadenceTypedChars, cadenceTypedMillis
+        case lifetimeKeystrokesSaved, lifetimeGhostsAccepted, days
+    }
+}
+
+extension LedgerFile {
+    /// Décodage tolérant (même esprit que `DayStat`) : un fichier v1 n'a ni
+    /// `version: 2` ni les champs lifetime — `decodeIfPresent` évite de jeter tout
+    /// le carnet à la montée de version. Le backfill v1→v2 se fait au `load` du
+    /// ledger (le seul à connaître le cap d'historique). En extension pour
+    /// préserver l'init membre à membre utilisé par `save()`.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        version = try c.decodeIfPresent(Int.self, forKey: .version) ?? 1
+        cadenceTypedChars = try c.decodeIfPresent(Int.self, forKey: .cadenceTypedChars) ?? 0
+        cadenceTypedMillis = try c.decodeIfPresent(Double.self, forKey: .cadenceTypedMillis) ?? 0
+        lifetimeKeystrokesSaved = try c.decodeIfPresent(Int.self, forKey: .lifetimeKeystrokesSaved) ?? 0
+        lifetimeGhostsAccepted = try c.decodeIfPresent(Int.self, forKey: .lifetimeGhostsAccepted) ?? 0
+        days = try c.decodeIfPresent([DayStat].self, forKey: .days) ?? []
+    }
 }
 
 /// Carnet d'usage : frappes épargnées, actes (traductions/relectures) et cadence
@@ -64,6 +93,9 @@ final class UsageLedger {
     private(set) var days: [DayStat] = []
     private(set) var cadenceTypedChars: Int = 0
     private(set) var cadenceTypedMillis: Double = 0
+    /// Cumuls « depuis l'installation » — indépendants du cap des `days`.
+    private(set) var lifetimeKeystrokesSaved: Int = 0
+    private(set) var lifetimeGhostsAccepted: Int = 0
     @ObservationIgnored private let fileURL: URL
     @ObservationIgnored private var lastSaveAt: Date?
 
@@ -90,6 +122,8 @@ final class UsageLedger {
         let i = ensureToday()
         days[i].keystrokesSaved += charsSaved
         days[i].ghostsAccepted += 1
+        lifetimeKeystrokesSaved += charsSaved   // cumul lifetime, hors du cap des jours
+        lifetimeGhostsAccepted += 1
         save()   // accepts rares → écriture immédiate
     }
 
@@ -149,6 +183,32 @@ final class UsageLedger {
             millisPerChar: millisPerChar)
     }
 
+    // MARK: Vue « 30 jours » (somme roulante sur la fenêtre d'historique)
+
+    /// Fenêtre roulante des `ledgerHistoryDays` derniers jours (trous comblés à 0).
+    /// `days` étant déjà plafonné à ce cap, c'est aussi tout l'historique retenu.
+    private var rollingWindow: [DayStat] { lastDays(T.ledgerHistoryDays) }
+
+    var last30KeystrokesSaved: Int { Self.totals(rollingWindow).keystrokesSaved }
+    var last30GhostsAccepted: Int { Self.totals(rollingWindow).ghostsAccepted }
+    var last30Translations: Int { Self.totals(rollingWindow).translations }
+    var last30Reformulations: Int { Self.totals(rollingWindow).reformulations }
+
+    /// Temps gagné estimé sur les 30 derniers jours.
+    var estimatedSecondsSavedLast30: Double {
+        let t = Self.totals(rollingWindow)
+        return Self.estimatedSecondsSaved(
+            keystrokesSaved: t.keystrokesSaved, ghostsAccepted: t.ghostsAccepted, millisPerChar: millisPerChar)
+    }
+
+    // MARK: Vue « depuis le début » (accumulateurs lifetime)
+
+    /// Temps gagné estimé depuis l'installation, sur les cumuls lifetime.
+    var estimatedLifetimeSecondsSaved: Double {
+        Self.estimatedSecondsSaved(
+            keystrokesSaved: lifetimeKeystrokesSaved, ghostsAccepted: lifetimeGhostsAccepted, millisPerChar: millisPerChar)
+    }
+
     /// Les `n` derniers jours (chronologiques), complétés par des jours vides en
     /// tête si l'historique est plus court — pour une sparkline de longueur fixe.
     func lastDays(_ n: Int) -> [DayStat] {
@@ -172,11 +232,24 @@ final class UsageLedger {
             days = Self.capped(file.days, maxDays: T.ledgerHistoryDays)
             cadenceTypedChars = max(0, file.cadenceTypedChars)
             cadenceTypedMillis = max(0, file.cadenceTypedMillis)
+            lifetimeKeystrokesSaved = max(0, file.lifetimeKeystrokesSaved)
+            lifetimeGhostsAccepted = max(0, file.lifetimeGhostsAccepted)
+            // Backfill v1→v2 : un fichier d'avant les accumulateurs lifetime n'a
+            // que `days`. À défaut de mieux, on amorce le cumul avec l'historique
+            // encore retenu (≤ cap) plutôt que de repartir de zéro pour les
+            // utilisateurs existants. Ne s'applique qu'aux fichiers pré-lifetime.
+            if lifetimeKeystrokesSaved == 0, lifetimeGhostsAccepted == 0, !days.isEmpty {
+                let t = Self.totals(days)
+                lifetimeKeystrokesSaved = t.keystrokesSaved
+                lifetimeGhostsAccepted = t.ghostsAccepted
+            }
         } catch {
             Log.warn(.ui, "usage_ledger_load_corrupt_reset")
             days = []
             cadenceTypedChars = 0
             cadenceTypedMillis = 0
+            lifetimeKeystrokesSaved = 0
+            lifetimeGhostsAccepted = 0
         }
     }
 
@@ -191,6 +264,8 @@ final class UsageLedger {
         let file = LedgerFile(
             cadenceTypedChars: cadenceTypedChars,
             cadenceTypedMillis: cadenceTypedMillis,
+            lifetimeKeystrokesSaved: lifetimeKeystrokesSaved,
+            lifetimeGhostsAccepted: lifetimeGhostsAccepted,
             days: days)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -226,6 +301,19 @@ final class UsageLedger {
         let gross = Double(keystrokesSaved) * millisPerChar / 1000.0
         let overhead = Double(ghostsAccepted) * SuggestionPolicy.Tuning.ledgerAcceptOverheadSeconds
         return max(0, gross - overhead)
+    }
+
+    /// Somme tous les compteurs d'un ensemble de jours — base des vues cumulées
+    /// (30 jours, backfill lifetime). Tuple nommé, sans allocation par champ.
+    nonisolated static func totals(_ days: [DayStat])
+        -> (keystrokesSaved: Int, ghostsAccepted: Int, translations: Int, reformulations: Int, transformations: Int) {
+        days.reduce(into: (0, 0, 0, 0, 0)) { acc, d in
+            acc.0 += d.keystrokesSaved
+            acc.1 += d.ghostsAccepted
+            acc.2 += d.translations
+            acc.3 += d.reformulations
+            acc.4 += d.transformations
+        }
     }
 
     /// Garde les `maxDays` jours les plus récents (tri chronologique par clé).
