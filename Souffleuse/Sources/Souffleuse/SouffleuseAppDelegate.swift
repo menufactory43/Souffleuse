@@ -1093,25 +1093,65 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
 
     /// Assemble les données du carnet depuis le ledger — toute la copie française
     /// (formats, pluriels) reste ici, source unique ; la fenêtre ne fait que rendre.
+    /// Trois vues : aujourd'hui · 30 jours · depuis le début. La vue lifetime ne
+    /// porte pas d'« actes » (le ledger n'accumule que frappes & répliques hors du
+    /// cap des jours — les traductions/relectures restent une mesure journalière).
     private func currentCarnetData() -> CarnetData {
+        let sparkRecent = 7
+        let sparkMonth = SuggestionPolicy.Tuning.ledgerHistoryDays   // 30
+        let recentSpark = ledger.lastDays(sparkRecent).map(\.keystrokesSaved)
+        let monthSpark = ledger.lastDays(sparkMonth).map(\.keystrokesSaved)
         let t = ledger.today
-        let repliques = "\(Self.frenchInt(t.ghostsAccepted)) "
-            + Self.plural(t.ghostsAccepted, tr(fr: "réplique soufflée", en: "line whispered"), tr(fr: "répliques soufflées", en: "lines whispered"))
-        let frappes = "\(Self.frenchInt(t.keystrokesSaved)) "
-            + Self.plural(t.keystrokesSaved, tr(fr: "frappe épargnée", en: "keystroke saved"), tr(fr: "frappes épargnées", en: "keystrokes saved"))
+
+        let today = makeCarnetView(
+            title: tr(fr: "aujourd'hui", en: "today"),
+            keystrokes: t.keystrokesSaved, ghosts: t.ghostsAccepted,
+            seconds: ledger.estimatedSecondsSavedToday,
+            translations: t.translations, reformulations: t.reformulations,
+            sparkline: recentSpark,
+            sparkCaption: tr(fr: "les \(sparkRecent) derniers jours", en: "the last \(sparkRecent) days"))
+
+        let monthly = makeCarnetView(
+            title: tr(fr: "30 jours", en: "30 days"),
+            keystrokes: ledger.last30KeystrokesSaved, ghosts: ledger.last30GhostsAccepted,
+            seconds: ledger.estimatedSecondsSavedLast30,
+            translations: ledger.last30Translations, reformulations: ledger.last30Reformulations,
+            sparkline: monthSpark,
+            sparkCaption: tr(fr: "les \(sparkMonth) derniers jours", en: "the last \(sparkMonth) days"))
+
+        let lifetime = makeCarnetView(
+            title: tr(fr: "depuis le début", en: "all time"),
+            keystrokes: ledger.lifetimeKeystrokesSaved, ghosts: ledger.lifetimeGhostsAccepted,
+            seconds: ledger.estimatedLifetimeSecondsSaved,
+            translations: 0, reformulations: 0,
+            sparkline: monthSpark,
+            sparkCaption: tr(fr: "tendance · \(sparkMonth) derniers jours", en: "trend · last \(sparkMonth) days"))
+
+        return CarnetData(views: [today, monthly, lifetime], initialIndex: 0)
+    }
+
+    /// Formate une vue du carnet à partir de compteurs bruts. Centralise les
+    /// pluriels FR/EN pour que les trois vues partagent exactement la même copie.
+    private func makeCarnetView(title: String, keystrokes: Int, ghosts: Int, seconds: Double,
+                                translations: Int, reformulations: Int,
+                                sparkline: [Int], sparkCaption: String) -> CarnetView {
+        let repliques = "\(Self.frenchInt(ghosts)) "
+            + Self.plural(ghosts, tr(fr: "réplique soufflée", en: "line whispered"), tr(fr: "répliques soufflées", en: "lines whispered"))
+        let frappes = "\(Self.frenchInt(keystrokes)) "
+            + Self.plural(keystrokes, tr(fr: "frappe épargnée", en: "keystroke saved"), tr(fr: "frappes épargnées", en: "keystrokes saved"))
         let suffix = ledger.cadenceCalibrated ? tr(fr: " · à ta cadence", en: " · at your pace") : ""
-        let temps = "≈ \(Self.formatDuration(ledger.estimatedSecondsSavedToday)) " + tr(fr: "gagnées", en: "saved") + suffix
+        let temps = "≈ \(Self.formatDuration(seconds)) " + tr(fr: "gagnées", en: "saved") + suffix
         var parts: [String] = []
-        if t.translations > 0 { parts.append("\(t.translations) " + Self.plural(t.translations, tr(fr: "traduite", en: "translated"), tr(fr: "traduites", en: "translated"))) }
-        if t.reformulations > 0 { parts.append("\(t.reformulations) " + Self.plural(t.reformulations, tr(fr: "relue", en: "rephrased"), tr(fr: "relues", en: "rephrased"))) }
-        let days = 7
-        return CarnetData(
+        if translations > 0 { parts.append("\(translations) " + Self.plural(translations, tr(fr: "traduite", en: "translated"), tr(fr: "traduites", en: "translated"))) }
+        if reformulations > 0 { parts.append("\(reformulations) " + Self.plural(reformulations, tr(fr: "relue", en: "rephrased"), tr(fr: "relues", en: "rephrased"))) }
+        return CarnetView(
+            title: title,
             repliquesLine: repliques,
             frappesLine: frappes,
             tempsLine: temps,
             actesLine: parts.isEmpty ? nil : parts.joined(separator: " · "),
-            sparkline: ledger.lastDays(days).map(\.keystrokesSaved),
-            sparklineCaption: tr(fr: "les \(days) derniers jours", en: "the last \(days) days"))
+            sparkline: sparkline,
+            sparklineCaption: sparkCaption)
     }
 
     /// Durée humaine, arrondie et conservatrice : « moins d'1 min », « 6 min »,
