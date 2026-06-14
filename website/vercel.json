@@ -1,5 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    { "source": "/Souffleuse.dmg", "destination": "/api/download" }
+  ],
   "headers": [
     {
       "source": "/appcast.xml",
@@ -9,7 +12,7 @@
       ]
     },
     {
-      "source": "/Souffleuse.dmg",
+      "source": "/dl/Souffleuse.dmg",
       "headers": [
         { "key": "Content-Type", "value": "application/octet-stream" },
         { "key": "Cache-Control", "value": "public, max-age=300, must-revalidate" }

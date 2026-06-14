@@ -11,8 +11,13 @@
 # - Imprime un bloc <item> prêt à coller dans deploy/vercel/appcast.xml.
 #
 # Le DMG produit par `RELEASE=1 NOTARIZE=0 Souffleuse/make-app.sh` est
-# build/Souffleuse.dmg ; copie-le dans website/Souffleuse.dmg (fichier unique,
-# servi à la racine du site, écrasé à chaque release) puis lance ce script dessus.
+# build/Souffleuse.dmg ; copie-le dans website/dl/Souffleuse.dmg (fichier unique,
+# servi via /dl/, écrasé à chaque release) puis lance ce script dessus.
+#
+# NB : l'enclosure de l'appcast pointe toujours sur https://souffleuse.app/Souffleuse.dmg
+# (URL inchangée) ; ce chemin est réécrit côté Vercel vers l'Edge Function
+# /api/download qui compte le téléchargement puis redirige (302) vers /dl/Souffleuse.dmg.
+# La signature EdDSA porte sur les octets du DMG, donc le redirect est transparent.
 set -euo pipefail
 
 DMG="${1:?usage: make-appcast-entry.sh <chemin.dmg> [version]}"
