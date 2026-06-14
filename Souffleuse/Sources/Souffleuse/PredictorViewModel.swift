@@ -742,6 +742,26 @@ final class PredictorViewModel {
             return
         }
 
+        // ── Dégradation INSTANT-ONLY ────────────────────────────────────────
+        // Le beam est le seul chemin de génération LLM. S'il n'est pas dispo
+        // (flag OFF ou contexte beam non chargé), on NE lance aucune génération :
+        // la couche instant (recall L0/L1, cache, undo) posée plus haut reste
+        // seule. On nettoie un éventuel ghost LLM périmé d'une frappe précédente,
+        // exactement comme le stale-clear interne du bloc beam (1079+). Aucun
+        // ghost muet, aucun crash, aucun appel moteur.
+        if Self.shouldDegradeToInstantOnly(useBeamCore: useBeamCore) {
+            if Self.shouldClearStaleGhost(emittedGhost: false,
+                                          instantGhost: instantGhost,
+                                          displayedSuggestion: self.suggestion) {
+                self.suggestion = ""
+                self.predictedForPrefix = ""
+                self.suggestionSource = .none
+                self.policy.reset()
+            }
+            Log.info(.predictor, "ghost_instant_only_degraded")
+            return
+        }
+
         // Build the system prompt + slot bodies. Language steering : detect
         // the prefix's language and prepend an explicit "you must reply in
         // {language}" header. Counters the English-drift bias on
@@ -1630,6 +1650,17 @@ final class PredictorViewModel {
         displayedSuggestion: String
     ) -> Bool {
         !emittedGhost && instantGhost.isEmpty && !displayedSuggestion.isEmpty
+    }
+
+    /// Le beam est le SEUL chemin de génération LLM du ghost. Quand il n'est pas
+    /// disponible (`useBeamCore == false` : flag `SOUFFLEUSE_BEAM_CORE_OFF` posé,
+    /// ou le contexte beam n'a pas chargé), `predict()` ne lance AUCUNE génération
+    /// LLM — il dégrade vers la couche INSTANT seule (recall L0/L1, cache, undo),
+    /// déjà posée en amont. Pure function (testable sans GGUF) : factorise la
+    /// décision de bascule pour la verrouiller contre toute régression silencieuse
+    /// (le greedy fallback historique a été retiré ; ce gate le remplace).
+    nonisolated static func shouldDegradeToInstantOnly(useBeamCore: Bool) -> Bool {
+        !useBeamCore
     }
 
     /// A fresh NEXT-WORD ghost reduced to a single character ("m" after "envie
