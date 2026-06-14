@@ -38,22 +38,15 @@ enum OnboardingStep: Int, CaseIterable {
     /// Nombre total d'étapes intermédiaires (permissions → commandes).
     static let intermediateCount = 5
 
-    // MARK: Taille de fenêtre préférée
+    // MARK: Taille de fenêtre
 
-    /// Taille cible de la fenêtre pour cette étape. L'AppKit owner anime le
-    /// resize, recentre et clampe au visibleFrame ; le ScrollView absorbe le
-    /// débordement.
-    var preferredSize: CGSize {
-        switch self {
-        case .welcome:     return CGSize(width: 480, height: 360)
-        case .permissions: return CGSize(width: 560, height: 640)
-        case .language:    return CGSize(width: 480, height: 420)
-        case .voice:       return CGSize(width: 520, height: 480)
-        case .howItWorks:  return CGSize(width: 500, height: 460)
-        case .commands:    return CGSize(width: 540, height: 600)
-        case .done:        return CGSize(width: 480, height: 400)
-        }
-    }
+    /// Taille FIXE de la fenêtre, IDENTIQUE pour toutes les étapes : on ne
+    /// redimensionne plus à chaque navigation. Le resize animé par étape (et le
+    /// recentrage qui l'accompagnait) faisait sautiller la fenêtre et annulait un
+    /// déplacement manuel à chaque tick du poll. Dimensionnée pour l'étape la plus
+    /// haute (permissions, 640) ; le ScrollView des intermédiaires absorbe tout
+    /// débordement, les terminales (welcome/done) se centrent dans la hauteur.
+    static let windowSize = CGSize(width: 560, height: 640)
 
     // MARK: Voisinage
 
@@ -1275,7 +1268,7 @@ final class OnboardingWindow {
         self.model = mdl
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: Int(step.preferredSize.width), height: Int(step.preferredSize.height)),
+            contentRect: NSRect(x: 0, y: 0, width: Int(OnboardingStep.windowSize.width), height: Int(OnboardingStep.windowSize.height)),
             styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -1311,9 +1304,7 @@ final class OnboardingWindow {
         let host = NSHostingController(rootView: rootView)
         self.host = host
         window.contentViewController = host
-
-        // Anime le resize à chaque changement d'étape (withAnimation assuré par SwiftUI)
-        // Le resize AppKit est piloté depuis une observation du modèle via onChange dans show().
+        // Taille fixe : la fenêtre ne se redimensionne jamais entre les étapes.
     }
 
     // MARK: Public API
@@ -1322,8 +1313,8 @@ final class OnboardingWindow {
         // Rafraîchit les permissions au premier affichage
         model.refreshPermissions()
 
-        // Animate vers la taille de l'étape courante, recentre sur l'écran
-        resizeWindow(to: model.currentStep.preferredSize, animated: false)
+        // Centrage UNIQUE sur l'écran, à la taille fixe. Plus aucun resize ensuite.
+        centerOnScreen()
 
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -1340,8 +1331,6 @@ final class OnboardingWindow {
                     self.onGhostInstalled?()
                 }
                 self.lastGhostReady = nowReady
-                // Anime le resize si l'étape a changé entre deux ticks
-                self.resizeWindow(to: self.model.currentStep.preferredSize, animated: true)
             }
         }
         // Seed lastGhostReady pour ne pas déclencher onGhostInstalled sur un modèle déjà là
@@ -1354,18 +1343,19 @@ final class OnboardingWindow {
         window.orderOut(nil)
     }
 
-    // MARK: Resize
+    // MARK: Centrage (une seule fois, taille fixe)
 
-    private func resizeWindow(to size: CGSize, animated: Bool) {
+    /// Centre la fenêtre à sa taille fixe dans le `visibleFrame`. Appelé une seule
+    /// fois depuis `show()` — aucun resize ni recentrage ensuite, pour que la
+    /// fenêtre reste là où l'utilisateur l'a éventuellement déplacée.
+    private func centerOnScreen() {
         guard let screen = window.screen ?? NSScreen.main else { return }
         let visible = screen.visibleFrame
+        let size = OnboardingStep.windowSize
         let w = min(size.width, visible.width)
         let h = min(size.height, visible.height)
-        // Centre dans le visibleFrame
         let x = visible.minX + (visible.width - w) / 2
         let y = visible.minY + (visible.height - h) / 2
-        let frame = NSRect(x: x, y: y, width: w, height: h)
-        window.setFrame(frame, display: true, animate: animated)
-        host.view.frame = window.contentView?.bounds ?? CGRect(origin: .zero, size: size)
+        window.setFrame(NSRect(x: x, y: y, width: w, height: h), display: true, animate: false)
     }
 }
