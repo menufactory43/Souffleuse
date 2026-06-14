@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Phase 04 complete
-last_updated: "2026-05-26T09:25:57.518Z"
+last_updated: "2026-06-14T09:25:00.000Z"
 progress:
   total_phases: 4
   completed_phases: 3
@@ -113,6 +113,7 @@ Aucun.
 | 260612-f8l | Vidéo sociale « rafale de Tab » — Remotion 9:16, 15 s, boucle, out/souffleuse-rafale.mp4 | 2026-06-12 | — (video/ non tracké) |  | [260612-f8l-vid-o-courte-r-seaux-sociaux-rafale-de-t](./quick/260612-f8l-vid-o-courte-r-seaux-sociaux-rafale-de-t/) |
 | 260612-gto | Refonte onboarding en wizard multi-étapes inspiré de Cotabby (pied fixe, cartes permission live, reprise après relaunch, complétion versionnée) | 2026-06-12 | c2ed369 | Vérifié live (screenshots 6 étapes) | [260612-gto-refonte-onboarding-en-wizard-multi-tapes](./quick/260612-gto-refonte-onboarding-en-wizard-multi-tapes/) |
 | 260612-ij2 | Onboarding complété : rappel permission perdue (Input Monitoring), essai RÉEL du souffle (exception R1 scopée + inject self-process), toggle login item, réassurance mots de passe, logo | 2026-06-12 | f82422e | Vérifié live (souffle réel + Tab dans le wizard) | [260612-ij2-compl-ter-l-onboarding-rappel-permission](./quick/260612-ij2-compl-ter-l-onboarding-rappel-permission/) |
+| 260614-fib | Supprimer 8 cibles dev mortes/superseded (CorpusEval, TTFTBench, BeamEval, PersonalizationEval, MaxWordsEval) + 3 benches MLX + dépendance mlx-swift-examples du package | 2026-06-14 | 6535438 | swift build OK + 938 @Test verts | [260614-fib-supprimer-8-cibles-dev-mortes-superseded](./quick/260614-fib-supprimer-8-cibles-dev-mortes-superseded/) |
 
 ### Notes
 
