@@ -191,9 +191,7 @@ final class PredictorViewModel {
 
     /// Phase 4 — Ghost Relevance Gate engine. Owns currentGhost/currentSource/
     /// currentScore/shownAt + the 5 classification events. PVM delegates cascade
-    /// routing (L0/L1) and LLM chunk replacement-bar to this engine ; partial-
-    /// accept + typedDiverged hooks will land in 04-04+ when TypingSession
-    /// is extracted (D-03).
+    /// routing (L0/L1) and LLM chunk replacement-bar to this engine.
     private let policy = SuggestionPolicyEngine(maxWords: 6)
 
     /// Synchronous snapshot of typing history for Instant Ghost Path Layer 1.

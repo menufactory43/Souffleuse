@@ -7,9 +7,6 @@ import SouffleuseLog
 /// Lifecycle owner for the predict loop. Single responsibility :
 ///   - bumper le generation counter à chaque `beginGeneration()` / `cancel()`
 ///   - posséder la `currentTask` (in-flight LLM `Task<Void, Never>`)
-///   - exposer un debounce coalescing utility (`scheduleDebounced`) qui
-///     centralise les `predictDebounceNanos = 30 ms` historiquement vivant
-///     dans `SouffleuseAppDelegate`.
 ///
 /// Plan 04-03 extrait la lifecycle hors de `PredictorViewModel` :
 ///   - PVM ne déclare plus `private var generation: UInt64`
@@ -31,15 +28,6 @@ final class GenerationPlanner {
     /// The Task currently driving the LLM generation (or nil if idle).
     /// Plan 04-03 : ownership migré depuis `PredictorViewModel.currentTask`.
     private var currentTask: Task<Void, Never>?
-
-    /// The debounce coalescing Task — cancelled & replaced on each `scheduleDebounced`.
-    /// Réservé pour la migration AppDelegate → TypingSession (Plan 04-07).
-    private var debounceTask: Task<Void, Never>?
-
-    /// 30 ms debounce — extracted from `SouffleuseAppDelegate:130`
-    /// (`predictDebounceNanos`). Centralisé ici pour que les call-sites futurs
-    /// (TypingSession) puissent référencer la même constante.
-    static let predictDebounceNanos: UInt64 = 30 * 1_000_000
 
     init() {}
 
@@ -101,22 +89,5 @@ final class GenerationPlanner {
         currentTask?.cancel()
         currentTask = nil
         currentGeneration = GenerationToken(value: currentGeneration.value &+ 1)
-    }
-
-    /// Debounce a piece of work by `predictDebounceNanos`. Cancels any pending
-    /// debounce. Le `work` s'exécute sur le MainActor après la fenêtre.
-    ///
-    /// Réservé Plan 04-07 (TypingSession) — exposé dès maintenant pour figer
-    /// le contrat. Pas de call-site actif dans le PVM (le debounce vit encore
-    /// dans `SouffleuseAppDelegate.predictDebounceTask`).
-    func scheduleDebounced(_ work: @escaping @Sendable @MainActor () async -> Void) {
-        debounceTask?.cancel()
-        let nanos = Self.predictDebounceNanos
-        debounceTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: nanos)
-            if Task.isCancelled { return }
-            guard self != nil else { return }
-            await work()
-        }
     }
 }

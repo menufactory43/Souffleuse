@@ -8,8 +8,6 @@ import SouffleuseCore
 ///   - GenerationToken Equatable + Sendable
 ///   - cancel-on-keystroke : la Task in-flight est cancellée + le token devient stale
 ///   - cancel() idempotent (le state reste cohérent après N appels)
-///   - scheduleDebounced coalesces — seul le dernier `work` s'exécute
-///   - le debounce respecte la fenêtre (≥25ms, marge sur les 30ms cible)
 ///
 /// Pitfall 1 (RESEARCH §"Common Pitfalls") : la token est capturée par VALEUR
 /// dans les closures onChunk, donc une fois `beginGeneration` rappelée le token
@@ -122,56 +120,4 @@ struct GenerationPlannerTests {
         }
     }
 
-    // MARK: - Debounce coalescing
-
-    /// Attente par POLLING avec deadline large : un sleep fixe de 80 ms
-    /// suffisait seul, mais sous la contention CPU de la suite parallèle le
-    /// task débouncé (30 ms) peut ne pas être ordonnancé à temps → flaky
-    /// (observé 2026-06-11 à l'ajout des tests NSSpellChecker).
-    private func waitForFire(_ counter: ActorCounter, deadline: TimeInterval = 2) async -> Int {
-        let end = Date().addingTimeInterval(deadline)
-        while Date() < end {
-            let n = await counter.value
-            if n >= 1 { return n }
-            try? await Task.sleep(nanoseconds: 10 * 1_000_000)
-        }
-        return await counter.value
-    }
-
-    @Test func scheduleDebouncedCoalesces() async {
-        let p = GenerationPlanner()
-        let counter = ActorCounter()
-        p.scheduleDebounced { await counter.increment() }
-        p.scheduleDebounced { await counter.increment() }
-        p.scheduleDebounced { await counter.increment() }
-        #expect(await waitForFire(counter) == 1)
-        // Coalescing : aucun second tir après coup.
-        try? await Task.sleep(nanoseconds: 80 * 1_000_000)
-        #expect(await counter.value == 1)
-    }
-
-    @Test func scheduleDebouncedRespectsDelay() async {
-        let p = GenerationPlanner()
-        let counter = ActorCounter()
-        let start = Date()
-        var elapsedAtFire: TimeInterval = 0
-        p.scheduleDebounced {
-            elapsedAtFire = Date().timeIntervalSince(start)
-            await counter.increment()
-        }
-        #expect(await waitForFire(counter) == 1)
-        // Should fire near 30ms — accept ≥25ms (loose timing for CI).
-        #expect(elapsedAtFire >= 0.025)
-    }
-
-    @Test func debounceConstantIs30Milliseconds() {
-        #expect(GenerationPlanner.predictDebounceNanos == 30 * 1_000_000)
-    }
-}
-
-// MARK: - Helpers
-
-private actor ActorCounter {
-    var value = 0
-    func increment() { value += 1 }
 }
