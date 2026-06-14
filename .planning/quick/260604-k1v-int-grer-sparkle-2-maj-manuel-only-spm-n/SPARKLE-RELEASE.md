@@ -53,13 +53,27 @@ Remplacer `PLACEHOLDER_REMPLACER_PAR_LA_CLE_PUBLIQUE_EDDSA` par la valeur réell
 
 ## 2. Signer une release
 
-### Build Developer ID (non notarisé, beta)
+### Build Developer ID NOTARISÉ (canonique — tout ce qui part sur Vercel)
+
+> **Règle** : toute release publiée sur souffleuse.app DOIT être notarisée.
+> La notarisation exige le cert **Developer ID Application** (pas le cert
+> *Apple Development* hard-codé par défaut dans `make-app.sh`, qu'Apple refuse).
+> On override donc `SIGN_IDENTITY` + on garde `NOTARIZE=1` (défaut du script).
 
 ```bash
 cd Souffleuse
-RELEASE=1 NOTARIZE=0 ./make-app.sh
-# Produit : build/Souffleuse.dmg (signé Developer ID, non staplé)
+RELEASE=1 NOTARIZE=1 \
+  SIGN_IDENTITY="Developer ID Application: Gabriel Turpin (AKMNXGVVGX)" \
+  NOTARY_PROFILE="souffleuse" \
+  ./make-app.sh
+# Produit : build/Souffleuse.dmg (signé Developer ID, NOTARISÉ + staplé).
+# Le submit --wait dure quelques minutes ; statut attendu : Accepted.
+# Vérifier : spctl -a -vvv -t install build/Souffleuse.dmg
+#            → "accepted / source=Notarized Developer ID"
 ```
+
+> Cert (SHA-1, utilisable à la place du nom) : `AE1E2158E210E923EF75A6214C188D5D7A56F71B`.
+> Build beta non notarisé (dépannage uniquement) : `RELEASE=1 NOTARIZE=0 ./make-app.sh`.
 
 ### Trouver le binaire `sign_update`
 
@@ -95,32 +109,39 @@ racine, lié à Vercel via `website/.vercel`). Les fichiers canoniques sont vers
 |---|---|
 | `website/appcast.xml` | Le flux Sparkle (source de vérité, versionnée). |
 | `website/vercel.json` | En-têtes : `application/xml` pour l'appcast, `octet-stream` pour le DMG. |
-| `website/Souffleuse.dmg` | Le binaire **unique** servi à la racine, écrasé à chaque release (gitignoré). |
+| `website/dl/Souffleuse.dmg` | Le binaire **unique** servi via `/dl/`, écrasé à chaque release (gitignoré). |
+| `website/api/download.js` | Edge Function : compte le download puis 302 vers `/dl/Souffleuse.dmg`. |
 
-**Convention fichier unique** : un seul `Souffleuse.dmg` à
-`https://souffleuse.app/Souffleuse.dmg`, écrasé à chaque version. On garde donc
-**une seule `<item>`** dans l'appcast (l'URL est réutilisée) ; `edSignature` +
-`length` doivent être régénérés en même temps que le DMG uploadé. Cache court +
-`must-revalidate` sur le DMG (cf. `vercel.json`) pour éviter de servir un cache périmé.
+**Convention fichier unique** : un seul `Souffleuse.dmg`. L'enclosure de l'appcast
+pointe sur `https://souffleuse.app/Souffleuse.dmg` (URL inchangée), réécrite côté
+Vercel vers l'Edge Function `/api/download` qui compte puis redirige (302) vers
+`/dl/Souffleuse.dmg`. On garde **une seule `<item>`** ; `edSignature` + `length`
+doivent être régénérés en même temps que le DMG uploadé. La signature porte sur les
+octets du DMG **notarisé+staplé** → régénérer APRÈS la notarisation (le staple change
+les octets). Cache court + `must-revalidate` (cf. `vercel.json`).
 
 ### Boucle de release
 
 ```bash
-# 1. Builder le DMG AVEC Sparkle (Developer ID, non notarisé)
-cd Souffleuse && RELEASE=1 NOTARIZE=0 ./make-app.sh        # → build/Souffleuse.dmg
+# 1. Builder le DMG NOTARISÉ (cf. section 2 — Developer ID + NOTARIZE=1)
+cd Souffleuse && RELEASE=1 NOTARIZE=1 \
+  SIGN_IDENTITY="Developer ID Application: Gabriel Turpin (AKMNXGVVGX)" \
+  NOTARY_PROFILE="souffleuse" ./make-app.sh                # → build/Souffleuse.dmg
 
-# 2. Le placer à la racine du site (fichier unique servi en statique)
-cp build/Souffleuse.dmg ../website/Souffleuse.dmg
+# 2. Le placer dans /dl/ (fichier servi en statique, hors racine)
+cp build/Souffleuse.dmg ../website/dl/Souffleuse.dmg
 
-# 3. Générer l'<item> signé et la coller dans website/appcast.xml
-../deploy/make-appcast-entry.sh ../website/Souffleuse.dmg
+# 3. Générer l'<item> signé (sur le DMG notarisé) et le coller dans website/appcast.xml
+../deploy/make-appcast-entry.sh ../website/dl/Souffleuse.dmg <version>
 
 # 4. Déployer (depuis website/, où vit le lien .vercel)
-cd ../website && vercel deploy --prod
+cd ../website && vercel deploy --prod --yes
 ```
 
-Vérif post-déploiement :
-`curl -sI https://souffleuse.app/appcast.xml | grep -i content-type` → `application/xml`.
+Vérif post-déploiement (sur le fichier RÉELLEMENT servi) :
+- `curl -sI https://souffleuse.app/appcast.xml | grep -i content-type` → `application/xml`
+- `curl -sIL https://souffleuse.app/Souffleuse.dmg | grep -i content-length` → doit == `length` de l'appcast
+- monter le DMG servi + `spctl -a -vvv -t install` → `source=Notarized Developer ID`
 
 Notes :
 - `<sparkle:version>` = `CFBundleVersion`, `<sparkle:shortVersionString>` = `CFBundleShortVersionString` (0.4.0).
