@@ -16,7 +16,9 @@ Mesures locales du moteur de prédiction. Mises à jour à chaque changement de 
 | Qualité FR sur prompt mail | continuation naturelle | — |
 | Qualité code-switching | garde la langue dominante | — |
 
-## Run 2 — `mlx-community/gemma-3-1b-pt-4bit` (base, RECOMMANDÉ)
+## Run 2 — `mlx-community/gemma-3-1b-pt-4bit` (base, RECOMMANDÉ) — référence historique
+
+> **Note (14/06/2026) :** Le moteur de génération est désormais **llama.cpp (GGUF Metal)** exclusivement. MLX (`mlx-swift-examples`) n'est plus une dépendance du package. Les runs ci-dessous sont conservés comme référence historique de comparaison qualité/débit.
 
 Modèle **base pretrained** (pas instruct) — entraîné uniquement à prédire le token suivant, sans biais conversationnel.
 
@@ -39,7 +41,7 @@ Modèle **base pretrained** (pas instruct) — entraîné uniquement à prédire
 - Throughput : 23-38 tok/s ✅ (cible >20)
 - Premier inférence (cold) : ~1.9 s — attendu, sera mitigé par préchauffage au load
 
-## Run 1 — `mlx-community/Llama-3.2-1B-Instruct-4bit` (REJETÉ)
+## Run 1 — `mlx-community/Llama-3.2-1B-Instruct-4bit` (REJETÉ) — référence historique
 
 Modèle **instruct** fine-tuné chat. Performances brillantes, qualité catastrophique pour de l'autocomplete.
 
@@ -80,7 +82,9 @@ Le débit Gemma (35 tok/s) reste très confortable. Pour une suggestion « Mediu
 - Mémoire résident sous charge (cible 1.2 GB)
 - Comparaison Gemma 3 1B vs Qwen 3 1.7B base sur même set
 
-## Run 3 — A/B Enrichissement contextuel (Jalon 2.5.D)
+## Run 3 — A/B Enrichissement contextuel (Jalon 2.5.D) — référence historique
+
+> **Note (14/06/2026) :** Ce bench utilisait `SouffleuseEnrichmentBench` (moteur MLX). Cette cible a été supprimée avec `mlx-swift-examples`. Les données ci-dessous sont conservées à titre de référence historique.
 
 Bench `SouffleuseEnrichmentBench` — 20 cas, chaque prompt généré deux fois :
 - (A) prompt utilisateur brut
@@ -130,11 +134,13 @@ Mesurés : sortie tronquée au premier `\n` (comme la prod), TTFT, latence total
 
 ---
 
-## Personnalisation Jalon 3.X
+## Personnalisation Jalon 3.X — référence historique
+
+> **Note (14/06/2026) :** Ce bench utilisait `SouffleuseEnrichmentBench` (moteur MLX, supprimé le 14/06/2026). Données conservées à titre de référence historique.
 
 **Date** : 2026-05-22 (Jalon 3.X.D)
-**Modèle** : `mlx-community/gemma-3-1b-pt-4bit` (défaut)
-**Bench** : `swift run SouffleuseEnrichmentBench --personalization-ab`
+**Modèle** : `mlx-community/gemma-3-1b-pt-4bit` (défaut, MLX — historique)
+**Bench** : `swift run SouffleuseEnrichmentBench --personalization-ab` (cible supprimée)
 
 ### Méthodologie
 
