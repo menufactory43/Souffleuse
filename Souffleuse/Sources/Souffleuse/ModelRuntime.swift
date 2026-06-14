@@ -270,15 +270,6 @@ final class ModelRuntime {
         return true
     }
 
-    /// Cancellation hook. No-op : `GenerationPlanner` owns Task cancellation,
-    /// container teardown happens in `swap(to:)` when modelId changes. Cette
-    /// méthode existe pour symétrie d'API (la façade 04-07 voudra peut-être
-    /// appeler `runtime.cancel()` après `planner.cancel()` pour des raisons
-    /// de lisibilité).
-    func cancel() {
-        // No-op by design. Voir doc-comment.
-    }
-
     /// Décharge le moteur ghost (GGUF llama.cpp) pour rendre la RAM quand
     /// l'utilisateur ne compose pas. Après ça `canGenerate` est faux →
     /// `predict()` baille proprement sur son gate. Un `loadModel()` ultérieur
