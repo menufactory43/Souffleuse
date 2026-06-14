@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import SouffleuseCore
 import os
 
 /// Session-level CGEventTap that consumes Tab/Esc when a suggestion is active.
@@ -37,11 +38,11 @@ public enum AcceptAllKey: String, CaseIterable, Sendable {
     }
     public var label: String {
         switch self {
-        case .disabled: return "Désactivé"
-        case .rightArrow: return "→ Flèche droite"
-        case .cmdRight: return "⌘→ Cmd + Flèche droite"
-        case .returnKey: return "↩ Entrée"
-        case .shiftTab: return "⇧⇥ Maj + Tab"
+        case .disabled: return tr(fr: "Désactivé", en: "Disabled")
+        case .rightArrow: return tr(fr: "→ Flèche droite", en: "→ Right arrow")
+        case .cmdRight: return tr(fr: "⌘→ Cmd + Flèche droite", en: "⌘→ Cmd + Right arrow")
+        case .returnKey: return tr(fr: "↩ Entrée", en: "↩ Return")
+        case .shiftTab: return tr(fr: "⇧⇥ Maj + Tab", en: "⇧⇥ Shift + Tab")
         }
     }
 }
@@ -70,10 +71,10 @@ public enum CommitKey: String, CaseIterable, Sendable {
     }
     public var label: String {
         switch self {
-        case .disabled: return "Désactivé"
-        case .cmdReturn: return "⌘↩ Cmd + Entrée"
-        case .cmdShiftReturn: return "⌘⇧↩ Cmd + Maj + Entrée"
-        case .optionReturn: return "⌥↩ Option + Entrée"
+        case .disabled: return tr(fr: "Désactivé", en: "Disabled")
+        case .cmdReturn: return tr(fr: "⌘↩ Cmd + Entrée", en: "⌘↩ Cmd + Return")
+        case .cmdShiftReturn: return tr(fr: "⌘⇧↩ Cmd + Maj + Entrée", en: "⌘⇧↩ Cmd + Shift + Return")
+        case .optionReturn: return tr(fr: "⌥↩ Option + Entrée", en: "⌥↩ Option + Return")
         }
     }
 }
@@ -101,10 +102,10 @@ public enum TargetCycleKey: String, CaseIterable, Sendable {
     }
     public var label: String {
         switch self {
-        case .disabled: return "Désactivé"
-        case .cmdShiftRight: return "⌘⇧→ Cmd + Maj + Flèche droite"
-        case .ctrlRight: return "⌃→ Ctrl + Flèche droite"
-        case .optionRight: return "⌥→ Option + Flèche droite"
+        case .disabled: return tr(fr: "Désactivé", en: "Disabled")
+        case .cmdShiftRight: return tr(fr: "⌘⇧→ Cmd + Maj + Flèche droite", en: "⌘⇧→ Cmd + Shift + Right arrow")
+        case .ctrlRight: return tr(fr: "⌃→ Ctrl + Flèche droite", en: "⌃→ Ctrl + Right arrow")
+        case .optionRight: return tr(fr: "⌥→ Option + Flèche droite", en: "⌥→ Option + Right arrow")
         }
     }
 }

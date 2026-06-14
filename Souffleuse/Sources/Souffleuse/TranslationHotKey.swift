@@ -1,5 +1,6 @@
 import AppKit
 import Carbon.HIToolbox
+import SouffleuseCore
 
 /// Préréglages du raccourci GLOBAL de traduction, choisis pour rester tapables
 /// d'une main sans casser le flow (critère utilisateur). Chaque preset mappe un
@@ -21,7 +22,7 @@ enum TranslateHotKeyOption: String, CaseIterable, Sendable {
 
     var label: String {
         switch self {
-        case .disabled: return "Désactivé"
+        case .disabled: return tr(fr: "Désactivé", en: "Disabled")
         case .optCmdT: return "⌥⌘T"
         case .ctrlOptT: return "⌃⌥T"
         case .optCmdY: return "⌥⌘Y"

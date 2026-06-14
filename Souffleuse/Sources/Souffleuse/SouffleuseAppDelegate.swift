@@ -569,6 +569,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             Task { await ScreenCapturer.forcePermissionPrompt() }
         }
         observePreferences()
+        observeUILanguage()
         observeSuggestionForInstantPaint()
         wireAXPushDetection()
         wireKeyDownTick()
@@ -943,61 +944,68 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     private func installStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         refreshLivingIcon()
+        statusItem.menu = makeStatusMenu()
+    }
 
+    /// Construit le menu de la barre des menus dans la langue d'interface
+    /// COURANTE (tous les titres passent par `tr(...)`). Extrait d'`installStatusItem`
+    /// pour pouvoir reconstruire le menu à chaud au changement de langue, SANS
+    /// recréer le `NSStatusItem` — le recréer dupliquerait l'icône.
+    private func makeStatusMenu() -> NSMenu {
         let menu = NSMenu()
-        let toggleItem = NSMenuItem(title: store.enabled ? "Activée ✓" : "Désactivée", action: #selector(toggleEnabled), keyEquivalent: "s")
+        let toggleItem = NSMenuItem(title: store.enabled ? tr(fr: "Activée ✓", en: "Enabled ✓") : tr(fr: "Désactivée", en: "Disabled"), action: #selector(toggleEnabled), keyEquivalent: "s")
         toggleItem.keyEquivalentModifierMask = [.control, .option, .command]
         toggleItem.target = self
         menu.addItem(toggleItem)
         menu.addItem(NSMenuItem.separator())
         let enrichItem = NSMenuItem(
-            title: store.enrichmentEnabled ? "Enrichissement contextuel ✓" : "Enrichissement contextuel",
+            title: store.enrichmentEnabled ? tr(fr: "Enrichissement contextuel ✓", en: "Context enrichment ✓") : tr(fr: "Enrichissement contextuel", en: "Context enrichment"),
             action: #selector(toggleEnrichment),
             keyEquivalent: ""
         )
         enrichItem.target = self
         menu.addItem(enrichItem)
         let captureItem = NSMenuItem(
-            title: store.captureEnabled ? "  ↳ Inclure capture d'écran ✓" : "  ↳ Inclure capture d'écran",
+            title: store.captureEnabled ? tr(fr: "  ↳ Inclure capture d'écran ✓", en: "  ↳ Include screen capture ✓") : tr(fr: "  ↳ Inclure capture d'écran", en: "  ↳ Include screen capture"),
             action: #selector(toggleCapture),
             keyEquivalent: ""
         )
         captureItem.target = self
         menu.addItem(captureItem)
         menu.addItem(NSMenuItem.separator())
-        let carnetHeader = NSMenuItem(title: "Carnet de la souffleuse — aujourd'hui", action: nil, keyEquivalent: "")
+        let carnetHeader = NSMenuItem(title: tr(fr: "Carnet de la souffleuse — aujourd'hui", en: "Souffleuse log — today"), action: nil, keyEquivalent: "")
         carnetHeader.isEnabled = false
         menu.addItem(carnetHeader)
         let repliques = Self.carnetLine(); menu.addItem(repliques); carnetRepliquesItem = repliques
         let frappes = Self.carnetLine(); menu.addItem(frappes); carnetFrappesItem = frappes
         let temps = Self.carnetLine(); menu.addItem(temps); carnetTempsItem = temps
         let actes = Self.carnetLine(); menu.addItem(actes); carnetActesItem = actes
-        let carnetOpen = NSMenuItem(title: "Ouvrir le carnet…", action: #selector(openCarnet), keyEquivalent: "")
+        let carnetOpen = NSMenuItem(title: tr(fr: "Ouvrir le carnet…", en: "Open log…"), action: #selector(openCarnet), keyEquivalent: "")
         carnetOpen.target = self
         menu.addItem(carnetOpen)
         menu.addItem(NSMenuItem.separator())
         let instructionsItem = NSMenuItem(
-            title: "Instructions personnalisées…",
+            title: tr(fr: "Instructions personnalisées…", en: "Custom instructions…"),
             action: #selector(openCustomInstructions),
             keyEquivalent: ""
         )
         instructionsItem.target = self
         menu.addItem(instructionsItem)
         menu.addItem(NSMenuItem.separator())
-        let prefsItem = NSMenuItem(title: "Préférences…", action: #selector(openPreferences), keyEquivalent: ",")
+        let prefsItem = NSMenuItem(title: tr(fr: "Préférences…", en: "Settings…"), action: #selector(openPreferences), keyEquivalent: ",")
         prefsItem.keyEquivalentModifierMask = [.command]
         prefsItem.target = self
         menu.addItem(prefsItem)
-        let updateItem = NSMenuItem(title: "Vérifier les mises à jour…", action: #selector(checkForUpdates), keyEquivalent: "")
+        let updateItem = NSMenuItem(title: tr(fr: "Vérifier les mises à jour…", en: "Check for Updates…"), action: #selector(checkForUpdates), keyEquivalent: "")
         updateItem.target = self
         menu.addItem(updateItem)
-        let onboardingItem = NSMenuItem(title: "Permissions…", action: #selector(openOnboarding), keyEquivalent: "")
+        let onboardingItem = NSMenuItem(title: tr(fr: "Permissions…", en: "Permissions…"), action: #selector(openOnboarding), keyEquivalent: "")
         onboardingItem.target = self
         menu.addItem(onboardingItem)
         #if DEBUG
         menu.addItem(NSMenuItem.separator())
         let inspectorItem = NSMenuItem(
-            title: "Inspecteur ghost (DEV)",
+            title: tr(fr: "Inspecteur ghost (DEV)", en: "Ghost inspector (DEV)"),
             action: #selector(toggleGhostInspector),
             keyEquivalent: ""
         )
@@ -1006,11 +1014,30 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(inspectorItem)
         #endif
         menu.addItem(NSMenuItem.separator())
-        let quitItem = NSMenuItem(title: "Quitter", action: #selector(quit), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: tr(fr: "Quitter", en: "Quit"), action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
         menu.delegate = self   // rafraîchit le carnet à chaque ouverture
-        statusItem.menu = menu
+        return menu
+    }
+
+    /// Bascule LIVE de la langue d'interface : reconstruit le menu de la barre
+    /// des menus dans la nouvelle langue. Appelé quand `store.uiLanguage` change
+    /// (depuis Préférences) — le menu n'est alors pas ouvert, le remplacer est sûr.
+    /// Les lignes du carnet (vides à la construction) se remplissent à la
+    /// prochaine ouverture via `menuNeedsUpdate`, comme à l'install initial.
+    private func observeUILanguage() {
+        withObservationTracking {
+            _ = store.uiLanguage
+        } onChange: { [weak self] in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.statusItem.menu = self.makeStatusMenu()
+                    self.observeUILanguage()   // re-arme (l'observation est one-shot)
+                }
+            }
+        }
     }
 
     /// Une ligne d'information non cliquable du carnet (grisée, titre posé au refresh).
@@ -1024,14 +1051,14 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     private func refreshCarnet() {
         let t = ledger.today
         carnetRepliquesItem?.title = "  \(Self.frenchInt(t.ghostsAccepted)) " +
-            Self.plural(t.ghostsAccepted, "réplique soufflée", "répliques soufflées")
+            Self.plural(t.ghostsAccepted, tr(fr: "réplique soufflée", en: "line whispered"), tr(fr: "répliques soufflées", en: "lines whispered"))
         carnetFrappesItem?.title = "  \(Self.frenchInt(t.keystrokesSaved)) " +
-            Self.plural(t.keystrokesSaved, "frappe épargnée", "frappes épargnées")
-        let suffix = ledger.cadenceCalibrated ? " (à ta cadence)" : ""
-        carnetTempsItem?.title = "  ≈ \(Self.formatDuration(ledger.estimatedSecondsSavedToday)) gagnées\(suffix)"
+            Self.plural(t.keystrokesSaved, tr(fr: "frappe épargnée", en: "keystroke saved"), tr(fr: "frappes épargnées", en: "keystrokes saved"))
+        let suffix = ledger.cadenceCalibrated ? tr(fr: " (à ta cadence)", en: " (at your pace)") : ""
+        carnetTempsItem?.title = "  ≈ \(Self.formatDuration(ledger.estimatedSecondsSavedToday)) " + tr(fr: "gagnées", en: "saved") + suffix
         var parts: [String] = []
-        if t.translations > 0 { parts.append("\(t.translations) " + Self.plural(t.translations, "traduite", "traduites")) }
-        if t.reformulations > 0 { parts.append("\(t.reformulations) " + Self.plural(t.reformulations, "relue", "relues")) }
+        if t.translations > 0 { parts.append("\(t.translations) " + Self.plural(t.translations, tr(fr: "traduite", en: "translated"), tr(fr: "traduites", en: "translated"))) }
+        if t.reformulations > 0 { parts.append("\(t.reformulations) " + Self.plural(t.reformulations, tr(fr: "relue", en: "rephrased"), tr(fr: "relues", en: "rephrased"))) }
         if parts.isEmpty {
             carnetActesItem?.isHidden = true
         } else {
@@ -1069,14 +1096,14 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     private func currentCarnetData() -> CarnetData {
         let t = ledger.today
         let repliques = "\(Self.frenchInt(t.ghostsAccepted)) "
-            + Self.plural(t.ghostsAccepted, "réplique soufflée", "répliques soufflées")
+            + Self.plural(t.ghostsAccepted, tr(fr: "réplique soufflée", en: "line whispered"), tr(fr: "répliques soufflées", en: "lines whispered"))
         let frappes = "\(Self.frenchInt(t.keystrokesSaved)) "
-            + Self.plural(t.keystrokesSaved, "frappe épargnée", "frappes épargnées")
-        let suffix = ledger.cadenceCalibrated ? " · à ta cadence" : ""
-        let temps = "≈ \(Self.formatDuration(ledger.estimatedSecondsSavedToday)) gagnées\(suffix)"
+            + Self.plural(t.keystrokesSaved, tr(fr: "frappe épargnée", en: "keystroke saved"), tr(fr: "frappes épargnées", en: "keystrokes saved"))
+        let suffix = ledger.cadenceCalibrated ? tr(fr: " · à ta cadence", en: " · at your pace") : ""
+        let temps = "≈ \(Self.formatDuration(ledger.estimatedSecondsSavedToday)) " + tr(fr: "gagnées", en: "saved") + suffix
         var parts: [String] = []
-        if t.translations > 0 { parts.append("\(t.translations) " + Self.plural(t.translations, "traduite", "traduites")) }
-        if t.reformulations > 0 { parts.append("\(t.reformulations) " + Self.plural(t.reformulations, "relue", "relues")) }
+        if t.translations > 0 { parts.append("\(t.translations) " + Self.plural(t.translations, tr(fr: "traduite", en: "translated"), tr(fr: "traduites", en: "translated"))) }
+        if t.reformulations > 0 { parts.append("\(t.reformulations) " + Self.plural(t.reformulations, tr(fr: "relue", en: "rephrased"), tr(fr: "relues", en: "rephrased"))) }
         let days = 7
         return CarnetData(
             repliquesLine: repliques,
@@ -1084,13 +1111,13 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             tempsLine: temps,
             actesLine: parts.isEmpty ? nil : parts.joined(separator: " · "),
             sparkline: ledger.lastDays(days).map(\.keystrokesSaved),
-            sparklineCaption: "les \(days) derniers jours")
+            sparklineCaption: tr(fr: "les \(days) derniers jours", en: "the last \(days) days"))
     }
 
     /// Durée humaine, arrondie et conservatrice : « moins d'1 min », « 6 min »,
     /// « 1 h 12 ». Jamais de fausse précision à la seconde.
     private static func formatDuration(_ seconds: Double) -> String {
-        if seconds < 60 { return "moins d'1 min" }
+        if seconds < 60 { return tr(fr: "moins d'1 min", en: "less than 1 min") }
         let mins = Int((seconds / 60).rounded())
         if mins < 60 { return "\(mins) min" }
         let h = mins / 60, m = mins % 60
@@ -1246,14 +1273,14 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     private func refreshStatusItem() {
         guard let menu = statusItem.menu else { return }
         if let toggle = menu.items.first {
-            toggle.title = store.enabled ? "Activée ✓" : "Désactivée"
+            toggle.title = store.enabled ? tr(fr: "Activée ✓", en: "Enabled ✓") : tr(fr: "Désactivée", en: "Disabled")
         }
         // Order matches installStatusItem: [toggle, sep, enrich, capture, ...]
         if menu.items.count > 2 {
-            menu.items[2].title = store.enrichmentEnabled ? "Enrichissement contextuel ✓" : "Enrichissement contextuel"
+            menu.items[2].title = store.enrichmentEnabled ? tr(fr: "Enrichissement contextuel ✓", en: "Context enrichment ✓") : tr(fr: "Enrichissement contextuel", en: "Context enrichment")
         }
         if menu.items.count > 3 {
-            menu.items[3].title = store.captureEnabled ? "  ↳ Inclure capture d'écran ✓" : "  ↳ Inclure capture d'écran"
+            menu.items[3].title = store.captureEnabled ? tr(fr: "  ↳ Inclure capture d'écran ✓", en: "  ↳ Include screen capture ✓") : tr(fr: "  ↳ Inclure capture d'écran", en: "  ↳ Include screen capture")
         }
     }
 
@@ -2834,19 +2861,19 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             stream = { [translationRuntime] onToken in
                 await translationRuntime.correct(scope, onToken: onToken)
             }
-            header = "// corriger…"
+            header = tr(fr: "// corriger…", en: "// fix…")
         case .raccourcir:
             stream = transformStream(GemmaChatPrompt.shortening(of: scope, model: model))
-            header = "// raccourcir…"
+            header = tr(fr: "// raccourcir…", en: "// shorten…")
         case .reformuler:
             stream = transformStream(GemmaChatPrompt.rephrasing(of: scope, model: model))
-            header = "// reformuler…"
+            header = tr(fr: "// reformuler…", en: "// rephrase…")
         case .ton:
             let tone = store.tones.tone(forBundle: bundleID)
             stream = { [translationRuntime] onToken in
                 await translationRuntime.reformulate(scope, tone: tone, onToken: onToken)
             }
-            header = "// ton · \(tone.displayName)…"
+            header = tr(fr: "// ton · \(tone.displayName)…", en: "// tone · \(tone.displayName)…")
         case .traduire:
             // Même résolution de cible que le commit ⌥⌘T : sélection vivante /
             // store par conversation, AUTO suit la langue détectée du
@@ -2861,13 +2888,13 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 stream = { [translationRuntime] onToken in
                     await translationRuntime.translate(scope, into: target, onToken: onToken)
                 }
-                header = "// traduire · FR → \(target.code)…"
+                header = tr(fr: "// traduire · FR → \(target.code)…", en: "// translate · FR → \(target.code)…")
             case .reformulate:
                 let tone = store.tones.tone(forBundle: bundleID)
                 stream = { [translationRuntime] onToken in
                     await translationRuntime.reformulate(scope, tone: tone, onToken: onToken)
                 }
-                header = "// ton · \(tone.displayName)…"
+                header = tr(fr: "// ton · \(tone.displayName)…", en: "// tone · \(tone.displayName)…")
             }
         case .libre(let instruction):
             stream = transformStream(
@@ -2876,7 +2903,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
         // Portée ≠ champ entier (paragraphe du trigger, ou repli > 1500 chars)
         // → l'aperçu le dit.
-        if state.isScopeTruncated { header += " · paragraphe" }
+        if state.isScopeTruncated { header += tr(fr: " · paragraphe", en: " · paragraph") }
 
         hideSlashPicker()
         let transformation = TextTransformation(
@@ -2893,7 +2920,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             bundleID: bundleID,
             hud: transformHUD,
             header: header,
-            unavailableBody: "⚠︎ modèle de transformation indisponible",
+            unavailableBody: tr(fr: "⚠︎ modèle de transformation indisponible", en: "⚠︎ transformation model unavailable"),
             guardEvent: "transform_guard_flagged",
             doneEvent: "transform_commit_done",
             applyMode: .preview(transformation),
@@ -3042,11 +3069,11 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         let anchor = fieldRect ?? .zero
         let header: String
         switch selection {
-        case .auto: header = "Cible : AUTO (langue détectée)"
-        case .fixed(let t): header = "Cible : FR → \(t.code)"
-        case .reformulate: header = "Relecture : FR (réécriture selon le ton de l'app)"
+        case .auto: header = tr(fr: "Cible : AUTO (langue détectée)", en: "Target: AUTO (detected language)")
+        case .fixed(let t): header = tr(fr: "Cible : FR → \(t.code)", en: "Target: FR → \(t.code)")
+        case .reformulate: header = tr(fr: "Relecture : FR (réécriture selon le ton de l'app)", en: "Rephrase: FR (rewritten in the app's tone)")
         }
-        translationHUD.show(at: anchor, header: header, body: "⌘⇧→ changer · ⌘↩ traduire",
+        translationHUD.show(at: anchor, header: header, body: tr(fr: "⌘⇧→ changer · ⌘↩ traduire", en: "⌘⇧→ change · ⌘↩ translate"),
                             savedOffset: hudSavedOffset(forBundle: bundleID), bundleID: bundleID)
         translationHUD.scheduleAutoHide(after: SuggestionPolicy.Tuning.translationHUDVisibleSeconds)
     }
@@ -3193,7 +3220,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             // noms propres) disparus dans la sortie — zéro appel LLM.
             let missing = TermSurvivalGuard.missingTokens(source: text, translation: output)
             if let summary = TermSurvivalGuard.badgeSummary(for: missing) {
-                hud.setBadge("⚠︎ à vérifier : \(summary)")
+                hud.setBadge(tr(fr: "⚠︎ à vérifier : \(summary)", en: "⚠︎ to check: \(summary)"))
                 Log.info(.input, guardEvent)
             }
             switch applyMode {
@@ -3237,7 +3264,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 // `cancelTransformPreview`) : la sortie tardive est alors jetée.
                 guard self.pendingTransformation == transformation else { return }
                 self.transformOutput = output
-                hud.setHint("↹ Tab remplacer · esc annuler")
+                hud.setHint(tr(fr: "↹ Tab remplacer · esc annuler", en: "↹ Tab replace · esc cancel"))
                 Log.info(.input, doneEvent)
                 // PAS de replaceForCommit, PAS de record() (comptés au Tab), PAS
                 // d'auto-hide : le preview attend une décision explicite —
@@ -3258,8 +3285,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         runInstructCommit(
             sourceText: frenchText, fieldRect: fieldRect, bundleID: bundleID,
             hud: translationHUD,
-            header: "FR → \(target.code) · traduction…",
-            unavailableBody: "⚠︎ modèle de traduction indisponible",
+            header: tr(fr: "FR → \(target.code) · traduction…", en: "FR → \(target.code) · translation…"),
+            unavailableBody: tr(fr: "⚠︎ modèle de traduction indisponible", en: "⚠︎ translation model unavailable"),
             guardEvent: "translate_guard_flagged", doneEvent: "translate_commit_done",
             applyMode: .immediate(deleteChars: frenchText.count),
             record: { [ledger] in ledger.recordTranslation() },
@@ -3278,8 +3305,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         runInstructCommit(
             sourceText: frenchText, fieldRect: fieldRect, bundleID: bundleID,
             hud: translationHUD,
-            header: "FR ↺ relecture · \(tone.displayName)…",
-            unavailableBody: "⚠︎ modèle de relecture indisponible",
+            header: tr(fr: "FR ↺ relecture · \(tone.displayName)…", en: "FR ↺ rephrase · \(tone.displayName)…"),
+            unavailableBody: tr(fr: "⚠︎ modèle de relecture indisponible", en: "⚠︎ rephrasing model unavailable"),
             guardEvent: "reformulate_guard_flagged", doneEvent: "reformulate_commit_done",
             applyMode: .immediate(deleteChars: frenchText.count),
             record: { [ledger] in ledger.recordReformulation() },

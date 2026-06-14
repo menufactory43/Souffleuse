@@ -194,8 +194,8 @@ public enum InstructModel: String, Sendable, CaseIterable, Codable {
     /// Libellé Préférences.
     public var displayName: String {
         switch self {
-        case .gemma1b: return "Gemma 3 1B — léger, rapide"
-        case .qwen1_5b: return "Qwen2.5 1.5B — multilingue (DE/IT/JA)"
+        case .gemma1b: return tr(fr: "Gemma 3 1B — léger, rapide", en: "Gemma 3 1B — light, fast")
+        case .qwen1_5b: return tr(fr: "Qwen2.5 1.5B — multilingue (DE/IT/JA)", en: "Qwen2.5 1.5B — multilingual (DE/IT/JA)")
         }
     }
 

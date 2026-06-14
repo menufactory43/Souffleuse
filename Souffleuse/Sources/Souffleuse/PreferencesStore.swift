@@ -12,9 +12,9 @@ enum CompletionLength: String, CaseIterable, Sendable {
 
     var label: String {
         switch self {
-        case .short: return "Court (~1 mot)"
-        case .medium: return "Moyen (~2-4 mots)"
-        case .long: return "Long (phrase complète)"
+        case .short: return tr(fr: "Court (~1 mot)", en: "Short (~1 word)")
+        case .medium: return tr(fr: "Moyen (~2-4 mots)", en: "Medium (~2-4 words)")
+        case .long: return tr(fr: "Long (phrase complète)", en: "Long (full sentence)")
         }
     }
 
@@ -66,8 +66,8 @@ enum GhostColorStyle: String, CaseIterable, Sendable {
 
     var label: String {
         switch self {
-        case .gris: return "Gris neutre"
-        case .sangDeBoeuf: return "Sang-de-bœuf"
+        case .gris: return tr(fr: "Gris neutre", en: "Neutral grey")
+        case .sangDeBoeuf: return tr(fr: "Sang-de-bœuf", en: "Oxblood")
         }
     }
 }
@@ -79,57 +79,64 @@ struct ModelOption: Identifiable, Sendable, Hashable {
     let approxRamGB: Double
     let languages: String
 
-    static let catalogue: [ModelOption] = [
+    // Catalogue COMPUTED (et non `static let`) : les libellés `tr(...)` doivent
+    // refléter la langue d'interface COURANTE à chaque lecture. Un `static let`
+    // gèlerait les chaînes à leur première évaluation, empêchant le basculement
+    // live. Le coût (recréer ~7 structs) est négligeable (lecture de config, pas
+    // de hot-path par frappe).
+    static var catalogue: [ModelOption] {
+        [
         ModelOption(
             id: "mlx-community/gemma-3-1b-pt-4bit",
             displayName: "Gemma 3 1B base (4-bit)",
             approxDiskGB: 0.8,
             approxRamGB: 1.5,
-            languages: "FR · EN · multilingue (défaut — continuation pure)"
+            languages: tr(fr: "FR · EN · multilingue (défaut — continuation pure)", en: "FR · EN · multilingual (default — pure continuation)")
         ),
         ModelOption(
             id: "mlx-community/gemma-3-1b-pt-6bit",
             displayName: "Gemma 3 1B base (6-bit)",
             approxDiskGB: 1.0,
             approxRamGB: 1.7,
-            languages: "FR · EN · multilingue (sweet spot qualité/taille — équivalent MLX du Q5_K_M imatrix de Cotypist)"
+            languages: tr(fr: "FR · EN · multilingue (sweet spot qualité/taille — équivalent MLX du Q5_K_M imatrix de Cotypist)", en: "FR · EN · multilingual (quality/size sweet spot — MLX equivalent of Cotypist's Q5_K_M imatrix)")
         ),
         ModelOption(
             id: "mlx-community/gemma-3-1b-pt-8bit",
             displayName: "Gemma 3 1B base (8-bit)",
             approxDiskGB: 1.3,
             approxRamGB: 2.0,
-            languages: "FR · EN · multilingue (≈ qualité bf16, TTFT similaire au 4-bit)"
+            languages: tr(fr: "FR · EN · multilingue (≈ qualité bf16, TTFT similaire au 4-bit)", en: "FR · EN · multilingual (≈ bf16 quality, TTFT similar to 4-bit)")
         ),
         ModelOption(
             id: "mlx-community/gemma-3-1b-it-4bit",
             displayName: "Gemma 3 1B Instruct (4-bit)",
             approxDiskGB: 0.8,
             approxRamGB: 1.5,
-            languages: "Suit le system prompt mais tendance à reformuler (test only)"
+            languages: tr(fr: "Suit le system prompt mais tendance à reformuler (test only)", en: "Follows the system prompt but tends to rephrase (test only)")
         ),
         ModelOption(
             id: "mlx-community/gemma-3-1b-it-qat-4bit",
             displayName: "Gemma 3 1B Instruct QAT (4-bit)",
             approxDiskGB: 0.8,
             approxRamGB: 1.5,
-            languages: "Variante QAT de l'Instruct (test only)"
+            languages: tr(fr: "Variante QAT de l'Instruct (test only)", en: "QAT variant of the Instruct (test only)")
         ),
         ModelOption(
             id: "mlx-community/Qwen2.5-1.5B-Instruct-4bit",
             displayName: "Qwen 2.5 1.5B Instruct (4-bit)",
             approxDiskGB: 1.0,
             approxRamGB: 2.0,
-            languages: "FR · EN · multilingue (plus précis, plus gros)"
+            languages: tr(fr: "FR · EN · multilingue (plus précis, plus gros)", en: "FR · EN · multilingual (more accurate, larger)")
         ),
         ModelOption(
             id: "mlx-community/Qwen2.5-0.5B-4bit",
             displayName: "Qwen 2.5 0.5B base (4-bit)",
             approxDiskGB: 0.4,
             approxRamGB: 0.9,
-            languages: "EN · multilingue (le plus léger)"
+            languages: tr(fr: "EN · multilingue (le plus léger)", en: "EN · multilingual (lightest)")
         ),
-    ]
+        ]
+    }
 }
 
 /// Single source of truth for user preferences. AppDelegate observes mutations
@@ -144,6 +151,7 @@ final class PreferencesStore {
         static let captureEnabled = "captureEnabled"
         static let modelID = "modelID"
         static let ggufModelID = "ggufModelID"
+        static let uiLanguage = "uiLanguage"
         static let primaryLanguage = "primaryLanguage"
         static let ocrLangFR = "ocrLangFR"
         static let ocrLangEN = "ocrLangEN"
@@ -189,6 +197,15 @@ final class PreferencesStore {
     /// (The MLX `modelID` above is legacy and no longer user-driven.)
     var ggufModelID: String {
         didSet { UserDefaults.standard.set(ggufModelID, forKey: K.ggufModelID) }
+    }
+    /// Langue de l'interface (chrome de l'app : menus, fenêtres, HUD). `.system`
+    /// suit la langue du Mac au lancement ; `.fr`/`.en` forcent. Toute mutation
+    /// re-résout immédiatement le `Localizer` partagé ; les fenêtres déjà ouvertes
+    /// doivent être rouvertes pour refléter le changement (libellés capturés à la
+    /// construction des vues). N'affecte ni le ghost ni la relecture FR→FR.
+    var uiLanguage: UILanguage {
+        didSet { UserDefaults.standard.set(uiLanguage.rawValue, forKey: K.uiLanguage)
+            Localizer.shared.apply(uiLanguage) }
     }
     /// Langue d'écriture principale — demandée à l'onboarding, modifiable dans
     /// l'onglet Souffle. Sert UNIQUEMENT à conseiller la bonne voix (la petite
@@ -335,6 +352,13 @@ final class PreferencesStore {
 
     init() {
         let d = UserDefaults.standard
+        // EN TOUT PREMIER : fixe la langue d'interface avant le moindre accès aux
+        // catalogues `static let` (ModelOption/GGUFModelOption ci-dessous) dont les
+        // libellés `tr(...)` sont gelés à leur première lecture. Défaut `.system` :
+        // on suit la langue du Mac au 1ᵉʳ lancement, sans réglage.
+        let resolvedUILang = (d.string(forKey: K.uiLanguage).flatMap(UILanguage.init(rawValue:))) ?? .system
+        self.uiLanguage = resolvedUILang
+        Localizer.shared.apply(resolvedUILang)
         self.enabled = (d.object(forKey: K.enabled) as? Bool) ?? true
         self.enrichmentEnabled = (d.object(forKey: K.enrichmentEnabled) as? Bool) ?? true
         self.captureEnabled = (d.object(forKey: K.captureEnabled) as? Bool) ?? false

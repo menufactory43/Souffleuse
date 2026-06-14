@@ -1,4 +1,5 @@
 import AppKit
+import SouffleuseCore
 import SouffleuseCorpus
 import SouffleusePersonalization
 import SwiftUI
@@ -26,7 +27,7 @@ final class HistoryViewerWindow {
         let host = NSHostingController(rootView: root)
         host.view.frame = NSRect(x: 0, y: 0, width: 640, height: 480)
         let w = NSWindow(contentViewController: host)
-        w.title = "Vos données collectées"
+        w.title = tr(fr: "Vos données collectées", en: "Your collected data")
         w.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         w.setContentSize(NSSize(width: 640, height: 480))
         w.isReleasedWhenClosed = false
@@ -46,18 +47,18 @@ private struct HistoryViewerRoot: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Vos données collectées").font(.headline)
+                Text(tr(fr: "Vos données collectées", en: "Your collected data")).font(.headline)
                 Spacer()
-                Text("\(entries.count) entrées").font(.callout).foregroundStyle(.secondary)
+                Text(tr(fr: "\(entries.count) entrées", en: "\(entries.count) entries")).font(.callout).foregroundStyle(.secondary)
             }
             .padding(.horizontal)
             .padding(.top)
 
             if entries.isEmpty {
                 ContentUnavailableView(
-                    "Aucune donnée",
+                    tr(fr: "Aucune donnée", en: "No data"),
                     systemImage: "tray",
-                    description: Text(loaded ? "Active la collecte dans Préférences > Personnalisation et accepte quelques suggestions." : "Chargement…")
+                    description: Text(loaded ? tr(fr: "Active la collecte dans Préférences > Personnalisation et accepte quelques suggestions.", en: "Enable collection in Settings > Personalization and accept a few suggestions.") : tr(fr: "Chargement…", en: "Loading…"))
                 )
             } else {
                 List(Array(entries.enumerated()), id: \.offset) { _, e in
@@ -86,7 +87,7 @@ private struct HistoryViewerRoot: View {
             }
 
             HStack {
-                Text("Cette fenêtre désactive les captures d'écran système. Données chiffrées sur ton Mac, jamais envoyées.")
+                Text(tr(fr: "Cette fenêtre désactive les captures d'écran système. Données chiffrées sur ton Mac, jamais envoyées.", en: "This window disables system screenshots. Data is encrypted on your Mac, never sent anywhere."))
                     .font(.callout)
                     .foregroundStyle(.tertiary)
                 Spacer()

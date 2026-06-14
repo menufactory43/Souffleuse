@@ -219,7 +219,7 @@ private struct OnboardingRootView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     // Pourquoi l'utilisateur revoit cet écran : rassurer, pas culpabiliser.
-                    Text("macOS a peut-être désactivé une autorisation après une mise à jour. Réactivez-la et Souffleuse reprend là où elle en était.")
+                    Text(tr(fr: "macOS a peut-être désactivé une autorisation après une mise à jour. Réactivez-la et Souffleuse reprend là où elle en était.", en: "macOS may have turned off a permission after an update. Re-enable it and Souffleuse picks up right where it left off."))
                         .font(.system(size: 13, design: .serif))
                         .italic()
                         .foregroundStyle(.secondary)
@@ -241,14 +241,14 @@ private struct OnboardingRootView: View {
 
             HStack {
                 Spacer(minLength: 0)
-                Button("Continuer vers Souffleuse") {
+                Button(tr(fr: "Continuer vers Souffleuse", en: "Continue to Souffleuse")) {
                     onFinished()
                     close()
                 }
                 .buttonStyle(SangDeBoeufButtonStyle())
                 .controlSize(.large)
                 .disabled(!corePermissionsGranted)
-                .help(corePermissionsGranted ? "" : "Accordez Accessibilité et Surveillance des entrées pour continuer.")
+                .help(corePermissionsGranted ? "" : tr(fr: "Accordez Accessibilité et Surveillance des entrées pour continuer.", en: "Grant Accessibility and Input Monitoring to continue."))
             }
             .padding(.horizontal, 36)
             .padding(.top, 12)
@@ -350,7 +350,7 @@ private struct OnboardingRootView: View {
             // Pas de « Passer » ici : l'étape EST de débloquer les permissions.
             OnboardingFooter(
                 canContinue: corePermissionsGranted,
-                continueHint: "Accordez Accessibilité et Surveillance des entrées pour continuer.",
+                continueHint: tr(fr: "Accordez Accessibilité et Surveillance des entrées pour continuer.", en: "Grant Accessibility and Input Monitoring to continue."),
                 onBack: retreat,
                 onContinue: advance
             )
@@ -364,7 +364,7 @@ private struct OnboardingRootView: View {
         case .voice:
             OnboardingFooter(
                 canContinue: voiceCanContinue,
-                continueHint: "Téléchargez la voix (ou laissez-la se télécharger) pour continuer.",
+                continueHint: tr(fr: "Téléchargez la voix (ou laissez-la se télécharger) pour continuer.", en: "Download the voice (or let it finish downloading) to continue."),
                 onSkip: skipAction,
                 onBack: retreat,
                 onContinue: advance
@@ -446,13 +446,13 @@ private struct OnboardingProgressHeader: View {
                         .animation(.easeInOut(duration: 0.2), value: current)
                 }
             }
-            Text("Étape \(current) sur \(total)")
+            Text(tr(fr: "Étape \(current) sur \(total)", en: "Step \(current) of \(total)"))
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Étape \(current) sur \(total)")
+        .accessibilityLabel(tr(fr: "Étape \(current) sur \(total)", en: "Step \(current) of \(total)"))
     }
 }
 
@@ -468,20 +468,20 @@ private struct OnboardingFooter: View {
 
     var body: some View {
         HStack {
-            Button("Retour") { onBack() }
+            Button(tr(fr: "Retour", en: "Back")) { onBack() }
                 .controlSize(.large)
             Spacer(minLength: 0)
             if let onSkip {
                 // Échappatoire discrète : gris, sans cadre, pour ne pas concurrencer
                 // l'action primaire « Continuer ».
-                Button("Passer l'intro") { onSkip() }
+                Button(tr(fr: "Passer l'intro", en: "Skip intro")) { onSkip() }
                     .buttonStyle(.plain)
                     .controlSize(.large)
                     .foregroundStyle(.secondary)
-                    .help("Vous connaissez déjà Souffleuse — filez à la fin.")
+                    .help(tr(fr: "Vous connaissez déjà Souffleuse — filez à la fin.", en: "You already know Souffleuse — jump to the end."))
                 Spacer(minLength: 0)
             }
-            Button("Continuer") { onContinue() }
+            Button(tr(fr: "Continuer", en: "Continue")) { onContinue() }
                 .buttonStyle(SangDeBoeufButtonStyle())
                 .controlSize(.large)
                 .disabled(!canContinue)
@@ -521,11 +521,11 @@ private struct WelcomeStepView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
 
                 VStack(spacing: 10) {
-                    Text("Bienvenue dans Souffleuse")
+                    Text(tr(fr: "Bienvenue dans Souffleuse", en: "Welcome to Souffleuse"))
                         .font(.system(size: 22, weight: .semibold, design: .serif))
                         .multilineTextAlignment(.center)
 
-                    Text("Souffleuse vit dans votre barre de menus et souffle le mot juste là où vous écrivez. Quelques réglages, puis elle s'efface.")
+                    Text(tr(fr: "Souffleuse vit dans votre barre de menus et souffle le mot juste là où vous écrivez. Quelques réglages, puis elle s'efface.", en: "Souffleuse lives in your menu bar and whispers the right word wherever you write. A few settings, then it slips away."))
                         .font(.system(size: 13, design: .serif))
                         .italic()
                         .foregroundStyle(.secondary)
@@ -533,7 +533,7 @@ private struct WelcomeStepView: View {
                 }
             }
 
-            Button("Commencer") { onStart() }
+            Button(tr(fr: "Commencer", en: "Get started")) { onStart() }
                 .buttonStyle(SangDeBoeufButtonStyle())
                 .controlSize(.large)
         }
@@ -552,14 +552,14 @@ private struct PermissionsStepView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Ce qu'il faut autoriser")
+            Text(tr(fr: "Ce qu'il faut autoriser", en: "What to allow"))
                 .font(.system(size: 22, weight: .semibold, design: .serif))
 
             // Carte Accessibilité (requise)
             PermissionCard(
                 symbol: "accessibility",
-                title: "Accessibilité",
-                subtitle: "Lit le champ de saisie où vous êtes, et y écrit la suggestion que vous acceptez.",
+                title: tr(fr: "Accessibilité", en: "Accessibility"),
+                subtitle: tr(fr: "Lit le champ de saisie où vous êtes, et y écrit la suggestion que vous acceptez.", en: "Reads the text field you're in, and writes the suggestion you accept into it."),
                 isGranted: axGranted,
                 isOptional: false,
                 settingsURL: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!,
@@ -569,8 +569,8 @@ private struct PermissionsStepView: View {
             // Carte Surveillance des entrées (requise)
             PermissionCard(
                 symbol: "keyboard",
-                title: "Surveillance des entrées",
-                subtitle: "Capte Tab et Esc, et seulement eux, quand une suggestion est à l'écran.",
+                title: tr(fr: "Surveillance des entrées", en: "Input Monitoring"),
+                subtitle: tr(fr: "Capte Tab et Esc, et seulement eux, quand une suggestion est à l'écran.", en: "Catches Tab and Esc, and only those, when a suggestion is on screen."),
                 isGranted: imGranted,
                 isOptional: false,
                 settingsURL: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!,
@@ -580,8 +580,8 @@ private struct PermissionsStepView: View {
             // Carte Enregistrement de l'écran (optionnelle)
             PermissionCard(
                 symbol: "rectangle.on.rectangle",
-                title: "Enregistrement de l'écran",
-                subtitle: "Laissez Souffleuse lire ce qui est à l'écran pour des suggestions plus justes. Reste éteint tant que vous ne l'accordez pas.",
+                title: tr(fr: "Enregistrement de l'écran", en: "Screen Recording"),
+                subtitle: tr(fr: "Laissez Souffleuse lire ce qui est à l'écran pour des suggestions plus justes. Reste éteint tant que vous ne l'accordez pas.", en: "Let Souffleuse read what's on screen for more accurate suggestions. Stays off until you grant it."),
                 isGranted: screenGranted,
                 isOptional: true,
                 settingsURL: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!,
@@ -594,7 +594,7 @@ private struct PermissionsStepView: View {
                 Image(systemName: "lock.fill")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
-                Text("Les champs de mot de passe ne sont jamais lus, ni les apps bancaires.")
+                Text(tr(fr: "Les champs de mot de passe ne sont jamais lus, ni les apps bancaires.", en: "Password fields are never read, nor are banking apps."))
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -604,13 +604,13 @@ private struct PermissionsStepView: View {
             // Encart d'aide repliable
             DisclosureGroup(isExpanded: $helpExpanded) {
                 VStack(alignment: .leading, spacing: 8) {
-                    HelpBullet("Souffleuse n'apparaît pas dans la liste ? Cliquez « Autoriser » ci-dessus : elle s'ajoutera toute seule, puis activez l'interrupteur en face de son nom dans Réglages.")
-                    HelpBullet("macOS vous demande de relancer Souffleuse ? C'est normal après avoir autorisé. Relancez : vous reprendrez ici même, vos réglages sont gardés.")
-                    HelpBullet("Le bouton reste « à accorder » ? Vérifiez que l'interrupteur est bien ALLUMÉ (bleu) dans Réglages, pas juste coché.")
+                    HelpBullet(tr(fr: "Souffleuse n'apparaît pas dans la liste ? Cliquez « Autoriser » ci-dessus : elle s'ajoutera toute seule, puis activez l'interrupteur en face de son nom dans Réglages.", en: "Souffleuse isn't in the list? Click \"Allow\" above: it adds itself automatically, then flip the switch next to its name in Settings."))
+                    HelpBullet(tr(fr: "macOS vous demande de relancer Souffleuse ? C'est normal après avoir autorisé. Relancez : vous reprendrez ici même, vos réglages sont gardés.", en: "macOS asks you to relaunch Souffleuse? That's normal after granting access. Relaunch: you'll pick up right here, your settings are kept."))
+                    HelpBullet(tr(fr: "Le bouton reste « à accorder » ? Vérifiez que l'interrupteur est bien ALLUMÉ (bleu) dans Réglages, pas juste coché.", en: "Button still says \"to grant\"? Check the switch is actually ON (blue) in Settings, not just ticked."))
                 }
                 .padding(.top, 8)
             } label: {
-                Text("Un souci pour autoriser ?")
+                Text(tr(fr: "Un souci pour autoriser ?", en: "Trouble allowing access?"))
                     .font(.system(size: 13, weight: .medium))
             }
             .padding(.top, 4)
@@ -663,7 +663,7 @@ private struct PermissionCard: View {
                         Text(title)
                             .font(.system(size: 14, weight: .semibold))
                         if isOptional {
-                            Text("Optionnel")
+                            Text(tr(fr: "Optionnel", en: "Optional"))
                                 .font(.system(size: 11, weight: .medium))
                                 .padding(.horizontal, 7)
                                 .padding(.vertical, 2)
@@ -685,9 +685,9 @@ private struct PermissionCard: View {
             // Boutons d'action
             if !isGranted {
                 HStack(spacing: 8) {
-                    Button("Autoriser") { onAuthorize() }
+                    Button(tr(fr: "Autoriser", en: "Allow")) { onAuthorize() }
                         .controlSize(.small)
-                    Button("Ouvrir Réglages") {
+                    Button(tr(fr: "Ouvrir Réglages", en: "Open Settings")) {
                         NSWorkspace.shared.open(settingsURL)
                     }
                     .controlSize(.small)
@@ -706,16 +706,16 @@ private struct PermissionCard: View {
     @ViewBuilder
     private var statusBadge: some View {
         if isGranted {
-            Text("✓ accordée")
+            Text(tr(fr: "✓ accordée", en: "✓ granted"))
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
         } else if isOptional {
-            Text("optionnel")
+            Text(tr(fr: "optionnel", en: "optional"))
                 .font(.system(size: 12))
                 .foregroundStyle(.tertiary)
         } else {
             // Cue sang-de-bœuf pour l'action requise — jamais de ✗ rouge
-            Text("à accorder")
+            Text(tr(fr: "à accorder", en: "to grant"))
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(Color.sangDeBoeuf)
         }
@@ -731,10 +731,10 @@ private struct LanguageStepView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Votre langue")
+                Text(tr(fr: "Votre langue", en: "Your language"))
                     .font(.system(size: 22, weight: .semibold, design: .serif))
 
-                Text("Sert à vous conseiller la bonne voix : en français, une petite voix rapide suffit ; pour plusieurs langues, une voix multilingue. Modifiable à tout moment.")
+                Text(tr(fr: "Sert à vous conseiller la bonne voix : en français, une petite voix rapide suffit ; pour plusieurs langues, une voix multilingue. Modifiable à tout moment.", en: "Helps us recommend the right voice: in French, a small fast voice is enough; for several languages, a multilingual one. Changeable anytime."))
                     .font(.system(size: 13, design: .serif))
                     .italic()
                     .foregroundStyle(.secondary)
@@ -766,15 +766,15 @@ private struct VoiceStepView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("La voix")
+            Text(tr(fr: "La voix", en: "The voice"))
                 .font(.system(size: 22, weight: .semibold, design: .serif))
 
             // Carte voix du souffle (requise) — « voix », pas « modèle » : la
             // cible n'est pas geek, le mot technique n'apporte rien ici.
             if let ghost = ghostProvider() {
                 ModelCard(
-                    title: "La voix du souffle",
-                    subtitle: "Ce qui souffle vos suggestions. Une minute environ, 100 % sur votre Mac, rien ne sort.",
+                    title: tr(fr: "La voix du souffle", en: "The whisper voice"),
+                    subtitle: tr(fr: "Ce qui souffle vos suggestions. Une minute environ, 100 % sur votre Mac, rien ne sort.", en: "What whispers your suggestions. About a minute, 100% on your Mac, nothing leaves it."),
                     model: ghost,
                     manager: manager,
                     isOptional: false,
@@ -785,8 +785,8 @@ private struct VoiceStepView: View {
             // Carte traduction (optionnelle)
             if let translationModel = translation {
                 ModelCard(
-                    title: "La traduction",
-                    subtitle: "Pour la traduction et la relecture par ton. Téléchargé tout seul au premier usage si vous passez.",
+                    title: tr(fr: "La traduction", en: "Translation"),
+                    subtitle: tr(fr: "Pour la traduction et la relecture par ton. Téléchargé tout seul au premier usage si vous passez.", en: "For translation and tone rephrasing. Downloads itself on first use if you skip."),
                     model: translationModel,
                     manager: manager,
                     isOptional: true,
@@ -822,7 +822,7 @@ private struct ModelCard: View {
                         Text(title)
                             .font(.system(size: 14, weight: .semibold))
                         if isOptional {
-                            Text("Optionnel")
+                            Text(tr(fr: "Optionnel", en: "Optional"))
                                 .font(.system(size: 11, weight: .medium))
                                 .padding(.horizontal, 7)
                                 .padding(.vertical, 2)
@@ -854,25 +854,25 @@ private struct ModelCard: View {
     private var modelStatusBadge: some View {
         switch effectiveStatus {
         case .ready:
-            Text("✓ installé")
+            Text(tr(fr: "✓ installé", en: "✓ installed"))
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
         case .downloading(let p):
-            Text("\(Int(p * 100)) %")
+            Text(tr(fr: "\(Int(p * 100)) %", en: "\(Int(p * 100))%"))
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
         case .absent:
             if isOptional {
-                Text("optionnel")
+                Text(tr(fr: "optionnel", en: "optional"))
                     .font(.system(size: 12))
                     .foregroundStyle(.tertiary)
             } else {
-                Text("à télécharger")
+                Text(tr(fr: "à télécharger", en: "to download"))
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Color.sangDeBoeuf)
             }
         case .failed:
-            Text("échec")
+            Text(tr(fr: "échec", en: "failed"))
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(Color.sangDeBoeuf)
         }
@@ -888,12 +888,12 @@ private struct ModelCard: View {
                 .progressViewStyle(.linear)
                 .frame(maxWidth: 200)
         case .absent:
-            Button("Télécharger (\(model.approxSizeMB) Mo)") {
+            Button(tr(fr: "Télécharger (\(model.approxSizeMB) Mo)", en: "Download (\(model.approxSizeMB) MB)")) {
                 manager.download(model)
             }
             .controlSize(.small)
         case .failed:
-            Button("Réessayer") {
+            Button(tr(fr: "Réessayer", en: "Retry")) {
                 manager.download(model)
             }
             .controlSize(.small)
@@ -940,13 +940,13 @@ private struct HowItWorksStepView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
-            Text("Comment ça marche")
+            Text(tr(fr: "Comment ça marche", en: "How it works"))
                 .font(.system(size: 22, weight: .semibold, design: .serif))
 
             if canTryGhost() {
                 // Essai RÉEL : un vrai champ où le souffle apparaît au caret.
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Essayez : écrivez quelques mots. Quand le mot gris apparaît, appuyez sur Tab pour l'accepter.")
+                    Text(tr(fr: "Essayez : écrivez quelques mots. Quand le mot gris apparaît, appuyez sur Tab pour l'accepter.", en: "Try it: type a few words. When the gray word appears, press Tab to accept it."))
                         .font(.system(size: 13, design: .serif))
                         .italic()
                         .foregroundStyle(.secondary)
@@ -958,9 +958,9 @@ private struct HowItWorksStepView: View {
                 // Repli : la voix n'est pas encore prête → maquette statique
                 // (le souffle ne viendrait pas, autant ne pas frustrer).
                 HStack(spacing: 0) {
-                    Text("Bonjour, je vous ")
+                    Text(tr(fr: "Bonjour, je vous ", en: "Hello, I'm "))
                         .font(.system(size: 15))
-                    + Text("écris ce mot")
+                    + Text(tr(fr: "écris ce mot", en: "writing this word"))
                         .font(.system(size: 15))
                         .foregroundStyle(.tertiary)
                 }
@@ -973,9 +973,9 @@ private struct HowItWorksStepView: View {
             }
 
             VStack(alignment: .leading, spacing: 12) {
-                HowBullet("Le mot juste apparaît en gris : appuyez sur **Tab** pour l'accepter.")
-                HowBullet("Il ne vous va pas ? **Esc**, ou continuez d'écrire : il s'efface.")
-                HowBullet("Souffleuse reste dans la barre de menus, en haut à droite.")
+                HowBullet(LocalizedStringKey(tr(fr: "Le mot juste apparaît en gris : appuyez sur **Tab** pour l'accepter.", en: "The right word appears in gray: press **Tab** to accept it.")))
+                HowBullet(LocalizedStringKey(tr(fr: "Il ne vous va pas ? **Esc**, ou continuez d'écrire : il s'efface.", en: "Not right for you? **Esc**, or keep typing: it fades away.")))
+                HowBullet(LocalizedStringKey(tr(fr: "Souffleuse reste dans la barre de menus, en haut à droite.", en: "Souffleuse stays in the menu bar, top right.")))
             }
         }
     }
@@ -1007,9 +1007,9 @@ private struct CommandsStepView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Pour aller plus loin")
+                Text(tr(fr: "Pour aller plus loin", en: "Going further"))
                     .font(.system(size: 22, weight: .semibold, design: .serif))
-                Text("Au-delà du souffle, Souffleuse corrige, reformule, traduit et glisse des emojis — sans quitter votre clavier.")
+                Text(tr(fr: "Au-delà du souffle, Souffleuse corrige, reformule, traduit et glisse des emojis — sans quitter votre clavier.", en: "Beyond the whisper, Souffleuse fixes, rephrases, translates, and drops in emoji — without leaving your keyboard."))
                     .font(.system(size: 13, design: .serif))
                     .italic()
                     .foregroundStyle(.secondary)
@@ -1019,15 +1019,15 @@ private struct CommandsStepView: View {
             // Le couteau suisse texte : // au début d'un mot.
             CommandCard(
                 trigger: "//",
-                title: "Corriger, reformuler, traduire",
-                subtitle: "Tapez // au début d'un mot, puis un chiffre — ou décrivez ce que vous voulez."
+                title: tr(fr: "Corriger, reformuler, traduire", en: "Fix, rephrase, translate"),
+                subtitle: tr(fr: "Tapez // au début d'un mot, puis un chiffre — ou décrivez ce que vous voulez.", en: "Type // at the start of a word, then a number — or describe what you want.")
             ) {
                 VStack(alignment: .leading, spacing: 6) {
-                    SlashIntent(number: "1", label: "Corriger", detail: "orthographe et grammaire")
-                    SlashIntent(number: "2", label: "Raccourcir", detail: "plus court, même sens")
-                    SlashIntent(number: "3", label: "Reformuler", detail: "autrement, plus clair")
-                    SlashIntent(number: "4", label: "Changer le ton", detail: "selon l'app où vous écrivez")
-                    SlashIntent(number: "5", label: "Traduire", detail: "vers la langue de la conversation")
+                    SlashIntent(number: "1", label: tr(fr: "Corriger", en: "Fix"), detail: tr(fr: "orthographe et grammaire", en: "spelling and grammar"))
+                    SlashIntent(number: "2", label: tr(fr: "Raccourcir", en: "Shorten"), detail: tr(fr: "plus court, même sens", en: "shorter, same meaning"))
+                    SlashIntent(number: "3", label: tr(fr: "Reformuler", en: "Rephrase"), detail: tr(fr: "autrement, plus clair", en: "differently, clearer"))
+                    SlashIntent(number: "4", label: tr(fr: "Changer le ton", en: "Change the tone"), detail: tr(fr: "selon l'app où vous écrivez", en: "based on the app you're writing in"))
+                    SlashIntent(number: "5", label: tr(fr: "Traduire", en: "Translate"), detail: tr(fr: "vers la langue de la conversation", en: "into the conversation's language"))
                 }
                 .padding(.top, 2)
             }
@@ -1035,18 +1035,18 @@ private struct CommandsStepView: View {
             // Emojis : deux-points + nom.
             CommandCard(
                 trigger: ":",
-                title: "Glisser un emoji",
-                subtitle: "Tapez : puis un nom — :sourire: — ou commencez (:sou) et choisissez d'un chiffre."
+                title: tr(fr: "Glisser un emoji", en: "Drop in an emoji"),
+                subtitle: tr(fr: "Tapez : puis un nom — :sourire: — ou commencez (:sou) et choisissez d'un chiffre.", en: "Type : then a name — :sourire: — or start (:sou) and pick with a number.")
             )
 
             // Traduction au vol : raccourci global.
             CommandCard(
                 trigger: "⌥⌘T",
-                title: "Traduire le champ",
-                subtitle: "Traduit tout le champ d'un raccourci. ⌘⇧→ change la langue cible, ⌘↩ applique."
+                title: tr(fr: "Traduire le champ", en: "Translate the field"),
+                subtitle: tr(fr: "Traduit tout le champ d'un raccourci. ⌘⇧→ change la langue cible, ⌘↩ applique.", en: "Translates the whole field with one shortcut. ⌘⇧→ changes the target language, ⌘↩ applies.")
             )
 
-            Text("Tout est rappelé dans les Préférences — rien à mémoriser maintenant.")
+            Text(tr(fr: "Tout est rappelé dans les Préférences — rien à mémoriser maintenant.", en: "It's all listed again in Settings — nothing to memorize now."))
                 .font(.system(size: 12))
                 .foregroundStyle(.tertiary)
                 .padding(.top, 2)
@@ -1169,23 +1169,23 @@ private struct DoneStepView: View {
             .frame(width: 64, height: 64)
 
             VStack(spacing: 8) {
-                Text("C'est prêt")
+                Text(tr(fr: "C'est prêt", en: "All set"))
                     .font(.system(size: 22, weight: .semibold, design: .serif))
-                Text("Tab pour accepter, Esc pour ignorer.")
+                Text(tr(fr: "Tab pour accepter, Esc pour ignorer.", en: "Tab to accept, Esc to dismiss."))
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
             }
 
             // Rappel si téléchargement encore en cours
             if isDownloading {
-                Text("La voix finit de se télécharger en arrière-plan — vous pourrez écrire dès qu'elle est prête.")
+                Text(tr(fr: "La voix finit de se télécharger en arrière-plan — vous pourrez écrire dès qu'elle est prête.", en: "The voice is finishing its download in the background — you can write as soon as it's ready."))
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
 
             VStack(spacing: 4) {
-                Toggle("Lancer Souffleuse à l'ouverture du Mac", isOn: $launchAtLogin)
+                Toggle(tr(fr: "Lancer Souffleuse à l'ouverture du Mac", en: "Launch Souffleuse when the Mac starts up"), isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, on in
                         do {
                             if on { try SMAppService.mainApp.register() }
@@ -1197,7 +1197,7 @@ private struct DoneStepView: View {
                         }
                     }
                     .toggleStyle(.checkbox)
-                Text("Conseillé : la souffleuse ne souffle que si elle est ouverte.")
+                Text(tr(fr: "Conseillé : la souffleuse ne souffle que si elle est ouverte.", en: "Recommended: Souffleuse only whispers while it's open."))
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -1205,11 +1205,11 @@ private struct DoneStepView: View {
             }
             .frame(maxWidth: 300)
 
-            Button("Commencer à écrire") { onFinished() }
+            Button(tr(fr: "Commencer à écrire", en: "Start writing")) { onFinished() }
                 .buttonStyle(SangDeBoeufButtonStyle())
                 .controlSize(.large)
                 .disabled(!canFinish)
-                .help(canFinish ? "" : "Accordez Accessibilité et Surveillance des entrées pour commencer.")
+                .help(canFinish ? "" : tr(fr: "Accordez Accessibilité et Surveillance des entrées pour commencer.", en: "Grant Accessibility and Input Monitoring to start."))
         }
         .frame(maxWidth: 340)
     }
@@ -1275,7 +1275,7 @@ final class OnboardingWindow {
         )
         // Titre gardé pour Mission Control/VoiceOver, mais barre masquée : chaque
         // étape porte déjà son titre serif — la barre ne ferait que le doubler.
-        window.title = "Bienvenue dans Souffleuse"
+        window.title = tr(fr: "Bienvenue dans Souffleuse", en: "Welcome to Souffleuse")
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.isMovableByWindowBackground = true
