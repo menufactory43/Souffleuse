@@ -43,7 +43,7 @@ const CARD_FILL = 0.96;
 export const Screencast = () => {
     const f = useCurrentFrame();
     const {width: W, height: H} = useVideoConfig();
-    const square = Math.abs(W / H - 0.8) < 0.05; // 4:5
+    const portrait = H > W; // portrait (4:5 ET 9:16) → mise en page mobile ; sinon paysage 16:9
 
     // Push-in très léger sur toute la durée : un soupçon de vie, sans pan.
     const push = interpolate(f, [0, SCREENCAST_FRAMES], [1, 1.04], {easing: settle, ...clamp});
@@ -52,7 +52,7 @@ export const Screencast = () => {
     const scale = cardW / FOCUS.w; // remplit la largeur de carte avec la ligne
     const cardH = FOCUS.h * scale;
     const left = (W - cardW) / 2;
-    const top = square ? H * 0.42 - cardH / 2 : (H - cardH) / 2;
+    const top = portrait ? H * 0.42 - cardH / 2 : (H - cardH) / 2;
 
     const fade = sceneFade(f, SCREENCAST_FRAMES, 12, 16);
 
@@ -74,13 +74,13 @@ export const Screencast = () => {
             <p
                 style={{
                     position: 'absolute',
-                    top: square ? '14%' : 56,
+                    top: portrait ? '14%' : 56,
                     left: 0,
                     right: 0,
                     textAlign: 'center',
                     fontFamily: DISPLAY,
                     fontWeight: 700,
-                    fontSize: square ? 58 : 50,
+                    fontSize: portrait ? 58 : 50,
                     lineHeight: 1.15,
                     letterSpacing: '-0.01em',
                     color: C.ink,
@@ -90,7 +90,7 @@ export const Screencast = () => {
             >
                 Le texte en <span style={{color: C.rouge}}>rouge</span> est prédit.
                 <br />
-                <span style={{fontSize: square ? 40 : 34, color: C.inkSoft, fontWeight: 400, fontStyle: 'italic'}}>
+                <span style={{fontSize: portrait ? 40 : 34, color: C.inkSoft, fontWeight: 400, fontStyle: 'italic'}}>
                     Tab pour l'accepter — dans n'importe quelle app.
                 </span>
             </p>
@@ -129,7 +129,7 @@ export const Screencast = () => {
             <div
                 style={{
                     position: 'absolute',
-                    bottom: square ? '10%' : 56,
+                    bottom: portrait ? '10%' : 56,
                     left: 0,
                     right: 0,
                     textAlign: 'center',
@@ -139,7 +139,7 @@ export const Screencast = () => {
                     style={{
                         fontFamily: DISPLAY,
                         fontWeight: 700,
-                        fontSize: square ? 52 : 44,
+                        fontSize: portrait ? 52 : 44,
                         letterSpacing: '0.06em',
                         color: C.rouge,
                     }}
@@ -149,7 +149,7 @@ export const Screencast = () => {
                 <div
                     style={{
                         fontFamily: BODY,
-                        fontSize: square ? 32 : 28,
+                        fontSize: portrait ? 32 : 28,
                         color: C.inkFaint,
                         marginTop: 6,
                     }}

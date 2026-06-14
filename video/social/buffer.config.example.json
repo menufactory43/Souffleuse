@@ -1,0 +1,26 @@
+{
+  "_doc": "Copie ce fichier en buffer.config.json (gitignoré) puis remplis-le. Clé API : publish.buffer.com/settings/api. organizationId : `node scripts/publish.mjs --orgs`. channelId : `node scripts/publish.mjs --channels`.",
+  "apiKey": "REMPLACE_PAR_TA_CLE_BUFFER",
+  "organizationId": "REMPLACE (via --orgs)",
+  "link": "https://souffleuse.app",
+
+  "assets": {
+    "vertical": { "url": "https://souffleuse.app/promo/screencast-vertical.mp4" },
+    "wide": { "url": "https://souffleuse.app/promo/screencast-16x9.mp4" }
+  },
+
+  "captions": {
+    "default": "Au théâtre, la souffleuse glisse la réplique suivante à l'acteur, tout bas, sans monter sur scène. J'ai écrit ça pour ton Mac : le mot juste soufflé au curseur, dans n'importe quelle app. Tab pour le prendre. Tout reste en coulisses — rien ne quitte ta machine. {LINK}",
+    "twitter": "Au théâtre, la souffleuse glisse la réplique suivante à l'acteur, tout bas. J'ai écrit ça pour ton Mac : le mot juste soufflé au curseur, dans n'importe quelle app. 100% local, rien ne quitte ta machine.",
+    "youtube": "Souffleuse — le mot juste soufflé au curseur, dans n'importe quelle app macOS. 100% en local, rien ne quitte ta machine. Tab pour accepter, Esc pour ignorer. → {LINK}  #macOS #productivity",
+    "instagram": "La souffleuse de ton clavier : elle devine la suite et te la glisse au curseur. Tout en local, rien ne sort des coulisses. Sur Mac. → lien en bio  #macOS #écriture #productivité",
+    "tiktok": "Elle te souffle la suite de ta phrase, au creux du curseur. 100% en local, sur Mac. Un petit théâtre d'écriture. #macOS #productivity #ia"
+  },
+
+  "targets": [
+    { "platform": "twitter",   "channelId": "REMPLACE", "asset": "wide",     "enabled": true,  "mode": "addToQueue" },
+    { "platform": "youtube",   "channelId": "REMPLACE", "asset": "vertical", "enabled": true,  "mode": "addToQueue", "title": "Souffleuse — le mot juste, soufflé au curseur" },
+    { "platform": "instagram", "channelId": "REMPLACE", "asset": "vertical", "enabled": false, "mode": "addToQueue", "postType": "reel" },
+    { "platform": "tiktok",    "channelId": "REMPLACE", "asset": "vertical", "enabled": false, "mode": "addToQueue", "isAiGenerated": false }
+  ]
+}
