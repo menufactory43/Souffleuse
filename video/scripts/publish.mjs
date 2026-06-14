@@ -1,22 +1,24 @@
 #!/usr/bin/env node
 // ─────────────────────────────────────────────────────────────────────────────
-// publish.mjs — publie les vidéos Souffleuse sur X / TikTok / Instagram / YouTube
-// via l'API Blotato (un seul endpoint, plateformes déjà auditées côté Blotato).
+// publish.mjs — publie les vidéos Souffleuse sur X / YouTube / Instagram / TikTok
+// via l'API GraphQL de Buffer (https://developers.buffer.com).
 //
-// Flux Blotato (https://help.blotato.com/api) :
-//   1. POST /v2/media {url}      → enregistre un média depuis une URL PUBLIQUE,
-//                                   renvoie {url: "https://database.blotato.com/…"}.
-//   2. POST /v2/posts {post:{…}} → publie sur une plateforme (accountId + target).
+// Pourquoi Buffer : API « fully scripted » avec clé perso (Bearer), vidéo + threads,
+// plateformes déjà auditées côté Buffer (pas de TikTok API approval ni Meta App
+// Review à faire soi-même), et dispo dès le plan gratuit (1 clé, 3 canaux).
 //
-// ⚠️ Blotato récupère le média par URL : le .mp4 doit être accessible publiquement
-//    (R2/S3 public, asset de release GitHub, Bunny, ou hébergeur temporaire).
-//    Voir social/README.md pour les options. On met ces URLs dans assets.*.url.
+// Flux GraphQL :
+//   - query channels(organizationId)        → récupère les channelId par réseau.
+//   - mutation createPost(input)             → publie/met en file un post.
+//     assets = [{ video: { url } }]  ⚠️ la vidéo est fournie par URL PUBLIQUE
+//     (R2/S3 public, asset de release GitHub, Bunny…). Buffer la récupère.
 //
-// Pré-requis : social/blotato.config.json (copié depuis .example.json) rempli,
-//   et un compte Blotato avec X/TikTok/Instagram(Business)/YouTube connectés.
+// Pré-requis : social/buffer.config.json (copié depuis .example.json) rempli,
+//   clé API (publish.buffer.com/settings/api), canaux X/YouTube/IG/TikTok connectés.
 //
 // Usage :
-//   node scripts/publish.mjs --accounts          # liste les comptes → accountId
+//   node scripts/publish.mjs --orgs              # tente de lister tes organizationId
+//   node scripts/publish.mjs --channels          # liste les canaux → channelId
 //   node scripts/publish.mjs --dry               # affiche les requêtes sans poster
 //   node scripts/publish.mjs                      # publie toutes les cibles activées
 //   node scripts/publish.mjs --only=tiktok,twitter
@@ -26,8 +28,8 @@ import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const CFG_PATH = join(ROOT, 'social', 'blotato.config.json');
-const API = 'https://backend.blotato.com';
+const CFG_PATH = join(ROOT, 'social', 'buffer.config.json');
+const ENDPOINT = 'https://api.buffer.com'; // POST GraphQL
 
 const args = process.argv.slice(2);
 const has = (f) => args.includes(f);
@@ -41,86 +43,92 @@ const ONLY = (val('--only', '') || '').split(',').map((s) => s.trim()).filter(Bo
 if (!existsSync(CFG_PATH)) {
     console.error(
         `Config absente : ${CFG_PATH}\n` +
-            `→ copie social/blotato.config.example.json vers social/blotato.config.json puis remplis-la.`,
+            `→ copie social/buffer.config.example.json vers social/buffer.config.json puis remplis-la.`,
     );
     process.exit(1);
 }
 const cfg = JSON.parse(readFileSync(CFG_PATH, 'utf8'));
-const KEY = process.env.BLOTATO_API_KEY || cfg.apiKey;
+const KEY = process.env.BUFFER_API_KEY || cfg.apiKey;
 if (!KEY || String(KEY).startsWith('REMPLACE')) {
-    console.error('Clé API Blotato manquante (env BLOTATO_API_KEY ou cfg.apiKey).');
+    console.error('Clé API Buffer manquante (env BUFFER_API_KEY ou cfg.apiKey). → publish.buffer.com/settings/api');
     process.exit(1);
 }
-const headers = {'Content-Type': 'application/json', 'blotato-api-key': KEY};
+const headers = {'Content-Type': 'application/json', Authorization: `Bearer ${KEY}`};
 
-async function post(path, body) {
-    const res = await fetch(API + path, {method: 'POST', headers, body: JSON.stringify(body)});
+/** Exécute une requête GraphQL ; lève sur erreur réseau ou erreurs GraphQL. */
+async function gql(query, variables = {}) {
+    const res = await fetch(ENDPOINT, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({query, variables}),
+    });
     const txt = await res.text();
-    if (!res.ok) throw new Error(`${path} → HTTP ${res.status} ${txt}`);
-    return txt ? JSON.parse(txt) : {};
+    let json;
+    try {
+        json = txt ? JSON.parse(txt) : {};
+    } catch {
+        throw new Error(`HTTP ${res.status} (réponse non-JSON) : ${txt.slice(0, 300)}`);
+    }
+    if (!res.ok || json.errors) {
+        throw new Error(`GraphQL ${res.status} : ${JSON.stringify(json.errors || json).slice(0, 500)}`);
+    }
+    return json.data;
 }
 
-// --accounts : lister les comptes connectés (pour récupérer les accountId)
-if (has('--accounts')) {
-    const res = await fetch(API + '/v2/users/me/accounts', {headers});
-    const txt = await res.text();
-    if (!res.ok) {
-        console.error(`/v2/users/me/accounts → HTTP ${res.status} ${txt}`);
+// --orgs : tente de lister tes organisations (pour récupérer organizationId).
+// Schéma « account » non garanti côté doc → best-effort, on imprime le brut.
+if (has('--orgs')) {
+    try {
+        const data = await gql(`query { account { id organizations { id name } } }`);
+        console.log(JSON.stringify(data, null, 2));
+    } catch (e) {
+        console.error(
+            `Échec de la découverte auto : ${e.message}\n` +
+                `→ Récupère ton organizationId depuis l'URL du dashboard Buffer, ou la doc, et mets-le dans cfg.organizationId.`,
+        );
         process.exit(1);
     }
-    console.log(txt);
     process.exit(0);
 }
 
-// 1) Upload média par URL publique (mis en cache : un même fichier sert plusieurs plateformes)
-const mediaCache = new Map();
-async function uploadMedia(url) {
-    if (mediaCache.has(url)) return mediaCache.get(url);
-    if (DRY) {
-        mediaCache.set(url, url);
-        return url;
+// --channels : liste les canaux connectés (id, nom, service) pour cette organisation.
+if (has('--channels')) {
+    if (!cfg.organizationId || String(cfg.organizationId).startsWith('REMPLACE')) {
+        console.error('cfg.organizationId manquant — lance d\'abord `--orgs`.');
+        process.exit(1);
     }
-    const {url: hosted} = await post('/v2/media', {url});
-    mediaCache.set(url, hosted);
-    return hosted;
+    const data = await gql(
+        `query Channels($input: ChannelsInput!) {
+            channels(input: $input) { id name service }
+        }`,
+        {input: {organizationId: cfg.organizationId}},
+    );
+    for (const c of data.channels || []) {
+        console.log(`${c.service.padEnd(12)} ${c.id}   ${c.name}`);
+    }
+    process.exit(0);
 }
 
-// 2) Cible par plateforme (champs spécifiques)
-function buildTarget(platform, t) {
-    switch (platform) {
-        case 'tiktok':
-            return {
-                targetType: 'tiktok',
-                privacyLevel: t.privacyLevel || 'PUBLIC_TO_EVERYONE',
-                disabledComments: false,
-                disabledDuet: false,
-                disabledStitch: false,
-                isBrandedContent: false,
-                isYourBrand: false,
-                isAiGenerated: t.isAiGenerated ?? false,
-            };
-        case 'youtube':
-            return {
-                targetType: 'youtube',
-                title: t.title || 'Souffleuse',
-                privacyStatus: t.privacyStatus || 'public',
-                shouldNotifySubscribers: t.shouldNotifySubscribers ?? false,
-            };
-        case 'facebook':
-            return {targetType: 'facebook', pageId: t.pageId};
-        default:
-            return {targetType: platform}; // twitter, instagram, threads, bluesky, linkedin…
-    }
+// Métadonnées spécifiques par réseau (best-effort ; ajuste si le schéma diffère).
+function buildMetadata(t) {
+    if (t.platform === 'tiktok') return {tiktok: {isAiGenerated: t.isAiGenerated ?? false}};
+    if (t.platform === 'instagram') return {instagram: {postType: t.postType || 'reel'}};
+    if (t.platform === 'youtube') return {youtube: {title: t.title || 'Souffleuse'}};
+    return undefined;
 }
 
-// 3) Publier chaque cible activée
-const targets = cfg.targets.filter(
+// Publier chaque cible activée.
+const targets = (cfg.targets || []).filter(
     (t) => t.enabled !== false && (ONLY.length === 0 || ONLY.includes(t.platform)),
 );
 if (!targets.length) {
     console.error('Aucune cible activée (vérifie cfg.targets / --only).');
     process.exit(1);
 }
+
+const MUTATION = `mutation CreatePost($input: CreatePostInput!) {
+    createPost(input: $input) { id }
+}`;
 
 let ok = 0;
 let fail = 0;
@@ -131,31 +139,34 @@ for (const t of targets) {
         fail++;
         continue;
     }
-    if (!t.accountId || String(t.accountId).startsWith('REMPLACE')) {
-        console.error(`✗ ${t.platform}: accountId manquant (lance --accounts) — saute.`);
+    if (!t.channelId || String(t.channelId).startsWith('REMPLACE')) {
+        console.error(`✗ ${t.platform}: channelId manquant (lance --channels) — saute.`);
         fail++;
         continue;
     }
-    const text = (cfg.captions?.[t.platform] || cfg.captions?.default || '').replaceAll(
-        '{LINK}',
-        cfg.link || '',
-    );
+    const text = (cfg.captions?.[t.platform] || cfg.captions?.default || '').replaceAll('{LINK}', cfg.link || '');
+    const metadata = buildMetadata(t);
+    const input = {
+        channelId: String(t.channelId),
+        text,
+        assets: [{video: {url: asset.url, ...(asset.thumbnailUrl ? {thumbnailUrl: asset.thumbnailUrl} : {})}}],
+        // addToQueue = prochain créneau de ta file Buffer (tu peux relire avant qu'il parte).
+        // « shareNow » pour publier tout de suite ; ou mets t.dueAt (ISO) pour programmer.
+        mode: t.mode || 'addToQueue',
+        schedulingType: 'automatic',
+        ...(t.dueAt ? {dueAt: t.dueAt} : {}),
+        ...(metadata ? {metadata} : {}),
+        aiAssisted: false,
+        source: 'souffleuse-publish',
+    };
     try {
-        const media = await uploadMedia(asset.url);
-        const body = {
-            post: {
-                accountId: String(t.accountId),
-                content: {text, mediaUrls: [media], platform: t.platform},
-                target: buildTarget(t.platform, t),
-            },
-        };
         if (DRY) {
-            console.log(`— DRY ${t.platform} (asset ${t.asset}) —\n${JSON.stringify(body, null, 2)}\n`);
+            console.log(`— DRY ${t.platform} (asset ${t.asset}) —\n${JSON.stringify({input}, null, 2)}\n`);
             ok++;
             continue;
         }
-        const r = await post('/v2/posts', body);
-        console.log(`✓ ${t.platform} publié →`, r.id || r);
+        const data = await gql(MUTATION, {input});
+        console.log(`✓ ${t.platform} →`, data.createPost?.id || data);
         ok++;
     } catch (e) {
         console.error(`✗ ${t.platform}:`, e.message);

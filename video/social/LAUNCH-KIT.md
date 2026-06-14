@@ -1,4 +1,4 @@
-# Souffleuse — Kit de lancement (prêt à copier)
+ # Souffleuse — Kit de lancement (prêt à copier)
 
 Site : https://souffleuse.app · Asset clé : `video/out/screencast-16x9.mp4`
 Règle d'or : **honnête, ton maker indé, zéro hype, pas de claim non prouvé.**
@@ -20,6 +20,70 @@ Règle d'or : **honnête, ton maker indé, zéro hype, pas de claim non prouvé.
 ---
 
 ## 𝕏 — Thread de lancement (FR)
+
+### Version DA — recommandée (la voix de la marque encadre la clarté)
+
+> **T1 — hook** · [MÉDIA : screencast 16:9 en **vidéo native**]
+```
+Au théâtre, la souffleuse glisse la réplique suivante à l'acteur. Tout bas. Sans jamais monter sur scène.
+
+J'ai écrit la même chose pour ton Mac : le mot juste soufflé au curseur, dans n'importe quelle app. Tab pour le prendre.
+
+Et tout reste en coulisses — rien ne quitte ta machine. Démo 👇
+```
+
+> **T2 — comment ça marche**
+```
+Le geste est simple :
+
+Tu tapes. Au curseur, la suite de ta phrase s'esquisse — le "ghost text".
+
+→ Tab pour la prendre, mot à mot
+→ Esc pour l'ignorer
+
+Partout : Mail, Notes, Messages, Slack, ton navigateur. Via l'accessibilité de macOS.
+```
+
+> **T3 — la démo**
+```
+Dans la démo, je tape un message.
+
+Le texte en couleur, c'est elle qui devine la suite — souffleuse, jamais bavarde. Généré sur ta machine.
+
+Tab → c'est pris, mot à mot. Pas de pop-up, pas de copier-coller. Juste le texte qui se pose sous tes doigts.
+```
+
+> **T4 — vie privée**
+```
+Ce à quoi je tenais le plus : rien ne sort des coulisses.
+
+Le modèle (Gemma 3 1B, llama.cpp/Metal) tourne sur ta machine. Zéro appel réseau pendant que tu écris.
+
+Pas une IA cloud. Pas de dictée qui expédie ta voix ailleurs. Ton texte reste à toi.
+```
+
+> **T5 — personnalisation + bonus**
+```
+Et elle apprend TA main.
+
+Elle relit ton historique de frappe (chiffré, en local) pour épouser ton style — pas une voix passe-partout.
+
+En coulisses aussi : traduction dans un HUD, relecture par ton, et un carnet qui compte les frappes épargnées.
+```
+
+> **T6 — CTA** · ⚠️ lien ici OU en 1er commentaire (voir conseils)
+```
+Gratuite, signée Apple. macOS 14+ · FR & EN · v0.8.1.
+
+Si tu écris toute la journée sur ton Mac, laisse-la te souffler le mot juste :
+→ https://souffleuse.app
+
+(Codée en solo. Aucun serveur n'a été dérangé pendant cette représentation.)
+```
+
+---
+
+### Version pragmatique (A/B — public très direct, ou repli si la voix DA paraît trop)
 
 > **T1 — hook** · [MÉDIA : screencast 16:9 en **vidéo native**]
 ```
