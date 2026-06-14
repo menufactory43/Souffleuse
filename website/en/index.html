@@ -38,6 +38,24 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,500;0,6..96,700;0,6..96,900;1,6..96,500&family=Spectral:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet" />
 
+<!-- Structured data: helps Google present Souffleuse as an app (rich result). -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Souffleuse",
+  "applicationCategory": "ProductivityApplication",
+  "operatingSystem": "macOS 14 (Sonoma) or later, Apple Silicon",
+  "softwareVersion": "0.9.0",
+  "url": "https://souffleuse.app/en/",
+  "downloadUrl": "https://souffleuse.app/Souffleuse.dmg",
+  "inLanguage": "en",
+  "image": "https://souffleuse.app/og.png",
+  "description": "A fully private writing aide for Mac. Souffleuse slips the right word under your cursor when you hesitate, then fades away. Your text never leaves your Mac.",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" }
+}
+</script>
+
 <style>
   :root {
     --paper:        #f3ead9;
@@ -276,6 +294,23 @@
     color: var(--ink-faint);
   }
   .cta-note b { font-style: normal; font-weight: 700; color: var(--rouge); }
+
+  /* The house count: how many have already taken their ticket. Populated by
+     /api/stats. Hidden until the total clears a threshold worth showing (a
+     small number would do the opposite of social proof). */
+  .tally {
+    margin: 1.4rem 0 0;
+    font-size: 0.92rem;
+    color: var(--ink-soft);
+    letter-spacing: 0.02em;
+  }
+  .tally b { font-weight: 700; color: var(--rouge); font-variant-numeric: tabular-nums; }
+  .tally::before {
+    content: "❧";
+    color: var(--rouge);
+    margin-right: 0.5rem;
+    opacity: 0.6;
+  }
 
   /* ---------- Hero ---------- */
 
@@ -887,6 +922,20 @@
     font-size: 1.08rem;
   }
   .coulisses__lede b { color: var(--paper); font-style: italic; font-weight: 400; }
+  .coulisses__more {
+    margin: clamp(2rem, 4vw, 2.8rem) auto 0;
+    text-align: center;
+    font-size: 0.96rem;
+  }
+  .coulisses__more a {
+    color: var(--paper-edge);
+    text-decoration: none;
+    border-bottom: 1px solid rgba(227,213,186,0.4);
+    padding-bottom: 2px;
+    transition: color .2s ease, border-color .2s ease;
+  }
+  .coulisses__more a:hover,
+  .coulisses__more a:focus-visible { color: var(--paper); border-bottom-color: var(--paper); }
   .vows {
     list-style: none;
     margin: 0;
@@ -1031,6 +1080,27 @@
   .foot__tag { font-style: italic; color: var(--ink-faint); font-size: 0.9rem; }
   .foot__meta { font-size: 0.84rem; color: var(--ink-faint); }
   .foot__sysreq { font-style: italic; }
+
+  /* The programme's cross-references: privacy, questions, and where to write
+     to the prompter. Quiet, in printer's small capitals. */
+  .foot__links {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.5rem 1.6rem;
+    margin-top: 1.8rem;
+    font-size: 0.86rem;
+    letter-spacing: 0.02em;
+  }
+  .foot__links a {
+    color: var(--ink-soft);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    padding-bottom: 1px;
+    transition: color .2s ease, border-color .2s ease;
+  }
+  .foot__links a:hover,
+  .foot__links a:focus-visible { color: var(--rouge); border-bottom-color: var(--rouge); }
 
   /* Colophon : l'« achevé d'imprimer » des livres composés au plomb. La page
      se referme comme un objet imprimé, et la promesse privacy y passe une
@@ -1906,6 +1976,9 @@
           <p>What it learns of your style is locked on your Mac. You alone can read it.</p>
         </li>
       </ul>
+      <p class="coulisses__more">
+        <a href="/en/privacy.html">Read the promise in full: what stays, what never leaves →</a>
+      </p>
     </div>
   </section>
 
@@ -2028,6 +2101,9 @@
         Download for Mac
       </a>
       <p class="cta-note"><b>Free during the beta.</b> macOS Sonoma (14) or newer · Apple Silicon.</p>
+      <p class="tally" id="tally" hidden aria-live="polite">
+        Already on <b id="tally-n"></b> Macs during the beta.
+      </p>
     </div>
   </section>
 
@@ -2044,6 +2120,11 @@
       <p class="foot__sysreq" style="margin:0;">For Mac · macOS Sonoma (14) or newer · Apple M1 chips and later</p>
     </div>
   </div>
+  <nav class="shell foot__links" aria-label="Useful links">
+    <a href="/en/privacy.html">Privacy &amp; security</a>
+    <a href="#faq">Questions</a>
+    <a href="mailto:souffleuse.app@gmail.com">Write to the prompter</a>
+  </nav>
   <div class="shell colophon">
     <p>
       Set in Bodoni Moda &amp; Spectral, on cream paper.<br />
@@ -2794,6 +2875,27 @@
   document.addEventListener("visibilitychange", function () {
     document.title = document.hidden ? "Waiting in the wings… · Souffleuse" : titre;
   });
+})();
+</script>
+<script>
+// The house count. We query /api/stats (read-only, aggregates). We only show
+// the number above a threshold: a small count would do the opposite of the
+// social proof we're after. Any failure is silent — the counter is a bonus,
+// never a blocker.
+(function () {
+  "use strict";
+  var SEUIL = 25; // below this, we'd rather stay quiet.
+  var el = document.getElementById("tally");
+  var n  = document.getElementById("tally-n");
+  if (!el || !n || !window.fetch) return;
+  fetch("/api/stats", { headers: { Accept: "application/json" } })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) {
+      if (!d || typeof d.total !== "number" || d.total < SEUIL) return;
+      n.textContent = d.total.toLocaleString("en-US");
+      el.hidden = false;
+    })
+    .catch(function () { /* KV unavailable: stay silent. */ });
 })();
 </script>
 </body>
