@@ -1,6 +1,6 @@
 # Swift Package Manager
 .build/
-Package.resolved
+# Package.resolved est versionné (builds reproductibles — voir CLAUDE.md)
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
 DerivedData/
