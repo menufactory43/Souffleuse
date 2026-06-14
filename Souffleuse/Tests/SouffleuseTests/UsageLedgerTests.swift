@@ -87,6 +87,112 @@ struct UsageLedgerTests {
         #expect(ledger.today.ghostsAccepted == 2)
     }
 
+    // MARK: - Cumuls (30 jours & lifetime)
+
+    @Test("totals somme tous les compteurs d'un ensemble de jours")
+    func totalsSumsEveryCounter() {
+        let days = [
+            DayStat(date: "2026-06-01", keystrokesSaved: 10, ghostsAccepted: 1, translations: 2, reformulations: 0, transformations: 1),
+            DayStat(date: "2026-06-02", keystrokesSaved: 5, ghostsAccepted: 1, translations: 0, reformulations: 3, transformations: 0),
+        ]
+        let t = UsageLedger.totals(days)
+        #expect(t.keystrokesSaved == 15)
+        #expect(t.ghostsAccepted == 2)
+        #expect(t.translations == 2)
+        #expect(t.reformulations == 3)
+        #expect(t.transformations == 1)
+        // Ensemble vide → tout à zéro (vue 30 jours d'un carnet neuf).
+        let empty = UsageLedger.totals([])
+        #expect(empty.keystrokesSaved == 0 && empty.ghostsAccepted == 0)
+    }
+
+    @MainActor
+    @Test("un accept alimente le cumul lifetime et il survit au rechargement")
+    func recordAcceptedUpdatesLifetime() throws {
+        let url = Self.tmp()
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let ledger = UsageLedger(fileURL: url)
+        ledger.recordAccepted(charsSaved: 12)
+        ledger.recordAccepted(charsSaved: 8)
+        #expect(ledger.lifetimeKeystrokesSaved == 20)
+        #expect(ledger.lifetimeGhostsAccepted == 2)
+
+        let reloaded = UsageLedger(fileURL: url)
+        #expect(reloaded.lifetimeKeystrokesSaved == 20)
+        #expect(reloaded.lifetimeGhostsAccepted == 2)
+    }
+
+    @MainActor
+    @Test("les cumuls 30 jours incluent l'activité du jour ; lifetime == 30j à un seul jour")
+    func last30AndLifetimeAgreeOnSingleDay() throws {
+        let url = Self.tmp()
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let ledger = UsageLedger(fileURL: url)
+        ledger.recordAccepted(charsSaved: 40)
+        #expect(ledger.last30KeystrokesSaved == 40)
+        #expect(ledger.last30GhostsAccepted == 1)
+        // Un seul jour d'historique → le cumul lifetime et la fenêtre 30j coïncident.
+        #expect(ledger.estimatedLifetimeSecondsSaved == ledger.estimatedSecondsSavedLast30)
+    }
+
+    @MainActor
+    @Test("migration v1→v2 : le cumul lifetime est amorcé depuis l'historique retenu")
+    func migrationBackfillsLifetimeFromDays() throws {
+        let url = Self.tmp()
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        // Fichier v1 : pas de champs lifetime, juste `days`.
+        let days: [[String: Any]] = [
+            ["date": "2026-06-01", "keystrokesSaved": 30, "ghostsAccepted": 3],
+            ["date": "2026-06-02", "keystrokesSaved": 12, "ghostsAccepted": 1],
+        ]
+        try Self.writeJSON(["version": 1, "cadenceTypedChars": 0, "cadenceTypedMillis": 0, "days": days], to: url)
+
+        let ledger = UsageLedger(fileURL: url)
+        #expect(ledger.lifetimeKeystrokesSaved == 42)   // 30 + 12
+        #expect(ledger.lifetimeGhostsAccepted == 4)     // 3 + 1
+    }
+
+    @MainActor
+    @Test("le cumul lifetime ne se fait pas tronquer par le cap des 30 jours")
+    func lifetimeSurvivesDayCap() throws {
+        let url = Self.tmp()
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        // 40 jours d'historique (> cap) + un lifetime DÉJÀ supérieur à leur somme.
+        let cal = Calendar(identifier: .gregorian)
+        var d = cal.date(from: DateComponents(year: 2026, month: 4, day: 1))!
+        var days: [[String: Any]] = []
+        for _ in 0..<40 {
+            days.append(["date": UsageLedger.dateKey(d), "keystrokesSaved": 10, "ghostsAccepted": 1])
+            d = cal.date(byAdding: .day, value: 1, to: d)!
+        }
+        try Self.writeJSON([
+            "version": 2, "cadenceTypedChars": 0, "cadenceTypedMillis": 0,
+            "lifetimeKeystrokesSaved": 5000, "lifetimeGhostsAccepted": 500, "days": days,
+        ], to: url)
+
+        let ledger = UsageLedger(fileURL: url)
+        #expect(ledger.days.count == T.ledgerHistoryDays)        // `days` plafonné
+        // La somme des jours retenus vaut 30×10 = 300 / 30 ghosts ; le lifetime
+        // doit rester intact (preuve qu'il ne dérive PAS de `days`).
+        #expect(ledger.lifetimeKeystrokesSaved == 5000)
+        #expect(ledger.lifetimeGhostsAccepted == 500)
+    }
+
+    // MARK: - Helpers persistance
+
+    private static func tmp() -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("ledger-\(UUID().uuidString).json")
+    }
+
+    private static func writeJSON(_ obj: [String: Any], to url: URL) throws {
+        let data = try JSONSerialization.data(withJSONObject: obj)
+        try data.write(to: url)
+    }
+
     @MainActor
     @Test("frappes, cadence et actes survivent à un rechargement")
     func persistenceRoundTrip() throws {
