@@ -8,15 +8,11 @@ let package = Package(
     ],
     products: [
         .executable(name: "Souffleuse", targets: ["Souffleuse"]),
-        .executable(name: "SouffleuseBench", targets: ["SouffleuseBench"]),
-        .executable(name: "SouffleuseCoherence", targets: ["SouffleuseCoherence"]),
-        .executable(name: "SouffleuseEnrichmentBench", targets: ["SouffleuseEnrichmentBench"]),
         .executable(name: "SouffleuseOCRAblation", targets: ["SouffleuseOCRAblation"]),
         .executable(name: "SouffleuseMidwordEval", targets: ["SouffleuseMidwordEval"]),
         .executable(name: "SouffleuseIntentionEval", targets: ["SouffleuseIntentionEval"]),
         .executable(name: "SouffleuseBeamGhostProbe", targets: ["SouffleuseBeamGhostProbe"]),
         .executable(name: "SouffleuseParityEval", targets: ["SouffleuseParityEval"]),
-        .executable(name: "SouffleuseMaxWordsEval", targets: ["SouffleuseMaxWordsEval"]),
         .executable(name: "SouffleuseAfterSpaceEval", targets: ["SouffleuseAfterSpaceEval"]),
         .executable(name: "SouffleuseRecallEval", targets: ["SouffleuseRecallEval"]),
         .executable(name: "SouffleuseInjectionEval", targets: ["SouffleuseInjectionEval"]),
@@ -40,7 +36,6 @@ let package = Package(
         .library(name: "SouffleuseLlama", targets: ["SouffleuseLlama"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/ml-explore/mlx-swift-examples", from: "2.0.0"),
         // Canal de MAJ beta (manuel-only) — ne doit pas fuiter dans les library
         // targets ni les tests (sinon `import Sparkle` dans la suite).
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
@@ -160,17 +155,6 @@ let package = Package(
             dependencies: ["SouffleuseTyping"]
         ),
         .executableTarget(
-            name: "SouffleuseTTFTBench",
-            dependencies: [
-                "SouffleuseLlama",
-                // A/B contention : phase « container MLX résident » — reproduit le
-                // chargement best-effort de ModelRuntime.loadModel pour mesurer son
-                // impact sur le TTFT/tok/s du moteur llama (GGUF Metal).
-                .product(name: "MLXLLM", package: "mlx-swift-examples"),
-                .product(name: "MLXLMCommon", package: "mlx-swift-examples"),
-            ]
-        ),
-        .executableTarget(
             name: "SouffleuseBoundaryAblation",
             dependencies: [
                 "SouffleuseLlama",
@@ -237,28 +221,6 @@ let package = Package(
             ]
         ),
         .executableTarget(
-            name: "SouffleuseBench",
-            dependencies: [
-                .product(name: "MLXLLM", package: "mlx-swift-examples"),
-                .product(name: "MLXLMCommon", package: "mlx-swift-examples"),
-            ]
-        ),
-        .executableTarget(
-            name: "SouffleuseCoherence",
-            dependencies: [
-                "SouffleusePrompt",
-                .product(name: "MLXLLM", package: "mlx-swift-examples"),
-                .product(name: "MLXLMCommon", package: "mlx-swift-examples"),
-            ]
-        ),
-        .executableTarget(
-            name: "SouffleuseEnrichmentBench",
-            dependencies: [
-                .product(name: "MLXLLM", package: "mlx-swift-examples"),
-                .product(name: "MLXLMCommon", package: "mlx-swift-examples"),
-            ]
-        ),
-        .executableTarget(
             name: "SouffleuseOCRAblation",
             dependencies: [
                 "SouffleuseCore",
@@ -284,27 +246,6 @@ let package = Package(
             name: "SouffleuseRecallEval",
             dependencies: [
                 "SouffleuseCore",
-                "SouffleusePersonalization",
-                "SouffleuseCorpus",
-                "SouffleuseTyping",
-            ]
-        ),
-        // JETABLE (dev-only) — harnais d'eval perso consolidé, à supprimer après usage.
-        .executableTarget(
-            name: "SouffleuseCorpusEval",
-            dependencies: [
-                "SouffleuseCore",
-                "SouffleusePersonalization",
-                "SouffleuseCorpus",
-                "SouffleuseTyping",
-            ]
-        ),
-        .executableTarget(
-            name: "SouffleusePersonalizationEval",
-            dependencies: [
-                "SouffleuseCore",
-                "SouffleuseLlama",
-                "SouffleuseLog",
                 "SouffleusePersonalization",
                 "SouffleuseCorpus",
                 "SouffleuseTyping",
@@ -380,14 +321,6 @@ let package = Package(
             ]
         ),
         .executableTarget(
-            name: "SouffleuseBeamEval",
-            dependencies: [
-                "SouffleuseCore",
-                "SouffleuseLlama",
-                "SouffleuseLog",
-            ]
-        ),
-        .executableTarget(
             name: "SouffleuseBeamAmortizedEval",
             dependencies: [
                 "SouffleuseCore",
@@ -420,13 +353,6 @@ let package = Package(
                 "SouffleuseLlama",
                 "SouffleuseLog",
                 "SouffleuseTyping",
-            ]
-        ),
-        .executableTarget(
-            name: "SouffleuseMaxWordsEval",
-            dependencies: [
-                "SouffleuseCore",
-                "SouffleuseLlama",
             ]
         ),
         .executableTarget(
