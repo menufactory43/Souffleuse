@@ -210,10 +210,11 @@ let package = Package(
                 "SouffleuseCorpus",
                 "SouffleusePrompt",
                 "SouffleuseLlama",
-                // MLXLLM/MLXLMCommon retirés du target app (11/06/2026) : le
-                // container MLX n'est plus chargé (870 MB / ~10 s mesurés pour
-                // zéro consommateur — bench TTFTBench). La dépendance SPM reste
-                // dans le package pour les probes dev (SouffleuseBench, etc.).
+                // MLXLLM/MLXLMCommon retirés du target app (11/06/2026) puis du
+                // package entier (14/06/2026) : le container MLX n'était plus chargé
+                // (870 MB / ~10 s mesurés pour zéro consommateur) et les seules cibles
+                // qui linkaient encore `mlx-swift-examples` (benches dev) ont été
+                // supprimées — la dépendance SPM n'existe plus.
                 // Sparkle 2 : canal MAJ beta manuel-only. Livré en binary XCFramework
                 // via SPM → uniquement sur l'exécutable (jamais dans un library target
                 // ni le testTarget, pour éviter `import Sparkle` dans la suite ~640 tests).
