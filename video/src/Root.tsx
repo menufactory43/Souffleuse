@@ -4,7 +4,7 @@ import {Rafale, RAFALE_FRAMES} from './scenes/Rafale';
 import {Cafe, CAFE_FRAMES} from './scenes/Cafe';
 import {CafeVertical} from './scenes/CafeVertical';
 import {DefiTab, DEFITAB_FRAMES} from './scenes/DefiTab';
-import {Screencast, SCREENCAST_FRAMES} from './scenes/Screencast';
+import {Screencast, SCREENCAST_FRAMES, SCREENCAST_SQUARE_FRAMES} from './scenes/Screencast';
 
 /**
  * Racine Remotion : trois compositions.
@@ -81,6 +81,14 @@ export const RemotionRoot = () => {
                 fps={30}
                 width={1920}
                 height={1080}
+            />
+            <Composition
+                id="ScreencastSquare"
+                component={Screencast}
+                durationInFrames={SCREENCAST_SQUARE_FRAMES}
+                fps={30}
+                width={1080}
+                height={1350}
             />
         </>
     );
