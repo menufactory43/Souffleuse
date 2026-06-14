@@ -11,12 +11,12 @@ public enum Tone: String, Sendable, Codable, CaseIterable {
     case neutral
     case formal
 
-    /// Libellé Préférences (FR).
+    /// Libellé Préférences (suit la langue d'interface).
     public var displayName: String {
         switch self {
-        case .casual: return "Décontracté"
-        case .neutral: return "Neutre"
-        case .formal: return "Formel"
+        case .casual: return tr(fr: "Décontracté", en: "Casual")
+        case .neutral: return tr(fr: "Neutre", en: "Neutral")
+        case .formal: return tr(fr: "Formel", en: "Formal")
         }
     }
 

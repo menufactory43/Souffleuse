@@ -69,7 +69,7 @@ final class PreferencesWindow {
         host.view.frame = NSRect(x: 0, y: 0, width: 800, height: 560)
 
         let w = NSWindow(contentViewController: host)
-        w.title = "Préférences"
+        w.title = tr(fr: "Préférences", en: "Settings")
         w.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         w.setContentSize(NSSize(width: 800, height: 560))
         w.isReleasedWhenClosed = false
@@ -91,15 +91,15 @@ private enum PrefSection: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .souffle: return "Souffle"
-        case .apparence: return "Apparence"
-        case .traduction: return "Traduction"
-        case .ton: return "Ton"
-        case .personnalisation: return "Personnalisation"
-        case .contexte: return "Contexte"
-        case .parApp: return "Par application"
-        case .reglages: return "Réglages"
-        case .aPropos: return "À propos"
+        case .souffle: return tr(fr: "Souffle", en: "Whisper")
+        case .apparence: return tr(fr: "Apparence", en: "Appearance")
+        case .traduction: return tr(fr: "Traduction", en: "Translation")
+        case .ton: return tr(fr: "Ton", en: "Tone")
+        case .personnalisation: return tr(fr: "Personnalisation", en: "Personalization")
+        case .contexte: return tr(fr: "Contexte", en: "Context")
+        case .parApp: return tr(fr: "Par application", en: "Per app")
+        case .reglages: return tr(fr: "Réglages", en: "General")
+        case .aPropos: return tr(fr: "À propos", en: "About")
         }
     }
 
@@ -158,6 +158,13 @@ private struct PreferencesRoot: View {
         // La voix unique : un seul accent sang-de-bœuf irrigue toggles, sliders,
         // radios et boutons de toute la fenêtre, à la place du bleu système.
         .tint(.sangDeBoeuf)
+        // Changement de langue d'interface = LIVE : `tr(...)` lit le Localizer au
+        // moment du rendu, mais n'est pas observable par SwiftUI. On force la
+        // reconstruction de tout l'arbre quand `uiLanguage` change → tous les
+        // libellés (y compris les cartes modèle dont le catalogue se recalcule)
+        // basculent immédiatement, sans rouvrir la fenêtre. La sélection de
+        // section retombe sur la première : acceptable pour une action aussi rare.
+        .id(store.uiLanguage)
     }
 
     @ViewBuilder
@@ -233,8 +240,8 @@ private struct AppearanceTab: View {
             Section {
                 SettingRow(
                     systemImage: "circle.lefthalf.filled",
-                    title: "Opacité du souffle",
-                    subtitle: "À quel point la suggestion reste discrète avant que vous l'acceptiez. Au plus bas elle s'efface presque ; au plus haut elle s'affirme."
+                    title: tr(fr: "Opacité du souffle", en: "Whisper opacity"),
+                    subtitle: tr(fr: "À quel point la suggestion reste discrète avant que vous l'acceptiez. Au plus bas elle s'efface presque ; au plus haut elle s'affirme.", en: "How discreet the suggestion stays before you accept it. At the lowest it nearly fades away; at the highest it stands out.")
                 ) {
                     HStack(spacing: 8) {
                         Slider(value: $store.ghostOpacity, in: 0.2...1.0)
@@ -247,8 +254,8 @@ private struct AppearanceTab: View {
                 }
                 SettingRow(
                     systemImage: "paintpalette",
-                    title: "Couleur du souffle",
-                    subtitle: "Le gris se lit comme « pas encore validé », un murmure. Le sang-de-bœuf affirme la voix de Souffleuse — au risque de ressembler à du texte déjà posé."
+                    title: tr(fr: "Couleur du souffle", en: "Whisper color"),
+                    subtitle: tr(fr: "Le gris se lit comme « pas encore validé », un murmure. Le sang-de-bœuf affirme la voix de Souffleuse — au risque de ressembler à du texte déjà posé.", en: "Grey reads as “not yet accepted,” a murmur. Oxblood asserts Souffleuse’s voice — at the risk of looking like text already typed.")
                 ) {
                     Picker("", selection: $store.ghostColorStyle) {
                         ForEach(GhostColorStyle.allCases, id: \.self) { style in
@@ -260,9 +267,9 @@ private struct AppearanceTab: View {
                     .fixedSize()
                 }
             } header: {
-                Text("Le souffle").font(.headline)
+                Text(tr(fr: "Le souffle", en: "The whisper")).font(.headline)
             } footer: {
-                Text("Pour voir l'effet : ouvrez un champ de texte, tapez quelques mots, et le souffle change en direct.")
+                Text(tr(fr: "Pour voir l'effet : ouvrez un champ de texte, tapez quelques mots, et le souffle change en direct.", en: "To see the effect: open a text field, type a few words, and the whisper changes live."))
                     .font(.callout).foregroundStyle(.secondary)
             }
         }
@@ -283,24 +290,24 @@ private struct PersonalizationTab: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Apprendre votre plume", isOn: $store.personalizationEnabled)
+                Toggle(tr(fr: "Apprendre votre plume", en: "Learn your style"), isOn: $store.personalizationEnabled)
                     .onChange(of: store.personalizationEnabled) { _, on in
                         if on && !store.personalizationOnboardingShown {
                             showingOnboarding = true
                         }
                     }
-                Text("Gardé sous clé sur votre Mac. Rien ne part en ligne.")
+                Text(tr(fr: "Gardé sous clé sur votre Mac. Rien ne part en ligne.", en: "Kept under lock on your Mac. Nothing goes online."))
                     .font(.callout).foregroundStyle(.secondary)
-                Toggle("Retenir aussi ce que vous écrivez sans accepter", isOn: $store.storeWithoutAccepted)
+                Toggle(tr(fr: "Retenir aussi ce que vous écrivez sans accepter", en: "Also remember what you write without accepting"), isOn: $store.storeWithoutAccepted)
                     .disabled(!store.personalizationEnabled)
-                Text("Souffleuse apprend alors de tout ce que vous tapez, pas seulement des suggestions retenues — un meilleur reflet de votre style. À éviter si vous écrivez des choses sensibles.")
+                Text(tr(fr: "Souffleuse apprend alors de tout ce que vous tapez, pas seulement des suggestions retenues — un meilleur reflet de votre style. À éviter si vous écrivez des choses sensibles.", en: "Souffleuse then learns from everything you type, not just the suggestions you keep — a better reflection of your style. Avoid this if you write sensitive things."))
                     .font(.callout).foregroundStyle(.secondary)
-                Toggle("Teinter les suggestions de vos mots et de votre ton", isOn: $store.personalizedSuggestionsEnabled)
+                Toggle(tr(fr: "Teinter les suggestions de vos mots et de votre ton", en: "Tint suggestions with your words and tone"), isOn: $store.personalizedSuggestionsEnabled)
                     .disabled(!store.personalizationEnabled)
-                Text("Le ghost reprend vos tournures récurrentes (un mot revenu dans plusieurs phrases est reproposé au bon endroit) et s'inspire de votre prose récente du même registre, application par application — le ton se règle dans l'onglet Ton.")
+                Text(tr(fr: "Le ghost reprend vos tournures récurrentes (un mot revenu dans plusieurs phrases est reproposé au bon endroit) et s'inspire de votre prose récente du même registre, application par application — le ton se règle dans l'onglet Ton.", en: "The whisper picks up your recurring phrasings (a word seen across several sentences is offered again in the right place) and draws on your recent prose in the same register, app by app — tone is set in the Tone tab."))
                     .font(.callout).foregroundStyle(.secondary)
             } header: {
-                Text("Apprendre de vous").font(.headline)
+                Text(tr(fr: "Apprendre de vous", en: "Learn from you")).font(.headline)
             }
 
             Section {
@@ -309,71 +316,71 @@ private struct PersonalizationTab: View {
                         value: $store.personalizationStrength,
                         in: 0.0...2.0
                     ) {
-                        Text("Influence")
+                        Text(tr(fr: "Influence", en: "Influence"))
                     } minimumValueLabel: {
-                        Text("Off").font(.callout).foregroundStyle(.secondary)
+                        Text(tr(fr: "Off", en: "Off")).font(.callout).foregroundStyle(.secondary)
                     } maximumValueLabel: {
-                        Text("Max").font(.callout).foregroundStyle(.secondary)
+                        Text(tr(fr: "Max", en: "Max")).font(.callout).foregroundStyle(.secondary)
                     }
                     .disabled(!store.personalizationEnabled)
-                    Text(String(format: "Valeur : %.2f", store.personalizationStrength))
+                    Text(String(format: tr(fr: "Valeur : %.2f", en: "Value: %.2f"), store.personalizationStrength))
                         .font(.callout).foregroundStyle(.secondary)
                 }
             } header: {
-                Text("Son influence").font(.headline)
+                Text(tr(fr: "Son influence", en: "Its influence")).font(.headline)
             } footer: {
-                Text("À zéro, Souffleuse observe sans rien changer. Au maximum, vos tournures familières reviennent fortement.")
+                Text(tr(fr: "À zéro, Souffleuse observe sans rien changer. Au maximum, vos tournures familières reviennent fortement.", en: "At zero, Souffleuse observes without changing anything. At the maximum, your familiar phrasings come back strongly."))
                     .font(.callout).foregroundStyle(.secondary)
             }
 
             Section {
                 HStack {
-                    Text("Phrases retenues")
+                    Text(tr(fr: "Phrases retenues", en: "Phrases remembered"))
                     Spacer()
                     Text("\(entryCount)").font(.system(.body, design: .monospaced))
                 }
                 HStack {
-                    Text("Place occupée")
+                    Text(tr(fr: "Place occupée", en: "Space used"))
                     Spacer()
                     Text(formatBytes(sizeBytes)).font(.system(.body, design: .monospaced))
                 }
                 HStack {
-                    Button("Consulter…", action: onOpenViewer)
+                    Button(tr(fr: "Consulter…", en: "View…"), action: onOpenViewer)
                     Spacer()
                     Button(role: .destructive) {
                         showingClearConfirm = true
                     } label: {
-                        Text("Tout supprimer…")
+                        Text(tr(fr: "Tout supprimer…", en: "Delete all…"))
                     }
                 }
             } header: {
-                Text("Mes données").font(.headline)
+                Text(tr(fr: "Mes données", en: "My data")).font(.headline)
             }
         }
         .formStyle(.grouped)
         .task(id: store.personalizationEnabled) { await refresh() }
-        .alert("Apprendre votre plume ?", isPresented: $showingOnboarding) {
-            Button("Annuler", role: .cancel) {
+        .alert(tr(fr: "Apprendre votre plume ?", en: "Learn your style?"), isPresented: $showingOnboarding) {
+            Button(tr(fr: "Annuler", en: "Cancel"), role: .cancel) {
                 store.personalizationEnabled = false
             }
-            Button("Apprendre") {
+            Button(tr(fr: "Apprendre", en: "Learn")) {
                 store.personalizationOnboardingShown = true
             }
         } message: {
-            Text("Souffleuse retiendra les phrases que vous acceptez, pour mieux vous souffler la suite. Tout est gardé sous clé sur votre Mac, jamais envoyé en ligne. Vous pouvez tout consulter ou tout effacer ici, à tout moment.")
+            Text(tr(fr: "Souffleuse retiendra les phrases que vous acceptez, pour mieux vous souffler la suite. Tout est gardé sous clé sur votre Mac, jamais envoyé en ligne. Vous pouvez tout consulter ou tout effacer ici, à tout moment.", en: "Souffleuse will remember the phrases you accept, to better whisper what comes next. Everything is kept under lock on your Mac, never sent online. You can view or erase it all here, at any time."))
         }
         .confirmationDialog(
-            "Effacer tout ce que Souffleuse a retenu ?",
+            tr(fr: "Effacer tout ce que Souffleuse a retenu ?", en: "Erase everything Souffleuse has remembered?"),
             isPresented: $showingClearConfirm,
             titleVisibility: .visible
         ) {
-            Button("Tout effacer", role: .destructive) {
+            Button(tr(fr: "Tout effacer", en: "Erase everything"), role: .destructive) {
                 onClearAll()
                 Task { await refresh() }
             }
-            Button("Annuler", role: .cancel) {}
+            Button(tr(fr: "Annuler", en: "Cancel"), role: .cancel) {}
         } message: {
-            Text("Tout ce que Souffleuse a retenu disparaît pour de bon. Sans retour.")
+            Text(tr(fr: "Tout ce que Souffleuse a retenu disparaît pour de bon. Sans retour.", en: "Everything Souffleuse has remembered is gone for good. No way back."))
         }
     }
 
@@ -383,9 +390,10 @@ private struct PersonalizationTab: View {
     }
 
     private func formatBytes(_ b: Int) -> String {
-        if b < 1024 { return "\(b) o" }
+        if b < 1024 { return "\(b)" + tr(fr: " o", en: " B") }
         let kb = Double(b) / 1024.0
-        return String(format: "%.1f Ko", kb)
+        let sep = tr(fr: ",", en: ".")
+        return String(format: "%.1f", kb).replacingOccurrences(of: ".", with: sep) + tr(fr: " Ko", en: " KB")
     }
 }
 
@@ -401,58 +409,58 @@ private struct SouffleTab: View {
             GhostModelSection(store: store)
 
             Section {
-                Picker("Longueur du souffle", selection: $store.completionLength) {
+                Picker(tr(fr: "Longueur du souffle", en: "Whisper length"), selection: $store.completionLength) {
                     ForEach(CompletionLength.allCases, id: \.self) { l in
                         Text(l.label).tag(l)
                     }
                 }
             } header: {
-                Text("La longueur").font(.headline)
+                Text(tr(fr: "La longueur", en: "Length")).font(.headline)
             } footer: {
-                Text("Plus c'est long, plus ça peut s'éloigner de votre intention. Tab accepte ; Esc écarte.")
+                Text(tr(fr: "Plus c'est long, plus ça peut s'éloigner de votre intention. Tab accepte ; Esc écarte.", en: "The longer it is, the more it can drift from what you meant. Tab accepts; Esc dismisses."))
                     .font(.callout).foregroundStyle(.secondary)
             }
 
             Section {
-                Toggle("Souffler au milieu d'une ligne", isOn: $store.midLineGhostEnabled)
-                Text("Quand le curseur est posé au milieu d'un texte, le souffle apparaît dans une petite bulle sous la ligne (au lieu de rester muet). Tab l'insère à l'endroit du curseur.")
+                Toggle(tr(fr: "Souffler au milieu d'une ligne", en: "Whisper mid-line"), isOn: $store.midLineGhostEnabled)
+                Text(tr(fr: "Quand le curseur est posé au milieu d'un texte, le souffle apparaît dans une petite bulle sous la ligne (au lieu de rester muet). Tab l'insère à l'endroit du curseur.", en: "When the cursor sits in the middle of some text, the whisper appears in a small bubble below the line (instead of staying silent). Tab inserts it at the cursor."))
                     .font(.callout).foregroundStyle(.secondary)
             } header: {
-                Text("Au milieu d'une ligne").font(.headline)
+                Text(tr(fr: "Au milieu d'une ligne", en: "Mid-line")).font(.headline)
             }
 
             Section {
-                Toggle("Accepter mot à mot", isOn: $store.partialAcceptEnabled)
-                Text("Tab pose un mot ; le reste attend en gris. Tab encore pour le suivant, Esc pour tout écarter.")
+                Toggle(tr(fr: "Accepter mot à mot", en: "Accept word by word"), isOn: $store.partialAcceptEnabled)
+                Text(tr(fr: "Tab pose un mot ; le reste attend en gris. Tab encore pour le suivant, Esc pour tout écarter.", en: "Tab places one word; the rest waits in grey. Tab again for the next, Esc to dismiss it all."))
                     .font(.callout).foregroundStyle(.secondary)
-                Toggle("Ajouter l'espace après le mot", isOn: $store.trailingSpaceOnPartial)
+                Toggle(tr(fr: "Ajouter l'espace après le mot", en: "Add a space after the word"), isOn: $store.trailingSpaceOnPartial)
                     .disabled(!store.partialAcceptEnabled)
-                Text("Le curseur se place, prêt pour la suite. Désactivez pour gérer l'espace vous-même.")
+                Text(tr(fr: "Le curseur se place, prêt pour la suite. Désactivez pour gérer l'espace vous-même.", en: "The cursor lands ready for what comes next. Turn off to handle the space yourself."))
                     .font(.callout).foregroundStyle(.secondary)
-                Picker("Tout accepter avec", selection: $store.acceptAllKey) {
+                Picker(tr(fr: "Tout accepter avec", en: "Accept all with"), selection: $store.acceptAllKey) {
                     ForEach(AcceptAllKey.allCases, id: \.self) { key in
                         Text(key.label).tag(key)
                     }
                 }
-                Text("Une touche qui pose toute la réplique d'un coup — active seulement quand un souffle s'affiche, donc elle ne gêne jamais votre frappe.")
+                Text(tr(fr: "Une touche qui pose toute la réplique d'un coup — active seulement quand un souffle s'affiche, donc elle ne gêne jamais votre frappe.", en: "A key that places the whole line at once — active only when a whisper is shown, so it never gets in the way of your typing."))
                     .font(.callout).foregroundStyle(.secondary)
             } header: {
-                Text("Accepter le souffle").font(.headline)
+                Text(tr(fr: "Accepter le souffle", en: "Accepting the whisper")).font(.headline)
             }
 
             Section {
-                Toggle("Corriger les coquilles", isOn: $store.typoEnabled)
-                Toggle("Se taire quand une coquille est en cours", isOn: $store.hideOnTypo)
+                Toggle(tr(fr: "Corriger les coquilles", en: "Fix typos"), isOn: $store.typoEnabled)
+                Toggle(tr(fr: "Se taire quand une coquille est en cours", en: "Stay quiet while a typo is in progress"), isOn: $store.hideOnTypo)
                     .disabled(!store.typoEnabled)
-                Toggle("Emoji — panneau dès « \u{003A} » et expansion (\u{003A}smile\u{003A} → 😄)", isOn: $store.emojiEnabled)
-                Toggle("Transformations « // » au clavier", isOn: $store.slashTransformEnabled)
-                Text("Tapez « // » après votre texte : corriger, raccourcir, reformuler, ton, traduire — ou une consigne libre validée par Entrée. Le résultat s'affiche d'abord en aperçu ; Tab remplace, Esc annule.")
+                Toggle(tr(fr: "Emoji — panneau dès « \u{003A} » et expansion (\u{003A}smile\u{003A} → 😄)", en: "Emoji — panel on “\u{003A}” and expansion (\u{003A}smile\u{003A} → 😄)"), isOn: $store.emojiEnabled)
+                Toggle(tr(fr: "Transformations « // » au clavier", en: "“//” keyboard transforms"), isOn: $store.slashTransformEnabled)
+                Text(tr(fr: "Tapez « // » après votre texte : corriger, raccourcir, reformuler, ton, traduire — ou une consigne libre validée par Entrée. Le résultat s'affiche d'abord en aperçu ; Tab remplace, Esc annule.", en: "Type “//” after your text: fix, shorten, rephrase, tone, translate — or a free instruction confirmed with Return. The result shows first as a preview; Tab replaces, Esc cancels."))
                     .font(.callout).foregroundStyle(.secondary)
-                Toggle("Corriger le texte avant de souffler", isOn: $store.prefixCorrectionEnabled)
+                Toggle(tr(fr: "Corriger le texte avant de souffler", en: "Fix the text before whispering"), isOn: $store.prefixCorrectionEnabled)
             } header: {
-                Text("Corrections").font(.headline)
+                Text(tr(fr: "Corrections", en: "Corrections")).font(.headline)
             } footer: {
-                Text("Mis en sommeil dans Xcode, VS Code, JetBrains et les terminaux. La correction ne change que ce que voit Souffleuse — votre texte reste tel que tapé.")
+                Text(tr(fr: "Mis en sommeil dans Xcode, VS Code, JetBrains et les terminaux. La correction ne change que ce que voit Souffleuse — votre texte reste tel que tapé.", en: "Put to sleep in Xcode, VS Code, JetBrains and terminals. Correction only changes what Souffleuse sees — your text stays exactly as typed."))
                     .font(.callout).foregroundStyle(.secondary)
             }
         }
@@ -470,12 +478,12 @@ private struct TranslationTab: View {
     var body: some View {
         Form {
             Section {
-                Picker("Modèle de traduction", selection: $store.translationModel) {
+                Picker(tr(fr: "Modèle de traduction", en: "Translation model"), selection: $store.translationModel) {
                     ForEach(InstructModel.allCases, id: \.self) { m in
                         Text(m.displayName).tag(m)
                     }
                 }
-                Text("Le moteur de traduction (le souffle français reste inchangé). Qwen 2.5 1.5B traduit mieux l'allemand/italien/japonais mais tient ~1 Go de RAM en plus pendant l'usage — libéré après inactivité. Le changement prend effet à la prochaine traduction.")
+                Text(tr(fr: "Le moteur de traduction (le souffle français reste inchangé). Qwen 2.5 1.5B traduit mieux l'allemand/italien/japonais mais tient ~1 Go de RAM en plus pendant l'usage — libéré après inactivité. Le changement prend effet à la prochaine traduction.", en: "The translation engine (the French whisper is unchanged). Qwen 2.5 1.5B translates German/Italian/Japanese better but holds ~1 GB more RAM while in use — released after idle. The change takes effect on the next translation."))
                     .font(.callout).foregroundStyle(.secondary)
                 ForEach(InstructModel.allCases, id: \.self) { m in
                     HStack(spacing: 8) {
@@ -488,35 +496,35 @@ private struct TranslationTab: View {
                     store.modelDownloads.refresh(InstructModel.allCases.map(\.downloadable))
                 }
             } header: {
-                Text("Le moteur").font(.headline)
+                Text(tr(fr: "Le moteur", en: "The engine")).font(.headline)
             }
 
             Section {
-                Picker("Traduire à tout moment avec", selection: $store.translateHotKey) {
+                Picker(tr(fr: "Traduire à tout moment avec", en: "Translate anytime with"), selection: $store.translateHotKey) {
                     ForEach(TranslateHotKeyOption.allCases, id: \.self) { key in
                         Text(key.label).tag(key)
                     }
                 }
-                Text("Raccourci global : traduit le champ en cours d'écriture, même sans souffle affiché. Une frappe, d'une main.")
+                Text(tr(fr: "Raccourci global : traduit le champ en cours d'écriture, même sans souffle affiché. Une frappe, d'une main.", en: "Global shortcut: translates the field you’re writing in, even with no whisper shown. One keystroke, one hand."))
                     .font(.callout).foregroundStyle(.secondary)
-                Picker("Valider la traduction avec", selection: $store.commitKey) {
+                Picker(tr(fr: "Valider la traduction avec", en: "Commit the translation with"), selection: $store.commitKey) {
                     ForEach(CommitKey.allCases, id: \.self) { key in
                         Text(key.label).tag(key)
                     }
                 }
-                Text("La touche qui envoie la réplique dans la langue cible — active quand un souffle ou le panneau de traduction est affiché.")
+                Text(tr(fr: "La touche qui envoie la réplique dans la langue cible — active quand un souffle ou le panneau de traduction est affiché.", en: "The key that sends the line in the target language — active when a whisper or the translation panel is shown."))
                     .font(.callout).foregroundStyle(.secondary)
-                Picker("Changer la langue cible avec", selection: $store.targetCycleKey) {
+                Picker(tr(fr: "Changer la langue cible avec", en: "Change the target language with"), selection: $store.targetCycleKey) {
                     ForEach(TargetCycleKey.allCases, id: \.self) { key in
                         Text(key.label).tag(key)
                     }
                 }
-                Text("Fait défiler la langue cible (EN → ES → DE → IT → Auto) pour la conversation en cours — mémorisée par conversation. Auto suit la langue de votre interlocuteur quand la capture d'écran est active.")
+                Text(tr(fr: "Fait défiler la langue cible (EN → ES → DE → IT → Auto) pour la conversation en cours — mémorisée par conversation. Auto suit la langue de votre interlocuteur quand la capture d'écran est active.", en: "Cycles the target language (EN → ES → DE → IT → Auto) for the current conversation — remembered per conversation. Auto follows your correspondent’s language when screen capture is on."))
                     .font(.callout).foregroundStyle(.secondary)
             } header: {
-                Text("Raccourcis").font(.headline)
+                Text(tr(fr: "Raccourcis", en: "Shortcuts")).font(.headline)
             } footer: {
-                Text("La traduction est en cours de construction.")
+                Text(tr(fr: "La traduction est en cours de construction.", en: "Translation is still being built."))
                     .font(.callout).foregroundStyle(.tertiary)
             }
         }
@@ -543,7 +551,7 @@ private struct GhostModelSection: View {
         Section {
             // La langue d'écriture : pilote la voix conseillée (la petite Gemma en
             // français, une voix multilingue sinon). Demandée aussi à l'onboarding.
-            Picker("J'écris…", selection: $store.primaryLanguage) {
+            Picker(tr(fr: "J'écris…", en: "I write in…"), selection: $store.primaryLanguage) {
                 ForEach(PrimaryLanguage.allCases, id: \.self) { lang in
                     Text(lang.label).tag(lang)
                 }
@@ -555,7 +563,7 @@ private struct GhostModelSection: View {
                 Image(systemName: "memorychip")
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
-                Text("Ton Mac : \(ramGB) Go de mémoire")
+                Text(tr(fr: "Ton Mac : \(ramGB) Go de mémoire", en: "Your Mac: \(ramGB) GB of memory"))
                     .font(.callout).foregroundStyle(.secondary)
             }
 
@@ -573,13 +581,13 @@ private struct GhostModelSection: View {
                 store.modelDownloads.refresh(GGUFModelOption.catalogue.compactMap(\.downloadable))
             }
         } header: {
-            Text("Qui vous souffle").font(.headline)
+            Text(tr(fr: "Qui vous souffle", en: "Who whispers to you")).font(.headline)
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Une seule voix souffle à la fois. Choisis « Conseillé » si tu hésites.")
-                Text("Les voix « beaucoup de langues » sont meilleures hors français (allemand, italien, espagnol, chinois, japonais…).")
+                Text(tr(fr: "Une seule voix souffle à la fois. Choisis « Conseillé » si tu hésites.", en: "Only one voice whispers at a time. Pick “Recommended” if you’re unsure."))
+                Text(tr(fr: "Les voix « beaucoup de langues » sont meilleures hors français (allemand, italien, espagnol, chinois, japonais…).", en: "The “many languages” voices are better outside French (German, Italian, Spanish, Chinese, Japanese…)."))
                     .foregroundStyle(.secondary)
-                Text("Une voix absente se télécharge d'un clic ; tout reste sur ton Mac.")
+                Text(tr(fr: "Une voix absente se télécharge d'un clic ; tout reste sur ton Mac.", en: "A missing voice downloads in one click; everything stays on your Mac."))
                     .foregroundStyle(.secondary)
             }
             .font(.callout)
@@ -607,7 +615,7 @@ private struct GhostModelCard: View {
             }
             .buttonStyle(.plain)
             .disabled(!model.isResolvable)
-            .accessibilityLabel("Choisir \(model.displayName)")
+            .accessibilityLabel(tr(fr: "Choisir \(model.displayName)", en: "Choose \(model.displayName)"))
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
@@ -622,13 +630,13 @@ private struct GhostModelCard: View {
                     .fixedSize(horizontal: false, vertical: true)
                 // Étiquettes : vitesse · langues.
                 HStack(spacing: 6) {
-                    chip(model.speedLabel, systemImage: "speedometer", tint: speedTint)
+                    chip(model.speedDisplay, systemImage: "speedometer", tint: speedTint)
                     chip(model.languagesLabel, systemImage: "globe", tint: .secondary)
                 }
                 // Mémoire + verdict pour ce Mac.
                 HStack(spacing: 4) {
                     Image(systemName: "memorychip").font(.caption2).foregroundStyle(.secondary)
-                    Text("~\(formatGo(model.approxRAMMB)) en mémoire")
+                    Text(tr(fr: "~\(formatGo(model.approxRAMMB)) en mémoire", en: "~\(formatGo(model.approxRAMMB)) in memory"))
                         .font(.caption).foregroundStyle(.secondary)
                     Text("·").font(.caption).foregroundStyle(.secondary)
                     Text(fitMessage).font(.caption.weight(.medium)).foregroundStyle(fitTint)
@@ -652,11 +660,11 @@ private struct GhostModelCard: View {
             ModelDownloadBadge(manager: downloads, model: d)
         } else if model.isResolvable {
             if isActive {
-                Label("Voix active", systemImage: "checkmark.circle.fill")
+                Label(tr(fr: "Voix active", en: "Active voice"), systemImage: "checkmark.circle.fill")
                     .labelStyle(.titleAndIcon)
                     .font(.caption).foregroundStyle(Color.sangDeBoeuf)
             } else {
-                Button("Choisir", action: onSelect).controlSize(.small)
+                Button(tr(fr: "Choisir", en: "Choose"), action: onSelect).controlSize(.small)
             }
         }
     }
@@ -664,7 +672,7 @@ private struct GhostModelCard: View {
     // MARK: - Étiquettes
 
     private var recommendedChip: some View {
-        Text("Conseillé pour ton Mac")
+        Text(tr(fr: "Conseillé pour ton Mac", en: "Recommended for your Mac"))
             .font(.caption2.weight(.bold))
             .padding(.horizontal, 6).padding(.vertical, 2)
             .background(Color.green.opacity(0.18), in: Capsule())
@@ -690,10 +698,10 @@ private struct GhostModelCard: View {
 
     private var fitMessage: String {
         switch fit {
-        case .recommended: return "le meilleur choix ici"
-        case .comfortable: return "à l'aise sur ton Mac"
-        case .tight: return "ton Mac est un peu juste"
-        case .tooHeavy: return "trop lourd pour ton Mac"
+        case .recommended: return tr(fr: "le meilleur choix ici", en: "the best choice here")
+        case .comfortable: return tr(fr: "à l'aise sur ton Mac", en: "comfortable on your Mac")
+        case .tight: return tr(fr: "ton Mac est un peu juste", en: "your Mac is a bit tight")
+        case .tooHeavy: return tr(fr: "trop lourd pour ton Mac", en: "too heavy for your Mac")
         }
     }
 
@@ -709,7 +717,8 @@ private struct GhostModelCard: View {
     /// Mo → « X,X Go », virgule décimale française.
     private func formatGo(_ mb: Int) -> String {
         let go = Double(mb) / 1024.0
-        return String(format: "%.1f", go).replacingOccurrences(of: ".", with: ",") + " Go"
+        let sep = tr(fr: ",", en: ".")
+        return String(format: "%.1f", go).replacingOccurrences(of: ".", with: sep) + tr(fr: " Go", en: " GB")
     }
 }
 
@@ -723,7 +732,7 @@ private struct ModelDownloadBadge: View {
     var body: some View {
         switch manager.status(for: model) {
         case .ready:
-            Label("Installé", systemImage: "checkmark.circle.fill")
+            Label(tr(fr: "Installé", en: "Installed"), systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green).font(.callout)
         case .downloading(let p):
             HStack(spacing: 6) {
@@ -731,12 +740,12 @@ private struct ModelDownloadBadge: View {
                 Text("\(Int(p * 100)) %").font(.caption).monospacedDigit()
             }
         case .absent:
-            Button("Télécharger (\(formatSize(model.approxSizeMB)))") { manager.download(model) }
+            Button(tr(fr: "Télécharger (\(formatSize(model.approxSizeMB)))", en: "Download (\(formatSize(model.approxSizeMB)))")) { manager.download(model) }
                 .controlSize(.small)
         case .failed:
             HStack(spacing: 6) {
-                Text("échec").foregroundStyle(Color.sangDeBoeuf).font(.caption)
-                Button("Réessayer") { manager.download(model) }
+                Text(tr(fr: "échec", en: "failed")).foregroundStyle(Color.sangDeBoeuf).font(.caption)
+                Button(tr(fr: "Réessayer", en: "Retry")) { manager.download(model) }
                     .controlSize(.small)
             }
         }
@@ -744,9 +753,10 @@ private struct ModelDownloadBadge: View {
 
     /// Mo → libellé compact : « 811 Mo » sous 1 Go, « 2,4 Go » au-delà.
     private func formatSize(_ mb: Int) -> String {
-        if mb < 1024 { return "\(mb) Mo" }
+        if mb < 1024 { return "\(mb)" + tr(fr: " Mo", en: " MB") }
         let go = Double(mb) / 1024.0
-        return String(format: "%.1f", go).replacingOccurrences(of: ".", with: ",") + " Go"
+        let sep = tr(fr: ",", en: ".")
+        return String(format: "%.1f", go).replacingOccurrences(of: ".", with: sep) + tr(fr: " Go", en: " GB")
     }
 }
 
@@ -766,28 +776,40 @@ private struct ReglagesTab: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Souffleuse à l'écoute", isOn: $store.enabled)
-                Text("Entrer / sortir de scène : ⌃⌥⌘S")
+                Picker(tr(fr: "Langue de l'interface", en: "Interface language"), selection: $store.uiLanguage) {
+                    ForEach(UILanguage.allCases, id: \.self) { lang in
+                        Text(lang.pickerLabel).tag(lang)
+                    }
+                }
+                Text(tr(fr: "« Système » suit la langue de votre Mac. Les fenêtres déjà ouvertes adoptent la nouvelle langue à leur réouverture.", en: "“System” follows your Mac’s language. Windows already open adopt the new language when reopened."))
+                    .font(.callout).foregroundStyle(.secondary)
+            } header: {
+                Text(tr(fr: "Langue", en: "Language")).font(.headline)
+            }
+
+            Section {
+                Toggle(tr(fr: "Souffleuse à l'écoute", en: "Souffleuse listening"), isOn: $store.enabled)
+                Text(tr(fr: "Entrer / sortir de scène : ⌃⌥⌘S", en: "Step on / off stage: ⌃⌥⌘S"))
                     .font(.callout)
                     .foregroundStyle(.secondary)
-                Text("Couper le contexte d'un coup : ⌃⌥⌘E")
+                Text(tr(fr: "Couper le contexte d'un coup : ⌃⌥⌘E", en: "Cut context instantly: ⌃⌥⌘E"))
                     .font(.callout)
                     .foregroundStyle(.secondary)
             } header: {
-                Text("Activation").font(.headline)
+                Text(tr(fr: "Activation", en: "Activation")).font(.headline)
             }
 
             Section {
                 accessibilityBadge
             } header: {
-                Text("Autorisations").font(.headline)
+                Text(tr(fr: "Autorisations", en: "Permissions")).font(.headline)
             } footer: {
-                Text("Sans cet accès, Souffleuse ne peut ni lire le champ où vous écrivez ni y poser le mot juste. Après une mise à jour, si Souffleuse apparaît cochée dans les Réglages mais se dit « absente », retirez l'entrée puis re-glissez l'app. L'accès à l'écran se règle dans l'onglet Contexte.")
+                Text(tr(fr: "Sans cet accès, Souffleuse ne peut ni lire le champ où vous écrivez ni y poser le mot juste. Après une mise à jour, si Souffleuse apparaît cochée dans les Réglages mais se dit « absente », retirez l'entrée puis re-glissez l'app. L'accès à l'écran se règle dans l'onglet Contexte.", en: "Without this access, Souffleuse can neither read the field you’re writing in nor place the right word there. After an update, if Souffleuse shows as checked in Settings but reports itself “missing,” remove the entry and drag the app back in. Screen access is set in the Context tab."))
                     .font(.callout).foregroundStyle(.secondary)
             }
 
             Section {
-                Toggle("Lancer au démarrage du Mac", isOn: $launchAtLogin)
+                Toggle(tr(fr: "Lancer au démarrage du Mac", en: "Launch at Mac startup"), isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, on in
                         do {
                             if on { try SMAppService.mainApp.register() }
@@ -799,16 +821,16 @@ private struct ReglagesTab: View {
                             launchAtLogin = SMAppService.mainApp.status == .enabled
                         }
                     }
-                Text("Souffleuse démarre en sourdine dans la barre des menus à l'ouverture de session.")
+                Text(tr(fr: "Souffleuse démarre en sourdine dans la barre des menus à l'ouverture de session.", en: "Souffleuse starts quietly in the menu bar when you log in."))
                     .font(.callout).foregroundStyle(.secondary)
             } header: {
-                Text("Au démarrage").font(.headline)
+                Text(tr(fr: "Au démarrage", en: "At startup")).font(.headline)
             }
 
             Section {
                 HStack {
-                    Button("Revoir les autorisations…", action: onOpenOnboarding)
-                    Button("Ouvrir les Réglages système") {
+                    Button(tr(fr: "Revoir les autorisations…", en: "Review permissions…"), action: onOpenOnboarding)
+                    Button(tr(fr: "Ouvrir les Réglages système", en: "Open System Settings")) {
                         openAccessibilitySettings()
                     }
                 }
@@ -829,22 +851,22 @@ private struct ReglagesTab: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 6) {
                 Text(hasAccessibility
-                     ? "Accès accordé — Souffleuse peut lire le champ et y souffler."
-                     : "Accès manquant. Souffleuse ne peut ni lire ni souffler tant que vous ne l'avez pas accordé.")
+                     ? tr(fr: "Accès accordé — Souffleuse peut lire le champ et y souffler.", en: "Access granted — Souffleuse can read the field and whisper into it.")
+                     : tr(fr: "Accès manquant. Souffleuse ne peut ni lire ni souffler tant que vous ne l'avez pas accordé.", en: "Access missing. Souffleuse can neither read nor whisper until you grant it."))
                     .font(.callout)
                     .foregroundStyle(hasAccessibility ? .secondary : .primary)
                 if !hasAccessibility {
                     HStack(spacing: 8) {
-                        Button("Donner l'accès") {
+                        Button(tr(fr: "Donner l'accès", en: "Grant access")) {
                             // Prompt=true shows the system alert AND opens
                             // Settings to the right pane if not yet trusted.
                             _ = AXClient.ensureTrusted(prompt: true)
                             hasAccessibility = AXClient.isTrusted
                         }
-                        Button("Ouvrir les Réglages") {
+                        Button(tr(fr: "Ouvrir les Réglages", en: "Open Settings")) {
                             openAccessibilitySettings()
                         }
-                        Button("Vérifier") {
+                        Button(tr(fr: "Vérifier", en: "Check")) {
                             hasAccessibility = AXClient.isTrusted
                         }
                     }
@@ -872,8 +894,8 @@ private struct EnrichmentTab: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Tenir compte du contexte", isOn: $store.enrichmentEnabled)
-                Toggle("Lire ce qui est à l'écran", isOn: Binding(
+                Toggle(tr(fr: "Tenir compte du contexte", en: "Take context into account"), isOn: $store.enrichmentEnabled)
+                Toggle(tr(fr: "Lire ce qui est à l'écran", en: "Read what’s on screen"), isOn: Binding(
                     get: { store.captureEnabled },
                     set: { onCaptureToggle($0) }
                 ))
@@ -882,23 +904,23 @@ private struct EnrichmentTab: View {
                     permissionBadge
                 }
             } header: {
-                Text("Autour de votre texte").font(.headline)
+                Text(tr(fr: "Autour de votre texte", en: "Around your text")).font(.headline)
             } footer: {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Le presse-papiers et l'écran ne sont jamais conservés. Souffleuse ne se lit pas elle-même.")
-                    Text("Lire l'écran aide dans les emails (sujet, destinataire) mais peut troubler les chats — Souffleuse mêle parfois ce qu'elle lit à votre réponse. Désactivez-la pour les conversations légères.")
+                    Text(tr(fr: "Le presse-papiers et l'écran ne sont jamais conservés. Souffleuse ne se lit pas elle-même.", en: "The clipboard and the screen are never kept. Souffleuse doesn’t read itself."))
+                    Text(tr(fr: "Lire l'écran aide dans les emails (sujet, destinataire) mais peut troubler les chats — Souffleuse mêle parfois ce qu'elle lit à votre réponse. Désactivez-la pour les conversations légères.", en: "Reading the screen helps in emails (subject, recipient) but can confuse chats — Souffleuse sometimes blends what it reads into your reply. Turn it off for casual conversations."))
                         .foregroundStyle(.orange)
                 }
                 .font(.callout).foregroundStyle(.secondary)
             }
             Section {
-                Toggle("Français", isOn: $store.ocrLangFR)
-                Toggle("Anglais", isOn: $store.ocrLangEN)
-                Toggle("Espagnol", isOn: $store.ocrLangES)
+                Toggle(tr(fr: "Français", en: "French"), isOn: $store.ocrLangFR)
+                Toggle(tr(fr: "Anglais", en: "English"), isOn: $store.ocrLangEN)
+                Toggle(tr(fr: "Espagnol", en: "Spanish"), isOn: $store.ocrLangES)
             } header: {
-                Text("Langues à l'écran").font(.headline)
+                Text(tr(fr: "Langues à l'écran", en: "On-screen languages")).font(.headline)
             } footer: {
-                Text("Au moins une langue. Si aucune n'est cochée, le français est utilisé par défaut.")
+                Text(tr(fr: "Au moins une langue. Si aucune n'est cochée, le français est utilisé par défaut.", en: "At least one language. If none is checked, French is used by default."))
                     .font(.callout).foregroundStyle(.secondary)
             }
         }
@@ -920,13 +942,13 @@ private struct EnrichmentTab: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 6) {
                 Text(hasScreenRecordingPermission
-                     ? "Lecture d'écran autorisée."
-                     : "Lecture d'écran non autorisée. Souffleuse ne voit pas l'écran tant que vous ne l'avez pas accordé dans Réglages › Confidentialité.")
+                     ? tr(fr: "Lecture d'écran autorisée.", en: "Screen reading allowed.")
+                     : tr(fr: "Lecture d'écran non autorisée. Souffleuse ne voit pas l'écran tant que vous ne l'avez pas accordé dans Réglages › Confidentialité.", en: "Screen reading not allowed. Souffleuse can’t see the screen until you grant it in Settings › Privacy."))
                     .font(.callout)
                     .foregroundStyle(hasScreenRecordingPermission ? .secondary : .primary)
                 if !hasScreenRecordingPermission {
                     HStack(spacing: 8) {
-                        Button("Autoriser") {
+                        Button(tr(fr: "Autoriser", en: "Allow")) {
                             // forcePermissionPrompt hits ScreenCaptureKit
                             // directly — that's the only reliable way to
                             // make macOS register the app in TCC when
@@ -938,10 +960,10 @@ private struct EnrichmentTab: View {
                                 }
                             }
                         }
-                        Button("Ouvrir les Réglages") {
+                        Button(tr(fr: "Ouvrir les Réglages", en: "Open Settings")) {
                             openScreenRecordingSettings()
                         }
-                        Button("Vérifier") {
+                        Button(tr(fr: "Vérifier", en: "Check")) {
                             hasScreenRecordingPermission = ScreenCapturer.hasPermission()
                         }
                     }
@@ -979,11 +1001,11 @@ private struct RuleListEditor<TableContent: View>: View {
             table()
             HStack(spacing: 6) {
                 Button(action: onAdd) { Image(systemName: "plus").frame(width: 24) }
-                    .accessibilityLabel("Ajouter une règle")
+                    .accessibilityLabel(tr(fr: "Ajouter une règle", en: "Add a rule"))
                 Button(action: onRemove) { Image(systemName: "minus").frame(width: 24) }
                     .disabled(!hasSelection)
-                    .accessibilityLabel("Supprimer la règle sélectionnée")
-                Button("Modifier…", action: onEdit)
+                    .accessibilityLabel(tr(fr: "Supprimer la règle sélectionnée", en: "Delete the selected rule"))
+                Button(tr(fr: "Modifier…", en: "Edit…"), action: onEdit)
                     .disabled(!hasSelection)
                 Spacer()
             }
@@ -999,7 +1021,7 @@ private struct AllowlistTab: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Des règles, dans l'ordre : la première qui correspond (application + titre de fenêtre) l'emporte. Partout ailleurs, Souffleuse est active par défaut.")
+            Text(tr(fr: "Des règles, dans l'ordre : la première qui correspond (application + titre de fenêtre) l'emporte. Partout ailleurs, Souffleuse est active par défaut.", en: "Rules, in order: the first that matches (app + window title) wins. Everywhere else, Souffleuse is active by default."))
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1015,7 +1037,7 @@ private struct AllowlistTab: View {
                 }
             ) {
                 Table(store.allowlist.rules, selection: $selection) {
-                    TableColumn("Application") { rule in
+                    TableColumn(tr(fr: "Application", en: "App")) { rule in
                         // Nom + icône résolus depuis le bundle ID (AppCatalog,
                         // même pattern que l'onglet Ton) ; app introuvable →
                         // ID brut en fallback.
@@ -1031,12 +1053,12 @@ private struct AllowlistTab: View {
                             Text(rule.bundleID).font(.system(.callout, design: .monospaced))
                         }
                     }
-                    TableColumn("Titre (regex)") { rule in
+                    TableColumn(tr(fr: "Titre (regex)", en: "Title (regex)")) { rule in
                         Text(rule.titleRegex.isEmpty ? "—" : rule.titleRegex)
                             .font(.system(.body, design: .monospaced))
                             .foregroundStyle(rule.titleRegex.isEmpty ? .secondary : .primary)
                     }
-                    TableColumn("Mode") { rule in
+                    TableColumn(tr(fr: "Mode", en: "Mode")) { rule in
                         Text(rule.mode.label)
                     }
                 }
@@ -1085,7 +1107,7 @@ private struct RuleEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            TextField("Rechercher une application…", text: $filter)
+            TextField(tr(fr: "Rechercher une application…", en: "Search for an app…"), text: $filter)
                 .textFieldStyle(.roundedBorder)
 
             List(filteredApps, selection: Binding(
@@ -1110,32 +1132,32 @@ private struct RuleEditor: View {
                 if apps.isEmpty {
                     ProgressView()
                 } else if filteredApps.isEmpty {
-                    Text("Aucune application ne correspond — voir « Avancé ».")
+                    Text(tr(fr: "Aucune application ne correspond — voir « Avancé ».", en: "No app matches — see “Advanced.”"))
                         .font(.callout).foregroundStyle(.secondary)
                 }
             }
 
-            DisclosureGroup("Avancé — identifiant d'application", isExpanded: $showAdvanced) {
-                TextField("Bundle ID", text: $rule.bundleID, prompt: Text("com.apple.mail"))
+            DisclosureGroup(tr(fr: "Avancé — identifiant d'application", en: "Advanced — app identifier"), isExpanded: $showAdvanced) {
+                TextField(tr(fr: "Bundle ID", en: "Bundle ID"), text: $rule.bundleID, prompt: Text("com.apple.mail"))
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.body, design: .monospaced))
             }
             .font(.callout)
 
-            TextField("Titre (regex, optionnel)", text: $rule.titleRegex, prompt: Text("^Re: .*"))
+            TextField(tr(fr: "Titre (regex, optionnel)", en: "Title (regex, optional)"), text: $rule.titleRegex, prompt: Text("^Re: .*"))
                 .textFieldStyle(.roundedBorder)
                 .font(.system(.body, design: .monospaced))
                 .foregroundColor(regexValid ? .primary : .red)
-            Picker("Mode", selection: $rule.mode) {
+            Picker(tr(fr: "Mode", en: "Mode"), selection: $rule.mode) {
                 ForEach(AllowlistMode.allCases, id: \.self) { m in
                     Text(m.label).tag(m)
                 }
             }
             HStack {
                 Spacer()
-                Button("Annuler", role: .cancel, action: onCancel)
+                Button(tr(fr: "Annuler", en: "Cancel"), role: .cancel, action: onCancel)
                     .keyboardShortcut(.cancelAction)
-                Button("Enregistrer") { onSave(rule) }
+                Button(tr(fr: "Enregistrer", en: "Save")) { onSave(rule) }
                     .keyboardShortcut(.defaultAction)
                     .disabled(rule.bundleID.trimmingCharacters(in: .whitespaces).isEmpty || !regexValid)
             }
@@ -1163,9 +1185,9 @@ private struct ToneTab: View {
     /// « Teinter les suggestions » (ou le flag dev) est active — mentir sur un
     /// comportement désactivé sèmerait le doute sur tout le panneau.
     private var panelDescription: String {
-        var text = "Quand le correspondant écrit en français, ⌘↩ ne traduit pas : la souffleuse relit ton message. Choisis le registre — un défaut, et des exceptions par application."
+        var text = tr(fr: "Quand le correspondant écrit en français, ⌘↩ ne traduit pas : la souffleuse relit ton message. Choisis le registre — un défaut, et des exceptions par application.", en: "When your correspondent writes in French, ⌘↩ doesn’t translate: Souffleuse rephrases your message. Choose the register — a default, plus per-app exceptions.")
         if SuggestionPolicy.Tuning.stylePrimerEnabled || store.personalizedSuggestionsEnabled {
-            text += " Ce registre teinte aussi les suggestions : dans chaque application, le ghost s'inspire de ta prose écrite sur le même ton."
+            text += tr(fr: " Ce registre teinte aussi les suggestions : dans chaque application, le ghost s'inspire de ta prose écrite sur le même ton.", en: " This register also tints suggestions: in each app, the whisper draws on your prose written in the same tone.")
         }
         return text
     }
@@ -1177,7 +1199,7 @@ private struct ToneTab: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Picker("Ton par défaut", selection: Binding(
+            Picker(tr(fr: "Ton par défaut", en: "Default tone"), selection: Binding(
                 get: { store.tones.defaultTone },
                 set: { store.tones.setDefaultTone($0) }
             )) {
@@ -1199,7 +1221,7 @@ private struct ToneTab: View {
                 }
             ) {
                 Table(store.tones.rules, selection: $selection) {
-                    TableColumn("Application") { rule in
+                    TableColumn(tr(fr: "Application", en: "App")) { rule in
                         // Nom + icône résolus depuis le bundle ID ; une app
                         // introuvable (désinstallée) retombe sur l'ID brut.
                         if let app = AppCatalog.entry(forBundleID: rule.bundleID) {
@@ -1214,7 +1236,7 @@ private struct ToneTab: View {
                             Text(rule.bundleID).font(.system(.callout, design: .monospaced))
                         }
                     }
-                    TableColumn("Ton") { rule in
+                    TableColumn(tr(fr: "Ton", en: "Tone")) { rule in
                         Text(rule.tone.displayName)
                     }
                 }
@@ -1257,7 +1279,7 @@ private struct ToneRuleEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            TextField("Rechercher une application…", text: $filter)
+            TextField(tr(fr: "Rechercher une application…", en: "Search for an app…"), text: $filter)
                 .textFieldStyle(.roundedBorder)
 
             List(filteredApps, selection: Binding(
@@ -1282,28 +1304,28 @@ private struct ToneRuleEditor: View {
                 if apps.isEmpty {
                     ProgressView()
                 } else if filteredApps.isEmpty {
-                    Text("Aucune application ne correspond — voir « Avancé ».")
+                    Text(tr(fr: "Aucune application ne correspond — voir « Avancé ».", en: "No app matches — see “Advanced.”"))
                         .font(.callout).foregroundStyle(.secondary)
                 }
             }
 
-            DisclosureGroup("Avancé — identifiant d'application", isExpanded: $showAdvanced) {
-                TextField("Bundle ID", text: $rule.bundleID, prompt: Text("com.tinyspeck.slackmacgap"))
+            DisclosureGroup(tr(fr: "Avancé — identifiant d'application", en: "Advanced — app identifier"), isExpanded: $showAdvanced) {
+                TextField(tr(fr: "Bundle ID", en: "Bundle ID"), text: $rule.bundleID, prompt: Text("com.tinyspeck.slackmacgap"))
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.body, design: .monospaced))
             }
             .font(.callout)
 
-            Picker("Ton", selection: $rule.tone) {
+            Picker(tr(fr: "Ton", en: "Tone"), selection: $rule.tone) {
                 ForEach(Tone.allCases, id: \.self) { t in
                     Text(t.displayName).tag(t)
                 }
             }
             HStack {
                 Spacer()
-                Button("Annuler", role: .cancel, action: onCancel)
+                Button(tr(fr: "Annuler", en: "Cancel"), role: .cancel, action: onCancel)
                     .keyboardShortcut(.cancelAction)
-                Button("Enregistrer") { onSave(rule) }
+                Button(tr(fr: "Enregistrer", en: "Save")) { onSave(rule) }
                     .keyboardShortcut(.defaultAction)
                     .disabled(rule.bundleID.trimmingCharacters(in: .whitespaces).isEmpty)
             }
@@ -1334,38 +1356,38 @@ private struct AboutTab: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text("Souffleuse")
                     .font(.system(size: 32, weight: .semibold, design: .serif))
-                Text("Le mot juste, soufflé à voix basse.")
+                Text(tr(fr: "Le mot juste, soufflé à voix basse.", en: "The right word, whispered."))
                     .font(.title3)
                     .foregroundStyle(.secondary)
-                Text("Tout reste sur votre Mac — rien ne passe en coulisses.")
+                Text(tr(fr: "Tout reste sur votre Mac — rien ne passe en coulisses.", en: "Everything stays on your Mac — nothing happens behind the scenes."))
                     .font(.callout)
                     .foregroundStyle(.tertiary)
-                Text("version \(version)")
+                Text(tr(fr: "version \(version)", en: "version \(version)"))
                     .font(.caption.monospaced())
                     .foregroundStyle(.tertiary)
                     .padding(.top, 3)
             }
             Divider()
             VStack(alignment: .leading, spacing: 6) {
-                Text("Le souffle apparaît en double ?")
+                Text(tr(fr: "Le souffle apparaît en double ?", en: "Seeing the whisper twice?"))
                     .font(.headline)
-                Text("macOS glisse parfois ses propres suggestions par-dessus celles de Souffleuse. Désactivez-les pour n'en garder qu'une voix.")
+                Text(tr(fr: "macOS glisse parfois ses propres suggestions par-dessus celles de Souffleuse. Désactivez-les pour n'en garder qu'une voix.", en: "macOS sometimes slips its own suggestions on top of Souffleuse’s. Turn them off to keep just one voice."))
                     .font(.callout)
                     .foregroundStyle(.secondary)
-                Button("Ouvrir les réglages Clavier") {
+                Button(tr(fr: "Ouvrir les réglages Clavier", en: "Open Keyboard settings")) {
                     let url = URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension")!
                     NSWorkspace.shared.open(url)
                 }
                 .padding(.top, 2)
             }
             Divider()
-            Button("Ouvrir le journal") {
+            Button(tr(fr: "Ouvrir le journal", en: "Open the log")) {
                 let url = FileManager.default.homeDirectoryForCurrentUser
                     .appendingPathComponent("Library/Logs/Souffleuse.log")
                 NSWorkspace.shared.activateFileViewerSelecting([url])
             }
             Spacer()
-            Text("Aucune connexion, hormis le premier téléchargement de la voix. Aucun de vos mots n'est écrit dans les journaux.")
+            Text(tr(fr: "Aucune connexion, hormis le premier téléchargement de la voix. Aucun de vos mots n'est écrit dans les journaux.", en: "No connection, apart from the first download of the voice. None of your words are written to the logs."))
                 .font(.callout)
                 .foregroundStyle(.tertiary)
         }

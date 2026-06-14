@@ -14,8 +14,8 @@ enum PrimaryLanguage: String, Sendable, CaseIterable, Codable {
     /// Libellé court pour le sélecteur.
     var label: String {
         switch self {
-        case .french: return "Surtout le français"
-        case .multilingual: return "Plusieurs langues"
+        case .french: return tr(fr: "Surtout le français", en: "Mostly French")
+        case .multilingual: return tr(fr: "Plusieurs langues", en: "Several languages")
         }
     }
 }
@@ -94,6 +94,19 @@ struct GGUFModelOption: Identifiable, Sendable, Hashable {
 
     /// True when this entry's GGUF file is resolvable on disk (or overridden).
     var isResolvable: Bool { resolvePath() != nil }
+
+    /// Libellé de vitesse LOCALISÉ, pour l'affichage. `speedLabel` reste la clé
+    /// brute FR ("Rapide"/"Posé"/"Lent") — stable, comparée par `speedTint` côté
+    /// Préférences ; on ne la traduit donc pas en place. C'est cette dérivée qui
+    /// est montrée à l'utilisateur.
+    var speedDisplay: String {
+        switch speedLabel {
+        case "Rapide": return tr(fr: "Rapide", en: "Fast")
+        case "Posé": return tr(fr: "Posé", en: "Steady")
+        case "Lent": return tr(fr: "Lent", en: "Slow")
+        default: return speedLabel
+        }
+    }
 
     // MARK: - Adéquation au Mac
 
@@ -194,18 +207,23 @@ struct GGUFModelOption: Identifiable, Sendable, Hashable {
     /// rangés du plus léger au plus lourd. Le souffle exige du base — un GGUF
     /// instruct (`-it`) rendrait la suggestion bavarde. Tous les liens pointent
     /// une variante base vérifiée (Gemma `-pt`, Qwen `-Base`).
-    static let catalogue: [GGUFModelOption] = [
+    // Catalogue COMPUTED (et non `static let`) : `hint`/`languagesLabel` portent
+    // des `tr(...)` qui doivent suivre la langue d'interface COURANTE à chaque
+    // lecture. Un `static let` les gèlerait à la première évaluation, bloquant le
+    // basculement live des cartes modèle. Coût négligeable (config, hors hot-path).
+    static var catalogue: [GGUFModelOption] {
+        [
         GGUFModelOption(
             id: "gemma-3-1b-q5",
             displayName: "Gemma 3 1B",
             quant: "Q5_K_M",
-            hint: "Léger et rapide, parfait pour le français et l'anglais.",
+            hint: tr(fr: "Léger et rapide, parfait pour le français et l'anglais.", en: "Light and fast, perfect for French and English."),
             fileName: "gemma-3-1b.i1-Q5_K_M.gguf",
             downloadURL: URL(string: "https://huggingface.co/mradermacher/gemma-3-1b-pt-i1-GGUF/resolve/main/gemma-3-1b-pt.i1-Q5_K_M.gguf"),
             approxSizeMB: 811,
             approxRAMMB: 1000,
             recommendedMinRAMGB: 8,
-            languagesLabel: "Français · anglais",
+            languagesLabel: tr(fr: "Français · anglais", en: "French · English"),
             speedLabel: "Rapide",
             autoRecommend: true,
             isMultilingual: false
@@ -214,13 +232,13 @@ struct GGUFModelOption: Identifiable, Sendable, Hashable {
             id: "qwen3-1.7b-q4",
             displayName: "Qwen3 1.7B",
             quant: "Q4_K_M",
-            hint: "Léger, rapide et très multilingue — le meilleur compromis.",
+            hint: tr(fr: "Léger, rapide et très multilingue — le meilleur compromis.", en: "Light, fast and very multilingual — the best compromise."),
             fileName: "Qwen3-1.7B-Base.Q4_K_M.gguf",
             downloadURL: URL(string: "https://huggingface.co/mradermacher/Qwen3-1.7B-Base-GGUF/resolve/main/Qwen3-1.7B-Base.Q4_K_M.gguf"),
             approxSizeMB: 1110,
             approxRAMMB: 1400,
             recommendedMinRAMGB: 8,
-            languagesLabel: "Français + beaucoup d'autres (DE · IT · ES · 中文 · 日本語)",
+            languagesLabel: tr(fr: "Français + beaucoup d'autres (DE · IT · ES · 中文 · 日本語)", en: "French + many others (DE · IT · ES · 中文 · 日本語)"),
             speedLabel: "Rapide",
             autoRecommend: true,
             isMultilingual: true
@@ -229,13 +247,13 @@ struct GGUFModelOption: Identifiable, Sendable, Hashable {
             id: "gemma-3-4b-q4",
             displayName: "Gemma 3 4B",
             quant: "Q4_K_M",
-            hint: "Plus juste sur les phrases longues, un peu plus lent.",
+            hint: tr(fr: "Plus juste sur les phrases longues, un peu plus lent.", en: "More accurate on long sentences, a bit slower."),
             fileName: "gemma-3-4b.i1-Q4_K_M.gguf",
             downloadURL: URL(string: "https://huggingface.co/mradermacher/gemma-3-4b-pt-i1-GGUF/resolve/main/gemma-3-4b-pt.i1-Q4_K_M.gguf"),
             approxSizeMB: 2374,
             approxRAMMB: 2900,
             recommendedMinRAMGB: 8,
-            languagesLabel: "Français · anglais",
+            languagesLabel: tr(fr: "Français · anglais", en: "French · English"),
             speedLabel: "Posé",
             autoRecommend: true,
             isMultilingual: false
@@ -244,13 +262,13 @@ struct GGUFModelOption: Identifiable, Sendable, Hashable {
             id: "qwen3-4b-q4",
             displayName: "Qwen3 4B",
             quant: "Q4_K_M",
-            hint: "La meilleure justesse multilingue, un peu plus lent.",
+            hint: tr(fr: "La meilleure justesse multilingue, un peu plus lent.", en: "The best multilingual accuracy, a bit slower."),
             fileName: "Qwen3-4B-Base.i1-Q4_K_M.gguf",
             downloadURL: URL(string: "https://huggingface.co/mradermacher/Qwen3-4B-Base-i1-GGUF/resolve/main/Qwen3-4B-Base.i1-Q4_K_M.gguf"),
             approxSizeMB: 2500,
             approxRAMMB: 3000,
             recommendedMinRAMGB: 8,
-            languagesLabel: "Français + beaucoup d'autres (DE · IT · ES · 中文 · 日本語)",
+            languagesLabel: tr(fr: "Français + beaucoup d'autres (DE · IT · ES · 中文 · 日本語)", en: "French + many others (DE · IT · ES · 中文 · 日本語)"),
             speedLabel: "Posé",
             autoRecommend: true,
             isMultilingual: true
@@ -259,18 +277,19 @@ struct GGUFModelOption: Identifiable, Sendable, Hashable {
             id: "qwen3-8b-q4",
             displayName: "Qwen3 8B",
             quant: "Q4_K_M",
-            hint: "La plus fine, mais réservée aux gros Macs — peut traîner derrière la frappe.",
+            hint: tr(fr: "La plus fine, mais réservée aux gros Macs — peut traîner derrière la frappe.", en: "The finest, but only for powerful Macs — may lag behind your typing."),
             fileName: "Qwen3-8B-Base.i1-Q4_K_M.gguf",
             downloadURL: URL(string: "https://huggingface.co/mradermacher/Qwen3-8B-Base-i1-GGUF/resolve/main/Qwen3-8B-Base.i1-Q4_K_M.gguf"),
             approxSizeMB: 5030,
             approxRAMMB: 5800,
             recommendedMinRAMGB: 16,
-            languagesLabel: "Français + beaucoup d'autres (DE · IT · ES · 中文 · 日本語)",
+            languagesLabel: tr(fr: "Français + beaucoup d'autres (DE · IT · ES · 中文 · 日本語)", en: "French + many others (DE · IT · ES · 中文 · 日本語)"),
             speedLabel: "Lent",
             autoRecommend: false,
             isMultilingual: true
         ),
-    ]
+        ]
+    }
 
     /// Default selection : the fast 1B Q5 entry (FR/EN par défaut ; la voix
     /// conseillée selon la RAM est calculée à part par `recommendedID`).

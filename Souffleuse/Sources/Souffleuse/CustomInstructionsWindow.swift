@@ -1,15 +1,21 @@
 import AppKit
 import Foundation
+import SouffleuseCore
 
 @MainActor
 final class CustomInstructionsWindow {
     static let defaultsKey = "customAIInstructions"
-    static let placeholder = """
+    static let placeholder = tr(fr: """
         Exemple :
         Je m'appelle Gabriel, j'écris principalement en français.
         Style : pro, chaleureux, direct, pas de formules creuses.
         Domaine : design produit + dev macOS.
-        """
+        """, en: """
+        Example:
+        My name is Gabriel, I write mostly in French.
+        Style: professional, warm, direct, no empty filler.
+        Field: product design + macOS dev.
+        """)
 
     private var window: NSWindow?
     private var textView: NSTextView?
@@ -31,7 +37,7 @@ final class CustomInstructionsWindow {
             backing: .buffered,
             defer: false
         )
-        w.title = "Instructions personnalisées"
+        w.title = tr(fr: "Instructions personnalisées", en: "Custom Instructions")
         w.isReleasedWhenClosed = false
         w.center()
 
@@ -41,7 +47,7 @@ final class CustomInstructionsWindow {
         stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
         stack.alignment = .leading
 
-        let header = NSTextField(labelWithString: "Cette consigne est ajoutée en tête de chaque prompt envoyé au modèle.")
+        let header = NSTextField(labelWithString: tr(fr: "Cette consigne est ajoutée en tête de chaque prompt envoyé au modèle.", en: "This instruction is prepended to every prompt sent to the model."))
         header.font = .systemFont(ofSize: 12)
         header.textColor = .secondaryLabelColor
         header.lineBreakMode = .byWordWrapping
@@ -98,12 +104,12 @@ final class CustomInstructionsWindow {
         buttonRow.spacing = 10
         buttonRow.alignment = .centerY
 
-        let cancel = NSButton(title: "Annuler", target: self, action: #selector(cancelClicked))
+        let cancel = NSButton(title: tr(fr: "Annuler", en: "Cancel"), target: self, action: #selector(cancelClicked))
         cancel.bezelStyle = .rounded
         cancel.keyEquivalent = "\u{1b}"
         buttonRow.addArrangedSubview(cancel)
 
-        let save = NSButton(title: "Enregistrer", target: self, action: #selector(saveClicked))
+        let save = NSButton(title: tr(fr: "Enregistrer", en: "Save"), target: self, action: #selector(saveClicked))
         save.bezelStyle = .rounded
         save.keyEquivalent = "\r"
         buttonRow.addArrangedSubview(save)

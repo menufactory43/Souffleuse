@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SouffleuseCore
 import SouffleuseLog
 
 /// Per-app behavior overrides. Looked up at every focus change in `tick()`.
@@ -12,10 +13,10 @@ enum AllowlistMode: String, Codable, CaseIterable, Sendable {
 
     var label: String {
         switch self {
-        case .active: return "Actif"
-        case .disabled: return "Désactivé"
-        case .suggestionOnly: return "Suggestion seule"
-        case .clipboardOnly: return "Clipboard seul"
+        case .active: return tr(fr: "Actif", en: "Active")
+        case .disabled: return tr(fr: "Désactivé", en: "Disabled")
+        case .suggestionOnly: return tr(fr: "Suggestion seule", en: "Suggestion only")
+        case .clipboardOnly: return tr(fr: "Clipboard seul", en: "Clipboard only")
         }
     }
 }

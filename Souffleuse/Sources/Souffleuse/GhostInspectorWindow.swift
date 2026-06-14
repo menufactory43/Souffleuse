@@ -106,17 +106,17 @@ final class GhostInspectorWindow {
         let mono = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
         let dim = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
         let out = NSMutableAttributedString()
-        out.append(NSAttributedString(string: "GHOST INSPECTOR — vert=affiché · rouge=gaté · orange=dropé/stub · [source] glisse pour déplacer\n\n",
+        out.append(NSAttributedString(string: tr(fr: "GHOST INSPECTOR — vert=affiché · rouge=gaté · orange=dropé/stub · [source] glisse pour déplacer\n\n", en: "GHOST INSPECTOR — green=shown · red=gated · orange=dropped/stub · [source] drag to move\n\n"),
                                       attributes: [.font: NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold),
                                                    .foregroundColor: NSColor.systemGray]))
         for e in entries {
             let color: NSColor
             let tag: String
             switch e.verdict {
-            case .shown:   color = .systemGreen;  tag = "AFFICHÉ"
-            case .gated:   color = .systemRed;    tag = "GATÉ   "
-            case .dropped: color = .systemOrange; tag = "DROP   "
-            case .stub:    color = .systemOrange; tag = "STUB   "
+            case .shown:   color = .systemGreen;  tag = tr(fr: "AFFICHÉ", en: "SHOWN  ")
+            case .gated:   color = .systemRed;    tag = tr(fr: "GATÉ   ", en: "GATED  ")
+            case .dropped: color = .systemOrange; tag = tr(fr: "DROP   ", en: "DROP   ")
+            case .stub:    color = .systemOrange; tag = tr(fr: "STUB   ", en: "STUB   ")
             }
             // tag coloré · [SOURCE] coloré par couche · CONTENU en blanc · score
             // décomposé + raison en sourdine · fin de préfixe en gris foncé.

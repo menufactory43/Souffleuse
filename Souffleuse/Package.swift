@@ -118,7 +118,11 @@ let package = Package(
             resources: [.process("Resources")]
         ),
         .target(
-            name: "SouffleuseInput"
+            name: "SouffleuseInput",
+            // Dépend de SouffleuseCore UNIQUEMENT pour `tr(fr:en:)` (localisation
+            // des libellés de raccourcis dans les pickers). Pas de cycle : Core ne
+            // dépend que de Log/Typing/Corpus, jamais d'Input.
+            dependencies: ["SouffleuseCore"]
         ),
         .target(
             name: "SouffleuseContext",
