@@ -38,6 +38,24 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,500;0,6..96,700;0,6..96,900;1,6..96,500&family=Spectral:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet" />
 
+<!-- Données structurées : aide Google à présenter Souffleuse comme une app (carte enrichie). -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Souffleuse",
+  "applicationCategory": "ProductivityApplication",
+  "operatingSystem": "macOS 14 (Sonoma) or later, Apple Silicon",
+  "softwareVersion": "0.9.0",
+  "url": "https://souffleuse.app/",
+  "downloadUrl": "https://souffleuse.app/Souffleuse.dmg",
+  "inLanguage": "fr",
+  "image": "https://souffleuse.app/og.png",
+  "description": "Une aide à l'écriture pour Mac, entièrement privée. Souffleuse glisse le mot juste sous votre curseur quand vous hésitez, puis s'efface. Vos textes ne quittent jamais votre Mac.",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" }
+}
+</script>
+
 <style>
   :root {
     --paper:        #f3ead9;
@@ -276,6 +294,23 @@
     color: var(--ink-faint);
   }
   .cta-note b { font-style: normal; font-weight: 700; color: var(--rouge); }
+
+  /* Le décompte de la salle : combien de gens ont déjà pris leur billet.
+     Peuplé par /api/stats. Masqué tant que le total n'a pas atteint un seuil
+     digne d'être montré (un petit chiffre ferait l'effet inverse). */
+  .tally {
+    margin: 1.4rem 0 0;
+    font-size: 0.92rem;
+    color: var(--ink-soft);
+    letter-spacing: 0.02em;
+  }
+  .tally b { font-weight: 700; color: var(--rouge); font-variant-numeric: tabular-nums; }
+  .tally::before {
+    content: "❧";
+    color: var(--rouge);
+    margin-right: 0.5rem;
+    opacity: 0.6;
+  }
 
   /* ---------- Hero ---------- */
 
@@ -887,6 +922,20 @@
     font-size: 1.08rem;
   }
   .coulisses__lede b { color: var(--paper); font-style: italic; font-weight: 400; }
+  .coulisses__more {
+    margin: clamp(2rem, 4vw, 2.8rem) auto 0;
+    text-align: center;
+    font-size: 0.96rem;
+  }
+  .coulisses__more a {
+    color: var(--paper-edge);
+    text-decoration: none;
+    border-bottom: 1px solid rgba(227,213,186,0.4);
+    padding-bottom: 2px;
+    transition: color .2s ease, border-color .2s ease;
+  }
+  .coulisses__more a:hover,
+  .coulisses__more a:focus-visible { color: var(--paper); border-bottom-color: var(--paper); }
   .vows {
     list-style: none;
     margin: 0;
@@ -1031,6 +1080,27 @@
   .foot__tag { font-style: italic; color: var(--ink-faint); font-size: 0.9rem; }
   .foot__meta { font-size: 0.84rem; color: var(--ink-faint); }
   .foot__sysreq { font-style: italic; }
+
+  /* Les renvois du programme : confidentialité, questions, et l'adresse où
+     écrire à la souffleuse. Discrets, en petites capitales d'imprimerie. */
+  .foot__links {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.5rem 1.6rem;
+    margin-top: 1.8rem;
+    font-size: 0.86rem;
+    letter-spacing: 0.02em;
+  }
+  .foot__links a {
+    color: var(--ink-soft);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    padding-bottom: 1px;
+    transition: color .2s ease, border-color .2s ease;
+  }
+  .foot__links a:hover,
+  .foot__links a:focus-visible { color: var(--rouge); border-bottom-color: var(--rouge); }
 
   /* Colophon : l'« achevé d'imprimer » des livres composés au plomb. La page
      se referme comme un objet imprimé, et la promesse privacy y passe une
@@ -1970,6 +2040,9 @@
           <p>Ce qu'elle retient de votre style est verrouillé sur votre Mac. Vous seul pouvez le lire.</p>
         </li>
       </ul>
+      <p class="coulisses__more">
+        <a href="/confidentialite.html">Lire la promesse en détail&nbsp;: ce qui reste, ce qui ne part jamais →</a>
+      </p>
     </div>
   </section>
 
@@ -2093,6 +2166,9 @@
         Télécharger pour Mac
       </a>
       <p class="cta-note"><b>Gratuit pendant la bêta.</b> macOS Sonoma (14) ou plus récent · puce Apple Silicon.</p>
+      <p class="tally" id="tally" hidden aria-live="polite">
+        Déjà <b id="tally-n"></b> Mac l'ont accueillie pendant la bêta.
+      </p>
     </div>
   </section>
 
@@ -2109,6 +2185,11 @@
       <p class="foot__sysreq" style="margin:0;">Pour Mac · macOS Sonoma (14) ou plus récent · puces Apple M1 et suivantes</p>
     </div>
   </div>
+  <nav class="shell foot__links" aria-label="Liens utiles">
+    <a href="/confidentialite.html">Confidentialité &amp; sécurité</a>
+    <a href="#faq">Questions</a>
+    <a href="mailto:souffleuse.app@gmail.com">Écrire à la souffleuse</a>
+  </nav>
   <div class="shell colophon">
     <p>
       Achevé d'imprimer en Bodoni Moda &amp; Spectral, sur papier crème.<br />
@@ -2857,6 +2938,27 @@
   document.addEventListener("visibilitychange", function () {
     document.title = document.hidden ? "En coulisse… · Souffleuse" : titre;
   });
+})();
+</script>
+<script>
+// Le décompte de la salle. On interroge /api/stats (lecture seule, agrégats).
+// On n'affiche le chiffre qu'au-delà d'un seuil : un petit nombre ferait
+// l'effet inverse de la preuve sociale recherchée. Tout échec est silencieux —
+// le compteur est un bonus, jamais un point de blocage.
+(function () {
+  "use strict";
+  var SEUIL = 25; // en deçà, on préfère se taire.
+  var el = document.getElementById("tally");
+  var n  = document.getElementById("tally-n");
+  if (!el || !n || !window.fetch) return;
+  fetch("/api/stats", { headers: { Accept: "application/json" } })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) {
+      if (!d || typeof d.total !== "number" || d.total < SEUIL) return;
+      n.textContent = d.total.toLocaleString("fr-FR");
+      el.hidden = false;
+    })
+    .catch(function () { /* KV indisponible : on reste muet. */ });
 })();
 </script>
 </body>
