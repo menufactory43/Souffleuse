@@ -21,7 +21,7 @@
 
     <item>
       <title>Version 0.9.0</title>
-      <pubDate>Sun, 14 Jun 2026 18:39:51 +0000</pubDate>
+      <pubDate>Sun, 14 Jun 2026 18:45:14 +0000</pubDate>
       <sparkle:version>0.9.0</sparkle:version>
       <sparkle:shortVersionString>0.9.0</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
@@ -33,12 +33,12 @@
         </ul>
         <p>macOS 14+ · Apple Silicon · 100 % on-device.</p>
       ]]></description>
-      <!-- Signé le 2026-06-14 (build Developer ID, NON notarisé). -->
+      <!-- Signé le 2026-06-14 (build Developer ID, NOTARISÉ + staplé). -->
       <!-- Régénérer à chaque release : deploy/make-appcast-entry.sh website/dl/Souffleuse.dmg -->
       <enclosure
         url="https://souffleuse.app/Souffleuse.dmg"
-        sparkle:edSignature="5cFguav4baRJvayfZ3I0IfDoOCYWExm67L+gV3BK9mWRPWbGa+spXb+8ma/BVAEMxwM4w5DCbC1egPgKtsxzBQ=="
-        length="7504859"
+        sparkle:edSignature="BZ0Bg2GsdxpLWoHB0oJ3UCdtVK6V7ocGtI367BnX2pXUj0cxd6zmmkc09ChNFLhiz8+7ibx5JZPan5g6XwUwDg=="
+        length="7504874"
         type="application/octet-stream" />
     </item>
 
