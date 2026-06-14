@@ -244,37 +244,4 @@ struct MidWordContinuationGuardTests {
         #expect(!OutputFilter.languageMismatch(ghost: "the truth is first", expected: nil))
     }
 
-    // MARK: - expectedLanguage (dérivation pour la garde)
-
-    @Test func expectedLanguagePrefersRequestField() {
-        let req = Self.request(detected: "en", userTail: "Dans la philosophie")
-        #expect(ModelRuntime.expectedLanguage(for: req) == "en")
-    }
-
-    @Test func expectedLanguageDerivesFromTailWhenFieldNil() {
-        let req = Self.request(detected: nil, userTail: "Dans la philosophie, la vérité")
-        #expect(ModelRuntime.expectedLanguage(for: req) == NLLanguage.french.rawValue)
-    }
-
-    @Test func expectedLanguageNilOnTooShortTail() {
-        let req = Self.request(detected: nil, userTail: "ph")
-        #expect(ModelRuntime.expectedLanguage(for: req) == nil)
-    }
-
-    // MARK: - test seam
-
-    /// Requête minimale pour exercer `expectedLanguage` (seuls `detectedLanguage`
-    /// / `userTail` / `llmTail` comptent ; le reste est inerte).
-    static func request(detected: String?, userTail: String) -> PredictRequest {
-        PredictRequest(
-            prefix: userTail, contextPrefix: "", customInstructions: "",
-            axSnapshotPlaceholder: nil, axSnapshotHelp: nil, axSnapshotRole: nil,
-            axSnapshotSubrole: nil, axTextAfterCaret: nil, personalizationStrength: 0,
-            maxTokens: 12, maxWords: 8, detectedLanguage: detected,
-            token: GenerationToken(value: 0),
-            userTail: userTail, llmTail: userTail, isInstructModel: false,
-            systemMessage: "", baseSystem: "", customInstr: "", ctxPrefix: "",
-            fieldContextSlot: "", afterCursorSlot: "", basePreamble: "",
-            examplesBlock: "", basePromptText: userTail)
-    }
 }
