@@ -307,6 +307,7 @@
     color: var(--ink-soft);
   }
   .version-badge::before { content: "·"; margin-right: 0.45rem; color: var(--rouge); }
+  .version-badge:empty { display: none; } /* nothing until JS fills it */
 
   /* The house count: how many have already taken their ticket. Populated by
      /api/stats. Hidden until the total clears a threshold worth showing (a
@@ -1635,7 +1636,7 @@
         <span class="langswitch__sep" aria-hidden="true">·</span>
         <a href="/en/" hreflang="en" aria-current="true">EN</a>
       </div>
-      <a href="/Souffleuse.dmg" download class="btn btn--small">Download</a>
+      <a href="/Souffleuse.dmg" download class="btn btn--small">Download</a><span class="version-badge" data-version></span>
     </div>
   </div>
 </header>
