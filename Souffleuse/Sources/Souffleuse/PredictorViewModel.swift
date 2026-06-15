@@ -1009,9 +1009,20 @@ final class PredictorViewModel {
                 if Task.isCancelled { return }
                 await MainActor.run { [weak self] in
                     guard let self, self.planner.isCurrent(myGeneration) else { return }
-                    if let beam, beam.show {
-                        let word = ModelRuntime.OutputFilter.normalizeFrenchTypography(beam.word)
-                        let score = SuggestionPolicy.score(source: .llm, ghost: beam.word, userTail: userTail)
+                    // Relevance Gate (D-07) AVANT l'affichage. Le chemin beam-core
+                    // ne décidait l'affichage que sur `beam.show` — il ne consultait
+                    // JAMAIS le plancher de pertinence (`score.passesGate`) que la
+                    // voie greedy/long-ghost historique appliquait. Conséquence : sur
+                    // un contexte long et brouillon (multi-salutations), le base PT
+                    // déraille et redémarre par une salutation (« Bonjour, ») dont le
+                    // `prefixFit` vaut 0 (tête = espace après une espace) → score 0.00
+                    // < `gateFloor` (0.25). `beam.show` étant vrai, ce « fortune
+                    // cookie » s'affichait quand même. On le masque ici comme une
+                    // continuation non pertinente plutôt que de le mettre dans la
+                    // bouche de l'utilisateur (cf. CompletionSuppressionReason.lowRelevance).
+                    let word = beam.map { ModelRuntime.OutputFilter.normalizeFrenchTypography($0.word) }
+                    let score = beam.map { SuggestionPolicy.score(source: .llm, ghost: $0.word, userTail: userTail) }
+                    if let beam, beam.show, let word, let score, score.passesGate {
                         self.policy.applyGhost(beam.word, source: .llm, score: score, userTail: userTail)
                         self.suggestion = word
                         self.predictedForPrefix = forPrefix
@@ -1029,9 +1040,10 @@ final class PredictorViewModel {
                         GhostInspector.shared.record(tail: userTail, verdict: .shown, source: .llm,
                                                      reason: beam.reason, content: word, score: score)
                     } else {
-                        // Rien à montrer : nettoie un ghost PÉRIMÉ d'une frappe
-                        // précédente (instantGhost est vide ici). Même garde que le
-                        // stale-clear du bloc de complétion du streaming.
+                        // Rien à montrer : beam vide/caché OU sous le plancher de
+                        // pertinence. Nettoie un ghost PÉRIMÉ d'une frappe précédente
+                        // (instantGhost est vide ici). Même garde que le stale-clear du
+                        // bloc de complétion du streaming.
                         self.ghostRollingAllowed = true
                         if Self.shouldClearStaleGhost(
                             emittedGhost: false, instantGhost: instantGhost,
@@ -1044,8 +1056,11 @@ final class PredictorViewModel {
                             self.policy.reset()
                         }
                         Log.info(.predictor, "ghost_beam_core_hidden")
+                        // Distingue le gate de pertinence (beam non vide mais sous le
+                        // plancher) du « rien produit » pour l'inspecteur DEV.
+                        let reason = (beam?.show == true) ? "beam-lowrelevance" : (beam?.reason ?? "beam-nil")
                         GhostInspector.shared.record(tail: userTail, verdict: .gated, source: .llm,
-                                                     reason: beam?.reason ?? "beam-nil", content: beam?.word ?? "(rien)")
+                                                     reason: reason, content: word ?? "(rien)", score: score)
                     }
                 }
                 return
