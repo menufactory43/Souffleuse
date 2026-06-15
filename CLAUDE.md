@@ -7,6 +7,11 @@
 
 Au-delà du ghost, l'app fait aussi : **traduction** (HUD, langue cible par conversation), **relecture par ton** (reformulation FR→FR selon l'app), et un **carnet d'usage** (frappes épargnées · temps gagné).
 
+### Dépôt (canonique)
+- **Remote principal : `git@github.com/menufactory43/Souffleuse`** (HTTPS : `https://github.com/menufactory43/Souffleuse.git`), compte GitHub **`menufactory43`**. C'est le `origin` officiel depuis la migration du 16/06/2026.
+- **Branches** : `main` (code app + releases) et `launch/souffleuse-video-social` (site souffleuse.app : landing, appcast Sparkle, vidéo). Le site se déploie via `vercel --prod` depuis `website/` (projet Vercel lié, org `family-flow-ios`) — **pas** par git push ; le `Souffleuse.dmg` reste gitignored (`website/.gitignore`).
+- **L'ancien remote `meffysto/cocotypist-llama` est mort** (404 / accès révoqué) : ne plus l'utiliser. L'auth git passe par le credential `gh` du compte `menufactory43` (`gh auth setup-git`).
+
 ### Constraints
 - **Stack figée** : Swift 6 strict concurrency, AppKit/SwiftUI. Le ghost est généré par **llama.cpp** (GGUF Metal vendoré, `SouffleuseLlama`/`CLlama`) — moteur de génération unique. **MLX** n'est plus une dépendance du package (supprimé le 14/06/2026 avec les 8 cibles dev mortes qui en étaient les seuls consommateurs). Le n-gram perso tokenise en ids llama via `LlamaEngine.setCorpus`. Pas de changement de stack.
 - **Privacy invariants** : `audit.sh` doit passer — no `print`/`NSLog`, no `os_log` interpolant des champs user, log fields whitelistés `{ts,level,module,event,count}`, store chiffré (`history.db`) référencé hors `TypingHistoryStore`/`HistoryViewerWindow` interdit. Toute source de contexte reste in-process.
