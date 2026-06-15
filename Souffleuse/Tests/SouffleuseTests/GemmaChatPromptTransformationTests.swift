@@ -178,11 +178,13 @@ struct GemmaChatPromptTransformationTests {
         // L'amorce occupe la place du message (préfixe stable AVANT → KV-LCP).
         let after = String(p[p.range(of: "Message : ")!.upperBound...])
         #expect(after.hasPrefix("rdv Paul jeudi 14h"))
-        #expect(p.contains("rédige un message complet"))
+        #expect(p.contains("écris le message que je veux envoyer"))
         #expect(p.contains("EN FRANÇAIS"))
         #expect(p.contains("UNIQUEMENT"))
+        // Concis + 1ʳᵉ personne (registre validé empiriquement).
+        #expect(p.contains("première personne"))
         // N'invente rien : garde-fou anti-hallucination propre à la rédaction.
-        #expect(p.contains("n'invente aucune information"))
+        #expect(p.contains("aucun fait inventé"))
         #expect(GemmaChatPrompt.composition(from: "x")
             == GemmaChatPrompt.composition(from: "x", model: .gemma1b))
     }

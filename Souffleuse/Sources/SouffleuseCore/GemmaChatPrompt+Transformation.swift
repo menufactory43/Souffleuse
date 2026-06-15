@@ -145,10 +145,20 @@ extension GemmaChatPrompt {
     }
 
     static func compositionInstruction(language: String = "français") -> String {
-        """
-        Tu es un rédacteur professionnel. À partir des notes ou mots-clés ci-dessous, rédige un message complet, clair et naturel EN \(language.uppercased()). Développe-les en phrases bien construites — n'invente aucune information factuelle (noms, dates, montants, lieux) qui ne figure pas dans les notes ; ne pose pas de questions à l'utilisateur, ne commente pas les notes.
-        Conserve exactement les noms propres, montants, pourcentages, dates, nombres et termes techniques (wallet, Binance, staking, NFT, gas, CSV, PDF, Stripe…) présents dans les notes.
-        Réponds UNIQUEMENT par le message rédigé EN \(language.uppercased()), sans commentaire ni guillemets.
+        // Consigne retenue après comparatif empirique sur le 1B-it (eval jetable,
+        // amorces ultra-courtes) : la variante CONCISE « 1ʳᵉ personne + politesses
+        // d'usage, aucun fait inventé » sort de vrais messages naturels et garde
+        // les noms donnés (« Paul »). Deux écueils écartés à la mesure :
+        // - PAS d'exemples de termes techniques (wallet, Stripe…) : la parenthèse
+        //   d'exemples de l'ancienne consigne FUITAIT dans la sortie (« Le wallet
+        //   sera disponible… » sur une amorce qui n'en parlait pas).
+        // - PAS de « formules de politesse / reprends exactement » trop appuyé :
+        //   ça basculait vers la lettre administrative (« salutations distinguées »,
+        //   placeholder « [Votre Nom] »). Le registre court et direct gagne.
+        let L = language.uppercased()
+        return """
+        À partir de ces quelques mots, écris le message que je veux envoyer, EN \(L) : court, naturel, poli, à la première personne (2 à 4 phrases). Ajoute les politesses d'usage mais aucun fait inventé (noms, dates, montants non donnés).
+        Réponds UNIQUEMENT par le message rédigé EN \(L), sans objet, sans en-tête ni guillemets.
         """
     }
 
