@@ -20,25 +20,25 @@
     <language>fr</language>
 
     <item>
-      <title>Version 0.9.0</title>
-      <pubDate>Sun, 14 Jun 2026 18:45:14 +0000</pubDate>
-      <sparkle:version>0.9.0</sparkle:version>
-      <sparkle:shortVersionString>0.9.0</sparkle:shortVersionString>
+      <title>Version 0.10.0</title>
+      <pubDate>Mon, 15 Jun 2026 23:04:23 +0000</pubDate>
+      <sparkle:version>0.10.0</sparkle:version>
+      <sparkle:shortVersionString>0.10.0</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
       <description><![CDATA[
-        <h2>Souffleuse 0.9.0</h2>
+        <h2>Souffleuse 0.10.0</h2>
         <ul>
-          <li><b>Souffleuse parle anglais.</b> L'interface est désormais bilingue : elle suit automatiquement la langue de votre Mac (français ou anglais), sans réglage à faire.</li>
+          <li><b>Rédigez un message à partir de quelques mots.</b> Tapez « // » au début d'un champ suivi de quelques mots-clés (« rdv Marie mardi 14h »), et Souffleuse rédige le message complet, naturel et poli. Choisissez la langue d'un chiffre — français, anglais, espagnol, allemand, italien.</li>
           <li>Comme toujours : 100 % sur votre Mac, rien ne part en ligne, et tout s'éteint d'un interrupteur.</li>
         </ul>
         <p>macOS 14+ · Apple Silicon · 100 % on-device.</p>
       ]]></description>
-      <!-- Signé le 2026-06-14 (build Developer ID, NOTARISÉ + staplé). -->
+      <!-- Signé le 2026-06-15 (build Developer ID, NOTARISÉ + staplé). -->
       <!-- Régénérer à chaque release : deploy/make-appcast-entry.sh website/dl/Souffleuse.dmg -->
       <enclosure
         url="https://souffleuse.app/Souffleuse.dmg"
-        sparkle:edSignature="BZ0Bg2GsdxpLWoHB0oJ3UCdtVK6V7ocGtI367BnX2pXUj0cxd6zmmkc09ChNFLhiz8+7ibx5JZPan5g6XwUwDg=="
-        length="7504874"
+        sparkle:edSignature="ZBkv3VAC8Yg7q7YV0pfCeI1IVycqGAVr/lvM0FQ2IMX1WXG6BrF5eNEuDwHbIrPuvb8btLat4gUMhvEMvmMyDA=="
+        length="6785654"
         type="application/octet-stream" />
     </item>
 
