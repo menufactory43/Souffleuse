@@ -307,6 +307,7 @@
     color: var(--ink-soft);
   }
   .version-badge::before { content: "·"; margin-right: 0.45rem; color: var(--rouge); }
+  .version-badge:empty { display: none; } /* rien tant que le JS n'a pas rempli */
 
   /* Le décompte de la salle : combien de gens ont déjà pris leur billet.
      Peuplé par /api/stats. Masqué tant que le total n'a pas atteint un seuil
@@ -1665,7 +1666,7 @@
         <span class="langswitch__sep" aria-hidden="true">·</span>
         <a href="/en/" hreflang="en">EN</a>
       </div>
-      <a href="./Souffleuse.dmg" download class="btn btn--small">Télécharger</a>
+      <a href="./Souffleuse.dmg" download class="btn btn--small">Télécharger</a><span class="version-badge" data-version></span>
     </div>
   </div>
 </header>
