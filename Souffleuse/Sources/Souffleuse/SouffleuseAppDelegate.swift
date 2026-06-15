@@ -3058,63 +3058,18 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// sinon la langue détectée ; et si rien n'est détectable, repli sur la langue
     /// système (choix UAT). Renvoie TOUJOURS une langue concrète (composable).
     private func resolveComposeLanguage(forBundle bundleID: String?, windowTitle: String?) -> ComposeLanguage {
-        // On calcule détection + sélection AVANT d'aiguiller, pour que la trace
-        // dev voie tout (même quand la préférence fige une langue).
+        // Une langue figée se renvoie telle quelle ; pas de détection inutile.
+        if store.composeLanguage != .conversation { return store.composeLanguage }
+        // .conversation : même résolution que la cible de traduction, repli langue
+        // système (et non anglais) quand rien n'est détectable.
         let context = lastEnrichedVisible ?? ""
-        let detected = TranslationTarget.detected(in: context)
-        let frCorrespondent = TranslationTarget.correspondentSpeaksFrench(in: context)
-        let selection = currentTargetSelection(forBundle: bundleID, windowTitle: windowTitle)
-        let resolved: ComposeLanguage
-        if store.composeLanguage != .conversation {
-            resolved = store.composeLanguage
-        } else {
-            // .conversation : même résolution que la cible de traduction, repli
-            // langue système (et non anglais) quand rien n'est détectable.
-            switch selection {
-            case .fixed(let target): resolved = .from(target: target)
-            case .reformulate: resolved = .french
-            case .auto:
-                if frCorrespondent { resolved = .french }
-                else if let d = detected { resolved = .from(target: d) }
-                else { resolved = ComposeLanguage.systemFallback() }
-            }
-        }
-        Self.debugDumpCompose(
-            bundleID: bundleID ?? "nil", windowTitle: windowTitle,
-            pref: store.composeLanguage, context: context,
-            detected: detected, frCorrespondent: frCorrespondent,
-            selection: selection, resolved: resolved.promptLanguageName ?? "français",
-            captureEnabled: store.captureEnabled, enrichmentEnabled: store.enrichmentEnabled)
-        return resolved
-    }
-
-    /// Trace dev de la résolution de langue du mode rédaction — gated sur
-    /// `SOUFFLEUSE_PREDICT_LOG`, écrite dans `/tmp/souffleuse-compose.log` (même
-    /// convention que les dumps OCR/predict, jamais en prod, hors audit). Dump le
-    /// texte brut du correspondant : strictement debug local.
-    private static func debugDumpCompose(
-        bundleID: String, windowTitle: String?,
-        pref: ComposeLanguage, context: String,
-        detected: TranslationTarget?, frCorrespondent: Bool,
-        selection: TargetSelection, resolved: String,
-        captureEnabled: Bool, enrichmentEnabled: Bool
-    ) {
-        guard ProcessInfo.processInfo.environment["SOUFFLEUSE_PREDICT_LOG"]?.isEmpty == false else { return }
-        let ts = ISO8601DateFormatter().string(from: Date())
-        let single = context.replacingOccurrences(of: "\n", with: "⏎")
-        let preview = single.count <= 600 ? single : String(single.prefix(600)) + "…"
-        let line = "[\(ts)] compose bundle=\(bundleID) title=\(windowTitle.debugDescription)"
-            + " pref=\(pref.rawValue) capture=\(captureEnabled) enrich=\(enrichmentEnabled)"
-            + " ctxLen=\(context.count) detected=\(detected?.code ?? "nil") frCorrespondent=\(frCorrespondent)"
-            + " selection=\(selection.shortLabel) → resolved=\(resolved)"
-            + " | ctx=\(preview.debugDescription)\n"
-        let path = "/tmp/souffleuse-compose.log"
-        if let data = line.data(using: .utf8) {
-            if let h = FileHandle(forWritingAtPath: path) {
-                h.seekToEndOfFile(); try? h.write(contentsOf: data); try? h.close()
-            } else {
-                FileManager.default.createFile(atPath: path, contents: data)
-            }
+        switch currentTargetSelection(forBundle: bundleID, windowTitle: windowTitle) {
+        case .fixed(let target): return .from(target: target)
+        case .reformulate: return .french
+        case .auto:
+            if TranslationTarget.correspondentSpeaksFrench(in: context) { return .french }
+            if let detected = TranslationTarget.detected(in: context) { return .from(target: detected) }
+            return ComposeLanguage.systemFallback()
         }
     }
 
