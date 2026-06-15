@@ -297,6 +297,17 @@
   }
   .cta-note b { font-style: normal; font-weight: 700; color: var(--rouge); }
 
+  /* Version number, right beside the button — populated from the Sparkle
+     appcast (the source of truth for the published release), always current. */
+  .version-badge {
+    display: inline-block;
+    margin-left: 0.35rem;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    color: var(--ink-soft);
+  }
+  .version-badge::before { content: "·"; margin-right: 0.45rem; color: var(--rouge); }
+
   /* The house count: how many have already taken their ticket. Populated by
      /api/stats. Hidden until the total clears a threshold worth showing (a
      small number would do the opposite of social proof). */
@@ -1668,7 +1679,7 @@
           </a>
           <a href="#souffle" class="btn btn--ghost">See how she whispers →</a>
         </div>
-        <p class="cta-note ink-rise k5"><b>Free during the beta.</b> For Apple Silicon Macs.</p>
+        <p class="cta-note ink-rise k5"><b>Free during the beta.</b> For Apple Silicon Macs.<span class="version-badge" data-version hidden></span></p>
       </div>
 
       <!-- ===== ÉLÉMENT SIGNATURE : le trou du souffleur ===== -->
@@ -2102,7 +2113,7 @@
         </svg>
         Download for Mac
       </a>
-      <p class="cta-note"><b>Free during the beta.</b> macOS Sonoma (14) or newer · Apple Silicon.</p>
+      <p class="cta-note"><b>Free during the beta.</b> macOS Sonoma (14) or newer · Apple Silicon.<span class="version-badge" data-version hidden></span></p>
       <p class="tally" id="tally" hidden aria-live="polite">
         Already on <b id="tally-n"></b> Macs during the beta.
       </p>
@@ -2899,6 +2910,26 @@
       el.hidden = false;
     })
     .catch(function () { /* KV unavailable: stay silent. */ });
+})();
+
+// Version number, read from the Sparkle appcast (the source of truth for the
+// published release): the badge updates itself on every deploy, so you can tell
+// at a glance whether the update went live. Silent on failure.
+(function () {
+  "use strict";
+  var badges = document.querySelectorAll("[data-version]");
+  if (!badges.length || !window.fetch) return;
+  fetch("/appcast.xml", { cache: "no-cache" })
+    .then(function (r) { return r.ok ? r.text() : null; })
+    .then(function (t) {
+      var m = t && t.match(/<sparkle:shortVersionString>([^<]+)</);
+      if (!m) return;
+      for (var i = 0; i < badges.length; i++) {
+        badges[i].textContent = "v" + m[1];
+        badges[i].hidden = false;
+      }
+    })
+    .catch(function () {});
 })();
 </script>
 </body>

@@ -297,6 +297,17 @@
   }
   .cta-note b { font-style: normal; font-weight: 700; color: var(--rouge); }
 
+  /* Numéro de version, juste à côté du bouton — peuplé depuis l'appcast Sparkle
+     (la source de vérité de la release publiée), donc toujours à jour. */
+  .version-badge {
+    display: inline-block;
+    margin-left: 0.35rem;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    color: var(--ink-soft);
+  }
+  .version-badge::before { content: "·"; margin-right: 0.45rem; color: var(--rouge); }
+
   /* Le décompte de la salle : combien de gens ont déjà pris leur billet.
      Peuplé par /api/stats. Masqué tant que le total n'a pas atteint un seuil
      digne d'être montré (un petit chiffre ferait l'effet inverse). */
@@ -1698,7 +1709,7 @@
           </a>
           <a href="#souffle" class="btn btn--ghost">Voir comment elle souffle →</a>
         </div>
-        <p class="cta-note ink-rise k5"><b>Gratuit pendant la bêta.</b> Pour Mac à puce Apple Silicon.</p>
+        <p class="cta-note ink-rise k5"><b>Gratuit pendant la bêta.</b> Pour Mac à puce Apple Silicon.<span class="version-badge" data-version hidden></span></p>
       </div>
 
       <!-- ===== ÉLÉMENT SIGNATURE : le trou du souffleur ===== -->
@@ -2167,7 +2178,7 @@
         </svg>
         Télécharger pour Mac
       </a>
-      <p class="cta-note"><b>Gratuit pendant la bêta.</b> macOS Sonoma (14) ou plus récent · puce Apple Silicon.</p>
+      <p class="cta-note"><b>Gratuit pendant la bêta.</b> macOS Sonoma (14) ou plus récent · puce Apple Silicon.<span class="version-badge" data-version hidden></span></p>
       <p class="tally" id="tally" hidden aria-live="polite">
         Déjà <b id="tally-n"></b> Mac l'ont accueillie pendant la bêta.
       </p>
@@ -2962,6 +2973,26 @@
       el.hidden = false;
     })
     .catch(function () { /* KV indisponible : on reste muet. */ });
+})();
+
+// Numéro de version, lu depuis l'appcast Sparkle (la source de vérité de la
+// release publiée) : le badge se met à jour seul à chaque déploiement, on voit
+// d'un coup d'œil si la mise à jour a bien pris. Échec silencieux.
+(function () {
+  "use strict";
+  var badges = document.querySelectorAll("[data-version]");
+  if (!badges.length || !window.fetch) return;
+  fetch("/appcast.xml", { cache: "no-cache" })
+    .then(function (r) { return r.ok ? r.text() : null; })
+    .then(function (t) {
+      var m = t && t.match(/<sparkle:shortVersionString>([^<]+)</);
+      if (!m) return;
+      for (var i = 0; i < badges.length; i++) {
+        badges[i].textContent = "v" + m[1];
+        badges[i].hidden = false;
+      }
+    })
+    .catch(function () {});
 })();
 </script>
 </body>
