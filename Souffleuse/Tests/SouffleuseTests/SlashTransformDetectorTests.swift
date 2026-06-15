@@ -18,11 +18,47 @@ struct SlashTransformDetectorTests {
         #expect(state?.isScopeTruncated == false)
     }
 
-    @Test("« // » en tout début de champ → nil (portée vide)")
-    func triggerAtFieldStartHasNoScope() {
+    @Test("« // » nu en début de champ → nil (ni portée ni amorce)")
+    func bareTriggerAtFieldStartIsNil() {
         #expect(SlashTransformDetector.detect(textBeforeCaret: "//") == nil)
-        // Portée non vide mais trimée vide (que des espaces) → rien à transformer.
+        // Que du blanc avant ET amorce vide → rien à transformer ni à rédiger.
         #expect(SlashTransformDetector.detect(textBeforeCaret: "   //") == nil)
+        #expect(SlashTransformDetector.detect(textBeforeCaret: "\n\n//") == nil)
+    }
+
+    // MARK: - Mode rédaction (composition)
+
+    @Test("« // » + amorce en début de champ → état composition, portée vide")
+    func compositionAtFieldStart() {
+        let state = SlashTransformDetector.detect(textBeforeCaret: "//rdv Paul jeudi 14h")
+        #expect(state != nil)
+        #expect(state?.isComposition == true)
+        #expect(state?.scopeText == "")
+        #expect(state?.filter == "rdv Paul jeudi 14h")
+        #expect(state?.isScopeTruncated == false)
+        // On ne supprime QUE « // » + l'amorce (rien à remplacer en amont).
+        #expect(state?.deleteCharsOnAccept == 2 + "rdv Paul jeudi 14h".count)
+    }
+
+    @Test("« // » + amorce après du blanc → composition, le blanc en tête reste")
+    func compositionAfterWhitespaceKeepsLeadingBlank() {
+        let state = SlashTransformDetector.detect(textBeforeCaret: "\n\n//note rapide")
+        #expect(state?.isComposition == true)
+        #expect(state?.scopeText == "")
+        // deleteChars ne couvre pas les « \n\n » : seuls « // » + amorce partent.
+        #expect(state?.deleteCharsOnAccept == 2 + "note rapide".count)
+    }
+
+    @Test("amorce uniquement blanche → nil (pas d'amorce réelle)")
+    func compositionWithBlankSeedIsNil() {
+        #expect(SlashTransformDetector.detect(textBeforeCaret: "//   ") == nil)
+    }
+
+    @Test("texte avant « // » → transformation, jamais composition")
+    func textBeforeTriggerIsNotComposition() {
+        let state = SlashTransformDetector.detect(textBeforeCaret: "Bonjour //ref")
+        #expect(state?.isComposition == false)
+        #expect(state?.scopeText == "Bonjour")
     }
 
     @Test("champ vide avant le caret → nil")

@@ -13,14 +13,29 @@ public struct SlashTransformState: Sendable, Equatable {
     /// Texte tapé après « // » (filtre d'intention ou instruction libre).
     /// Peut contenir espaces et accents ; jamais de saut de ligne.
     public let filter: String
+    /// Mode rédaction : « // » ouvert SANS texte à transformer avant lui (début
+    /// de champ / que du blanc), `filter` non vide. Le filtre n'est alors PAS un
+    /// filtre d'intention mais une amorce (mots-clés / notes) à développer en un
+    /// texte complet. L'appelant aiguille sur ce flag (picker rédaction vs.
+    /// rangées de transformation). `scopeText` est vide dans ce mode.
+    public let isComposition: Bool
     /// Caractères avant le caret à supprimer à l'acceptation :
     /// portée brute (non trimée, depuis son début dans le champ) + 2 + filter.count.
+    /// En composition, la portée brute est du blanc qu'on NE supprime pas : seul
+    /// « // » + l'amorce (2 + filter.count) est remplacé par le texte rédigé.
     public let deleteCharsOnAccept: Int
 
-    public init(scopeText: String, isScopeTruncated: Bool, filter: String, deleteCharsOnAccept: Int) {
+    public init(
+        scopeText: String,
+        isScopeTruncated: Bool,
+        filter: String,
+        isComposition: Bool = false,
+        deleteCharsOnAccept: Int
+    ) {
         self.scopeText = scopeText
         self.isScopeTruncated = isScopeTruncated
         self.filter = filter
+        self.isComposition = isComposition
         self.deleteCharsOnAccept = deleteCharsOnAccept
     }
 }
@@ -45,7 +60,9 @@ public enum SlashTransformDetector {
     /// - le caractère AVANT « // » doit être espace / « \n » / « \t » ou le début
     ///   du champ. Lettre, chiffre, « / », « : » ou ponctuation → nil. Ça neutralise
     ///   « https:// », « /usr//bin », « ///doc », « path//file » sans liste d'exceptions.
-    /// - portée = texte avant « // » ; trimée vide → nil (rien à transformer).
+    /// - portée = texte avant « // ». Trimée non vide → mode transformation.
+    ///   Trimée vide AVEC amorce → mode rédaction (`isComposition`). Trimée vide
+    ///   SANS amorce (« // » nu) → nil (rien à transformer ni à rédiger).
     /// - filtre > `maxFilterLength` → nil.
     public static func detect(textBeforeCaret: String) -> SlashTransformState? {
         // Remontée depuis le caret : on accumule le filtre jusqu'au « / » le plus
@@ -85,7 +102,22 @@ public enum SlashTransformDetector {
         let prefixBeforeTrigger = textBeforeCaret[..<firstSlash]
         let (rawScope, truncated) = resolveScope(prefixBeforeTrigger: prefixBeforeTrigger)
         let scopeText = rawScope.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !scopeText.isEmpty else { return nil }
+
+        // Mode rédaction : rien à transformer avant « // » (début de champ ou que
+        // du blanc) MAIS une amorce a été tapée → on développe l'amorce en texte
+        // complet. On ne supprime QUE « // » + l'amorce (le blanc en tête, ex. des
+        // sauts de ligne d'un brouillon, reste intact). « // » nu (amorce vide)
+        // tombe à nil : pas d'amorce, rien à rédiger.
+        if scopeText.isEmpty {
+            guard !filter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            return SlashTransformState(
+                scopeText: "",
+                isScopeTruncated: false,
+                filter: filter,
+                isComposition: true,
+                deleteCharsOnAccept: 2 + filter.count
+            )
+        }
 
         // Compte en `Character` (pas UTF-16) : replaceForCommit envoie un
         // backspace par Character, même contrat que l'emoji picker.

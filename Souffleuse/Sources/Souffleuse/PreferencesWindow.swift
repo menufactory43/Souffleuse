@@ -454,7 +454,15 @@ private struct SouffleTab: View {
                     .disabled(!store.typoEnabled)
                 Toggle(tr(fr: "Emoji — panneau dès « \u{003A} » et expansion (\u{003A}smile\u{003A} → 😄)", en: "Emoji — panel on “\u{003A}” and expansion (\u{003A}smile\u{003A} → 😄)"), isOn: $store.emojiEnabled)
                 Toggle(tr(fr: "Transformations « // » au clavier", en: "“//” keyboard transforms"), isOn: $store.slashTransformEnabled)
-                Text(tr(fr: "Tapez « // » après votre texte : corriger, raccourcir, reformuler, ton, traduire — ou une consigne libre validée par Entrée. Le résultat s'affiche d'abord en aperçu ; Tab remplace, Esc annule.", en: "Type “//” after your text: fix, shorten, rephrase, tone, translate — or a free instruction confirmed with Return. The result shows first as a preview; Tab replaces, Esc cancels."))
+                Text(tr(fr: "Tapez « // » après votre texte : corriger, raccourcir, reformuler, ton, traduire — ou une consigne libre validée par Entrée. En début de champ, « // » + quelques mots rédige le message complet. Le résultat s'affiche d'abord en aperçu ; Tab remplace, Esc annule.", en: "Type “//” after your text: fix, shorten, rephrase, tone, translate — or a free instruction confirmed with Return. At the start of a field, “//” + a few words drafts the whole message. The result shows first as a preview; Tab replaces, Esc cancels."))
+                    .font(.callout).foregroundStyle(.secondary)
+                Picker(tr(fr: "Rédiger en", en: "Draft in"), selection: $store.composeLanguage) {
+                    ForEach(ComposeLanguage.allCases, id: \.self) { lang in
+                        Text(lang.menuLabel).tag(lang)
+                    }
+                }
+                .disabled(!store.slashTransformEnabled)
+                Text(tr(fr: "La langue par défaut quand vous rédigez depuis quelques mots — placée en ① du choix rapide au clavier ; les autres langues suivent (un chiffre change à la volée). « Suivre la conversation » met en tête la langue cible de traduction (ou celle du correspondant ; sinon la langue du système). Ne change pas corriger/reformuler, qui restent en français.", en: "The default language when you draft from a few words — placed at ① of the keyboard quick-pick; the other languages follow (a digit switches on the fly). “Follow the conversation” puts the translation target language at the top (or the correspondent's; otherwise the system language). Doesn't affect fix/rephrase, which stay in French."))
                     .font(.callout).foregroundStyle(.secondary)
                 Toggle(tr(fr: "Corriger le texte avant de souffler", en: "Fix the text before whispering"), isOn: $store.prefixCorrectionEnabled)
             } header: {

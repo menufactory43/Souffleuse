@@ -73,6 +73,22 @@ struct TransformationIntentTests {
         #expect(TransformationIntent.ton.displayName == "ton")
         #expect(TransformationIntent.traduire.displayName == "traduire")
         #expect(TransformationIntent.libre("x").displayName == "instruction libre")
+        #expect(TransformationIntent.rediger(.french).displayName == "rédiger · français")
+        #expect(TransformationIntent.rediger(.english).displayName == "rédiger · anglais")
+    }
+
+    @Test(".rediger porte sa langue et reste Equatable")
+    func redigerCarriesLanguage() {
+        #expect(TransformationIntent.rediger(.spanish) == .rediger(.spanish))
+        #expect(TransformationIntent.rediger(.spanish) != .rediger(.german))
+        #expect(TransformationIntent.rediger(.french) != .corriger)
+    }
+
+    @Test(".rediger n'est pas une rangée fixe du picker (mode composition)")
+    func redigerIsNotInPickerOrder() {
+        #expect(!TransformationIntent.pickerOrder.contains(.rediger(.french)))
+        // Aucun filtre ne doit faire matcher .rediger (il est hors des rangées).
+        #expect(!TransformationIntent.matches(filter: "réd").contains(.rediger(.french)))
     }
 
     @Test(".libre porte son instruction et reste Equatable")
