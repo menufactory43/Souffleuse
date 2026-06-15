@@ -137,6 +137,11 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// Ancre refusée par Esc — tant que le même « //… » reste ouvert, on ne
     /// rouvre pas le picker que l'utilisateur vient de refuser.
     private var slashPickerDismissedAnchor: String?
+    /// Cache des rangées-langues du picker rédaction, calculées une fois par
+    /// session (clé = ancre « // »). Évite de relancer la détection NL à chaque
+    /// tick alors que la langue de tête ne dépend pas de l'amorce.
+    private var composeRows: [ComposeLanguage] = []
+    private var composeRowsAnchor: String?
     /// Transformation en preview (générée ou en cours de stream).
     private var pendingTransformation: TextTransformation?
     /// Sortie nettoyée du stream, posée à la fin — Tab l'injecte.
@@ -155,6 +160,17 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     private var transformMissTicks = 0
     /// ~1 s au poll de 80 ms — même ordre de grandeur que la grâce du badge.
     private static let transformGraceTicks = 12
+    /// Pause de frappe exigée avant d'afficher les rangées-langues du mode
+    /// rédaction. L'amorce se tape sur plusieurs mots ; afficher les rangées dès
+    /// la 1ʳᵉ lettre recouvrirait le texte (« ça empiète »). On attend que le
+    /// préfixe soit stable ce délai — plus long que le debounce du ghost (50 ms,
+    /// imperceptible) mais sous le seuil d'attente ressentie. ~0,5 s ≈ « j'ai
+    /// fini de taper mes mots-clés », sans flasher entre deux mots.
+    private static let composePauseSeconds: TimeInterval = 0.5
+    /// Préfixe complet (amorce incluse) suivi pour mesurer la pause, + l'instant
+    /// de sa dernière mutation.
+    private var composePauseAnchor: String?
+    private var composePauseSince: Date = .distantPast
     /// Mini Phase 4 — moteur instruct paresseux + petit panneau de traduction.
     private let translationRuntime = TranslationRuntime()
     private let translationHUD = TranslationHUDWindow()
@@ -1404,6 +1420,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         slashPickerState = nil
         slashPickerAnchor = nil
         slashPickerMatches = []
+        composeRows = []
+        composeRowsAnchor = nil
         transformPicker.hide()
         interceptor.setSlashPickerArmed(false)
     }
@@ -1814,23 +1832,68 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             // Ancre de refus : le préfixe jusqu'au « // » inclus. Tant qu'elle
             // n'a pas changé après un Esc, le panneau reste fermé.
             let anchor = String(prefix.prefix(prefix.count - slashState.filter.count))
+            // Anti-empiètement (rédaction) : tant que l'amorce est en cours de
+            // frappe, on n'affiche PAS les rangées (elles recouvriraient le
+            // texte). On attend une pause — préfixe complet stable depuis
+            // `composePauseSeconds`. Pendant l'attente : aucune rangée, aucun
+            // ghost, le champ reste net. (Les transformations sur texte existant
+            // ne sont pas concernées : on y tape un court filtre pour choisir.)
+            if slashState.isComposition {
+                let now = Date()
+                if composePauseAnchor != prefix {
+                    composePauseAnchor = prefix
+                    composePauseSince = now
+                }
+                if now.timeIntervalSince(composePauseSince) < Self.composePauseSeconds {
+                    hideSlashPicker()           // retire une rangée déjà posée si la frappe reprend
+                    predictor.cancel()
+                    lastPredictedPrefix = nil
+                    overlay.hide()
+                    interceptor.setActive(false)
+                    currentTypo = nil
+                    return
+                }
+            }
             if slashPickerDismissedAnchor != anchor {
                 slashPickerDismissedAnchor = nil
                 if slashPickerState == nil { Log.info(.input, "slash_picker_shown") }
                 slashPickerState = slashState
                 slashPickerAnchor = anchor
-                slashPickerMatches = TransformationIntent.matches(filter: slashState.filter)
-                transformPicker.show(
-                    labels: slashPickerMatches.map(\.displayName),
-                    freeInstruction: slashPickerMatches.isEmpty ? slashState.filter : nil,
-                    at: rect)
-                // Digits coupés en mode instruction libre (« //passe en 3 points »
-                // reste saisissable) ; ⏎ armé seulement filtre non vide (« // » nu
-                // + Entrée = saut de ligne normal dans l'app hôte).
-                interceptor.setSlashPickerArmed(
-                    true,
-                    digits: !slashPickerMatches.isEmpty,
-                    enter: !slashState.filter.isEmpty)
+                if slashState.isComposition {
+                    // Rédaction : « // » en début de champ + amorce → une rangée
+                    // PAR LANGUE. La préférence « Rédiger en » met une langue en
+                    // tête (①, prise aussi par ⏎) ; les autres suivent. Un chiffre
+                    // override la langue à la volée — sélection rapide, jamais
+                    // dépendante d'un ghost ni de l'OCR. La résolution (détection /
+                    // épingle / repli) est calculée UNE fois par session de
+                    // rédaction (cache sur l'ancre, stable tant que « // » ne bouge
+                    // pas) — sinon la détection NL tournerait à chaque tick.
+                    if composeRowsAnchor != anchor {
+                        composeRows = orderedComposeLanguages(
+                            forBundle: bundleID, windowTitle: snap.windowTitle)
+                        composeRowsAnchor = anchor
+                    }
+                    slashPickerMatches = composeRows.map { .rediger($0) }
+                    let labels = composeRows.enumerated().map { idx, lang -> String in
+                        let name = lang.promptLanguageName ?? ""
+                        return idx == 0 ? tr(fr: "rédiger · \(name)", en: "compose · \(name)") : name
+                    }
+                    transformPicker.show(labels: labels, freeInstruction: nil, at: rect)
+                    interceptor.setSlashPickerArmed(true, digits: true, enter: true)
+                } else {
+                    slashPickerMatches = TransformationIntent.matches(filter: slashState.filter)
+                    transformPicker.show(
+                        labels: slashPickerMatches.map(\.displayName),
+                        freeInstruction: slashPickerMatches.isEmpty ? slashState.filter : nil,
+                        at: rect)
+                    // Digits coupés en mode instruction libre (« //passe en 3 points »
+                    // reste saisissable) ; ⏎ armé seulement filtre non vide (« // » nu
+                    // + Entrée = saut de ligne normal dans l'app hôte).
+                    interceptor.setSlashPickerArmed(
+                        true,
+                        digits: !slashPickerMatches.isEmpty,
+                        enter: !slashState.filter.isEmpty)
+                }
                 predictor.cancel()
                 lastPredictedPrefix = nil
                 overlay.hide()
@@ -1842,6 +1905,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             // Plus de trigger ouvert : fermer le panneau et ré-armer le
             // déclenchement après un éventuel refus.
             slashPickerDismissedAnchor = nil
+            composePauseAnchor = nil
             hideSlashPicker()
         }
 
@@ -2880,6 +2944,11 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         let prefixNow = snap.text.map { String($0.prefix(caret)) } ?? ""
         let model = translationRuntime.model
         let scope = state.scopeText
+        // Source du commit instruct = ce que voit `runInstructCommit` (garde
+        // « texte vide », TermSurvivalGuard). En transformation c'est la portée ;
+        // en rédaction la portée est vide → on passe l'amorce, sinon le commit
+        // bail immédiatement sur le guard « source vide ».
+        var commitSource = scope
 
         // Fabrique de stream par intention. ④ ton et ⑤ traduire passent par les
         // méthodes du runtime (reformulate/translate) — MÊME tuyau que ⌥⌘T, dont
@@ -2915,31 +2984,37 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             }
             header = tr(fr: "// ton · \(tone.displayName)…", en: "// tone · \(tone.displayName)…")
         case .traduire:
-            // Même résolution de cible que le commit ⌥⌘T : sélection vivante /
-            // store par conversation, AUTO suit la langue détectée du
-            // correspondant. Un AUTO résolu en relecture bascule sur le ton.
+            // Choix EXPLICITE « traduire » → on TRADUIT toujours. Contrairement au
+            // raccourci global ⌥⌘T (qui via `.action` bascule vers le ton quand le
+            // correspondant écrit français — « fais le truc malin »), ici
+            // l'utilisateur a explicitement pris ⑤ : une bascule silencieuse vers
+            // la relecture surprend (pour le ton il y a ④). `resolve` rend
+            // TOUJOURS une langue : épingle de conversation, sinon langue
+            // détectée, sinon EN par défaut (changeable à la volée via ⌘⇧→).
             let selection = currentTargetSelection(
                 forBundle: bundleID, windowTitle: snap.windowTitle)
             let context = lastEnrichedVisible ?? ""
             let detected = TranslationTarget.detected(in: context)
-            let frCorrespondent = TranslationTarget.correspondentSpeaksFrench(in: context)
-            switch selection.action(detected: detected, correspondentIsFrench: frCorrespondent) {
-            case .translate(let target):
-                stream = { [translationRuntime] onToken in
-                    await translationRuntime.translate(scope, into: target, onToken: onToken)
-                }
-                header = tr(fr: "// traduire · FR → \(target.code)…", en: "// translate · FR → \(target.code)…")
-            case .reformulate:
-                let tone = store.tones.tone(forBundle: bundleID)
-                stream = { [translationRuntime] onToken in
-                    await translationRuntime.reformulate(scope, tone: tone, onToken: onToken)
-                }
-                header = tr(fr: "// ton · \(tone.displayName)…", en: "// tone · \(tone.displayName)…")
+            let target = selection.resolve(detected: detected)
+            stream = { [translationRuntime] onToken in
+                await translationRuntime.translate(scope, into: target, onToken: onToken)
             }
+            header = tr(fr: "// traduire · FR → \(target.code)…", en: "// translate · FR → \(target.code)…")
         case .libre(let instruction):
             stream = transformStream(
                 GemmaChatPrompt.freeTransformation(of: scope, instruction: instruction, model: model))
             header = "// \(instruction.prefix(24))…"
+        case .rediger(let composeLanguage):
+            // Rédaction : l'amorce (mots-clés tapés après « // ») EST le filtre —
+            // pas de portée source. Le plancher de `transformMaxNewTokens` (192)
+            // s'applique malgré une source vide, assez pour un message complet.
+            // La langue est portée par la rangée choisie (① préférée ou override
+            // au chiffre) — déjà résolue à l'ouverture du picker.
+            let seed = state.filter.trimmingCharacters(in: .whitespacesAndNewlines)
+            commitSource = seed
+            let language = composeLanguage.promptLanguageName ?? "français"
+            stream = transformStream(GemmaChatPrompt.composition(from: seed, language: language, model: model))
+            header = tr(fr: "// rédiger · \(language)…", en: "// compose · \(language)…")
         }
         // Portée ≠ champ entier (paragraphe du trigger, ou repli > 1500 chars)
         // → l'aperçu le dit.
@@ -2955,7 +3030,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         transformAnchorPrefix = prefixNow
         transformOutput = nil
         transformTask = runInstructCommit(
-            sourceText: scope,
+            sourceText: commitSource,
             fieldRect: snap.elementRect ?? snap.caretRect,
             bundleID: bundleID,
             hud: transformHUD,
@@ -2966,6 +3041,81 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             applyMode: .preview(transformation),
             record: { },   // comptabilisé au Tab seulement (preview ≠ acte)
             stream: stream)
+    }
+
+    /// Rangées-langues du picker rédaction : la langue préférée en tête, les
+    /// autres derrière dans l'ordre du menu. Override au chiffre garanti par les
+    /// 5 rangées concrètes.
+    private func orderedComposeLanguages(forBundle bundleID: String?, windowTitle: String?) -> [ComposeLanguage] {
+        let preferred = resolveComposeLanguage(forBundle: bundleID, windowTitle: windowTitle)
+        return [preferred] + ComposeLanguage.composable.filter { $0 != preferred }
+    }
+
+    /// Résout la langue de tête (①) du mode rédaction depuis la préférence
+    /// `composeLanguage`. Une langue figée se renvoie telle quelle.
+    /// `.conversation` réutilise l'aiguillage de `//traduire` : une cible épinglée
+    /// à la main (touche de cycle) l'emporte ; un correspondant français → FR ;
+    /// sinon la langue détectée ; et si rien n'est détectable, repli sur la langue
+    /// système (choix UAT). Renvoie TOUJOURS une langue concrète (composable).
+    private func resolveComposeLanguage(forBundle bundleID: String?, windowTitle: String?) -> ComposeLanguage {
+        // On calcule détection + sélection AVANT d'aiguiller, pour que la trace
+        // dev voie tout (même quand la préférence fige une langue).
+        let context = lastEnrichedVisible ?? ""
+        let detected = TranslationTarget.detected(in: context)
+        let frCorrespondent = TranslationTarget.correspondentSpeaksFrench(in: context)
+        let selection = currentTargetSelection(forBundle: bundleID, windowTitle: windowTitle)
+        let resolved: ComposeLanguage
+        if store.composeLanguage != .conversation {
+            resolved = store.composeLanguage
+        } else {
+            // .conversation : même résolution que la cible de traduction, repli
+            // langue système (et non anglais) quand rien n'est détectable.
+            switch selection {
+            case .fixed(let target): resolved = .from(target: target)
+            case .reformulate: resolved = .french
+            case .auto:
+                if frCorrespondent { resolved = .french }
+                else if let d = detected { resolved = .from(target: d) }
+                else { resolved = ComposeLanguage.systemFallback() }
+            }
+        }
+        Self.debugDumpCompose(
+            bundleID: bundleID ?? "nil", windowTitle: windowTitle,
+            pref: store.composeLanguage, context: context,
+            detected: detected, frCorrespondent: frCorrespondent,
+            selection: selection, resolved: resolved.promptLanguageName ?? "français",
+            captureEnabled: store.captureEnabled, enrichmentEnabled: store.enrichmentEnabled)
+        return resolved
+    }
+
+    /// Trace dev de la résolution de langue du mode rédaction — gated sur
+    /// `SOUFFLEUSE_PREDICT_LOG`, écrite dans `/tmp/souffleuse-compose.log` (même
+    /// convention que les dumps OCR/predict, jamais en prod, hors audit). Dump le
+    /// texte brut du correspondant : strictement debug local.
+    private static func debugDumpCompose(
+        bundleID: String, windowTitle: String?,
+        pref: ComposeLanguage, context: String,
+        detected: TranslationTarget?, frCorrespondent: Bool,
+        selection: TargetSelection, resolved: String,
+        captureEnabled: Bool, enrichmentEnabled: Bool
+    ) {
+        guard ProcessInfo.processInfo.environment["SOUFFLEUSE_PREDICT_LOG"]?.isEmpty == false else { return }
+        let ts = ISO8601DateFormatter().string(from: Date())
+        let single = context.replacingOccurrences(of: "\n", with: "⏎")
+        let preview = single.count <= 600 ? single : String(single.prefix(600)) + "…"
+        let line = "[\(ts)] compose bundle=\(bundleID) title=\(windowTitle.debugDescription)"
+            + " pref=\(pref.rawValue) capture=\(captureEnabled) enrich=\(enrichmentEnabled)"
+            + " ctxLen=\(context.count) detected=\(detected?.code ?? "nil") frCorrespondent=\(frCorrespondent)"
+            + " selection=\(selection.shortLabel) → resolved=\(resolved)"
+            + " | ctx=\(preview.debugDescription)\n"
+        let path = "/tmp/souffleuse-compose.log"
+        if let data = line.data(using: .utf8) {
+            if let h = FileHandle(forWritingAtPath: path) {
+                h.seekToEndOfFile(); try? h.write(contentsOf: data); try? h.close()
+            } else {
+                FileManager.default.createFile(atPath: path, contents: data)
+            }
+        }
     }
 
     /// Tab pendant le preview : supprime « portée + //filtre » puis injecte le

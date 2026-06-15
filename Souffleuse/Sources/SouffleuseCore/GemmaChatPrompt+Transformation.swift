@@ -61,6 +61,25 @@ extension GemmaChatPrompt {
             model: model)
     }
 
+    /// Rédaction (« // » en début de champ) — développe une amorce (mots-clés /
+    /// notes tapés après « // ») en un texte complet. Pas de texte source : c'est
+    /// l'amorce elle-même qui occupe la place du « message » (EN DERNIER, KV-LCP).
+    /// L'amorce est assainie (balises de chat-template neutralisées) — elle vient
+    /// de la frappe utilisateur, jamais elle ne doit ouvrir un tour.
+    /// `language` = nom de langue (en français, sans article : « français »,
+    /// « anglais »…) résolu par l'appelant depuis la préférence `ComposeLanguage` ;
+    /// défaut « français » (comportement d'origine).
+    public static func composition(
+        from seed: String,
+        language: String = "français",
+        model: InstructModel = .gemma1b
+    ) -> String {
+        assemble(
+            instruction: compositionInstruction(language: language),
+            message: sanitizedInstruction(seed),
+            model: model)
+    }
+
     // MARK: - Assemblage
 
     /// Assemble consigne + message selon le chat-template — factorisation du
@@ -122,6 +141,14 @@ extension GemmaChatPrompt {
         Conserve exactement les noms propres, montants, pourcentages, dates, nombres et termes techniques (wallet, Binance, staking, NFT, gas, CSV, PDF, Stripe…).
         Conserve les sauts de ligne et la structure en paragraphes du message.
         Réponds UNIQUEMENT par la reformulation, sans commentaire ni guillemets.
+        """
+    }
+
+    static func compositionInstruction(language: String = "français") -> String {
+        """
+        Tu es un rédacteur professionnel. À partir des notes ou mots-clés ci-dessous, rédige un message complet, clair et naturel EN \(language.uppercased()). Développe-les en phrases bien construites — n'invente aucune information factuelle (noms, dates, montants, lieux) qui ne figure pas dans les notes ; ne pose pas de questions à l'utilisateur, ne commente pas les notes.
+        Conserve exactement les noms propres, montants, pourcentages, dates, nombres et termes techniques (wallet, Binance, staking, NFT, gas, CSV, PDF, Stripe…) présents dans les notes.
+        Réponds UNIQUEMENT par le message rédigé EN \(language.uppercased()), sans commentaire ni guillemets.
         """
     }
 

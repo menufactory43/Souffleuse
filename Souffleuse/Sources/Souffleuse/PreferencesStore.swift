@@ -159,6 +159,7 @@ final class PreferencesStore {
         static let typoEnabled = "typoEnabled"
         static let emojiEnabled = "emojiEnabled"
         static let slashTransformEnabled = "slashTransformEnabled"
+        static let composeLanguage = "composeLanguage"
         static let emojiFrequency = "emojiFrequency"
         static let completionLength = "completionLength"
         static let hideOnTypo = "hideOnTypo"
@@ -224,6 +225,15 @@ final class PreferencesStore {
     /// « // » est un commentaire ou un chemin).
     var slashTransformEnabled: Bool {
         didSet { UserDefaults.standard.set(slashTransformEnabled, forKey: K.slashTransformEnabled) }
+    }
+    /// Langue de sortie du mode RÉDACTION (« // » en début de champ + amorce →
+    /// texte complet). `.conversation` suit la cible de la conversation (épingle
+    /// manuelle ou langue détectée du correspondant ; repli langue système) ;
+    /// sinon langue figée. Défaut `.french` (FR neutre, comportement d'origine).
+    /// N'affecte QUE la rédaction — les transformations « // » sur texte existant
+    /// (corriger/raccourcir/reformuler) restent en français.
+    var composeLanguage: ComposeLanguage {
+        didSet { UserDefaults.standard.set(composeLanguage.rawValue, forKey: K.composeLanguage) }
     }
     /// Compteur d'usage par shortcode (picker ET expansion `:code:` classique).
     /// Alimente le classement du picker : l'état « : » nu montre TES emoji, pas
@@ -381,6 +391,7 @@ final class PreferencesStore {
         self.typoEnabled = (d.object(forKey: K.typoEnabled) as? Bool) ?? true
         self.emojiEnabled = (d.object(forKey: K.emojiEnabled) as? Bool) ?? true
         self.slashTransformEnabled = (d.object(forKey: K.slashTransformEnabled) as? Bool) ?? true
+        self.composeLanguage = ComposeLanguage(rawValue: d.string(forKey: K.composeLanguage) ?? "") ?? .french
         self.emojiFrequency = (d.object(forKey: K.emojiFrequency) as? [String: Int]) ?? [:]
         self.completionLength = (d.string(forKey: K.completionLength).flatMap(CompletionLength.init(rawValue:))) ?? .medium
         self.hideOnTypo = (d.object(forKey: K.hideOnTypo) as? Bool) ?? true

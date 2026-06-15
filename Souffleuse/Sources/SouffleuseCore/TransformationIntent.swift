@@ -13,6 +13,14 @@ public enum TransformationIntent: Sendable, Equatable {
     case ton
     case traduire
     case libre(String)
+    /// Mode rédaction (« // » en début de champ + amorce) : développe les
+    /// mots-clés / notes tapés après « // » en un texte complet, dans la langue
+    /// portée. N'a pas de rangée fixe dans le picker — l'appelant instancie une
+    /// rangée par langue offerte (la préférence décide laquelle est en tête).
+    /// Le texte rédigé est neuf (pas une transformation d'un texte source), d'où
+    /// l'absence de portée. La langue est TOUJOURS concrète ici (jamais
+    /// `.conversation`, qui est résolu en amont).
+    case rediger(ComposeLanguage)
 
     /// Ordre des rangées du picker — la position visuelle (badge ①–⑤) = index + 1.
     public static let pickerOrder: [TransformationIntent] =
@@ -27,6 +35,7 @@ public enum TransformationIntent: Sendable, Equatable {
         case .ton: return "ton"
         case .traduire: return "traduire"
         case .libre: return "instruction libre"
+        case .rediger(let lang): return "rédiger · \(lang.promptLanguageName ?? "")"
         }
     }
 
