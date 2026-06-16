@@ -85,7 +85,7 @@ public final class OverlayWindow {
     }
 
     public func show(text: String, at caretRectQuartz: CGRect) {
-        show(text: text, at: caretRectQuartz, hostText: nil, caretIndex: nil, hostFont: nil)
+        show(text: text, at: caretRectQuartz, hostText: nil, caretIndex: nil, hostFont: nil, fieldRect: nil)
     }
 
     // MARK: - Apparence du souffle (Préférences › Apparence)
@@ -150,7 +150,18 @@ public final class OverlayWindow {
     /// l'app qui le branche quand `SOUFFLEUSE_LATENCY_TRACE` est posé.
     public var onPaint: ((Int) -> Void)?
 
-    public func show(text: String, at caretRectQuartz: CGRect, hostText: String?, caretIndex: Int?, hostFont: NSFont?) {
+    /// Surcharge principale. `fieldRect` (frame du champ texte en coords Quartz)
+    /// active le rendu wrap multi-ligne quand il est fourni et fiable (prédicat
+    /// `isUsableElementRect`) ; sinon repli sur le rendu single-line bottom-anchored
+    /// historique. NE PAS toucher `showPill` (pill mid-line, hors scope).
+    public func show(
+        text: String,
+        at caretRectQuartz: CGRect,
+        hostText: String?,
+        caretIndex: Int?,
+        hostFont: NSFont?,
+        fieldRect: CGRect? = nil
+    ) {
         // Safety net: a ghost must never contain a hard line break. A newline
         // (e.g. a prose corpus entry stored as "…Bitcoin.\n") renders the
         // overlay one line ABOVE the caret — the panel is bottom-anchored to
@@ -174,7 +185,9 @@ public final class OverlayWindow {
             ?? label.font
             ?? .systemFont(ofSize: 15)
         let correctedRect = Self.correctCaretRect(caretRectQuartz, hostText: hostText, caretIndex: caretIndex, font: renderFont)
-        let frame = Self.appKitFrame(forGhostAfterCaret: correctedRect, text: text, font: renderFont)
+        let (frame, wrap, firstLineIndent) = Self.frameForShow(
+            caret: correctedRect, fieldRect: fieldRect, text: text, font: renderFont
+        )
 
         // Skip redundant repaints (revertable). The 80 ms poll re-calls show()
         // ~12x/s with identical content; re-running setFrame(display:) every tick
@@ -189,7 +202,35 @@ public final class OverlayWindow {
         pillView.isHidden = true
         label.isHidden = false
         label.font = renderFont
-        label.stringValue = text
+
+        if wrap {
+            // Chemin WRAP : panneau TOP-anchored sur la ligne du caret, texte
+            // enroulé sur la largeur du champ. La 1re ligne part du caret
+            // (firstLineHeadIndent), les suivantes repartent au bord gauche.
+            let para = NSMutableParagraphStyle()
+            para.firstLineHeadIndent = firstLineIndent
+            para.headIndent = 0
+            para.lineBreakMode = .byWordWrapping
+            label.maximumNumberOfLines = 0
+            label.lineBreakMode = .byWordWrapping
+            label.attributedStringValue = NSAttributedString(
+                string: text,
+                attributes: [
+                    .font: renderFont,
+                    .foregroundColor: label.textColor ?? NSColor.tertiaryLabelColor,
+                    .paragraphStyle: para,
+                ]
+            )
+        } else {
+            // Chemin SINGLE-LINE (fallback Chromium/Intercom) : restaure l'état
+            // historique avant de peindre — le label reste épinglé BAS
+            // (contraintes lignes 63-74 inchangées), comportement bottom-anchored
+            // strictement préservé.
+            label.maximumNumberOfLines = 1
+            label.lineBreakMode = .byTruncatingTail
+            label.stringValue = text
+        }
+
         panel.setFrame(frame, display: true)
         if !panel.isVisible {
             panel.orderFrontRegardless()
@@ -197,6 +238,25 @@ public final class OverlayWindow {
         lastFrame = frame
         lastText = text
         onPaint?(text.count)
+    }
+
+    /// Helper pur pour les tests et le rendu : choisit entre le frame wrap
+    /// multi-ligne et le frame single-line existant selon la qualité de `fieldRect`.
+    ///
+    /// - Returns: `(frame, wrap, firstLineIndent)` — `wrap == false` signifie
+    ///   repli sur `appKitFrame` (comportement bottom-anchored historique préservé
+    ///   au pixel près).
+    public static func frameForShow(
+        caret: CGRect,
+        fieldRect: CGRect?,
+        text: String,
+        font: NSFont
+    ) -> (frame: CGRect, wrap: Bool, firstLineIndent: CGFloat) {
+        if let fieldRect, isUsableElementRect(fieldRect, caretX: caret.origin.x) {
+            let (wf, indent) = wrapFrame(forGhostAfterCaret: caret, fieldRect: fieldRect, text: text, font: font)
+            return (wf, true, indent)
+        }
+        return (appKitFrame(forGhostAfterCaret: caret, text: text, font: font), false, 0)
     }
 
     /// Paint the **mid-line** ghost as a rounded pill floated just below the caret
