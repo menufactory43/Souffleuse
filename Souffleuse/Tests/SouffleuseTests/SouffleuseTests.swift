@@ -211,6 +211,49 @@ import Testing
     #expect(frame.height > ceil(singleLineSize.height), "le texte doit enrouler sur plusieurs lignes")
 }
 
+// MARK: - OverlayWindow frameForShow (régression fallback + wrap)
+
+@MainActor
+@Test func overlayFrameForShowNilFieldRectEqualsAppKitFrame() {
+    // RÉGRESSION : quand fieldRect est nil, frameForShow doit produire exactement
+    // le même rect que appKitFrame — pixel-identique, comportement bottom-anchored
+    // Chromium/Intercom strictement préservé.
+    let font = NSFont.systemFont(ofSize: 15)
+    let caret = CGRect(x: 120, y: 300, width: 1, height: 18)
+    let text = "suggestion"
+    let (frame, wrap, _) = OverlayWindow.frameForShow(caret: caret, fieldRect: nil, text: text, font: font)
+    let expected = OverlayWindow.appKitFrame(forGhostAfterCaret: caret, text: text, font: font)
+    #expect(frame == expected)
+    #expect(wrap == false)
+}
+
+@MainActor
+@Test func overlayFrameForShowShortTextSingleLine() {
+    // Un texte court qui tient sur la largeur restante wrap sur une seule ligne —
+    // height ≈ caret.height (pas de régression visuelle pour les souffles courts).
+    let font = NSFont.systemFont(ofSize: 15)
+    let caret = CGRect(x: 120, y: 300, width: 1, height: 18)
+    let field = CGRect(x: 50, y: 100, width: 400, height: 200)
+    let text = "ok" // très court, tient forcément sur la ligne restante
+    let (frame, wrap, _) = OverlayWindow.frameForShow(caret: caret, fieldRect: field, text: text, font: font)
+    #expect(wrap == true)
+    // Le texte court → height ≈ caret.height (une seule ligne).
+    let singleLineSize = (text as NSString).size(withAttributes: [.font: font])
+    #expect(frame.height <= ceil(singleLineSize.height) + 4)
+}
+
+@MainActor
+@Test func overlayFrameForShowLongTextMultiLine() {
+    // Un texte long → wrap activé + height > caret.height (au moins 2 lignes).
+    let font = NSFont.systemFont(ofSize: 15)
+    let caret = CGRect(x: 300, y: 300, width: 1, height: 18)
+    let field = CGRect(x: 50, y: 100, width: 320, height: 200) // champ étroit
+    let text = "suggestion très longue qui devrait enrouler à la ligne suivante dans le champ"
+    let (frame, wrap, _) = OverlayWindow.frameForShow(caret: caret, fieldRect: field, text: text, font: font)
+    #expect(wrap == true)
+    #expect(frame.height > caret.height)
+}
+
 // MARK: - SouffleuseAppDelegate mid-line accept plan (fusion avec l'existant)
 
 @MainActor
