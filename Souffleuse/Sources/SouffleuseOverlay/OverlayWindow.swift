@@ -85,7 +85,7 @@ public final class OverlayWindow {
     }
 
     public func show(text: String, at caretRectQuartz: CGRect) {
-        show(text: text, at: caretRectQuartz, hostText: nil, caretIndex: nil, hostFont: nil)
+        show(text: text, at: caretRectQuartz, hostText: nil, caretIndex: nil, hostFont: nil, fieldRect: nil)
     }
 
     // MARK: - Apparence du souffle (Préférences › Apparence)
@@ -150,7 +150,18 @@ public final class OverlayWindow {
     /// l'app qui le branche quand `SOUFFLEUSE_LATENCY_TRACE` est posé.
     public var onPaint: ((Int) -> Void)?
 
-    public func show(text: String, at caretRectQuartz: CGRect, hostText: String?, caretIndex: Int?, hostFont: NSFont?) {
+    /// Surcharge principale. `fieldRect` (frame du champ texte en coords Quartz)
+    /// active le rendu wrap multi-ligne quand il est fourni et fiable (prédicat
+    /// `isUsableElementRect`) ; sinon repli sur le rendu single-line bottom-anchored
+    /// historique. NE PAS toucher `showPill` (pill mid-line, hors scope).
+    public func show(
+        text: String,
+        at caretRectQuartz: CGRect,
+        hostText: String?,
+        caretIndex: Int?,
+        hostFont: NSFont?,
+        fieldRect: CGRect? = nil
+    ) {
         // Safety net: a ghost must never contain a hard line break. A newline
         // (e.g. a prose corpus entry stored as "…Bitcoin.\n") renders the
         // overlay one line ABOVE the caret — the panel is bottom-anchored to
@@ -174,7 +185,9 @@ public final class OverlayWindow {
             ?? label.font
             ?? .systemFont(ofSize: 15)
         let correctedRect = Self.correctCaretRect(caretRectQuartz, hostText: hostText, caretIndex: caretIndex, font: renderFont)
-        let frame = Self.appKitFrame(forGhostAfterCaret: correctedRect, text: text, font: renderFont)
+        let (frame, wrap, firstLineIndent) = Self.frameForShow(
+            caret: correctedRect, fieldRect: fieldRect, text: text, font: renderFont
+        )
 
         // Skip redundant repaints (revertable). The 80 ms poll re-calls show()
         // ~12x/s with identical content; re-running setFrame(display:) every tick
@@ -189,7 +202,35 @@ public final class OverlayWindow {
         pillView.isHidden = true
         label.isHidden = false
         label.font = renderFont
-        label.stringValue = text
+
+        if wrap {
+            // Chemin WRAP : panneau TOP-anchored sur la ligne du caret, texte
+            // enroulé sur la largeur du champ. La 1re ligne part du caret
+            // (firstLineHeadIndent), les suivantes repartent au bord gauche.
+            let para = NSMutableParagraphStyle()
+            para.firstLineHeadIndent = firstLineIndent
+            para.headIndent = 0
+            para.lineBreakMode = .byWordWrapping
+            label.maximumNumberOfLines = 0
+            label.lineBreakMode = .byWordWrapping
+            label.attributedStringValue = NSAttributedString(
+                string: text,
+                attributes: [
+                    .font: renderFont,
+                    .foregroundColor: label.textColor ?? NSColor.tertiaryLabelColor,
+                    .paragraphStyle: para,
+                ]
+            )
+        } else {
+            // Chemin SINGLE-LINE (fallback Chromium/Intercom) : restaure l'état
+            // historique avant de peindre — le label reste épinglé BAS
+            // (contraintes lignes 63-74 inchangées), comportement bottom-anchored
+            // strictement préservé.
+            label.maximumNumberOfLines = 1
+            label.lineBreakMode = .byTruncatingTail
+            label.stringValue = text
+        }
+
         panel.setFrame(frame, display: true)
         if !panel.isVisible {
             panel.orderFrontRegardless()
@@ -197,6 +238,25 @@ public final class OverlayWindow {
         lastFrame = frame
         lastText = text
         onPaint?(text.count)
+    }
+
+    /// Helper pur pour les tests et le rendu : choisit entre le frame wrap
+    /// multi-ligne et le frame single-line existant selon la qualité de `fieldRect`.
+    ///
+    /// - Returns: `(frame, wrap, firstLineIndent)` — `wrap == false` signifie
+    ///   repli sur `appKitFrame` (comportement bottom-anchored historique préservé
+    ///   au pixel près).
+    public static func frameForShow(
+        caret: CGRect,
+        fieldRect: CGRect?,
+        text: String,
+        font: NSFont
+    ) -> (frame: CGRect, wrap: Bool, firstLineIndent: CGFloat) {
+        if let fieldRect, isUsableElementRect(fieldRect, caretX: caret.origin.x) {
+            let (wf, indent) = wrapFrame(forGhostAfterCaret: caret, fieldRect: fieldRect, text: text, font: font)
+            return (wf, true, indent)
+        }
+        return (appKitFrame(forGhostAfterCaret: caret, text: text, font: font), false, 0)
     }
 
     /// Paint the **mid-line** ghost as a rounded pill floated just below the caret
@@ -375,6 +435,83 @@ public final class OverlayWindow {
         rect.width >= 2 && rect.height >= 2
             && rect.width < 4000 && rect.height < 400
             && rect.origin.x.isFinite && rect.origin.y.isFinite
+    }
+
+    /// Vérifie que `rect` (frame du champ texte focalisé, coords Quartz) est
+    /// exploitable pour ancrer le rendu wrap multi-ligne.
+    ///
+    /// Pourquoi ce prédicat : certains hôtes Chromium/Electron ne renvoient pas
+    /// de frame de champ fiable via AX — soit la valeur est absente, soit les
+    /// dimensions sont aberrantes (width géante, origins infinies). Sans ce
+    /// garde-fou on risque d'ancrer le panneau wrap sur un rect fantôme et de
+    /// faire disparaître le souffle ou de le positionner hors-écran. Dans ce
+    /// cas on retombe sur le rendu single-line historique (bottom-anchored,
+    /// comportement Chromium/Intercom strictement préservé).
+    ///
+    /// Le `caretX` doit être DANS la largeur du champ : un caret hors du rect
+    /// signifie que le rect ne correspond pas au champ du caret — on ne wrape
+    /// pas sur un champ tiers.
+    public static func isUsableElementRect(_ rect: CGRect, caretX: CGFloat) -> Bool {
+        rect.width >= 2
+            && rect.width < 4000
+            && rect.height.isFinite
+            && rect.origin.x.isFinite
+            && rect.origin.y.isFinite
+            && caretX.isFinite
+            && caretX >= rect.minX - 1
+            && caretX <= rect.maxX
+    }
+
+    /// Calcule la frame AppKit et l'indentation de première ligne pour un rendu
+    /// wrap multi-ligne du souffle.
+    ///
+    /// Contexte : `appKitFrame` calcule `width = ceil(textSize.width) + 4` ancré
+    /// sur `caret.origin.x` sans borne droite — le souffle déborde le bord droit
+    /// du champ hôte quand la suggestion est longue (bug constaté dans les
+    /// composers webmail Chromium). Ce chemin TOP-anchored, qui élargit le panneau
+    /// à `fieldRect.width` et laisse NSTextField wrapper le texte, règle le
+    /// problème sans troncature.
+    ///
+    /// Ancrage : le TOP du panneau est aligné sur le haut de la ligne du caret
+    /// (le panneau déborde vers le BAS — Quartz Y descend). Le label reste épinglé
+    /// au bas dans le chemin single-line (contraintes lignes 63-74 inchangées) ;
+    /// le chemin wrap est un panneau DISTINCT en termes de géométrie, TOP-anchored.
+    ///
+    /// - Returns: `(frame, firstLineIndent)` où `firstLineIndent` est la distance
+    ///   entre le bord gauche du champ et le caret, à injecter dans
+    ///   `NSParagraphStyle.firstLineHeadIndent` pour que la première ligne parte
+    ///   du caret et les lignes suivantes du bord gauche du champ.
+    static func wrapFrame(
+        forGhostAfterCaret caret: CGRect,
+        fieldRect: CGRect,
+        text: String,
+        font: NSFont
+    ) -> (frame: CGRect, firstLineIndent: CGFloat) {
+        // La 1re ligne part du caret ; les suivantes repartent au bord gauche.
+        let firstLineIndent = max(0, caret.origin.x - fieldRect.minX)
+        let width = ceil(fieldRect.width)
+
+        // Mesure de la hauteur enroulée avec l'indentation de la 1re ligne.
+        let para = NSMutableParagraphStyle()
+        para.firstLineHeadIndent = firstLineIndent
+        para.headIndent = 0
+        para.lineBreakMode = .byWordWrapping
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .paragraphStyle: para]
+        let boundingRect = (text as NSString).boundingRect(
+            with: CGSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: attrs
+        )
+        let height = max(caret.height, ceil(boundingRect.height))
+
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? NSScreen.main?.frame.height ?? 0
+        // TOP-anchored sur la ligne du caret : le haut du panneau correspond à
+        // `caret.origin.y` en Quartz (le bas de la ligne en AppKit coordonnées).
+        // En AppKit (origine bottom-left) : appKitY = primaryHeight - caret.origin.y - height.
+        let appKitY = primaryHeight - caret.origin.y - height
+        let appKitX = fieldRect.minX
+
+        return (CGRect(x: appKitX, y: appKitY, width: width, height: height), firstLineIndent)
     }
 
     public func hide() {
