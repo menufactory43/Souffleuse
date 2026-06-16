@@ -862,15 +862,21 @@
   .feature {
     padding: 1.7rem 1.6rem;
     border-bottom: 1px solid rgba(26,22,19,0.4);
+    transition: background .28s cubic-bezier(0.22,0.7,0.2,1);
   }
-  /* Filets de colonne : la carte large (iii) décale la parité, on désigne donc
-     explicitement les entrées de la colonne droite (2, 5, 7, 9). */
+  /* Le rôle entre dans la lumière au survol : un voile de papier plus clair,
+     sans jamais convoquer la voix sang-de-bœuf (réservée à la réplique). */
+  @media (hover: hover) {
+    .feature:not(.feature--wide):hover { background: var(--paper-card); }
+  }
+  /* Filets de colonne : les deux cartes larges (iii, x) décalent la parité, on
+     désigne donc explicitement les entrées de la colonne droite (2, 5, 7, 9).
+     La carte large finale ferme la grille → seul `:last-child` retire le filet bas. */
   @media (min-width: 720px) {
     .feature:nth-child(2),
     .feature:nth-child(5),
     .feature:nth-child(7),
     .feature:nth-child(9) { border-left: 1px solid rgba(26,22,19,0.4); }
-    .feature:nth-last-child(-n+2) { border-bottom: none; }
   }
   .feature:last-child { border-bottom: none; }
 
@@ -922,6 +928,26 @@
     border-radius: 2px;
     border: 1px solid rgba(26,22,19,0.2);
   }
+  /* Tête d'affiche (x.) : l'exemple « // → réplique » soufflé dans la carte
+     sombre. Le « // » et le caret sang-de-bœuf rejouent la signature du souffleur. */
+  .feature--cue .shortcode {
+    background: rgba(243,234,217,0.12);
+    border-color: rgba(243,234,217,0.28);
+    color: var(--paper);
+  }
+  .feature--cue .cue-vue {
+    margin: 0.85rem 0 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.15rem 0.55rem;
+    font-size: 0.92rem;
+    line-height: 1.7;
+    color: var(--paper-edge);
+  }
+  .cue-typed { color: var(--paper); }
+  .cue-fleche { color: var(--rouge); font-style: normal; }
+  .cue-apres { font-style: italic; color: var(--paper-edge); }
 
   /* ---------- Coulisses / confidentialité ---------- */
 
@@ -1396,6 +1422,17 @@
   .reveal.is-in .feature:nth-child(7) { transition-delay: 0.64s; }
   .reveal.is-in .feature:nth-child(8) { transition-delay: 0.72s; }
   .reveal.is-in .feature:nth-child(9) { transition-delay: 0.80s; }
+  .reveal.is-in .feature:nth-child(10) { transition-delay: 0.88s; }
+  /* Les rôles ne tombent pas droit : ils dérivent du côté jardin (bas-gauche)
+     et passent du flou au net — l'encre qui se pose sur le programme. */
+  .reveal .feature {
+    transform: translate(-7px, 16px);
+    filter: blur(5px);
+    transition: opacity 0.72s ease,
+                transform 0.78s cubic-bezier(0.16, 0.74, 0.12, 1),
+                filter 0.66s ease;
+  }
+  .reveal.is-in .feature { filter: none; }
 
   /* ---------- Les filets se tirent ---------- */
   /* Un filet de programme se trace au moment où on l'atteint. */
@@ -1545,6 +1582,7 @@
     }
     .ink-rise { opacity: 1; transform: none; filter: none; }
     .reveal { opacity: 1; transform: none; }
+    .reveal .feature { opacity: 1; transform: none; filter: none; }
     .souffle-wave { stroke-dashoffset: 0; opacity: 1; }
     .souffle-label { opacity: 1; }
     .souffle__word { opacity: 1; filter: none; transform: none; transition: none; }
@@ -1912,7 +1950,7 @@
       <div class="section-head">
         <span class="smallcaps">La distribution</span>
         <h2 id="fonctions-titre">Ce qu'elle fait</h2>
-        <p class="stage-dir">Neuf rôles, tenus en silence</p>
+        <p class="stage-dir">Dix rôles, tenus en silence</p>
       </div>
       <ul class="features">
         <li class="feature">
@@ -1993,6 +2031,20 @@
           <p class="feature__vue" aria-hidden="true">
             <span class="vue-scene">Ce soir, au carnet</span>
             <span class="vue-typed"><span class="vue-num">1 248</span> frappes épargnées · <span class="vue-num">11</span> minutes rendues</span>
+          </p>
+        </li>
+        <!-- Tête d'affiche : la fonction phare, rédiger un message depuis quelques mots -->
+        <li class="feature feature--wide feature--cue">
+          <div class="feature__head">
+            <span class="feature__num">x.</span>
+            <h3>Quelques mots, et la réplique entière</h3>
+            <p class="feature__lede">Vous soufflez l'essentiel ; elle écrit le reste.</p>
+          </div>
+          <p>En tête d'un message, tapez <span class="shortcode">//</span> puis trois mots jetés (« rdv Marie mardi 14h ») : elle en tire un message entier, naturel et juste de ton. La langue se choisit d'un chiffre (français, anglais, espagnol, allemand, italien). Vous relisez, <kbd>Tab</kbd> pose, <kbd>Esc</kbd> oublie. Toujours sur votre Mac.</p>
+          <p class="cue-vue" aria-hidden="true">
+            <span class="cue-typed"><span class="shortcode">//</span> rdv Marie mardi 14h</span><span class="caret"></span>
+            <span class="cue-fleche">→</span>
+            <span class="cue-apres">« Bonjour Marie, je vous propose un rendez-vous mardi à 14 h. Cela vous conviendrait-il ? »</span>
           </p>
         </li>
       </ul>
