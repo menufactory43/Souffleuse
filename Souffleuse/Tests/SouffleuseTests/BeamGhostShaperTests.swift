@@ -333,4 +333,42 @@ struct BeamGhostShaperTests {
         #expect(off == "informe que")
         #expect(on == "informe")
     }
+
+    // MARK: - Anti-répétition interne (décode beam sans repeatPenalty)
+
+    @Test func internalRepeat_truncatesAtFirstDuplicate() {
+        // Cas réel (capture 16/06) : « revolut » → liste dégénérée. On coupe au
+        // 2ᵉ « révolutionnaire » et on lâche la virgule traînante.
+        #expect(BeamGhostShaper.truncateAtInternalRepeat(
+            "ions, révolution, révolutionnaire, révolutionnaire, révolutionnaire")
+            == "ions, révolution, révolutionnaire")
+    }
+
+    @Test func internalRepeat_healthyGhostUnchanged() {
+        // Aucun mot de contenu redoublé → byte-identique (invariant clé).
+        let s = "je vous informe que le service sera disponible demain"
+        #expect(BeamGhostShaper.truncateAtInternalRepeat(s) == s)
+    }
+
+    @Test func internalRepeat_functionWordRepeatAllowed() {
+        // « de … de », « la … la » : répétition de mots-outils légitime, jamais
+        // déclenchée (seuls les mots de contenu ≥ 3 lettres comptent).
+        let s = "le prix de la pomme et de la poire"
+        #expect(BeamGhostShaper.truncateAtInternalRepeat(s) == s)
+    }
+
+    @Test func internalRepeat_preservesLeadingSpace() {
+        // Ghost next-word (espace de tête) : l'espace survit à la coupe.
+        #expect(BeamGhostShaper.truncateAtInternalRepeat(
+            " merci merci beaucoup") == " merci")
+    }
+
+    @Test func postFilter_killsDegenerateList() {
+        // Bout-en-bout : la liste dégénérée ressort dé-bouclée du post-filtre.
+        let out = BeamGhostShaper.beamPostFilter(
+            rawGhost: "ions, révolution, révolutionnaire, révolutionnaire, révolutionnaire",
+            isBoundary: false, caretAfterSpace: false,
+            userTail: "revolut", maxWords: 8)
+        #expect(out == "ions, révolution, révolutionnaire")
+    }
 }

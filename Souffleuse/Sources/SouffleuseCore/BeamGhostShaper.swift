@@ -275,6 +275,37 @@ public enum BeamGhostShaper {
         return parts.joined(separator: " ")
     }
 
+    /// Tronque le ghost AU PREMIER mot de contenu qui répète un mot de contenu
+    /// déjà émis DANS le ghost. Le décode du beam (K=1 « greedy » après-espace
+    /// comme K>1 mid-mot) n'applique AUCUNE pénalité de répétition — pas de
+    /// `repeatPenalty`, pas de no-repeat-ngram (le greedy `LlamaEngine.generate`
+    /// qui en a une ne sert QUE la traduction). Sur un préfixe pauvre, le base/PT
+    /// dérive alors en énumération (« révolution, révolutionnaire,
+    /// révolutionnaire, … ») que rien n'arrêtait : `echoScore` ne mesure que
+    /// l'écho du TAIL utilisateur, pas la répétition INTERNE du ghost. On coupe
+    /// AVANT le doublon — la 1ʳᵉ occurrence reste, la boucle disparaît — et on
+    /// lâche un séparateur traînant (« …révolutionnaire, »). Conservateur : seuls
+    /// les mots de contenu (≥ 3 lettres, hors mots-outils `trailingFunctionWords`)
+    /// comptent, donc un « de … de » / « la … la » légitime ne déclenche jamais.
+    /// SANS doublon, renvoie l'entrée INCHANGÉE (byte-identique pour un ghost sain).
+    public nonisolated static func truncateAtInternalRepeat(_ ghost: String) -> String {
+        var seen = Set<String>()
+        let parts = ghost.split(separator: " ", omittingEmptySubsequences: false)
+        for (i, part) in parts.enumerated() {
+            let n = normalizedTailWord(part)
+            guard n.count >= 3, !trailingFunctionWords.contains(n) else { continue }
+            if seen.contains(n) {
+                var kept = parts[0..<i].joined(separator: " ")
+                while let last = kept.last, last == "," || last == ";" || last == " " {
+                    kept.removeLast()
+                }
+                return kept
+            }
+            seen.insert(n)
+        }
+        return ghost
+    }
+
     // MARK: - Post-filtre de sortie
 
     /// Garde de sortie du ghost beam — MIROIR des post-filtres du long-ghost
@@ -312,6 +343,13 @@ public enum BeamGhostShaper {
             let run = OutputFilter.longestVerbatimRunWords(ghost: result, tail: userTail)
             if run >= SuggestionPolicy.Tuning.echoMinVerbatimRunWords { return "" }
         }
+        // Répétition INTERNE : le décode beam n'a aucune pénalité de répétition
+        // → sur préfixe pauvre il part en liste (« révolution, révolutionnaire,
+        // révolutionnaire, … »). On coupe au 1ᵉʳ mot de contenu redoublé. AVANT
+        // le word-cap pour que le cap compte la version dé-bouclée. No-op (byte-
+        // identique) sur un ghost sain.
+        result = truncateAtInternalRepeat(result)
+        if result.trimmingCharacters(in: .whitespaces).isEmpty { return "" }
         // Coupe à la 1ʳᵉ frontière de clause/phrase (newline . ! ? ; :), bornes
         // INCLUSES — exactement « comme d'hab » (long-ghost) : on montre la suite
         // jusqu'à la fin de phrase comprise, on ne va pas AU-DELÀ. Ne pas proposer
