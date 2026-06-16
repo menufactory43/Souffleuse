@@ -377,6 +377,83 @@ public final class OverlayWindow {
             && rect.origin.x.isFinite && rect.origin.y.isFinite
     }
 
+    /// Vérifie que `rect` (frame du champ texte focalisé, coords Quartz) est
+    /// exploitable pour ancrer le rendu wrap multi-ligne.
+    ///
+    /// Pourquoi ce prédicat : certains hôtes Chromium/Electron ne renvoient pas
+    /// de frame de champ fiable via AX — soit la valeur est absente, soit les
+    /// dimensions sont aberrantes (width géante, origins infinies). Sans ce
+    /// garde-fou on risque d'ancrer le panneau wrap sur un rect fantôme et de
+    /// faire disparaître le souffle ou de le positionner hors-écran. Dans ce
+    /// cas on retombe sur le rendu single-line historique (bottom-anchored,
+    /// comportement Chromium/Intercom strictement préservé).
+    ///
+    /// Le `caretX` doit être DANS la largeur du champ : un caret hors du rect
+    /// signifie que le rect ne correspond pas au champ du caret — on ne wrape
+    /// pas sur un champ tiers.
+    public static func isUsableElementRect(_ rect: CGRect, caretX: CGFloat) -> Bool {
+        rect.width >= 2
+            && rect.width < 4000
+            && rect.height.isFinite
+            && rect.origin.x.isFinite
+            && rect.origin.y.isFinite
+            && caretX.isFinite
+            && caretX >= rect.minX - 1
+            && caretX <= rect.maxX
+    }
+
+    /// Calcule la frame AppKit et l'indentation de première ligne pour un rendu
+    /// wrap multi-ligne du souffle.
+    ///
+    /// Contexte : `appKitFrame` calcule `width = ceil(textSize.width) + 4` ancré
+    /// sur `caret.origin.x` sans borne droite — le souffle déborde le bord droit
+    /// du champ hôte quand la suggestion est longue (bug constaté dans les
+    /// composers webmail Chromium). Ce chemin TOP-anchored, qui élargit le panneau
+    /// à `fieldRect.width` et laisse NSTextField wrapper le texte, règle le
+    /// problème sans troncature.
+    ///
+    /// Ancrage : le TOP du panneau est aligné sur le haut de la ligne du caret
+    /// (le panneau déborde vers le BAS — Quartz Y descend). Le label reste épinglé
+    /// au bas dans le chemin single-line (contraintes lignes 63-74 inchangées) ;
+    /// le chemin wrap est un panneau DISTINCT en termes de géométrie, TOP-anchored.
+    ///
+    /// - Returns: `(frame, firstLineIndent)` où `firstLineIndent` est la distance
+    ///   entre le bord gauche du champ et le caret, à injecter dans
+    ///   `NSParagraphStyle.firstLineHeadIndent` pour que la première ligne parte
+    ///   du caret et les lignes suivantes du bord gauche du champ.
+    static func wrapFrame(
+        forGhostAfterCaret caret: CGRect,
+        fieldRect: CGRect,
+        text: String,
+        font: NSFont
+    ) -> (frame: CGRect, firstLineIndent: CGFloat) {
+        // La 1re ligne part du caret ; les suivantes repartent au bord gauche.
+        let firstLineIndent = max(0, caret.origin.x - fieldRect.minX)
+        let width = ceil(fieldRect.width)
+
+        // Mesure de la hauteur enroulée avec l'indentation de la 1re ligne.
+        let para = NSMutableParagraphStyle()
+        para.firstLineHeadIndent = firstLineIndent
+        para.headIndent = 0
+        para.lineBreakMode = .byWordWrapping
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .paragraphStyle: para]
+        let boundingRect = (text as NSString).boundingRect(
+            with: CGSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: attrs
+        )
+        let height = max(caret.height, ceil(boundingRect.height))
+
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? NSScreen.main?.frame.height ?? 0
+        // TOP-anchored sur la ligne du caret : le haut du panneau correspond à
+        // `caret.origin.y` en Quartz (le bas de la ligne en AppKit coordonnées).
+        // En AppKit (origine bottom-left) : appKitY = primaryHeight - caret.origin.y - height.
+        let appKitY = primaryHeight - caret.origin.y - height
+        let appKitX = fieldRect.minX
+
+        return (CGRect(x: appKitX, y: appKitY, width: width, height: height), firstLineIndent)
+    }
+
     public func hide() {
         label.stringValue = ""
         label.isHidden = false
