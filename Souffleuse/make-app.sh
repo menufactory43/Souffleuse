@@ -7,8 +7,15 @@ cd "$(dirname "$0")"
 
 # Release mode (RELEASE=1) : signature Developer ID + timestamp sécurisé +
 # entitlements MLX, puis notarisation + staple + fabrication du .dmg pour le site.
-# Par défaut on garde le flux dev rapide : cert Apple Development, pas de
-# timestamp/réseau, pas de DMG (build local + TCC stable).
+#
+# DEVBUILD=1 : « vrai build » Release (flag DEBUG off → -O, features dev comme
+# l'inspecteur ghost compilées dehors) MAIS signé avec le cert Apple Development
+# (TCC-stable) et SANS notarisation/DMG — pour tester le comportement réel sans
+# reperdre les permissions. C'est le flux dev quotidien quand on veut autre chose
+# que le Debug. Ignoré si RELEASE=1. `CONFIGURATION` explicite l'emporte toujours.
+#
+# Par défaut (ni RELEASE ni DEVBUILD) : flux dev rapide en Debug, cert Apple
+# Development, pas de timestamp/réseau, pas de DMG (build local + TCC stable).
 RELEASE="${RELEASE:-}"
 if [ -n "$RELEASE" ]; then
   CONFIGURATION="${CONFIGURATION:-Release}"
@@ -16,7 +23,11 @@ if [ -n "$RELEASE" ]; then
   TIMESTAMP_FLAG="--timestamp"
   ENTITLEMENTS_ARG="--entitlements Resources/Souffleuse.entitlements"
 else
-  CONFIGURATION="${CONFIGURATION:-Debug}"
+  if [ -n "${DEVBUILD:-}" ]; then
+    CONFIGURATION="${CONFIGURATION:-Release}"   # vrai build, mais cert dev (lignes ci-dessous)
+  else
+    CONFIGURATION="${CONFIGURATION:-Debug}"
+  fi
   DEFAULT_SIGN="A798891AB1B0A8C0B46AFADBD95094BABF680037"   # Apple Development (TCC-stable en dev)
   TIMESTAMP_FLAG="--timestamp=none"
   ENTITLEMENTS_ARG=""
