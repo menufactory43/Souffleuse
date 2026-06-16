@@ -14,7 +14,7 @@ progress:
 
 # Project State: Cocotypist / Souffleuse
 
-**Last updated:** 2026-05-24
+**Last updated:** 2026-06-16 — Completed quick task 260616-eoy: ghost inline wrap multi-ligne
 
 ---
 
@@ -114,6 +114,7 @@ Aucun.
 | 260612-gto | Refonte onboarding en wizard multi-étapes inspiré de Cotabby (pied fixe, cartes permission live, reprise après relaunch, complétion versionnée) | 2026-06-12 | c2ed369 | Vérifié live (screenshots 6 étapes) | [260612-gto-refonte-onboarding-en-wizard-multi-tapes](./quick/260612-gto-refonte-onboarding-en-wizard-multi-tapes/) |
 | 260612-ij2 | Onboarding complété : rappel permission perdue (Input Monitoring), essai RÉEL du souffle (exception R1 scopée + inject self-process), toggle login item, réassurance mots de passe, logo | 2026-06-12 | f82422e | Vérifié live (souffle réel + Tab dans le wizard) | [260612-ij2-compl-ter-l-onboarding-rappel-permission](./quick/260612-ij2-compl-ter-l-onboarding-rappel-permission/) |
 | 260614-fib | Supprimer 8 cibles dev mortes/superseded (CorpusEval, TTFTBench, BeamEval, PersonalizationEval, MaxWordsEval) + 3 benches MLX + dépendance mlx-swift-examples du package | 2026-06-14 | 6535438 | swift build OK + 938 @Test verts | [260614-fib-supprimer-8-cibles-dev-mortes-superseded](./quick/260614-fib-supprimer-8-cibles-dev-mortes-superseded/) |
+| 260616-eoy | Fix ghost inline déborde la zone de texte → wrap multi-ligne (1re ligne au caret, lignes suivantes au bord gauche du champ), fallback single-line bottom-anchored préservé | 2026-06-16 | b414507 | swift build OK + 972 @Test verts + audit.sh PASS | [260616-eoy-fix-ghost-inline-d-borde-la-zone-de-text](./quick/260616-eoy-fix-ghost-inline-d-borde-la-zone-de-text/) |
 
 ### Notes
 
