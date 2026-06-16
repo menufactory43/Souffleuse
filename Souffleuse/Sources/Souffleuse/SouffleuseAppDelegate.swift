@@ -1988,7 +1988,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 partialAcceptedAtBundleID = bundleID
                 partialRemainder = ghost
                 if let rect = rectForGhost {
-                    overlay.show(text: ghost, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFontForOverlay)
+                    overlay.show(text: ghost, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFontForOverlay, fieldRect: snap.elementRect)
                     interceptor.setActive(true)
                     maybeSpawnRollingRefill(committedText: prefix, bundleID: bundleID)
                 } else {
@@ -2131,7 +2131,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             if prefix == expected {
                 // Synced — render remainder and skip predict.
                 if let rect = rectForGhost {
-                    overlay.show(text: partialRemainder, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFontForOverlay)
+                    overlay.show(text: partialRemainder, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFontForOverlay, fieldRect: snap.elementRect)
                     interceptor.setActive(true)
                     // ── ROLLING REFILL (mode sliding-window, flag OFF par défaut) ──
                     // Si le reste affiché descend SOUS le plancher de mots, on GÉNÈRE
@@ -2150,7 +2150,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 // AX hasn't caught up to our latest inject yet. Keep showing
                 // the remainder, do not re-predict, wait for the next tick.
                 if let rect = rectForGhost {
-                    overlay.show(text: partialRemainder, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFontForOverlay)
+                    overlay.show(text: partialRemainder, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFontForOverlay, fieldRect: snap.elementRect)
                     interceptor.setActive(true)
                 }
                 return
@@ -2180,7 +2180,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                         // Don't return — fall through so predict fires.
                     } else {
                         if let rect = rectForGhost {
-                            overlay.show(text: partialRemainder, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFontForOverlay)
+                            overlay.show(text: partialRemainder, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFontForOverlay, fieldRect: snap.elementRect)
                             interceptor.setActive(true)
                             // FLUX CONTINU : recharge le bord droit DÈS la conso active
                             // (et pas seulement au tick synchronisé suivant), pour que la
@@ -2426,7 +2426,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        overlay.show(text: suggestion, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFontForOverlay)
+        overlay.show(text: suggestion, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFontForOverlay, fieldRect: snap.elementRect)
         interceptor.setActive(true)
 
         // ── ANCRAGE D'UNE GÉNÉRATION FRAÎCHE (flag `midWordGhostRollingEnabled`) ──
