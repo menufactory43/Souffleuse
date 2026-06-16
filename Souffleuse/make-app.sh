@@ -26,8 +26,12 @@ APP_NAME="Souffleuse"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 
 echo "==> xcodebuild ($CONFIGURATION)..."
+# XCB_EXTRA : build-settings optionnels passés tels quels à xcodebuild (ex.
+# « SWIFT_OPTIMIZATION_LEVEL=-O SWIFT_COMPILATION_MODE=wholemodule » pour un
+# build Debug avec perf release — flag DEBUG/assertions conservés, vitesse -O).
 xcodebuild -scheme "$APP_NAME" -derivedDataPath ./build -destination "platform=macOS" -configuration "$CONFIGURATION" build \
   -quiet \
+  ${XCB_EXTRA:-} \
   | tail -5
 
 if [ ! -x "$BUILD_DIR/$APP_NAME" ]; then
