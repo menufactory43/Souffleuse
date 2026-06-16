@@ -74,10 +74,28 @@ extension GemmaChatPrompt {
         language: String = "français",
         model: InstructModel = .gemma1b
     ) -> String {
-        assemble(
-            instruction: compositionInstruction(language: language),
-            message: sanitizedInstruction(seed),
-            model: model)
+        let instruction = compositionInstruction(language: language)
+        let message = sanitizedInstruction(seed)
+        switch model {
+        case .gemma1b:
+            // Gemma-3 : pas de few-shot ChatML sur cette voie (comme translation).
+            return assemble(instruction: instruction, message: message, model: .gemma1b)
+        case .qwen1_5b:
+            // Qwen2.5 : un tour few-shot DANS LA LANGUE CIBLE avant l'amorce.
+            // L'amorce est en français ; sans ancre, le 1.5B échote le français
+            // au lieu de rédiger dans la langue choisie — même mode écho que la
+            // traduction (cf. `translationFewShot`, UAT 11/06). Français → aucun
+            // shot : pas de dérive depuis la langue source. Préfixe stable par
+            // langue → KV-LCP intact.
+            let shots = compositionFewShot(language: language)
+            return "<|im_start|>system\n" + instruction + "<|im_end|>\n"
+                + shots.map {
+                    "<|im_start|>user\n" + $0.user + "<|im_end|>\n"
+                        + "<|im_start|>assistant\n" + $0.assistant + "<|im_end|>\n"
+                }.joined()
+                + "<|im_start|>user\n" + message + "<|im_end|>\n"
+                + "<|im_start|>assistant\n"
+        }
     }
 
     // MARK: - Assemblage
@@ -156,10 +174,52 @@ extension GemmaChatPrompt {
         //   ça basculait vers la lettre administrative (« salutations distinguées »,
         //   placeholder « [Votre Nom] »). Le registre court et direct gagne.
         let L = language.uppercased()
-        return """
+        var instruction = """
         À partir de ces quelques mots, écris le message que je veux envoyer, EN \(L) : court, naturel, poli, à la première personne (2 à 4 phrases). Ajoute les politesses d'usage mais aucun fait inventé (noms, dates, montants non donnés).
         Réponds UNIQUEMENT par le message rédigé EN \(L), sans objet, sans en-tête ni guillemets.
         """
+        // L'amorce est tapée en français : sans verrou explicite, le 1.5B retombe
+        // sur le français au lieu de la langue choisie (même dérive que la
+        // traduction, neutralisée là par « ENTIÈREMENT en X »). Inutile — voire
+        // contre-productif — quand la cible EST le français.
+        if language != "français" {
+            instruction += "\nIMPORTANT : ta réponse doit être ENTIÈREMENT en \(language). N'écris AUCUN mot français."
+        }
+        return instruction
+    }
+
+    /// Un tour few-shot FR→cible pour la **rédaction** (voie Qwen) : une amorce
+    /// française très courte → un message complet DANS LA LANGUE CIBLE, au
+    /// registre voulu (court, 1ʳᵉ personne, poli, sans fait inventé hors amorce).
+    /// Ancre la langue de sortie ET le format — sans lui le 1.5B échote le
+    /// français de l'amorce (symétrique de `translationFewShot`). Français → []
+    /// (aucune dérive depuis la langue source). Clé = nom FR de langue produit
+    /// par `ComposeLanguage.promptLanguageName`.
+    static func compositionFewShot(language: String) -> [(user: String, assistant: String)] {
+        // DEUX amorces de registres distincts (rendez-vous / relance pro) — un
+        // seul exemple ne suffit pas à verrouiller l'italien, qui re-fuit des
+        // mots français (mesuré). La 2e paire ancre un autre champ lexical.
+        let ex1 = "rdv reporté mardi 14h, désolé du changement"
+        let ex2 = "réponse rapide svp, dossier urgent"
+        switch language {
+        case "anglais": return [
+            (ex1, "Hi, I'm sorry but I have to move our meeting to Tuesday at 2 PM. Thank you for your understanding."),
+            (ex2, "Hello, could you please reply quickly? The matter is urgent. Thank you in advance."),
+        ]
+        case "espagnol": return [
+            (ex1, "Hola, lo siento pero tengo que aplazar nuestra cita al martes a las 14 h. Gracias por su comprensión."),
+            (ex2, "Hola, ¿podría responder rápidamente, por favor? El asunto es urgente. Gracias de antemano."),
+        ]
+        case "allemand": return [
+            (ex1, "Hallo, es tut mir leid, aber ich muss unseren Termin auf Dienstag um 14 Uhr verschieben. Danke für Ihr Verständnis."),
+            (ex2, "Hallo, könnten Sie bitte schnell antworten? Die Sache ist dringend. Vielen Dank im Voraus."),
+        ]
+        case "italien": return [
+            (ex1, "Ciao, mi dispiace ma devo spostare il nostro appuntamento a martedì alle 14. Grazie per la comprensione."),
+            (ex2, "Salve, potrebbe rispondere rapidamente per favore? La questione è urgente. Grazie in anticipo."),
+        ]
+        default: return []   // français : pas d'ancre nécessaire
+        }
     }
 
     static func freeInstruction(_ userInstruction: String) -> String {
