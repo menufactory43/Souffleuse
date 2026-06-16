@@ -125,6 +125,92 @@ import Testing
     #expect(abs((a.origin.y - b.origin.y) - 40) < 0.001)
 }
 
+// MARK: - OverlayWindow (wrap multi-ligne)
+
+@MainActor
+@Test func overlayIsUsableElementRectAcceptsValidRect() {
+    // Un rect de champ sain avec le caret DANS sa largeur → usable.
+    let field = CGRect(x: 50, y: 100, width: 400, height: 300)
+    let caretX: CGFloat = 200 // bien dans [50, 450]
+    #expect(OverlayWindow.isUsableElementRect(field, caretX: caretX))
+}
+
+@MainActor
+@Test func overlayIsUsableElementRectRejectsZeroOrNarrow() {
+    // rect.zero / width trop faible → inutilisable.
+    #expect(!OverlayWindow.isUsableElementRect(.zero, caretX: 0))
+    #expect(!OverlayWindow.isUsableElementRect(CGRect(x: 50, y: 100, width: 1, height: 300), caretX: 50))
+}
+
+@MainActor
+@Test func overlayIsUsableElementRectRejectsAberrant() {
+    // Largeur aberrante ou origines non finies → inutilisable.
+    #expect(!OverlayWindow.isUsableElementRect(CGRect(x: 50, y: 100, width: 5000, height: 300), caretX: 200))
+    #expect(!OverlayWindow.isUsableElementRect(CGRect(x: CGFloat.infinity, y: 100, width: 400, height: 300), caretX: 200))
+    #expect(!OverlayWindow.isUsableElementRect(CGRect(x: 50, y: 100, width: CGFloat.infinity, height: 300), caretX: 200))
+}
+
+@MainActor
+@Test func overlayIsUsableElementRectRejectsCaretOutsideField() {
+    // Le caret hors de la largeur du champ → on n'accroche pas le wrap sur ce champ.
+    let field = CGRect(x: 50, y: 100, width: 400, height: 300) // minX=50, maxX=450
+    #expect(!OverlayWindow.isUsableElementRect(field, caretX: 10))  // à gauche
+    #expect(!OverlayWindow.isUsableElementRect(field, caretX: 500)) // à droite
+}
+
+@MainActor
+@Test func overlayWrapFrameWidthEqualsFieldWidth() {
+    // La largeur du panneau wrap == ceil(fieldRect.width).
+    let font = NSFont.systemFont(ofSize: 15)
+    let caret = CGRect(x: 120, y: 200, width: 1, height: 18)
+    let field = CGRect(x: 50, y: 100, width: 380, height: 200)
+    let (frame, _) = OverlayWindow.wrapFrame(forGhostAfterCaret: caret, fieldRect: field,
+                                              text: "Bonjour à tous et bienvenue", font: font)
+    #expect(frame.width == ceil(field.width))
+}
+
+@MainActor
+@Test func overlayWrapFrameFirstLineIndentStartsAtCaret() {
+    // L'indentation de la 1re ligne = distance entre le bord gauche du champ et le caret.
+    let font = NSFont.systemFont(ofSize: 15)
+    let caret = CGRect(x: 120, y: 200, width: 1, height: 18)
+    let field = CGRect(x: 50, y: 100, width: 380, height: 200)
+    let (_, firstLineIndent) = OverlayWindow.wrapFrame(forGhostAfterCaret: caret, fieldRect: field,
+                                                        text: "Bonjour", font: font)
+    #expect(firstLineIndent == max(0, caret.origin.x - field.minX))
+}
+
+@MainActor
+@Test func overlayWrapFrameOriginAlignedToFieldLeft() {
+    // Le bord gauche du panneau doit être aligné sur le bord gauche du champ.
+    // Le TOP du panneau doit correspondre à la ligne du caret (appKitY = primaryHeight - caret.origin.y - height).
+    let font = NSFont.systemFont(ofSize: 15)
+    let caret = CGRect(x: 120, y: 200, width: 1, height: 18)
+    let field = CGRect(x: 50, y: 100, width: 380, height: 200)
+    let text = "Bonjour"
+    let (frame, _) = OverlayWindow.wrapFrame(forGhostAfterCaret: caret, fieldRect: field, text: text, font: font)
+    let primaryHeight = NSScreen.screens.first?.frame.height ?? NSScreen.main?.frame.height ?? 0
+    // X aligné sur le bord gauche du champ (coords AppKit).
+    #expect(frame.origin.x == field.minX)
+    // appKitY = primaryHeight - caret.origin.y - height (TOP-anchored sur la ligne du caret).
+    #expect(abs(frame.origin.y - (primaryHeight - caret.origin.y - frame.height)) < 0.001)
+}
+
+@MainActor
+@Test func overlayWrapFrameHeightCoversWrappedLines() {
+    // Un texte long wrap sur plusieurs lignes → height >= caret.height et >= hauteur d'une ligne seule.
+    let font = NSFont.systemFont(ofSize: 15)
+    let caret = CGRect(x: 300, y: 200, width: 1, height: 18) // caret proche du bord droit
+    let field = CGRect(x: 50, y: 100, width: 320, height: 200)  // champ étroit
+    // Texte assez long pour déborder sur la largeur restante (320 - (300-50) = 70px disponibles).
+    let text = "suggestion très longue qui devrait enrouler à la ligne suivante dans le champ"
+    let (frame, _) = OverlayWindow.wrapFrame(forGhostAfterCaret: caret, fieldRect: field, text: text, font: font)
+    #expect(frame.height >= caret.height)
+    // Le texte DOIT prendre au moins 2 lignes (vérifie que le wrap a eu lieu).
+    let singleLineSize = (text as NSString).size(withAttributes: [.font: font])
+    #expect(frame.height > ceil(singleLineSize.height), "le texte doit enrouler sur plusieurs lignes")
+}
+
 // MARK: - SouffleuseAppDelegate mid-line accept plan (fusion avec l'existant)
 
 @MainActor
