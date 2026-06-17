@@ -1501,6 +1501,79 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         Self.appendTickLog(line)
     }
 
+    /// Résout le rect d'ancrage du ghost et la police à passer à l'overlay pour ce
+    /// tick. Met à jour les caches par-bundle (caretRect horodaté TTL, dernière
+    /// police fiable) et déclenche au besoin la résolution OCR async (non bloquante)
+    /// pour les hôtes web qui refusent `kAXBoundsForRangeParameterizedAttribute`.
+    /// Seules la police AX et la calibration OCR sont mises en cache : l'estimation
+    /// par hauteur de rect est déterministe et n'est jamais stockée. Extrait de `tick()`.
+    private func resolveCaretRectAndFont(snap: AXSnapshot, bundleID: String) -> (rect: CGRect?, font: NSFont?) {
+        // Cache fresh AX caretRect WITH a timestamp so we can expire stale
+        // anchors. When the host stops emitting bounds (zoom, scroll, reflow
+        // in Brave/Intercom/Notion), the previous rect would otherwise survive
+        // forever and our ghost would paint at the wrong screen coordinates.
+        if let rect = snap.caretRect {
+            lastCaretRectByApp[bundleID] = rect
+            lastCaretRectTimestampByApp[bundleID] = Date()
+        }
+        let cachedRect: CGRect? = {
+            guard let rect = lastCaretRectByApp[bundleID],
+                  let ts = lastCaretRectTimestampByApp[bundleID],
+                  Date().timeIntervalSince(ts) < Self.caretRectTTL
+            else { return nil }
+            return rect
+        }()
+        // Hosts that refuse `kAXBoundsForRangeParameterizedAttribute` for web
+        // content (Chromium-based browsers, contenteditable, some Electron
+        // apps) leave us with no real caret rect — but we still have
+        // `elementRect`, `text`, and `caretIndex`. The resolver picks the
+        // best available strategy (instant estimate now, OCR refinement
+        // async) without blocking the tick loop.
+        let resolvedRect: CGRect? = {
+            guard snap.caretRect == nil, cachedRect == nil else {
+                return nil
+            }
+            return caretResolver.resolve(snapshot: snap) { [weak self] in
+                // Async OCR completed: redraw on the next runloop turn.
+                self?.tickThrottled()
+            }
+        }()
+        let rectForGhost = snap.caretRect ?? cachedRect ?? resolvedRect
+
+        // Pick the font we'll hand to the overlay: AX's report wins (rare in
+        // web hosts), else the OCR-calibrated point size from the resolver,
+        // else the last reliable font we saw for this bundle (avoids feeding a
+        // degenerate empty-line rect to estimatedFont), else nil — letting
+        // `OverlayWindow` fall back to its conservative rect-height heuristic.
+        // Only AX font + OCR calibration are considered reliable; the estimate
+        // is never stored so the cache can never degrade.
+        let hostFontForOverlay: NSFont? = {
+            if let axFont = snap.caretFont {
+                let font = NSFont(name: axFont.familyName, size: CGFloat(axFont.pointSize))
+                    ?? .systemFont(ofSize: CGFloat(axFont.pointSize))
+                lastReliableFontByBundle[bundleID] = font
+                return font
+            }
+            if let metrics = caretResolver.calibration(for: bundleID) {
+                let font = NSFont.systemFont(ofSize: metrics.fontPointSize)
+                lastReliableFontByBundle[bundleID] = font
+                return font
+            }
+            // No reliable source — reuse the last known font for this bundle if
+            // we have one (typical on empty lines in Notes/TextEdit where AX
+            // stops reporting the font). Otherwise estimate from the caret-rect
+            // height using the PER-BUNDLE line-box→font ratio (Electron hosts
+            // like Signal need a tighter ratio than the 1.27 browser default).
+            // The estimate is never cached — it's deterministic from the rect,
+            // so the reliable-font cache can never be polluted by a guess.
+            if let cached = lastReliableFontByBundle[bundleID] { return cached }
+            return rectForGhost.flatMap {
+                OverlayWindow.estimatedFont(forCaretRectHeight: $0.height, bundleID: bundleID)
+            }
+        }()
+        return (rectForGhost, hostFontForOverlay)
+    }
+
     private func tick() {
         guard store.enabled else { return }
         // Icône vivante : par défaut « pas de champ actif » ; repassé à vrai plus
@@ -1625,69 +1698,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         rawInputText = text
         rawInputBundleID = bundleID
 
-        // Cache fresh AX caretRect WITH a timestamp so we can expire stale
-        // anchors. When the host stops emitting bounds (zoom, scroll, reflow
-        // in Brave/Intercom/Notion), the previous rect would otherwise survive
-        // forever and our ghost would paint at the wrong screen coordinates.
-        if let rect = snap.caretRect {
-            lastCaretRectByApp[bundleID] = rect
-            lastCaretRectTimestampByApp[bundleID] = Date()
-        }
-        let cachedRect: CGRect? = {
-            guard let rect = lastCaretRectByApp[bundleID],
-                  let ts = lastCaretRectTimestampByApp[bundleID],
-                  Date().timeIntervalSince(ts) < Self.caretRectTTL
-            else { return nil }
-            return rect
-        }()
-        // Hosts that refuse `kAXBoundsForRangeParameterizedAttribute` for web
-        // content (Chromium-based browsers, contenteditable, some Electron
-        // apps) leave us with no real caret rect — but we still have
-        // `elementRect`, `text`, and `caretIndex`. The resolver picks the
-        // best available strategy (instant estimate now, OCR refinement
-        // async) without blocking the tick loop.
-        let resolvedRect: CGRect? = {
-            guard snap.caretRect == nil, cachedRect == nil else {
-                return nil
-            }
-            return caretResolver.resolve(snapshot: snap) { [weak self] in
-                // Async OCR completed: redraw on the next runloop turn.
-                self?.tickThrottled()
-            }
-        }()
-        let rectForGhost = snap.caretRect ?? cachedRect ?? resolvedRect
-
-        // Pick the font we'll hand to the overlay: AX's report wins (rare in
-        // web hosts), else the OCR-calibrated point size from the resolver,
-        // else the last reliable font we saw for this bundle (avoids feeding a
-        // degenerate empty-line rect to estimatedFont), else nil — letting
-        // `OverlayWindow` fall back to its conservative rect-height heuristic.
-        // Only AX font + OCR calibration are considered reliable; the estimate
-        // is never stored so the cache can never degrade.
-        let hostFontForOverlay: NSFont? = {
-            if let axFont = snap.caretFont {
-                let font = NSFont(name: axFont.familyName, size: CGFloat(axFont.pointSize))
-                    ?? .systemFont(ofSize: CGFloat(axFont.pointSize))
-                lastReliableFontByBundle[bundleID] = font
-                return font
-            }
-            if let metrics = caretResolver.calibration(for: bundleID) {
-                let font = NSFont.systemFont(ofSize: metrics.fontPointSize)
-                lastReliableFontByBundle[bundleID] = font
-                return font
-            }
-            // No reliable source — reuse the last known font for this bundle if
-            // we have one (typical on empty lines in Notes/TextEdit where AX
-            // stops reporting the font). Otherwise estimate from the caret-rect
-            // height using the PER-BUNDLE line-box→font ratio (Electron hosts
-            // like Signal need a tighter ratio than the 1.27 browser default).
-            // The estimate is never cached — it's deterministic from the rect,
-            // so the reliable-font cache can never be polluted by a guess.
-            if let cached = lastReliableFontByBundle[bundleID] { return cached }
-            return rectForGhost.flatMap {
-                OverlayWindow.estimatedFont(forCaretRectHeight: $0.height, bundleID: bundleID)
-            }
-        }()
+        let (rectForGhost, hostFontForOverlay) = resolveCaretRectAndFont(snap: snap, bundleID: bundleID)
 
         // We've cleared every gate: focused, AX-trusted, not blocklisted, real
         // text element. Anchor the presence badge to the field's top-left so
