@@ -273,7 +273,10 @@ final class PreferencesStore {
     /// `SouffleuseAppDelegate` (init + sync de prefs), au risque de diverger. Le
     /// predictor fast-path et saute le biais n-gram dès que c'est `0`.
     var effectivePersonalizationStrength: Float {
-        personalizationEnabled ? Float(personalizationStrength) : 0
+        // Studio : la personnalisation (biais n-gram) est une feature payante —
+        // force 0 tant que la licence n'est pas active (kill switch off → isPro
+        // toujours vrai, donc inchangé pour tous tant qu'on ne vend pas).
+        (personalizationEnabled && license.isPro) ? Float(personalizationStrength) : 0
     }
     var personalizationOnboardingShown: Bool {
         didSet { UserDefaults.standard.set(personalizationOnboardingShown, forKey: K.personalizationOnboardingShown) }
@@ -354,6 +357,10 @@ final class PreferencesStore {
     }
 
     let allowlist = AllowlistStore()
+    /// Licence Studio (achat unique) — `license.isPro` gate les features payantes.
+    /// Kill switch global dans `LicenseGate.paywallEnabled` (false par défaut → tout
+    /// déverrouillé).
+    let license = LicenseStore()
     let hudAnchors = HUDAnchorStore()
     let conversationTargets = ConversationTargetStore()
     let tones = ToneStore()

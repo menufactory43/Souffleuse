@@ -323,6 +323,19 @@ final class UsageLedger {
         Array(days.sorted { $0.date < $1.date }.suffix(max(0, maxDays)))
     }
 
+    /// Compteur COMPACT pour l'icône du menu-bar (place horizontale rare) :
+    /// « 0 » → vide, « 1..999 » → tel quel, « 1000.. » → « 1,2k » (virgule FR,
+    /// 1 décimale sous 10k, entier au-delà). Pur, testable.
+    nonisolated static func compactCount(_ n: Int) -> String {
+        if n <= 0 { return "" }
+        if n < 1000 { return String(n) }
+        let k = Double(n) / 1000
+        if k < 10 {
+            return String(format: "%.1fk", k).replacingOccurrences(of: ".", with: ",")
+        }
+        return "\(Int(k))k"
+    }
+
     /// Renvoie exactement `count` jours finissant aujourd'hui, en complétant par
     /// des jours vides les dates absentes — fenêtre stable pour la sparkline.
     nonisolated static func lastDays(_ days: [DayStat], count: Int, today: Date) -> [DayStat] {
