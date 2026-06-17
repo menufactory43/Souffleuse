@@ -2092,6 +2092,98 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         return false
     }
 
+    /// Correction de typo (préempte le ghost LLM). Détecte le dernier mot sur frontière
+    /// de mot, debounce un mot encore en cours de frappe, puis affiche le panneau de
+    /// correction (rendu une seule fois par nouvelle suggestion). Gère aussi le cas
+    /// mid-mot (`hideOnTypo`) où le caret est DANS un mot suspect : on masque le ghost
+    /// pour ne pas prolonger la faute. Retourne `true` quand `tick()` doit sortir
+    /// (typo affichée, debounce, ou suppression mid-mot) ; `false` (pas de typo) remet
+    /// l'état à zéro et rend la main au predict gate. Extrait de `tick()`.
+    private func handleTypoCorrection(prefix: String, bundleID: String, caretIndex: Int, text: String, rectForGhost: CGRect?, hostFont: NSFont?, allowMode: AllowlistMode) -> Bool {
+        // Typo correction — preempts LLM ghost. Triggered only on word boundary
+        // (caret right after a non-word char like space/punct), so we don't
+        // flag the word the user is still typing.
+        let typoCandidate: TypoSuggestion? = {
+            guard store.typoEnabled,
+                  !EmojiExpander.disabledBundles.contains(bundleID),
+                  allowMode != .suggestionOnly  // honor per-app modes
+            else { return nil }
+            return typoDetector.checkLastWord(in: prefix, caretIndex: caretIndex)
+        }()
+
+        // Mid-word case: caret is INSIDE a misspelled word. We can't suggest a
+        // correction (no clear word boundary yet), but we should also stop the
+        // LLM from extending the typo with more wrong text. Bail before predict.
+        if store.hideOnTypo,
+           store.typoEnabled,
+           !EmojiExpander.disabledBundles.contains(bundleID),
+           typoCandidate == nil,
+           typoDetector.currentWordLooksSuspect(in: prefix, caretIndex: caretIndex)
+        {
+            currentTypo = nil
+            overlay.hide()
+            interceptor.setActive(false)
+            predictor.cancel()
+            lastPredictedPrefix = nil
+            return true
+        }
+
+        if let typo = typoCandidate {
+            // Chars between the word's end and the caret (the typo can fire after
+            // a trailing space). `prefix` ends at the caret, so this is that gap.
+            let trailing = String(prefix[typo.range.upperBound...])
+            // A word followed by a separator is "done" → correct immediately. A
+            // word at end-of-string may still be in progress → debounce so we
+            // don't flash a correction for each incomplete prefix while typing.
+            if trailing.isEmpty {
+                let settleKey = typo.original + "\u{1}" + String(prefix.count)
+                if settleKey != typoSettleKey {
+                    typoSettleKey = settleKey
+                    typoSettleSince = Date()
+                }
+                let settled = typoSettleSince.map { Date().timeIntervalSince($0) >= Self.typoDebounce } ?? false
+                if !settled {
+                    // Still settling: suppress (no flash) and don't predict on a
+                    // suspected mid-word typo. Hide any prior typo ghost.
+                    if currentTypo != nil {
+                        overlay.hide()
+                        interceptor.setActive(false)
+                        currentTypo = nil
+                    }
+                    return true
+                }
+            }
+            let isNewSuggestion = currentTypo != typo
+            currentTypo = typo
+            currentTypoTrailing = trailing
+            predictor.cancel()
+            lastPredictedPrefix = nil
+            if let rect = rectForGhost {
+                // Render once per new suggestion: the panel persists across the
+                // identical re-detections on subsequent ticks (currentTypo stays
+                // equal), so re-painting — and re-querying AX bounds — every tick
+                // is wasted. Any non-typo branch resets currentTypo, which makes
+                // the next typo tick "new" again and re-renders.
+                if isNewSuggestion {
+                    renderTypoSuggestion(
+                        typo,
+                        prefix: prefix,
+                        caretRect: rect,
+                        text: text,
+                        caretIndex: caretIndex,
+                        font: hostFont
+                    )
+                    Log.info(.input, "typo_suggested")
+                }
+                interceptor.setActive(true)
+            }
+            return true
+        }
+        currentTypo = nil
+        typoSettleKey = nil
+        return false
+    }
+
     private func tick() {
         guard store.enabled else { return }
         // Icône vivante : par défaut « pas de champ actif » ; repassé à vrai plus
@@ -2377,87 +2469,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        // Typo correction — preempts LLM ghost. Triggered only on word boundary
-        // (caret right after a non-word char like space/punct), so we don't
-        // flag the word the user is still typing.
-        let typoCandidate: TypoSuggestion? = {
-            guard store.typoEnabled,
-                  !EmojiExpander.disabledBundles.contains(bundleID),
-                  allowMode != .suggestionOnly  // honor per-app modes
-            else { return nil }
-            return typoDetector.checkLastWord(in: prefix, caretIndex: caretIndex)
-        }()
-
-        // Mid-word case: caret is INSIDE a misspelled word. We can't suggest a
-        // correction (no clear word boundary yet), but we should also stop the
-        // LLM from extending the typo with more wrong text. Bail before predict.
-        if store.hideOnTypo,
-           store.typoEnabled,
-           !EmojiExpander.disabledBundles.contains(bundleID),
-           typoCandidate == nil,
-           typoDetector.currentWordLooksSuspect(in: prefix, caretIndex: caretIndex)
-        {
-            currentTypo = nil
-            overlay.hide()
-            interceptor.setActive(false)
-            predictor.cancel()
-            lastPredictedPrefix = nil
+        if handleTypoCorrection(prefix: prefix, bundleID: bundleID, caretIndex: caretIndex, text: text, rectForGhost: rectForGhost, hostFont: hostFontForOverlay, allowMode: allowMode) {
             return
         }
-
-        if let typo = typoCandidate {
-            // Chars between the word's end and the caret (the typo can fire after
-            // a trailing space). `prefix` ends at the caret, so this is that gap.
-            let trailing = String(prefix[typo.range.upperBound...])
-            // A word followed by a separator is "done" → correct immediately. A
-            // word at end-of-string may still be in progress → debounce so we
-            // don't flash a correction for each incomplete prefix while typing.
-            if trailing.isEmpty {
-                let settleKey = typo.original + "\u{1}" + String(prefix.count)
-                if settleKey != typoSettleKey {
-                    typoSettleKey = settleKey
-                    typoSettleSince = Date()
-                }
-                let settled = typoSettleSince.map { Date().timeIntervalSince($0) >= Self.typoDebounce } ?? false
-                if !settled {
-                    // Still settling: suppress (no flash) and don't predict on a
-                    // suspected mid-word typo. Hide any prior typo ghost.
-                    if currentTypo != nil {
-                        overlay.hide()
-                        interceptor.setActive(false)
-                        currentTypo = nil
-                    }
-                    return
-                }
-            }
-            let isNewSuggestion = currentTypo != typo
-            currentTypo = typo
-            currentTypoTrailing = trailing
-            predictor.cancel()
-            lastPredictedPrefix = nil
-            if let rect = rectForGhost {
-                // Render once per new suggestion: the panel persists across the
-                // identical re-detections on subsequent ticks (currentTypo stays
-                // equal), so re-painting — and re-querying AX bounds — every tick
-                // is wasted. Any non-typo branch resets currentTypo, which makes
-                // the next typo tick "new" again and re-renders.
-                if isNewSuggestion {
-                    renderTypoSuggestion(
-                        typo,
-                        prefix: prefix,
-                        caretRect: rect,
-                        text: text,
-                        caretIndex: caretIndex,
-                        font: hostFontForOverlay
-                    )
-                    Log.info(.input, "typo_suggested")
-                }
-                interceptor.setActive(true)
-            }
-            return
-        }
-        currentTypo = nil
-        typoSettleKey = nil
 
         if prefix != lastPredictedPrefix {
             // Debounce: every prefix change cancels the pending task and
