@@ -34,9 +34,10 @@
 <meta name="twitter:description" content="A fully private writing aid for Mac. Your text never leaves your Mac." />
 <meta name="twitter:image" content="https://souffleuse.app/og.png" />
 
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,500;0,6..96,700;0,6..96,900;1,6..96,500&family=Spectral:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet" />
+<!-- Fonts self-hébergées : aucune requête tierce au runtime (promesse 100% local). -->
+<link rel="preload" href="/assets/fonts/bodoni-moda-700-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="preload" href="/assets/fonts/spectral-400-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="stylesheet" href="/assets/fonts.css" />
 
 <!-- Structured data: helps Google present Souffleuse as an app (rich result). -->
 <script type="application/ld+json">
@@ -64,7 +65,7 @@
     --ink:          #1a1613;
     --ink-soft:     #463d33;
     --ink-faint:    #5e5446;   /* assombri pour passer AA sur petits textes */
-    --ghost:        #a99a82;   /* l'encre pâle du souffle — décoratif uniquement */
+    --ghost:        #786750;   /* l'encre du souffle : la plus pâle des encres, mais assez dense pour se lire — porte le mot suggéré, donc AA (4.5:1 sur papier) */
     --rouge:        #8c2b21;   /* sang-de-boeuf */
     --rouge-deep:   #6f2018;
 
@@ -294,6 +295,16 @@
     color: var(--ink-faint);
   }
   .cta-note b { font-style: normal; font-weight: 700; color: var(--rouge); }
+
+  /* Trust line under the button: size, Apple signature, privacy reminder,
+     right where download anxiety happens. Quieter than the free-beta note. */
+  .cta-trust {
+    margin: 0.45rem 0 0;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    color: var(--ink-faint);
+    letter-spacing: 0.01em;
+  }
 
   /* The house count: how many have already taken their ticket. Populated by
      /api/stats. Hidden until the total clears a threshold worth showing (a
@@ -583,7 +594,7 @@
   }
   /* Bref éclat sur le texte au moment où la réplique vient d'être prise. */
   @keyframes prise-eclat {
-    0%   { background: rgba(168, 154, 130, 0.30); }
+    0%   { background: rgba(120, 103, 80, 0.22); }
     100% { background: transparent; }
   }
   .typed.just-took { animation: prise-eclat 0.6s ease forwards; border-radius: 2px; }
@@ -1150,6 +1161,16 @@
     .langswitch a { padding-block: 0.7rem; }
   }
 
+  /* Touch labels: on a keyless screen you tap the grey line or the buttons
+     (which are clickable); naming Tab / Esc / ↓ makes no sense by finger.
+     We swap the label, never the interaction. */
+  .verb-touch { display: none; }
+  @media (pointer: coarse) {
+    .verb-key   { display: none; }
+    .verb-touch { display: inline; }
+    .hint-key--touchable kbd { display: none; }
+  }
+
   /* ---------- La mascotte : la souffleuse, dans la marge gauche ---------- */
   /* Silhouette d'encre penchée pour souffler la réplique. Purement décorative
      (aria-hidden), ne capte jamais le clic, et ne paraît que là où la marge
@@ -1667,6 +1688,7 @@
           <a href="#souffle" class="btn btn--ghost">See how she whispers →</a>
         </div>
         <p class="cta-note ink-rise k5"><b>Free during the beta.</b> For Apple Silicon Macs.</p>
+        <p class="cta-trust ink-rise k5">~6.5 MB · notarized by Apple · your text never leaves your Mac.</p>
       </div>
 
       <!-- ===== ÉLÉMENT SIGNATURE : le trou du souffleur ===== -->
@@ -1713,14 +1735,14 @@
               <p class="souffleur__line tryline" id="demo-tryline"><span class="typed tryinput" id="demo-input" contenteditable="plaintext-only" role="textbox" aria-multiline="false" spellcheck="false" aria-label="Write a sentence; Souffleuse suggests how it continues. Tab to take it, down arrow for another idea." data-placeholder="Write here…"></span><span class="souffle tryghost" id="demo-ghost" aria-hidden="true"></span></p>
               <p class="tryline__live sr-only" id="demo-live" role="status" aria-live="polite"></p>
               <div class="souffleur__hint">
-                <button type="button" class="hint-key" id="demo-take2" disabled><kbd>Tab</kbd> to take</button>
-                <button type="button" class="hint-key" id="demo-cycle" disabled><kbd>↓</kbd> another idea<span class="hint-count" id="demo-count"></span></button>
-                <button type="button" class="hint-key" id="demo-drop2" disabled><kbd>Esc</kbd> to leave it</button>
+                <button type="button" class="hint-key hint-key--touchable" id="demo-take2" disabled><kbd>Tab</kbd> <span class="verb-key">to take</span><span class="verb-touch">Tap to take</span></button>
+                <button type="button" class="hint-key hint-key--touchable" id="demo-cycle" disabled><kbd>↓</kbd> <span class="verb-key">another idea</span><span class="verb-touch">Another idea</span><span class="hint-count" id="demo-count"></span></button>
+                <button type="button" class="hint-key hint-key--touchable" id="demo-drop2" disabled><kbd>Esc</kbd> <span class="verb-key">to leave it</span><span class="verb-touch">Leave it</span></button>
               </div>
             </div>
           </div>
         </div>
-        <p class="souffleur__caption stage-dir">Hover or pick a scene: it plays once, then falls silent.</p>
+        <p class="souffleur__caption stage-dir"><span class="verb-key">Hover or pick a scene: it plays once, then falls silent.</span><span class="verb-touch">Tap a scene: it plays once, then falls silent.</span></p>
       </figure>
     </div>
   </section>
@@ -1729,7 +1751,7 @@
   <!-- La distribution des salles : un bandeau de programme qui défile
        lentement. La piste est dupliquée en JS pour boucler sans couture ;
        sans JS elle reste une ligne fixe, lisible. -->
-  <div class="tournee" role="marquee" aria-label="Souffleuse plays in most Mac apps: Mail, Notes, Messages, Safari, Pages, Slack, and almost anywhere you write.">
+  <div class="tournee" role="img" aria-label="Souffleuse plays in most Mac apps: Mail, Notes, Messages, Safari, Pages, Slack, and almost anywhere you write.">
     <div class="tournee__track" id="tournee-track" aria-hidden="true">
       <span class="tournee__item tournee__item--lede">On tour tonight, on your Mac:</span>
       <span class="tournee__fleuron" aria-hidden="true">❧</span>
@@ -1927,6 +1949,7 @@
       <div class="section-head">
         <span class="smallcaps">Stage left, stage right</span>
         <h2 id="coulisses-titre">What's said backstage stays backstage</h2>
+        <p class="stage-dir">In plain terms: privacy, by construction.</p>
       </div>
       <p class="coulisses__lede">
         Souffleuse only works because it reads what you write. So we made sure it has
@@ -2037,7 +2060,7 @@
         <details class="qa">
           <summary>Is it free? How much does it cost?</summary>
           <div class="qa__body">
-            <p>During the beta, Souffleuse is completely free. No daily word limit, no card required: you download, and you write. We'll let you know clearly, and well in advance, if pricing changes after the beta.</p>
+            <p>During the beta, Souffleuse is completely free. No daily word limit, no card required: you download, and you write. And our intention is set in advance: if Souffleuse becomes paid after the beta, it will be a one-time purchase, at a fair price, never a hidden subscription. We'll let you know clearly, and well ahead of time.</p>
           </div>
         </details>
         <details class="qa">
@@ -2101,6 +2124,7 @@
         Download for Mac
       </a>
       <p class="cta-note"><b>Free during the beta.</b> macOS Sonoma (14) or newer · Apple Silicon.</p>
+      <p class="cta-trust">~6.5 MB · notarized by Apple · your text never leaves your Mac.</p>
       <p class="tally" id="tally" hidden aria-live="polite">
         Already on <b id="tally-n"></b> Macs during the beta.
       </p>

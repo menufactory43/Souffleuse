@@ -34,9 +34,10 @@
 <meta name="twitter:description" content="A fully private writing aid for Mac. Your text never leaves your Mac." />
 <meta name="twitter:image" content="https://souffleuse.app/og.png" />
 
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,500;0,6..96,700;0,6..96,900;1,6..96,500&family=Spectral:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet" />
+<!-- Fonts self-hébergées : aucune requête tierce au runtime (promesse 100% local). -->
+<link rel="preload" href="/assets/fonts/bodoni-moda-700-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="preload" href="/assets/fonts/spectral-400-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="stylesheet" href="/assets/fonts.css" />
 
 <style>
   :root {
@@ -46,7 +47,7 @@
     --ink:          #1a1613;
     --ink-soft:     #463d33;
     --ink-faint:    #5e5446;   /* assombri pour passer AA sur petits textes */
-    --ghost:        #a99a82;   /* l'encre pâle du souffle — décoratif uniquement */
+    --ghost:        #786750;   /* l'encre du souffle : la plus pâle des encres, mais assez dense pour se lire — porte le mot suggéré, donc AA (4.5:1 sur papier) */
     --rouge:        #8c2b21;   /* sang-de-boeuf */
     --rouge-deep:   #6f2018;
 
@@ -545,7 +546,7 @@
   }
   /* Bref éclat sur le texte au moment où la réplique vient d'être prise. */
   @keyframes prise-eclat {
-    0%   { background: rgba(168, 154, 130, 0.30); }
+    0%   { background: rgba(120, 103, 80, 0.22); }
     100% { background: transparent; }
   }
   .typed.just-took { animation: prise-eclat 0.6s ease forwards; border-radius: 2px; }
