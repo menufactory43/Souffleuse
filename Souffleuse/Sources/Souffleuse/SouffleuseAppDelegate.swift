@@ -2026,6 +2026,72 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         return false
     }
 
+    /// Expansion de raccourci emoji : quand le texte se termine par `:code:<space>`,
+    /// remplace via AX (pas d'UI ghost). Désactivé dans les bundles IDE/terminal où
+    /// `:tags:` est de la vraie syntaxe. Retourne `true` quand l'expansion a eu lieu
+    /// (`tick()` doit sortir). Extrait de `tick()`.
+    private func handleEmojiExpansion(prefix: String, bundleID: String) -> Bool {
+        guard store.emojiEnabled,
+              !EmojiExpander.disabledBundles.contains(bundleID),
+              let expansion = EmojiExpander.detect(textBeforeCaret: prefix)
+        else { return false }
+        DispatchQueue.global(qos: .userInitiated).async { [axClient] in
+            axClient.replaceTrailing(deleteChars: expansion.deleteChars, with: expansion.insert)
+        }
+        Log.info(.input, "emoji_expanded")
+        // L'expansion compte comme un usage → nourrit le ranking du picker.
+        store.incrementEmojiFrequency(expansion.shortcode)
+        hideEmojiPicker()
+        // Clear any pending suggestion so the LLM ghost doesn't blink.
+        predictor.cancel()
+        lastPredictedPrefix = nil
+        overlay.hide()
+        interceptor.setActive(false)
+        currentTypo = nil
+        return true
+    }
+
+    /// Picker emoji : dès « : » ouvert avant le caret, affiche une rangée de candidats
+    /// numérotés ①–⑨ au caret (parité Cotypist) ; la rangée physique 1–9 sans Maj
+    /// choisit, Esc ferme, taper filtre. Pendant que le panneau est ouvert, pas de
+    /// ghost LLM concurrent. L'ancre de refus garde le panneau fermé après un Esc tant
+    /// que le préfixe jusqu'au `:` n'a pas changé. Retourne `true` quand le panneau est
+    /// affiché (`tick()` doit sortir) ; sinon ferme un panneau orphelin. Extrait de `tick()`.
+    private func handleEmojiPicker(prefix: String, bundleID: String, rectForGhost: CGRect?) -> Bool {
+        if store.emojiEnabled,
+           !EmojiExpander.disabledBundles.contains(bundleID),
+           let pickerState = EmojiExpander.pickerCandidates(
+               textBeforeCaret: prefix, frequency: store.emojiFrequency),
+           let rect = rectForGhost
+        {
+            // Ancre de refus : le préfixe jusqu'au `:` d'ouverture inclus. Tant
+            // qu'il n'a pas changé après un Esc, le panneau reste fermé.
+            let anchor = String(prefix.prefix(prefix.count - pickerState.fragmentLength + 1))
+            if emojiPickerDismissedAnchor != anchor {
+                emojiPickerDismissedAnchor = nil
+                if emojiPickerState == nil {
+                    Log.info(.input, "emoji_picker_shown")
+                }
+                emojiPickerState = pickerState
+                emojiPickerAnchor = anchor
+                emojiPicker.show(emojis: pickerState.candidates.map(\.emoji), at: rect)
+                interceptor.setPickerArmed(true)
+                predictor.cancel()
+                lastPredictedPrefix = nil
+                overlay.hide()
+                interceptor.setActive(false)
+                currentTypo = nil
+                return true
+            }
+        } else {
+            // Plus de fragment ouvert : fermer le panneau et ré-armer le
+            // déclenchement après un éventuel refus.
+            emojiPickerDismissedAnchor = nil
+            hideEmojiPicker()
+        }
+        return false
+    }
+
     private func tick() {
         guard store.enabled else { return }
         // Icône vivante : par défaut « pas de champ actif » ; repassé à vrai plus
@@ -2303,64 +2369,12 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        // Emoji shortcode expansion — fires when text ends with `:code:<space>`.
-        // No ghost UI: we just do the AX replace and let the user see the result.
-        // Disabled in IDE/terminal bundles where `:tags:` are real syntax.
-        if store.emojiEnabled,
-           !EmojiExpander.disabledBundles.contains(bundleID),
-           let expansion = EmojiExpander.detect(textBeforeCaret: prefix)
-        {
-            DispatchQueue.global(qos: .userInitiated).async { [axClient] in
-                axClient.replaceTrailing(deleteChars: expansion.deleteChars, with: expansion.insert)
-            }
-            Log.info(.input, "emoji_expanded")
-            // L'expansion compte comme un usage → nourrit le ranking du picker.
-            store.incrementEmojiFrequency(expansion.shortcode)
-            hideEmojiPicker()
-            // Clear any pending suggestion so the LLM ghost doesn't blink.
-            predictor.cancel()
-            lastPredictedPrefix = nil
-            overlay.hide()
-            interceptor.setActive(false)
-            currentTypo = nil
+        if handleEmojiExpansion(prefix: prefix, bundleID: bundleID) {
             return
         }
 
-        // Picker emoji — dès « : » ouvert avant le caret, une rangée de
-        // candidats numérotés ①–⑨ s'affiche au caret (parité Cotypist) ; la
-        // rangée physique 1–9 SANS Maj choisit (voir `KeyInterceptor.Key.digit`
-        // pour l'astuce AZERTY), Esc ferme, taper filtre. Pendant que le
-        // panneau est ouvert, pas de ghost LLM concurrent.
-        if store.emojiEnabled,
-           !EmojiExpander.disabledBundles.contains(bundleID),
-           let pickerState = EmojiExpander.pickerCandidates(
-               textBeforeCaret: prefix, frequency: store.emojiFrequency),
-           let rect = rectForGhost
-        {
-            // Ancre de refus : le préfixe jusqu'au `:` d'ouverture inclus. Tant
-            // qu'il n'a pas changé après un Esc, le panneau reste fermé.
-            let anchor = String(prefix.prefix(prefix.count - pickerState.fragmentLength + 1))
-            if emojiPickerDismissedAnchor != anchor {
-                emojiPickerDismissedAnchor = nil
-                if emojiPickerState == nil {
-                    Log.info(.input, "emoji_picker_shown")
-                }
-                emojiPickerState = pickerState
-                emojiPickerAnchor = anchor
-                emojiPicker.show(emojis: pickerState.candidates.map(\.emoji), at: rect)
-                interceptor.setPickerArmed(true)
-                predictor.cancel()
-                lastPredictedPrefix = nil
-                overlay.hide()
-                interceptor.setActive(false)
-                currentTypo = nil
-                return
-            }
-        } else {
-            // Plus de fragment ouvert : fermer le panneau et ré-armer le
-            // déclenchement après un éventuel refus.
-            emojiPickerDismissedAnchor = nil
-            hideEmojiPicker()
+        if handleEmojiPicker(prefix: prefix, bundleID: bundleID, rectForGhost: rectForGhost) {
+            return
         }
 
         // Typo correction — preempts LLM ghost. Triggered only on word boundary
