@@ -23,6 +23,13 @@ public struct TypoSuggestion: Sendable, Equatable {
 /// flow through Log.
 public final class TypoDetector: @unchecked Sendable {
     private let checker = NSSpellChecker.shared
+    /// `NSSpellChecker.shared` est process-wide et non-`Sendable` ; ce verrou
+    /// sérialise les accès de cette instance, ce qui rend honnête le `@unchecked
+    /// Sendable` (cf. conventions : autorisé seulement avec synchro interne). En
+    /// pratique TypoDetector est piloté depuis MainActor, donc le verrou est non
+    /// contendu (~20  ns) — il sécurise un éventuel appelant hors-MainActor sans
+    /// coût mesurable sur le chemin chaud.
+    private let checkerLock = NSLock()
     public static let maxLevenshtein = 2
     /// Don't flag very short typos (≤2 chars), too noisy.
     public static let minWordLength = 3
@@ -32,6 +39,14 @@ public final class TypoDetector: @unchecked Sendable {
         // system primary language, which means FR words get checked against the
         // EN dictionary on most installs (so "Bonjur" isn't flagged, etc.).
         checker.automaticallyIdentifiesLanguages = true
+    }
+
+    /// Exécute `body` sous le verrou du checker. Tout accès runtime à
+    /// `NSSpellChecker.shared` passe par ici pour garantir la sérialisation.
+    private func withChecker<T>(_ body: (NSSpellChecker) -> T) -> T {
+        checkerLock.lock()
+        defer { checkerLock.unlock() }
+        return body(checker)
     }
 
     /// Check the word ending at `caretIndex` (or just before it, separated by
@@ -196,17 +211,21 @@ public final class TypoDetector: @unchecked Sendable {
     /// l'utilisateur a tapé exactement ces lettres-là, accents en moins).
     private func verdict(forWord word: String, language: String) -> LanguageVerdict {
         let nsword = word as NSString
-        let range = checker.checkSpelling(
-            of: word, startingAt: 0, language: language, wrap: false,
-            inSpellDocumentWithTag: 0, wordCount: nil
-        )
+        let range = withChecker {
+            $0.checkSpelling(
+                of: word, startingAt: 0, language: language, wrap: false,
+                inSpellDocumentWithTag: 0, wordCount: nil
+            )
+        }
         guard range.location != NSNotFound, range.length == nsword.length else {
             return .accepted  // not flagged → not a typo in this language
         }
-        guard let guesses = checker.guesses(
-            forWordRange: NSRange(location: 0, length: nsword.length),
-            in: word, language: language, inSpellDocumentWithTag: 0
-        ), !guesses.isEmpty else {
+        guard let guesses = withChecker({
+            $0.guesses(
+                forWordRange: NSRange(location: 0, length: nsword.length),
+                in: word, language: language, inSpellDocumentWithTag: 0
+            )
+        }), !guesses.isEmpty else {
             return .flaggedNoCandidate
         }
         let close = guesses.prefix(5).filter { Self.levenshtein($0, word) <= Self.maxLevenshtein }
@@ -260,7 +279,7 @@ public final class TypoDetector: @unchecked Sendable {
     }
 
     public func ignore(word: String) {
-        checker.ignoreWord(word, inSpellDocumentWithTag: 0)
+        withChecker { $0.ignoreWord(word, inSpellDocumentWithTag: 0) }
     }
 
     /// True when `word` is a valid word in at least one of the checked
@@ -287,10 +306,12 @@ public final class TypoDetector: @unchecked Sendable {
         }
         let nsword = trimmed as NSString
         for language in languages {
-            let range = checker.checkSpelling(
-                of: trimmed, startingAt: 0, language: language, wrap: false,
-                inSpellDocumentWithTag: 0, wordCount: nil
-            )
+            let range = withChecker {
+                $0.checkSpelling(
+                    of: trimmed, startingAt: 0, language: language, wrap: false,
+                    inSpellDocumentWithTag: 0, wordCount: nil
+                )
+            }
             // Not flagged (or flagged on a sub-range only) → valid in this lang.
             if range.location == NSNotFound || range.length != nsword.length {
                 return true
@@ -328,10 +349,12 @@ public final class TypoDetector: @unchecked Sendable {
         // Suspect only if BOTH FR and EN flag it — single-language flags get
         // false positives on proper nouns / loanwords ("Bonjour" flagged in EN).
         for language in ["fr", "en"] {
-            let range = checker.checkSpelling(
-                of: word, startingAt: 0, language: language, wrap: false,
-                inSpellDocumentWithTag: 0, wordCount: nil
-            )
+            let range = withChecker {
+                $0.checkSpelling(
+                    of: word, startingAt: 0, language: language, wrap: false,
+                    inSpellDocumentWithTag: 0, wordCount: nil
+                )
+            }
             if range.location == NSNotFound || range.length != nsword.length {
                 return false  // at least one language accepts it → not suspect
             }

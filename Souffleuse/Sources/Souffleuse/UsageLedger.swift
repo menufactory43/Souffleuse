@@ -102,9 +102,7 @@ final class UsageLedger {
     private typealias T = SuggestionPolicy.Tuning
 
     convenience init() {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Souffleuse", isDirectory: true)
-        try? FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
+        let support = FileManager.souffleuseSupportDirectory()
         self.init(fileURL: support.appendingPathComponent("usage-ledger.json"))
     }
 
@@ -222,7 +220,11 @@ final class UsageLedger {
         if let i = days.firstIndex(where: { $0.date == key }) { return i }
         days.append(DayStat(date: key))
         days = Self.capped(days, maxDays: T.ledgerHistoryDays)
-        return days.firstIndex(where: { $0.date == key })!
+        if let i = days.firstIndex(where: { $0.date == key }) { return i }
+        // `capped` a tout retiré (maxDays pathologique = 0) : on regarnit avec le
+        // jour courant pour garantir un index valide — jamais de force-unwrap.
+        days = [DayStat(date: key)]
+        return 0
     }
 
     func load() {
