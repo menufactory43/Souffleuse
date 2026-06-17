@@ -1450,6 +1450,57 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         if pendingTransformation != nil { cancelTransformPreview() }
     }
 
+    /// Append-or-create sur `/tmp/souffleuse-tick.log` (diagnostic dev hors audit,
+    /// gated par `SOUFFLEUSE_PREDICT_LOG`). Mutualise l'écriture des deux traces.
+    private static func appendTickLog(_ line: String) {
+        guard let data = line.data(using: .utf8) else { return }
+        let path = "/tmp/souffleuse-tick.log"
+        if let h = FileHandle(forWritingAtPath: path) {
+            h.seekToEndOfFile(); try? h.write(contentsOf: data); try? h.close()
+        } else {
+            FileManager.default.createFile(atPath: path, contents: data)
+        }
+    }
+
+    /// Trace dev : un échantillon par snapshot (caret/élément/queue de préfixe).
+    /// Diagnostic « // invisible dans Brave » — révèle un caretIndex décalé ou des
+    /// chars invisibles (ZWSP) côté Chromium. Extrait de `tick()` pour le garder lisible.
+    private func logTickSnapshot(_ snap: AXSnapshot) {
+        guard ProcessInfo.processInfo.environment["SOUFFLEUSE_PREDICT_LOG"]?.isEmpty == false,
+              let bid = snap.bundleID, !bid.contains("ghostty"), !bid.contains("Terminal") else { return }
+        let txtLen = snap.text?.count ?? -1
+        let caret = snap.caretIndex.map(String.init) ?? "nil"
+        let rect = snap.caretRect.map { "\($0.origin.x.rounded()),\($0.origin.y.rounded())" } ?? "nil"
+        let elem = snap.elementRect.map { "\($0.size.width.rounded())x\($0.size.height.rounded())" } ?? "nil"
+        let tail: String = {
+            guard let t = snap.text, let c = snap.caretIndex else { return "nil" }
+            let p = String(t.prefix(c))
+            let after = c < t.count ? String(String(t.dropFirst(c)).prefix(1)) : ""
+            return String(p.suffix(12)).debugDescription + " after=" + after.debugDescription
+        }()
+        let line = "[\(ISO8601DateFormatter().string(from: Date()))] tick_snap bundle=\(bid) textLen=\(txtLen) caretIdx=\(caret) isText=\(snap.isTextElement) secure=\(snap.isSecureField) caretRect=\(rect) elemRect=\(elem) tail=\(tail)\n"
+        Self.appendTickLog(line)
+    }
+
+    /// Trace dev : pourquoi le gate AX a bailé ce tick (enquête « Signal stops
+    /// working »). Logge le premier critère de gate échoué par bundle. Extrait de `tick()`.
+    private func logTickGateFail(_ snap: AXSnapshot) {
+        guard ProcessInfo.processInfo.environment["SOUFFLEUSE_PREDICT_LOG"]?.isEmpty == false else { return }
+        let reason: String
+        if snap.bundleID == nil { reason = "no_bundleID" }
+        else if let b = snap.bundleID, bundleBlocklist.contains(b) { reason = "blocklisted=\(b)" }
+        else if snap.isSecureField { reason = "secure_field" }
+        else if snap.isSearchField { reason = "search_field" }
+        else if snap.isAddressBar { reason = "address_bar" }
+        else if snap.isPickerField { reason = "picker_field" }
+        else if snap.text == nil { reason = "no_text" }
+        else if snap.caretIndex == nil { reason = "no_caret" }
+        else if !snap.isTextElement { reason = "not_text_element" }
+        else { reason = "unknown" }
+        let line = "[\(ISO8601DateFormatter().string(from: Date()))] tick_gate_fail bundle=\(snap.bundleID ?? "nil") reason=\(reason)\n"
+        Self.appendTickLog(line)
+    }
+
     private func tick() {
         guard store.enabled else { return }
         // Icône vivante : par défaut « pas de champ actif » ; repassé à vrai plus
@@ -1482,31 +1533,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         let snap = axClient.snapshot()
-
-        // Verbose tick observability — every snapshot result, gated by env var.
-        if ProcessInfo.processInfo.environment["SOUFFLEUSE_PREDICT_LOG"]?.isEmpty == false,
-           let bid = snap.bundleID, !bid.contains("ghostty"), !bid.contains("Terminal") {
-            let txtLen = snap.text?.count ?? -1
-            let caret = snap.caretIndex.map(String.init) ?? "nil"
-            let rect = snap.caretRect.map { "\($0.origin.x.rounded()),\($0.origin.y.rounded())" } ?? "nil"
-            let elem = snap.elementRect.map { "\($0.size.width.rounded())x\($0.size.height.rounded())" } ?? "nil"
-            // Queue du préfixe (12 chars, échappée) + 1er char après le caret :
-            // diagnostic « // invisible dans Brave » (UAT 11/06) — révèle un
-            // caretIndex décalé ou des chars invisibles (ZWSP) côté Chromium.
-            let tail: String = {
-                guard let t = snap.text, let c = snap.caretIndex else { return "nil" }
-                let p = String(t.prefix(c))
-                let after = c < t.count ? String(String(t.dropFirst(c)).prefix(1)) : ""
-                return String(p.suffix(12)).debugDescription + " after=" + after.debugDescription
-            }()
-            let line = "[\(ISO8601DateFormatter().string(from: Date()))] tick_snap bundle=\(bid) textLen=\(txtLen) caretIdx=\(caret) isText=\(snap.isTextElement) secure=\(snap.isSecureField) caretRect=\(rect) elemRect=\(elem) tail=\(tail)\n"
-            if let data = line.data(using: .utf8) {
-                let path = "/tmp/souffleuse-tick.log"
-                if let h = FileHandle(forWritingAtPath: path) {
-                    h.seekToEndOfFile(); try? h.write(contentsOf: data); try? h.close()
-                } else { FileManager.default.createFile(atPath: path, contents: data) }
-            }
-        }
+        logTickSnapshot(snap)
 
         // Gate: must be a non-blocklisted, non-secure text element.
         // isAddressBar : les omniboxes (Safari/Chromium/Firefox) sont des
@@ -1523,31 +1550,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
               let text = snap.text,
               let caretIndex = snap.caretIndex,
               snap.isTextElement else {
-            // Temporary diagnostic for "Signal stops working" investigation.
-            // Logs which AX gate fails per-bundle so we can see why we bail.
-            // Same env var as the predictor debug log.
-            if ProcessInfo.processInfo.environment["SOUFFLEUSE_PREDICT_LOG"]?.isEmpty == false {
-                let reason: String
-                if snap.bundleID == nil { reason = "no_bundleID" }
-                else if let b = snap.bundleID, bundleBlocklist.contains(b) { reason = "blocklisted=\(b)" }
-                else if snap.isSecureField { reason = "secure_field" }
-                else if snap.isSearchField { reason = "search_field" }
-                else if snap.isAddressBar { reason = "address_bar" }
-                else if snap.isPickerField { reason = "picker_field" }
-                else if snap.text == nil { reason = "no_text" }
-                else if snap.caretIndex == nil { reason = "no_caret" }
-                else if !snap.isTextElement { reason = "not_text_element" }
-                else { reason = "unknown" }
-                let line = "[\(ISO8601DateFormatter().string(from: Date()))] tick_gate_fail bundle=\(snap.bundleID ?? "nil") reason=\(reason)\n"
-                if let data = line.data(using: .utf8) {
-                    let path = "/tmp/souffleuse-tick.log"
-                    if let h = FileHandle(forWritingAtPath: path) {
-                        h.seekToEndOfFile(); try? h.write(contentsOf: data); try? h.close()
-                    } else {
-                        FileManager.default.createFile(atPath: path, contents: data)
-                    }
-                }
-            }
+            logTickGateFail(snap)
             overlay.hide()
             hideEmojiPicker()
             hideSlashPicker()
