@@ -20,25 +20,26 @@
     <language>fr</language>
 
     <item>
-      <title>Version 0.10.1</title>
-      <pubDate>Tue, 16 Jun 2026 18:11:28 +0000</pubDate>
-      <sparkle:version>0.10.1</sparkle:version>
-      <sparkle:shortVersionString>0.10.1</sparkle:shortVersionString>
+      <title>Version 0.11.0</title>
+      <pubDate>Wed, 17 Jun 2026 18:05:19 +0000</pubDate>
+      <sparkle:version>0.11.0</sparkle:version>
+      <sparkle:shortVersionString>0.11.0</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
       <description><![CDATA[
-        <h2>Souffleuse 0.10.1</h2>
+        <h2>Souffleuse 0.11.0</h2>
         <ul>
-          <li><b>Mode rédaction « // » :</b> le message respecte désormais la langue choisie — l'italien, l'espagnol et l'anglais ne repartent plus en français.</li>
-          <li><b>Souffle gris :</b> il ne déborde plus de la zone de texte sur les messages longs (retour à la ligne propre).</li>
+          <li><b>Souffle plus naturel :</b> il ne répète plus des bouts déjà écrits et ne coupe plus les mots en deux (fini les « vo us »).</li>
+          <li><b>Prise en main :</b> un bac à sable intégré pour essayer en direct les modes « // » (transformation et rédaction).</li>
+          <li><b>Fiabilité :</b> robustesse renforcée sous le capot.</li>
         </ul>
         <p>macOS 14+ · Apple Silicon · 100 % on-device.</p>
       ]]></description>
-      <!-- Signé le 2026-06-16 (build Developer ID, NOTARISÉ + staplé). -->
+      <!-- Signé le 2026-06-17 (build Developer ID, NOTARISÉ + staplé). -->
       <!-- Régénérer à chaque release : deploy/make-appcast-entry.sh website/dl/Souffleuse.dmg -->
       <enclosure
         url="https://souffleuse.app/Souffleuse.dmg"
-        sparkle:edSignature="wU6HH/JKH9DnTQcKvUkCXbundlvOh2e3Cd/5sb6cmJ0IBpFbiPIY+H1Y1h5fgtZq5FDXjqsFazWFiQsv0gq6Ag=="
-        length="6786560"
+        sparkle:edSignature="cXnXzY3NyMypuFmzbZsX9Z/tKz5+9wuf59R9wmZTp9QsJJ79G58awGwcZkijXGKcSTt+unJtyW87rklsXBsUAQ=="
+        length="7518444"
         type="application/octet-stream" />
     </item>
 
