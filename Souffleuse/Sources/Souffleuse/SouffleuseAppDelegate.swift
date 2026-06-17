@@ -1875,6 +1875,157 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         return false
     }
 
+    /// Live-consume promotion : si une suggestion LLM est active et que l'utilisateur
+    /// vient de taper des caractères qui matchent son début (espaces et ponctuation
+    /// inclus — pas de coupure aux frontières de mot, comportement Cotypist), promeut
+    /// la suggestion en état partial-remainder pour que `handlePartialRemainder` la
+    /// rende et saute le re-predict. Divergence ou ghost mid-mot périmé → masque le
+    /// ghost (la régénération repart du predict gate). Extrait de `tick()`.
+    private func promoteLiveConsume(prefix: String, bundleID: String) {
+        guard partialRemainder.isEmpty,
+              !predictor.suggestion.isEmpty,
+              let basePrefix = lastPredictedPrefix,
+              predictor.predictedForPrefix == basePrefix,
+              prefix.count > basePrefix.count,
+              prefix.hasPrefix(basePrefix) else { return }
+        let typedSince = String(prefix.dropFirst(basePrefix.count))
+        // Case-insensitive match: typing "Bonjour" should still consume
+        // a ghost starting with "bonjour" (and vice versa). The user's
+        // typed casing wins in the rendered text (AX writes verbatim);
+        // only the matching logic ignores case.
+        // ANTI-FLICKER (revertable — see note below). We used to also require
+        // `!isStaleMidWordCompletion` here, which forced a hide+re-predict on
+        // EVERY keystroke into a "word-completion + tail" ghost — now the
+        // common case with the corpus (e.g. "achète du Bitcoin."). That blinked
+        // the tail on each letter. We now let these enter the smooth
+        // partial-remainder consume too: a correctly-guessed word consumes
+        // letter-by-letter with no flicker, and a *wrong* guess ("envi" →
+        // "es de manger" while the user types "envie ") still self-corrects —
+        // the divergence break in the partial-remainder block below re-predicts.
+        // Trade-off: on a wrong guess the stale tail shows for ~1 keystroke
+        // before the divergence swap, instead of being hidden.
+        // TO REVERT: re-add `&& !Self.isStaleMidWordCompletion(basePrefix:
+        // basePrefix, ghost: predictor.suggestion)` to the condition below.
+        if Self.isLiveConsumeMatch(ghost: predictor.suggestion, typedSince: typedSince) {
+            // User is consuming the ghost letter-by-letter — set up
+            // partial state so the existing block below renders the
+            // remainder and skips re-prediction.
+            partialAcceptedAtPrefix = basePrefix
+            partialAcceptedSoFar = typedSince
+            partialAcceptedAtBundleID = bundleID
+            partialRemainder = String(predictor.suggestion.dropFirst(typedSince.count))
+            predictor.cancel()
+        } else {
+            // Either the typed char(s) do NOT match the start of the ghost
+            // (true divergence — the "applielle" bug), OR the ghost was a
+            // stale mid-word completion guess that the user is now typing
+            // past (the "envies de" bug). Both cases: hide the stale ghost
+            // NOW, then fall through. The predict gate at the bottom fires a
+            // fresh prediction because `lastPredictedPrefix` is reset to nil
+            // here (and was stale anyway). Without this clear, the old ghost
+            // stayed rendered.
+            clearStaleGhostOnDivergence()
+        }
+    }
+
+    /// Partial-accept guard : tant qu'un reste est dû (issu d'un accept Tab partiel
+    /// OU de la consommation au clavier), l'overlay l'affiche verbatim et on saute le
+    /// re-predict tant que le texte AX correspond à ce qu'on a injecté/consommé.
+    /// Quand le préfixe dépasse, on continue la conso si ça matche (refill rolling
+    /// inclus) ou on traite la divergence (record + reset + masque). Retourne `true`
+    /// quand `tick()` doit sortir ; `false` (reste consommé/divergent) laisse le
+    /// predict gate reprendre la main. Extrait de `tick()`.
+    private func handlePartialRemainder(prefix: String, bundleID: String, text: String, caretIndex: Int, snap: AXSnapshot, rectForGhost: CGRect?, hostFont: NSFont?) -> Bool {
+        guard !partialRemainder.isEmpty else { return false }
+        let expected = partialAcceptedAtPrefix + partialAcceptedSoFar
+        if prefix == expected {
+            // Synced — render remainder and skip predict.
+            if let rect = rectForGhost {
+                overlay.show(text: partialRemainder, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFont, fieldRect: snap.elementRect)
+                interceptor.setActive(true)
+                // ── ROLLING REFILL (mode sliding-window, flag OFF par défaut) ──
+                // Si le reste affiché descend SOUS le plancher de mots, on GÉNÈRE
+                // les mots suivants à droite pendant que l'utilisateur consomme à
+                // gauche → fenêtre glissante qui ne se vide jamais. Le reste
+                // courant reste affiché ; les mots générés l'étendront au prochain
+                // tick render. Jamais de hide pendant le refill.
+                maybeSpawnRollingRefill(committedText: expected, bundleID: bundleID)
+            } else {
+                overlay.hide()
+                interceptor.setActive(false)
+            }
+            return true
+        }
+        if expected.hasPrefix(prefix) {
+            // AX hasn't caught up to our latest inject yet. Keep showing
+            // the remainder, do not re-predict, wait for the next tick.
+            if let rect = rectForGhost {
+                overlay.show(text: partialRemainder, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFont, fieldRect: snap.elementRect)
+                interceptor.setActive(true)
+            }
+            return true
+        }
+        // Prefix has grown past expected — the user typed more. Could be
+        // (a) live consumption of the next letters of the remainder, or
+        // (b) divergence / word boundary requesting a regen.
+        if prefix.hasPrefix(expected), prefix.count > expected.count {
+            let typedSince = String(prefix.dropFirst(expected.count))
+            // Case-insensitive match: a typo correction or auto-capitalize
+            // shouldn't break the consume chain mid-suggestion.
+            if Self.isLiveConsumeMatch(ghost: partialRemainder, typedSince: typedSince) {
+                // Continue consuming — match keeps going regardless of
+                // whether the typed char is a space, punctuation, or
+                // letter. Only divergence breaks the consume.
+                partialAcceptedSoFar += typedSince
+                partialRemainder = String(partialRemainder.dropFirst(typedSince.count))
+                if partialRemainder.isEmpty {
+                    // Whole suggestion consumed by typing — record + reset,
+                    // let the next tick re-predict on the new prefix.
+                    recordPartialAcceptanceToHistoryIfAllowed()
+                    partialAcceptedSoFar = ""
+                    partialAcceptedAtPrefix = ""
+                    partialAcceptedAtBundleID = nil
+                    overlay.hide()
+                    interceptor.setActive(false)
+                    // Don't return — fall through so predict fires.
+                } else {
+                    if let rect = rectForGhost {
+                        overlay.show(text: partialRemainder, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFont, fieldRect: snap.elementRect)
+                        interceptor.setActive(true)
+                        // FLUX CONTINU : recharge le bord droit DÈS la conso active
+                        // (et pas seulement au tick synchronisé suivant), pour que la
+                        // fenêtre reste pleine pendant que tu tapes la suite du ghost.
+                        maybeSpawnRollingRefill(
+                            committedText: partialAcceptedAtPrefix + partialAcceptedSoFar,
+                            bundleID: bundleID)
+                    }
+                    return true
+                }
+            } else {
+                // Divergence — record what was consumed, reset, fall
+                // through to the predict gate below. Hide the stale ghost
+                // (the remainder rendered last tick) so it can't linger if
+                // the re-prediction is gated/empty.
+                recordPartialAcceptanceToHistoryIfAllowed()
+                partialRemainder = ""
+                partialAcceptedSoFar = ""
+                partialAcceptedAtPrefix = ""
+                partialAcceptedAtBundleID = nil
+                clearStaleGhostOnDivergence()
+            }
+        } else {
+            // Divergence (user deleted, moved caret, etc.) — record + reset.
+            // Hide the stale remainder ghost; re-prediction repaints later.
+            recordPartialAcceptanceToHistoryIfAllowed()
+            partialRemainder = ""
+            partialAcceptedSoFar = ""
+            partialAcceptedAtPrefix = ""
+            partialAcceptedAtBundleID = nil
+            clearStaleGhostOnDivergence()
+        }
+        return false
+    }
+
     private func tick() {
         guard store.enabled else { return }
         // Icône vivante : par défaut « pas de champ actif » ; repassé à vrai plus
@@ -2142,154 +2293,14 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        // Live-consume promotion: if there's an active LLM suggestion and the
-        // user just typed characters that match its beginning (INCLUDING
-        // spaces and punctuation), promote it into the partial-remainder
-        // state. We deliberately do NOT break on word boundaries — Cotypist's
-        // observed behaviour keeps the same ghost while the user types
-        // straight through "ça va ?" letter by letter, space included.
-        // Regeneration happens only on divergence (typed char ≠ next ghost
-        // char) or when the entire ghost has been consumed.
-        if partialRemainder.isEmpty,
-           !predictor.suggestion.isEmpty,
-           let basePrefix = lastPredictedPrefix,
-           predictor.predictedForPrefix == basePrefix,
-           prefix.count > basePrefix.count,
-           prefix.hasPrefix(basePrefix) {
-            let typedSince = String(prefix.dropFirst(basePrefix.count))
-            // Case-insensitive match: typing "Bonjour" should still consume
-            // a ghost starting with "bonjour" (and vice versa). The user's
-            // typed casing wins in the rendered text (AX writes verbatim);
-            // only the matching logic ignores case.
-            // ANTI-FLICKER (revertable — see note below). We used to also require
-            // `!isStaleMidWordCompletion` here, which forced a hide+re-predict on
-            // EVERY keystroke into a "word-completion + tail" ghost — now the
-            // common case with the corpus (e.g. "achète du Bitcoin."). That blinked
-            // the tail on each letter. We now let these enter the smooth
-            // partial-remainder consume too: a correctly-guessed word consumes
-            // letter-by-letter with no flicker, and a *wrong* guess ("envi" →
-            // "es de manger" while the user types "envie ") still self-corrects —
-            // the divergence break in the partial-remainder block below re-predicts.
-            // Trade-off: on a wrong guess the stale tail shows for ~1 keystroke
-            // before the divergence swap, instead of being hidden.
-            // TO REVERT: re-add `&& !Self.isStaleMidWordCompletion(basePrefix:
-            // basePrefix, ghost: predictor.suggestion)` to the condition below.
-            if Self.isLiveConsumeMatch(ghost: predictor.suggestion, typedSince: typedSince) {
-                // User is consuming the ghost letter-by-letter — set up
-                // partial state so the existing block below renders the
-                // remainder and skips re-prediction.
-                partialAcceptedAtPrefix = basePrefix
-                partialAcceptedSoFar = typedSince
-                partialAcceptedAtBundleID = bundleID
-                partialRemainder = String(predictor.suggestion.dropFirst(typedSince.count))
-                predictor.cancel()
-            } else {
-                // Either the typed char(s) do NOT match the start of the ghost
-                // (true divergence — the "applielle" bug), OR the ghost was a
-                // stale mid-word completion guess that the user is now typing
-                // past (the "envies de" bug). Both cases: hide the stale ghost
-                // NOW, then fall through. The predict gate at the bottom fires a
-                // fresh prediction because `lastPredictedPrefix` is reset to nil
-                // here (and was stale anyway). Without this clear, the old ghost
-                // stayed rendered.
-                clearStaleGhostOnDivergence()
-            }
-        }
+        // Promeut une suggestion LLM active en état partial-remainder quand
+        // l'utilisateur tape ses premières lettres (consommation lettre-à-lettre).
+        promoteLiveConsume(prefix: prefix, bundleID: bundleID)
 
-        // Partial-accept guard: while we still owe the user a remainder, the
-        // overlay shows that remainder verbatim. The remainder may originate
-        // from a Tab partial accept OR from live typing consumption (above).
-        // If the AX text still matches what we injected/consumed, do not
-        // request a new prediction. If it doesn't match, we either keep
-        // consuming (user typing more matching letters) or treat it as
-        // divergence and re-predict.
-        if !partialRemainder.isEmpty {
-            let expected = partialAcceptedAtPrefix + partialAcceptedSoFar
-            if prefix == expected {
-                // Synced — render remainder and skip predict.
-                if let rect = rectForGhost {
-                    overlay.show(text: partialRemainder, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFontForOverlay, fieldRect: snap.elementRect)
-                    interceptor.setActive(true)
-                    // ── ROLLING REFILL (mode sliding-window, flag OFF par défaut) ──
-                    // Si le reste affiché descend SOUS le plancher de mots, on GÉNÈRE
-                    // les mots suivants à droite pendant que l'utilisateur consomme à
-                    // gauche → fenêtre glissante qui ne se vide jamais. Le reste
-                    // courant reste affiché ; les mots générés l'étendront au prochain
-                    // tick render. Jamais de hide pendant le refill.
-                    maybeSpawnRollingRefill(committedText: expected, bundleID: bundleID)
-                } else {
-                    overlay.hide()
-                    interceptor.setActive(false)
-                }
-                return
-            }
-            if expected.hasPrefix(prefix) {
-                // AX hasn't caught up to our latest inject yet. Keep showing
-                // the remainder, do not re-predict, wait for the next tick.
-                if let rect = rectForGhost {
-                    overlay.show(text: partialRemainder, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFontForOverlay, fieldRect: snap.elementRect)
-                    interceptor.setActive(true)
-                }
-                return
-            }
-            // Prefix has grown past expected — the user typed more. Could be
-            // (a) live consumption of the next letters of the remainder, or
-            // (b) divergence / word boundary requesting a regen.
-            if prefix.hasPrefix(expected), prefix.count > expected.count {
-                let typedSince = String(prefix.dropFirst(expected.count))
-                // Case-insensitive match: a typo correction or auto-capitalize
-                // shouldn't break the consume chain mid-suggestion.
-                if Self.isLiveConsumeMatch(ghost: partialRemainder, typedSince: typedSince) {
-                    // Continue consuming — match keeps going regardless of
-                    // whether the typed char is a space, punctuation, or
-                    // letter. Only divergence breaks the consume.
-                    partialAcceptedSoFar += typedSince
-                    partialRemainder = String(partialRemainder.dropFirst(typedSince.count))
-                    if partialRemainder.isEmpty {
-                        // Whole suggestion consumed by typing — record + reset,
-                        // let the next tick re-predict on the new prefix.
-                        recordPartialAcceptanceToHistoryIfAllowed()
-                        partialAcceptedSoFar = ""
-                        partialAcceptedAtPrefix = ""
-                        partialAcceptedAtBundleID = nil
-                        overlay.hide()
-                        interceptor.setActive(false)
-                        // Don't return — fall through so predict fires.
-                    } else {
-                        if let rect = rectForGhost {
-                            overlay.show(text: partialRemainder, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFontForOverlay, fieldRect: snap.elementRect)
-                            interceptor.setActive(true)
-                            // FLUX CONTINU : recharge le bord droit DÈS la conso active
-                            // (et pas seulement au tick synchronisé suivant), pour que la
-                            // fenêtre reste pleine pendant que tu tapes la suite du ghost.
-                            maybeSpawnRollingRefill(
-                                committedText: partialAcceptedAtPrefix + partialAcceptedSoFar,
-                                bundleID: bundleID)
-                        }
-                        return
-                    }
-                } else {
-                    // Divergence — record what was consumed, reset, fall
-                    // through to the predict gate below. Hide the stale ghost
-                    // (the remainder rendered last tick) so it can't linger if
-                    // the re-prediction is gated/empty.
-                    recordPartialAcceptanceToHistoryIfAllowed()
-                    partialRemainder = ""
-                    partialAcceptedSoFar = ""
-                    partialAcceptedAtPrefix = ""
-                    partialAcceptedAtBundleID = nil
-                    clearStaleGhostOnDivergence()
-                }
-            } else {
-                // Divergence (user deleted, moved caret, etc.) — record + reset.
-                // Hide the stale remainder ghost; re-prediction repaints later.
-                recordPartialAcceptanceToHistoryIfAllowed()
-                partialRemainder = ""
-                partialAcceptedSoFar = ""
-                partialAcceptedAtPrefix = ""
-                partialAcceptedAtBundleID = nil
-                clearStaleGhostOnDivergence()
-            }
+        // Tant qu'on doit un reste à l'utilisateur, on l'affiche verbatim et on
+        // saute le predict — sauf divergence, qui rend la main au predict gate.
+        if handlePartialRemainder(prefix: prefix, bundleID: bundleID, text: text, caretIndex: caretIndex, snap: snap, rectForGhost: rectForGhost, hostFont: hostFontForOverlay) {
+            return
         }
 
         // Emoji shortcode expansion — fires when text ends with `:code:<space>`.
