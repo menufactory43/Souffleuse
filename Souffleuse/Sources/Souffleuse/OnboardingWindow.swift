@@ -335,7 +335,7 @@ private struct OnboardingRootView: View {
         case .howItWorks:
             HowItWorksStepView(canTryGhost: canTryGhost)
         case .commands:
-            CommandsStepView()
+            CommandsStepView(canTryGhost: canTryGhost)
         case .welcome, .done:
             EmptyView()
         }
@@ -901,34 +901,44 @@ private struct ModelCard: View {
     }
 }
 
-// MARK: - Ghost try field (NSTextField AppKit)
+// MARK: - Ghost try field (NSTextView AppKit)
 
-/// Champ texte AppKit pour l'étape « Comment ça marche » : un vrai champ où le
-/// pipeline normal (tick → AX → predictor → overlay → Tab) souffle pour de vrai.
-/// On passe par AppKit et NON par un TextField SwiftUI car l'AX d'un TextField
-/// SwiftUI n'expose pas toujours caret/bounds de façon fiable pour AXClient.
-private struct GhostTryField: NSViewRepresentable {
-    let placeholderSeed: String
+/// Champ d'essai MULTI-LIGNES AppKit, partagé par « Comment ça marche » (souffle)
+/// et « Pour aller plus loin » (// et :). Un vrai NSTextView où le pipeline global
+/// (tick → AX → predictor → overlay → Tab) tourne pour de vrai. NSTextView plutôt
+/// qu'un TextEditor SwiftUI car l'AX d'un champ SwiftUI n'expose pas toujours
+/// caret/bounds de façon fiable pour AXClient. Substitutions auto (guillemets/
+/// tirets) coupées pour que « // » et « : » arrivent intacts.
+private struct GhostTryTextView: NSViewRepresentable {
+    let seed: String
 
-    func makeNSView(context: Context) -> NSTextField {
-        let field = NSTextField(string: placeholderSeed)
-        field.font = .systemFont(ofSize: 15)
-        field.isEditable = true
-        field.isSelectable = true
-        field.isBordered = true
-        field.bezelStyle = .roundedBezel
-        field.focusRingType = .default
-        field.lineBreakMode = .byTruncatingTail
-        // Auto-focus + caret en fin de seed pour que la frappe continue la phrase.
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSTextView.scrollableTextView()
+        scroll.borderType = .bezelBorder
+        scroll.hasVerticalScroller = true
+        guard let textView = scroll.documentView as? NSTextView else { return scroll }
+        textView.string = seed
+        textView.font = .systemFont(ofSize: 15)
+        textView.isEditable = true
+        textView.isSelectable = true
+        textView.isRichText = false
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.textContainerInset = NSSize(width: 6, height: 8)
+        // VoiceOver : un champ texte multi-lignes nommé (sinon annoncé « zone de
+        // texte » nue). Le scroll reste transparent à l'AX (le texte porte le rôle).
+        textView.setAccessibilityLabel(tr(fr: "Champ d'essai", en: "Practice field"))
+        scroll.setAccessibilityElement(false)
+        // Auto-focus + caret en fin de seed (cohérent avec GhostTryField).
         DispatchQueue.main.async {
-            guard let win = field.window else { return }
-            win.makeFirstResponder(field)
-            field.currentEditor()?.selectedRange = NSRange(location: placeholderSeed.count, length: 0)
+            guard let win = textView.window else { return }
+            win.makeFirstResponder(textView)
+            textView.setSelectedRange(NSRange(location: (seed as NSString).length, length: 0))
         }
-        return field
+        return scroll
     }
 
-    func updateNSView(_ nsView: NSTextField, context: Context) {}
+    func updateNSView(_ nsView: NSScrollView, context: Context) {}
 }
 
 // MARK: - Step: How it works
@@ -951,8 +961,8 @@ private struct HowItWorksStepView: View {
                         .italic()
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    GhostTryField(placeholderSeed: seed)
-                        .frame(height: 30)
+                    GhostTryTextView(seed: seed)
+                        .frame(minHeight: 96, maxHeight: 160)
                 }
             } else {
                 // Repli : la voix n'est pas encore prête → maquette statique
@@ -1004,23 +1014,40 @@ private struct HowBullet: View {
 /// les déclencheurs exacts sont calqués sur SlashTransformDetector / EmojiExpander
 /// / TranslationHotKey pour ne jamais mentir sur la syntaxe.
 private struct CommandsStepView: View {
+    let canTryGhost: () -> Bool
+
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 8) {
                 Text(tr(fr: "Pour aller plus loin", en: "Going further"))
                     .font(.system(size: 22, weight: .semibold, design: .serif))
-                Text(tr(fr: "Au-delà du souffle, Souffleuse corrige, reformule, traduit et glisse des emojis — sans quitter votre clavier.", en: "Beyond the whisper, Souffleuse fixes, rephrases, translates, and drops in emoji — without leaving your keyboard."))
+                Text(tr(fr: "Au-delà du souffle, Souffleuse corrige, reformule, rédige, traduit et glisse des emojis — sans quitter votre clavier.", en: "Beyond the whisper, Souffleuse fixes, rephrases, drafts, translates, and drops in emoji — without leaving your keyboard."))
                     .font(.system(size: 13, design: .serif))
                     .italic()
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            // Le couteau suisse texte : // au début d'un mot.
+            // Bac à sable live : même pipeline global que le ghost — « : » et « // »
+            // s'y déclenchent comme dans n'importe quelle app. Caché si la voix
+            // n'est pas prête (rien ne se passerait → autant ne pas frustrer).
+            if canTryGhost() {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(tr(fr: "Essayez ici même : tapez : pour un emoji, ou terminez par // puis un chiffre pour corriger, reformuler ou traduire.", en: "Try it right here: type : for an emoji, or end with // then a number to fix, rephrase or translate."))
+                        .font(.system(size: 13, design: .serif))
+                        .italic()
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    GhostTryTextView(seed: tr(fr: "je voulais vous dire que c'est super ", en: "I just wanted to say this is great "))
+                        .frame(minHeight: 96, maxHeight: 160)
+                }
+            }
+
+            // Mode transformation : // APRÈS un texte → agit sur ce qui précède.
             CommandCard(
-                trigger: "//",
+                trigger: "texte //",
                 title: tr(fr: "Corriger, reformuler, traduire", en: "Fix, rephrase, translate"),
-                subtitle: tr(fr: "Tapez // au début d'un mot, puis un chiffre — ou décrivez ce que vous voulez.", en: "Type // at the start of a word, then a number — or describe what you want.")
+                subtitle: tr(fr: "Tapez // juste après ce que vous venez d'écrire, puis un chiffre — ou décrivez ce que vous voulez.", en: "Type // right after what you just wrote, then a number — or describe what you want.")
             ) {
                 VStack(alignment: .leading, spacing: 6) {
                     SlashIntent(number: "1", label: tr(fr: "Corriger", en: "Fix"), detail: tr(fr: "orthographe et grammaire", en: "spelling and grammar"))
@@ -1031,6 +1058,13 @@ private struct CommandsStepView: View {
                 }
                 .padding(.top, 2)
             }
+
+            // Mode rédaction : // EN DÉBUT de champ + amorce → texte neuf.
+            CommandCard(
+                trigger: "// notes",
+                title: tr(fr: "Rédiger d'une amorce", en: "Draft from a few words"),
+                subtitle: tr(fr: "Commencez par // puis vos mots-clés — Souffleuse les développe en un texte complet. Un chiffre choisit la langue.", en: "Start with // then your keywords — Souffleuse expands them into a full text. A number picks the language.")
+            )
 
             // Emojis : deux-points + nom.
             CommandCard(
@@ -1044,6 +1078,13 @@ private struct CommandsStepView: View {
                 trigger: "⌥⌘T",
                 title: tr(fr: "Traduire le champ", en: "Translate the field"),
                 subtitle: tr(fr: "Traduit tout le champ d'un raccourci. ⌘⇧→ change la langue cible, ⌘↩ applique.", en: "Translates the whole field with one shortcut. ⌘⇧→ changes the target language, ⌘↩ applies.")
+            )
+
+            // Consigne persistante : pas un trigger clavier mais le menu barre.
+            CommandCard(
+                trigger: "✎",
+                title: tr(fr: "Vous présenter au modèle", en: "Introduce yourself to the model"),
+                subtitle: tr(fr: "Menu Souffleuse → « Instructions personnalisées… » : qui vous êtes, votre style, votre domaine — ajouté en tête de chaque demande au modèle.", en: "Souffleuse menu → \u{201C}Custom instructions\u{2026}\u{201D}: who you are, your style, your field — prepended to every request to the model.")
             )
 
             Text(tr(fr: "Tout est rappelé dans les Préférences — rien à mémoriser maintenant.", en: "It's all listed again in Settings — nothing to memorize now."))
@@ -1235,13 +1276,15 @@ final class OnboardingWindow {
     /// Ghost provider, gardé pour le refresh de transition.
     private let ghostReady: () -> Bool
 
-    /// Vrai quand l'essai réel du souffle est en scène : fenêtre key ET étape
-    /// « Comment ça marche ». C'est la SEULE situation où le tick de
-    /// l'AppDelegate laisse le pipeline tourner alors que Souffleuse est l'app
-    /// active (exception au gate R1) — le seul champ focusable de cette étape
-    /// est le champ d'essai AppKit, dont l'AX est fiable.
+    /// Vrai quand une étape à champ d'essai est en scène : fenêtre key ET étape
+    /// « Comment ça marche » (souffle) OU « Pour aller plus loin » (// et :).
+    /// C'est la SEULE situation où le tick de l'AppDelegate laisse le pipeline
+    /// tourner alors que Souffleuse est l'app active (exception au gate R1) —
+    /// le seul champ focusable de ces étapes est le champ d'essai AppKit, dont
+    /// l'AX est fiable (aucun TextField SwiftUI ne vient racer les lectures AX).
     var isTryGhostStepActive: Bool {
-        window.isKeyWindow && model.currentStep == .howItWorks
+        window.isKeyWindow
+            && (model.currentStep == .howItWorks || model.currentStep == .commands)
     }
 
     // MARK: Init
@@ -1269,10 +1312,14 @@ final class OnboardingWindow {
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: Int(OnboardingStep.windowSize.width), height: Int(OnboardingStep.windowSize.height)),
-            styleMask: [.titled, .closable, .fullSizeContentView],
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
+        // Redimensionnable, mais jamais sous la taille conçue (le layout des étapes
+        // est calibré pour `windowSize` ; en dessous, le contenu se tasse). Vers le
+        // haut, libre : champs d'essai multi-lignes, longues traductions, etc.
+        window.minSize = OnboardingStep.windowSize
         // Titre gardé pour Mission Control/VoiceOver, mais barre masquée : chaque
         // étape porte déjà son titre serif — la barre ne ferait que le doubler.
         window.title = tr(fr: "Bienvenue dans Souffleuse", en: "Welcome to Souffleuse")
@@ -1304,7 +1351,8 @@ final class OnboardingWindow {
         let host = NSHostingController(rootView: rootView)
         self.host = host
         window.contentViewController = host
-        // Taille fixe : la fenêtre ne se redimensionne jamais entre les étapes.
+        // On ne redimensionne JAMAIS par programme entre les étapes ; seul
+        // l'utilisateur peut agrandir (styleMask `.resizable`, minSize ci-dessus).
     }
 
     // MARK: Public API
