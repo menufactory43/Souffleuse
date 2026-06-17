@@ -24,8 +24,18 @@ private extension Color {
 }
 
 @MainActor
+/// Navigation pilotable de la fenêtre Préférences — partagée avec `PreferencesRoot`
+/// pour qu'un deep-link externe (ex. « Débloquer Studio ») puisse poser la section
+/// active. `@Observable` plutôt qu'un `@State` privé : la sélection est alors
+/// contrôlable du dehors ET survit aux reconstructions (changement de langue).
+@Observable fileprivate final class PreferencesNavigation {
+    var selection: PrefSection? = .souffle
+}
+
+@MainActor
 final class PreferencesWindow {
     private var window: NSWindow?
+    private let nav = PreferencesNavigation()
     private let store: PreferencesStore
     private let onModelChange: (String) -> Void
     private let onCaptureToggle: (Bool) -> Void
@@ -49,6 +59,13 @@ final class PreferencesWindow {
         self.onClearPersonalization = onClearPersonalization
     }
 
+    /// Ouvre (ou ramène au premier plan) en ciblant la section Studio — appelé par
+    /// l'invite « Débloquer Studio ».
+    func showStudio() {
+        nav.selection = .studio
+        show()
+    }
+
     func show() {
         if let w = window {
             w.makeKeyAndOrderFront(nil)
@@ -57,6 +74,7 @@ final class PreferencesWindow {
         }
         let root = PreferencesRoot(
             store: store,
+            nav: nav,
             onModelChange: onModelChange,
             onCaptureToggle: onCaptureToggle,
             onOpenOnboarding: onOpenOnboarding,
@@ -202,13 +220,13 @@ private enum PrefSection: String, CaseIterable, Identifiable {
 /// fiable. Même look de sidebar, navigation qui marche.
 private struct PreferencesRoot: View {
     @Bindable var store: PreferencesStore
+    @Bindable var nav: PreferencesNavigation
     let onModelChange: (String) -> Void
     let onCaptureToggle: (Bool) -> Void
     let onOpenOnboarding: () -> Void
     let onOpenHistoryViewer: () -> Void
     let onClearPersonalization: () -> Void
 
-    @State private var selection: PrefSection? = .souffle
     @State private var query = ""
 
     /// Sections visibles selon la recherche — toutes si la requête est vide.
@@ -233,7 +251,7 @@ private struct PreferencesRoot: View {
                         .font(.callout).foregroundStyle(.secondary)
                     Spacer()
                 } else {
-                    List(filteredSections, selection: $selection) { section in
+                    List(filteredSections, selection: $nav.selection) { section in
                         HStack {
                             Label(section.label, systemImage: section.systemImage)
                             if section.isStudio && !store.license.isPro {
@@ -254,11 +272,11 @@ private struct PreferencesRoot: View {
 
             Divider()
 
-            detail(for: selection ?? .souffle)
+            detail(for: nav.selection ?? .souffle)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .modifier(StudioGate(
-                    locked: (selection ?? .souffle).isStudio && !store.license.isPro,
-                    onUnlock: { selection = .studio }))
+                    locked: (nav.selection ?? .souffle).isStudio && !store.license.isPro,
+                    onUnlock: { nav.selection = .studio }))
         }
         .frame(width: 800, height: 560)
         // La voix unique : un seul accent sang-de-bœuf irrigue toggles, sliders,
@@ -747,7 +765,7 @@ private struct LicenseTab: View {
                     Text(tr(fr: "Traduction, ton, transformations « // » et personnalisation — une licence unique, à vie, sur ce Mac.", en: "Translation, tone, “//” transforms and personalization — one license, forever, on this Mac."))
                         .font(.callout).foregroundStyle(.secondary)
                     HStack {
-                        TextField(tr(fr: "Colle ta clé (SOUF-…)", en: "Paste your key (SOUF-…)"), text: $keyInput)
+                        TextField(tr(fr: "Colle ta clé de licence", en: "Paste your license key"), text: $keyInput)
                             .textFieldStyle(.roundedBorder)
                             .onSubmit(activate)
                         Button(activating ? tr(fr: "Activation…", en: "Activating…") : tr(fr: "Activer", en: "Activate"), action: activate)
