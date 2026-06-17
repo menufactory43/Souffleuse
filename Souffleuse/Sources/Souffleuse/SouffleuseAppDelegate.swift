@@ -1574,6 +1574,79 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         return (rectForGhost, hostFontForOverlay)
     }
 
+    /// Reflète l'état de capture (OCR) dans l'icône menubar via un poll async léger.
+    /// Fire-and-forget : ne bloque jamais la boucle de tick. Extrait de `tick()`.
+    private func pollCaptureIcon() {
+        Task { [weak self] in
+            guard let self else { return }
+            let cap = await self.enricher.isCapturing()
+            await MainActor.run {
+                self.iconCapturingNow = cap
+                self.refreshLivingIcon()
+            }
+        }
+    }
+
+    /// Applique la politique d'enrichment par app et relance un snapshot de contexte
+    /// quand le contexte focus change matériellement (bundle, ou titre de fenêtre au-
+    /// delà de `titleChangeRefireMinInterval`). Le refire vide `cachedEnrichmentPrefix`
+    /// puis le repeuple en async ; `suggestionOnly`/`clipboardOnly` modulent enrichment
+    /// et capture sans toucher au toggle global. Extrait de `tick()`.
+    private func manageEnrichment(snap: AXSnapshot, bundleID: String, allowMode: AllowlistMode) {
+        // Per-app enrichment policy: suggestionOnly disables enrichment for this
+        // bundle without disabling the global toggle.
+        let enrichmentAllowed = store.enrichmentEnabled && allowMode != .suggestionOnly
+        let captureAllowedHere = store.captureEnabled && allowMode != .clipboardOnly
+
+        // Refresh enrichment when the focused context materially changes:
+        //   - bundle changes (focus moved to a different app) — always honoured
+        //   - window title changes within the same bundle (typical browser tab
+        //     switch) — honoured if at least `titleChangeRefireMinInterval`
+        //     elapsed since the last refire, debouncing transient titles
+        //     during page loads ("Loading…" → "Inbox · Intercom")
+        //
+        // First tick after a refire uses the cached prefix (which has been
+        // cleared); subsequent ticks pick up the fresh snapshot once it
+        // completes.
+        let bundleChanged = bundleID != lastEnrichedBundleID
+        let titleChanged = snap.windowTitle != lastEnrichedWindowTitle
+        let elapsedSinceLast = Date().timeIntervalSince(lastEnrichmentAt)
+        let shouldRefire = enrichmentAllowed && (
+            bundleChanged ||
+            (titleChanged && elapsedSinceLast >= Self.titleChangeRefireMinInterval)
+        )
+        if shouldRefire {
+            lastEnrichedBundleID = bundleID
+            lastEnrichedWindowTitle = snap.windowTitle
+            lastEnrichmentAt = Date()
+            cachedEnrichmentPrefix = ""
+            lastEnrichedVisible = nil
+            let appliedCapture = captureAllowedHere
+            // Within-bundle title changes need an explicit cache invalidate —
+            // `visibleCache` in ContextEnricher is keyed on bundleID only and
+            // its 5s TTL would otherwise mask the new tab's content.
+            let invalidate = titleChanged && !bundleChanged
+            Task { [weak self] in
+                guard let self else { return }
+                if invalidate { await self.enricher.invalidate() }
+                // Temporarily toggle capture for this snapshot if the rule says clipboard-only.
+                await self.enricher.setCaptureEnabled(appliedCapture)
+                let enriched = await self.enricher.snapshot(focusedFieldRect: snap.elementRect)
+                // Restore global capture preference after the snapshot.
+                await self.enricher.setCaptureEnabled(self.store.captureEnabled)
+                await MainActor.run {
+                    self.cachedEnrichmentPrefix = enriched.prefix
+                    self.lastEnrichedVisible = enriched.visible
+                }
+            }
+        } else if !enrichmentAllowed {
+            cachedEnrichmentPrefix = ""
+            lastEnrichedVisible = nil
+            lastEnrichedBundleID = nil
+            lastEnrichedWindowTitle = nil
+        }
+    }
+
     private func tick() {
         guard store.enabled else { return }
         // Icône vivante : par défaut « pas de champ actif » ; repassé à vrai plus
@@ -1729,68 +1802,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
         dismissedForText = nil
 
-        // Reflect capture state in the menubar icon (lightweight async poll).
-        Task { [weak self] in
-            guard let self else { return }
-            let cap = await self.enricher.isCapturing()
-            await MainActor.run {
-                self.iconCapturingNow = cap
-                self.refreshLivingIcon()
-            }
-        }
-
-        // Per-app enrichment policy: suggestionOnly disables enrichment for this
-        // bundle without disabling the global toggle.
-        let enrichmentAllowed = store.enrichmentEnabled && allowMode != .suggestionOnly
-        let captureAllowedHere = store.captureEnabled && allowMode != .clipboardOnly
-
-        // Refresh enrichment when the focused context materially changes:
-        //   - bundle changes (focus moved to a different app) — always honoured
-        //   - window title changes within the same bundle (typical browser tab
-        //     switch) — honoured if at least `titleChangeRefireMinInterval`
-        //     elapsed since the last refire, debouncing transient titles
-        //     during page loads ("Loading…" → "Inbox · Intercom")
-        //
-        // First tick after a refire uses the cached prefix (which has been
-        // cleared); subsequent ticks pick up the fresh snapshot once it
-        // completes.
-        let bundleChanged = bundleID != lastEnrichedBundleID
-        let titleChanged = snap.windowTitle != lastEnrichedWindowTitle
-        let elapsedSinceLast = Date().timeIntervalSince(lastEnrichmentAt)
-        let shouldRefire = enrichmentAllowed && (
-            bundleChanged ||
-            (titleChanged && elapsedSinceLast >= Self.titleChangeRefireMinInterval)
-        )
-        if shouldRefire {
-            lastEnrichedBundleID = bundleID
-            lastEnrichedWindowTitle = snap.windowTitle
-            lastEnrichmentAt = Date()
-            cachedEnrichmentPrefix = ""
-            lastEnrichedVisible = nil
-            let appliedCapture = captureAllowedHere
-            // Within-bundle title changes need an explicit cache invalidate —
-            // `visibleCache` in ContextEnricher is keyed on bundleID only and
-            // its 5s TTL would otherwise mask the new tab's content.
-            let invalidate = titleChanged && !bundleChanged
-            Task { [weak self] in
-                guard let self else { return }
-                if invalidate { await self.enricher.invalidate() }
-                // Temporarily toggle capture for this snapshot if the rule says clipboard-only.
-                await self.enricher.setCaptureEnabled(appliedCapture)
-                let enriched = await self.enricher.snapshot(focusedFieldRect: snap.elementRect)
-                // Restore global capture preference after the snapshot.
-                await self.enricher.setCaptureEnabled(self.store.captureEnabled)
-                await MainActor.run {
-                    self.cachedEnrichmentPrefix = enriched.prefix
-                    self.lastEnrichedVisible = enriched.visible
-                }
-            }
-        } else if !enrichmentAllowed {
-            cachedEnrichmentPrefix = ""
-            lastEnrichedVisible = nil
-            lastEnrichedBundleID = nil
-            lastEnrichedWindowTitle = nil
-        }
+        pollCaptureIcon()
+        manageEnrichment(snap: snap, bundleID: bundleID, allowMode: allowMode)
 
         // First-keystroke gate: enrichment has been kicked off (pre-warming
         // for when the user actually types) but the UI stays silent — no
