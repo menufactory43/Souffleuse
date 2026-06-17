@@ -12,6 +12,10 @@ public final class PresenceIndicatorWindow {
     private let panel: NSPanel
     private let badge: BadgeView
 
+    /// Clic sur le badge → ouvre la palette d'actions « // » (corriger, traduire…).
+    /// Posé par l'AppDelegate ; tant qu'il est nil le badge reste click-through.
+    public var onClick: (() -> Void)?
+
     /// Footprint of the badge in points. The brand mark is aspect-fit inside
     /// this square box. 28 pt (au lieu des 22 historiques du disque « S ») :
     /// retour utilisateur 2026-06-10 — 22 trop petit, 26 essayé, 28 validé.
@@ -32,13 +36,20 @@ public final class PresenceIndicatorWindow {
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = false
-        panel.ignoresMouseEvents = true
+        // Cliquable (panneau non-activant → l'app hôte garde le focus clavier) :
+        // le clic ouvre la palette d'actions. Le curseur main signale l'affordance.
+        panel.ignoresMouseEvents = false
 
         self.badge = BadgeView(
             frame: NSRect(x: 0, y: 0, width: Self.diameter, height: Self.diameter)
         )
+        badge.onClick = { [weak self] in self?.onClick?() }
         panel.contentView = badge
     }
+
+    /// Frame AppKit (bas-gauche) courant du badge — point d'ancrage de la palette
+    /// d'actions, lue par l'AppDelegate au clic.
+    public var anchorFrameAppKit: NSRect { panel.frame }
 
     /// Show the badge anchored to the top-left of `fieldRectQuartz` (the
     /// focused text element's frame). Anchoring to the field — not the caret
@@ -78,6 +89,19 @@ private final class BadgeView: NSView {
     /// Loaded once via `Bundle.module` ; `image(forResource:)` apparie le @2x
     /// automatiquement selon le backing scale de l'écran.
     private static let mark: NSImage? = Bundle.module.image(forResource: "PresenceMark")
+
+    /// Clic relâché DANS le badge → ouvre la palette (posé par la fenêtre).
+    var onClick: (() -> Void)?
+
+    override func resetCursorRects() {
+        // Main au survol : signale que le badge est actionnable (pas décoratif).
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+        onClick?()
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         guard let mark = Self.mark else { return }

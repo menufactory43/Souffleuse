@@ -75,13 +75,27 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// Canal de mise à jour beta (manuel-only). Armé dès le lancement pour que
     /// Sparkle s'initialise avant l'affichage du menu.
     private let updater = UpdaterController()
-    /// Carnet d'usage : frappes épargnées, cadence mesurée, actes — affiché au clic
-    /// sur l'icône (« mieux qu'un compteur de mots collé à l'icône »).
+    /// Carnet d'usage : frappes épargnées, cadence mesurée, actes. Le détail vit
+    /// dans la fenêtre Carnet (le menu ne porte plus que « Ouvrir le carnet… »,
+    /// allégé le 2026-06-17) ; un compteur compact des frappes épargnées DU JOUR
+    /// s'affiche à côté de l'icône (parité Cotypist, demande utilisateur — révise
+    /// l'ancien parti « pas de compteur collé à l'icône » : ici c'est le score du
+    /// jour, vivant et remis à zéro, pas un cumul de vanité).
     private let ledger = UsageLedger()
-    private var carnetRepliquesItem: NSMenuItem?
-    private var carnetFrappesItem: NSMenuItem?
-    private var carnetTempsItem: NSMenuItem?
-    private var carnetActesItem: NSMenuItem?
+    /// Désactivations temporaires par app (menu « Désactiver dans <App> »).
+    private let tempDisables = TemporaryDisableStore()
+    /// Dernier bundleID d'un champ texte éligible vu par `tick` — cible du menu
+    /// « Désactiver/Réactiver dans <App> » (le menu-bar n'a pas de focus AX propre).
+    private var lastMenuBundleID: String?
+    /// Item parent du sous-menu par-app, reconstruit à l'ouverture du menu.
+    private var perAppDisableItem: NSMenuItem?
+    /// Références aux bascules enrichissement/capture — mises à jour PAR RÉFÉRENCE
+    /// au refresh (les indices fixes cassaient dès qu'un item était inséré/caché).
+    private var enrichmentMenuItem: NSMenuItem?
+    private var captureMenuItem: NSMenuItem?
+    private var toggleMenuItem: NSMenuItem?
+    /// Dernier titre-compteur posé sur l'icône — évite de réécrire à chaque tick.
+    private var lastIconCountTitle = ""
     /// État de la mesure de cadence de frappe (croissance de texte entre deux polls).
     private var cadenceLastLen = 0
     private var cadenceLastBundle: String?
@@ -133,6 +147,10 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// Picker au caret — rangée ①–⑤ (corriger · raccourcir · reformuler · ton ·
     /// traduire), clone structurel du picker emoji.
     private let transformPicker = TransformPickerWindow()
+    /// Palette d'actions ouverte au CLIC sur le badge de présence — point d'entrée
+    /// découvrable des transformations « // » sans taper le trigger. Cliquable
+    /// (les autres pickers sont click-through).
+    private let presenceActions = PresenceActionsWindow()
     /// HUD dédié au preview — instance SÉPARÉE de `translationHUD` : son
     /// `onVisibilityChanged` arme Tab/Esc (preview), pas ⌘↩ (flux traduction).
     private let transformHUD = TranslationHUDWindow()
@@ -430,6 +448,15 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // still appears effectively immediately.
         overlay = OverlayWindow()
         presence = PresenceIndicatorWindow()
+        // Clic sur le badge → palette d'actions « // ». Clic hors palette → repli
+        // (et ré-armement implicite du pipeline ghost au tick suivant).
+        presence.onClick = { [weak self] in self?.openPresenceActions() }
+        presenceActions.onDismiss = { [weak self] in
+            // Clic hors palette : elle s'est déjà repliée seule, on désarme le
+            // clavier et on ré-arme implicitement le ghost au tick suivant.
+            self?.interceptor.setSlashPickerArmed(false)
+            self?.predictor.cancel()
+        }
         // Applique l'apparence du souffle choisie (Préférences › Apparence) dès la
         // création — sinon le label garde son gris/opacité par défaut jusqu'au
         // premier changement de pref.
@@ -519,7 +546,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         predictor.maxTokens = store.completionLength.maxTokens
         predictor.maxWords = store.completionLength.maxWords
         predictor.personalizationStrength = store.effectivePersonalizationStrength
-        predictor.personalizedSuggestionsEnabled = store.personalizedSuggestionsEnabled
+        // Few-shot perso = Studio aussi (la force n-gram l'est déjà via
+        // `effectivePersonalizationStrength`) → coupé tant que la licence est inactive.
+        predictor.personalizedSuggestionsEnabled = store.personalizedSuggestionsEnabled && store.license.isPro
         predictor.prefixCorrectionEnabled = store.prefixCorrectionEnabled
         // Few-shot dynamique : le predictor lit ce store à chaque appel à
         // `predict()` pour retrouver des entrées similaires au userTail.
@@ -903,8 +932,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         if predictor.personalizationStrength != effectiveStrength {
             predictor.personalizationStrength = effectiveStrength
         }
-        if predictor.personalizedSuggestionsEnabled != store.personalizedSuggestionsEnabled {
-            predictor.personalizedSuggestionsEnabled = store.personalizedSuggestionsEnabled
+        let effectivePersonalized = store.personalizedSuggestionsEnabled && store.license.isPro
+        if predictor.personalizedSuggestionsEnabled != effectivePersonalized {
+            predictor.personalizedSuggestionsEnabled = effectivePersonalized
         }
         if predictor.prefixCorrectionEnabled != store.prefixCorrectionEnabled {
             predictor.prefixCorrectionEnabled = store.prefixCorrectionEnabled
@@ -983,7 +1013,16 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         toggleItem.keyEquivalentModifierMask = [.control, .option, .command]
         toggleItem.target = self
         menu.addItem(toggleItem)
+        toggleMenuItem = toggleItem
+        // ── Désactiver dans <App> — geste rapide par-app (façon Cotypist).
+        // Placeholder peuplé à l'ouverture par `menuNeedsUpdate` selon l'app focus
+        // et son état (titre + sous-menu 5/15/60 min / indéfiniment, ou « Réactiver »).
+        let perApp = NSMenuItem(title: tr(fr: "Désactiver dans cette app", en: "Disable in this app"), action: nil, keyEquivalent: "")
+        perApp.target = self
+        menu.addItem(perApp)
+        perAppDisableItem = perApp
         menu.addItem(NSMenuItem.separator())
+        // ── Groupe FONCTIONS : enrichissement + capture.
         let enrichItem = NSMenuItem(
             title: store.enrichmentEnabled ? tr(fr: "Enrichissement contextuel ✓", en: "Context enrichment ✓") : tr(fr: "Enrichissement contextuel", en: "Context enrichment"),
             action: #selector(toggleEnrichment),
@@ -991,6 +1030,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         )
         enrichItem.target = self
         menu.addItem(enrichItem)
+        enrichmentMenuItem = enrichItem
         let captureItem = NSMenuItem(
             title: store.captureEnabled ? tr(fr: "  ↳ Inclure capture d'écran ✓", en: "  ↳ Include screen capture ✓") : tr(fr: "  ↳ Inclure capture d'écran", en: "  ↳ Include screen capture"),
             action: #selector(toggleCapture),
@@ -998,18 +1038,13 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         )
         captureItem.target = self
         menu.addItem(captureItem)
+        captureMenuItem = captureItem
         menu.addItem(NSMenuItem.separator())
-        let carnetHeader = NSMenuItem(title: tr(fr: "Carnet de la souffleuse — aujourd'hui", en: "Souffleuse log — today"), action: nil, keyEquivalent: "")
-        carnetHeader.isEnabled = false
-        menu.addItem(carnetHeader)
-        let repliques = Self.carnetLine(); menu.addItem(repliques); carnetRepliquesItem = repliques
-        let frappes = Self.carnetLine(); menu.addItem(frappes); carnetFrappesItem = frappes
-        let temps = Self.carnetLine(); menu.addItem(temps); carnetTempsItem = temps
-        let actes = Self.carnetLine(); menu.addItem(actes); carnetActesItem = actes
+        // ── Groupe RÉGLAGES : carnet (détail dans la fenêtre, plus inline) +
+        // instructions + préférences. Stats du jour visibles à l'icône.
         let carnetOpen = NSMenuItem(title: tr(fr: "Ouvrir le carnet…", en: "Open log…"), action: #selector(openCarnet), keyEquivalent: "")
         carnetOpen.target = self
         menu.addItem(carnetOpen)
-        menu.addItem(NSMenuItem.separator())
         let instructionsItem = NSMenuItem(
             title: tr(fr: "Instructions personnalisées…", en: "Custom instructions…"),
             action: #selector(openCustomInstructions),
@@ -1017,17 +1052,18 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         )
         instructionsItem.target = self
         menu.addItem(instructionsItem)
-        menu.addItem(NSMenuItem.separator())
         let prefsItem = NSMenuItem(title: tr(fr: "Préférences…", en: "Settings…"), action: #selector(openPreferences), keyEquivalent: ",")
         prefsItem.keyEquivalentModifierMask = [.command]
         prefsItem.target = self
         menu.addItem(prefsItem)
-        let updateItem = NSMenuItem(title: tr(fr: "Vérifier les mises à jour…", en: "Check for Updates…"), action: #selector(checkForUpdates), keyEquivalent: "")
-        updateItem.target = self
-        menu.addItem(updateItem)
+        menu.addItem(NSMenuItem.separator())
+        // ── Groupe SYSTÈME : permissions + mises à jour.
         let onboardingItem = NSMenuItem(title: tr(fr: "Permissions…", en: "Permissions…"), action: #selector(openOnboarding), keyEquivalent: "")
         onboardingItem.target = self
         menu.addItem(onboardingItem)
+        let updateItem = NSMenuItem(title: tr(fr: "Vérifier les mises à jour…", en: "Check for Updates…"), action: #selector(checkForUpdates), keyEquivalent: "")
+        updateItem.target = self
+        menu.addItem(updateItem)
         #if DEBUG
         menu.addItem(NSMenuItem.separator())
         let inspectorItem = NSMenuItem(
@@ -1066,31 +1102,79 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Une ligne d'information non cliquable du carnet (grisée, titre posé au refresh).
-    private static func carnetLine() -> NSMenuItem {
-        let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-        item.isEnabled = false
-        return item
+    /// Nom localisé de l'app pour un bundleID (ex. « com.brave.Browser » → « Brave »),
+    /// nil si l'app n'est plus en cours d'exécution.
+    private static func appDisplayName(forBundle bundleID: String) -> String? {
+        NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first?.localizedName
     }
 
-    /// Met à jour les lignes du carnet (frappes, temps, actes) à partir du ledger.
-    private func refreshCarnet() {
-        let t = ledger.today
-        carnetRepliquesItem?.title = "  \(Self.frenchInt(t.ghostsAccepted)) " +
-            Self.plural(t.ghostsAccepted, tr(fr: "réplique soufflée", en: "line whispered"), tr(fr: "répliques soufflées", en: "lines whispered"))
-        carnetFrappesItem?.title = "  \(Self.frenchInt(t.keystrokesSaved)) " +
-            Self.plural(t.keystrokesSaved, tr(fr: "frappe épargnée", en: "keystroke saved"), tr(fr: "frappes épargnées", en: "keystrokes saved"))
-        let suffix = ledger.cadenceCalibrated ? tr(fr: " (à ta cadence)", en: " (at your pace)") : ""
-        carnetTempsItem?.title = "  ≈ \(Self.formatDuration(ledger.estimatedSecondsSavedToday)) " + tr(fr: "gagnées", en: "saved") + suffix
-        var parts: [String] = []
-        if t.translations > 0 { parts.append("\(t.translations) " + Self.plural(t.translations, tr(fr: "traduite", en: "translated"), tr(fr: "traduites", en: "translated"))) }
-        if t.reformulations > 0 { parts.append("\(t.reformulations) " + Self.plural(t.reformulations, tr(fr: "relue", en: "rephrased"), tr(fr: "relues", en: "rephrased"))) }
-        if parts.isEmpty {
-            carnetActesItem?.isHidden = true
-        } else {
-            carnetActesItem?.isHidden = false
-            carnetActesItem?.title = "  " + parts.joined(separator: " · ")
+    /// Reconstruit l'item « Désactiver/Réactiver dans <App> » à l'ouverture du
+    /// menu : titre = nom de l'app du dernier champ focus, sous-menu de durées si
+    /// l'app est active, action de réactivation directe si elle est déjà coupée.
+    /// Masqué si aucune app cible (aucun champ texte vu récemment).
+    private func rebuildPerAppItem() {
+        guard let item = perAppDisableItem else { return }
+        // Cible : la dernière app à champ texte (posée par `tick`), sinon l'app au
+        // premier plan (repli pour le tout premier menu, avant d'avoir tapé) — en
+        // excluant la nôtre. nil → aucune cible, item masqué.
+        let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        let selfBundle = Bundle.main.bundleIdentifier
+        let fallback = frontmost == selfBundle ? nil : frontmost
+        guard let bundleID = lastMenuBundleID ?? fallback else {
+            item.isHidden = true
+            return
         }
+        item.isHidden = false
+        let name = Self.appDisplayName(forBundle: bundleID) ?? bundleID
+
+        if tempDisables.isDisabled(bundleID: bundleID) {
+            item.title = tr(fr: "Réactiver dans « \(name) »", en: "Re-enable in “\(name)”")
+            item.submenu = nil
+            item.action = #selector(reactivateCurrentApp(_:))
+            item.representedObject = bundleID
+            return
+        }
+
+        item.title = tr(fr: "Désactiver dans « \(name) »", en: "Disable in “\(name)”")
+        item.action = nil
+        item.representedObject = nil
+        let sub = NSMenu()
+        let durations: [(title: String, minutes: Int)] = [
+            (tr(fr: "Pendant 5 minutes", en: "For 5 minutes"), 5),
+            (tr(fr: "Pendant 15 minutes", en: "For 15 minutes"), 15),
+            (tr(fr: "Pendant 1 heure", en: "For 1 hour"), 60),
+        ]
+        for d in durations {
+            let mi = NSMenuItem(title: d.title, action: #selector(disableCurrentApp(_:)), keyEquivalent: "")
+            mi.target = self
+            mi.representedObject = ["bundleID": bundleID, "minutes": d.minutes] as [String: Any]
+            sub.addItem(mi)
+        }
+        sub.addItem(NSMenuItem.separator())
+        let indef = NSMenuItem(title: tr(fr: "Indéfiniment", en: "Indefinitely"), action: #selector(disableCurrentApp(_:)), keyEquivalent: "")
+        indef.target = self
+        indef.representedObject = ["bundleID": bundleID, "minutes": 0] as [String: Any]   // 0 = sans limite
+        sub.addItem(indef)
+        item.submenu = sub
+    }
+
+    /// Action des durées du sous-menu par-app. `minutes <= 0` → indéfiniment.
+    @objc private func disableCurrentApp(_ sender: NSMenuItem) {
+        guard let info = sender.representedObject as? [String: Any],
+              let bundleID = info["bundleID"] as? String,
+              let minutes = info["minutes"] as? Int else { return }
+        let until = minutes <= 0
+            ? TemporaryDisableStore.indefinite
+            : Date().addingTimeInterval(Double(minutes) * 60)
+        tempDisables.disable(bundleID: bundleID, until: until)
+        refreshLivingIcon()
+    }
+
+    /// Réactive l'app coupée (item « Réactiver dans <App> »).
+    @objc private func reactivateCurrentApp(_ sender: NSMenuItem) {
+        guard let bundleID = sender.representedObject as? String else { return }
+        tempDisables.reactivate(bundleID: bundleID)
+        refreshLivingIcon()
     }
 
     private static let frenchNumberFormatter: NumberFormatter = {
@@ -1210,6 +1294,21 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             state = .coulisse
         }
         applyIconState(state)
+        refreshIconCount()
+    }
+
+    /// Compteur compact des frappes épargnées DU JOUR, posé en titre à droite de
+    /// l'icône (parité Cotypist). Masqué à 0 et quand l'app est désactivée — l'icône
+    /// reste nue dans ces cas. Mis à jour seulement quand le texte change (le tick
+    /// passe ici à ~80 ms ; `statusItem` est `variableLength`, il s'élargit seul).
+    private func refreshIconCount() {
+        guard let button = statusItem?.button else { return }
+        let n = store.enabled ? ledger.today.keystrokesSaved : 0
+        let compact = UsageLedger.compactCount(n)
+        let title = compact.isEmpty ? "" : " " + compact
+        guard title != lastIconCountTitle else { return }
+        lastIconCountTitle = title
+        button.title = title
     }
 
     /// Applique une silhouette de bulle par état. Souffle = bulle pleine teintée
@@ -1337,17 +1436,11 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func refreshStatusItem() {
-        guard let menu = statusItem.menu else { return }
-        if let toggle = menu.items.first {
-            toggle.title = store.enabled ? tr(fr: "Activée ✓", en: "Enabled ✓") : tr(fr: "Désactivée", en: "Disabled")
-        }
-        // Order matches installStatusItem: [toggle, sep, enrich, capture, ...]
-        if menu.items.count > 2 {
-            menu.items[2].title = store.enrichmentEnabled ? tr(fr: "Enrichissement contextuel ✓", en: "Context enrichment ✓") : tr(fr: "Enrichissement contextuel", en: "Context enrichment")
-        }
-        if menu.items.count > 3 {
-            menu.items[3].title = store.captureEnabled ? tr(fr: "  ↳ Inclure capture d'écran ✓", en: "  ↳ Include screen capture ✓") : tr(fr: "  ↳ Inclure capture d'écran", en: "  ↳ Include screen capture")
-        }
+        // Mise à jour PAR RÉFÉRENCE (pas par index) : robuste à l'insertion ou au
+        // masquage d'items (l'item par-app caché décalait les indices fixes).
+        toggleMenuItem?.title = store.enabled ? tr(fr: "Activée ✓", en: "Enabled ✓") : tr(fr: "Désactivée", en: "Disabled")
+        enrichmentMenuItem?.title = store.enrichmentEnabled ? tr(fr: "Enrichissement contextuel ✓", en: "Context enrichment ✓") : tr(fr: "Enrichissement contextuel", en: "Context enrichment")
+        captureMenuItem?.title = store.captureEnabled ? tr(fr: "  ↳ Inclure capture d'écran ✓", en: "  ↳ Include screen capture ✓") : tr(fr: "  ↳ Inclure capture d'écran", en: "  ↳ Include screen capture")
     }
 
     @objc private func toggleEnrichment() {
@@ -1604,9 +1697,13 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// et capture sans toucher au toggle global. Extrait de `tick()`.
     private func manageEnrichment(snap: AXSnapshot, bundleID: String, allowMode: AllowlistMode) {
         // Per-app enrichment policy: suggestionOnly disables enrichment for this
-        // bundle without disabling the global toggle.
-        let enrichmentAllowed = store.enrichmentEnabled && allowMode != .suggestionOnly
-        let captureAllowedHere = store.captureEnabled && allowMode != .clipboardOnly
+        // bundle without disabling the global toggle. Studio : l'enrichissement de
+        // contexte (presse-papier + OCR) est payant → coupé tant que la licence est
+        // inactive, même si le toggle (menu/prefs) est ON. Gate au point de
+        // CONSOMMATION = le mur ne fuit pas (kill switch off → isPro vrai → inchangé).
+        let licensed = store.license.isPro
+        let enrichmentAllowed = licensed && store.enrichmentEnabled && allowMode != .suggestionOnly
+        let captureAllowedHere = licensed && store.captureEnabled && allowMode != .clipboardOnly
 
         // Refresh enrichment when the focused context materially changes:
         //   - bundle changes (focus moved to a different app) — always honoured
@@ -2268,9 +2365,16 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // gate de suggestion : on veut mesurer partout où l'utilisateur tape.
         observeTypingCadence(text: text, bundleID: bundleID)
 
-        // Per-app allowlist override (after blocklist, before any prediction work).
+        // Cible du menu « Désactiver dans <App> » : la dernière app à champ texte
+        // éligible (le menu-bar lui-même n'a pas de focus AX). Posé même si l'app
+        // est désactivée juste après, pour pouvoir la RÉACTIVER depuis le menu.
+        lastMenuBundleID = bundleID
+
+        // Per-app override : règle PERMANENTE (allowlist, Préférences) OU
+        // désactivation TEMPORAIRE (menu, 5/15/60 min ou indéfiniment). Avant tout
+        // travail de prédiction.
         let allowMode = store.allowlist.mode(forBundle: bundleID, windowTitle: snap.windowTitle)
-        if allowMode == .disabled {
+        if allowMode == .disabled || tempDisables.isDisabled(bundleID: bundleID) {
             overlay.hide()
             hideEmojiPicker()
             dismissSlashTransformUI()
@@ -2348,6 +2452,18 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         dismissedForText = nil
+
+        // Palette d'actions ouverte (clic badge) : apparition EXPLICITE et modale.
+        // La résolution focus/présence ci-dessus a déjà pu la refermer (perte de
+        // focus → presenceHideNow → hidePresenceActions). Si elle est TOUJOURS
+        // visible, on gèle le reste du pipeline tant qu'elle est à l'écran : sinon
+        // le tick afficherait un ghost ou un picker « // » PAR-DESSUS, avec un
+        // armement clavier partagé (digits/Esc) en conflit. Invariant « jamais la
+        // palette ET un picker ensemble » rendu réel ici, pas seulement supposé.
+        if presenceActions.isVisible {
+            overlay.hide()
+            return
+        }
 
         pollCaptureIcon()
         manageEnrichment(snap: snap, bundleID: bundleID, allowMode: allowMode)
@@ -2672,8 +2788,10 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // ferme sans insérer ET mémorise le fragment refusé pour que le tick
         // suivant ne rouvre pas le panneau immédiatement.
         if case .digit(let n) = key {
-            // Les deux pickers coexistent dans l'API mais jamais à l'écran
-            // ensemble (le tick n'en arme qu'un) : emoji d'abord, puis slash.
+            // Palette d'actions (clic badge) d'abord : elle réutilise l'armement
+            // slashPicker mais jamais à l'écran avec un vrai « // ». Puis emoji,
+            // puis slash (le tick n'en arme qu'un à la fois).
+            if handlePresenceActionDigit(n) { return true }
             if handleEmojiPickerDigit(n) { return true }
             return handleSlashPickerDigit(n)
         }
@@ -2682,6 +2800,17 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             return handleSlashPickerEnter()
         }
         if key == .esc {
+            // Esc pendant la palette d'actions : referme (champ intact), désarme.
+            let closedPalette: Bool = MainActor.assumeIsolated {
+                guard presenceActions.isVisible else { return false }
+                hidePresenceActions()
+                predictor.cancel()
+                return true
+            }
+            if closedPalette {
+                Log.info(.input, "presence_actions_dismissed")
+                return true
+            }
             let closedPicker: Bool = MainActor.assumeIsolated {
                 guard emojiPickerState != nil else { return false }
                 emojiPickerDismissedAnchor = emojiPickerAnchor
@@ -3047,6 +3176,20 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// re-dispatché sur le main thread → `assumeIsolated` est sûr ici (même
     /// contrat que `handleEmojiPickerDigit`). Position au-delà de la rangée →
     /// touche avalée sans effet (le tap a déjà consommé), comportement assumé.
+    /// Chiffre 1–5 pendant la palette d'actions (clic badge) : sélectionne la
+    /// ligne, MÊME effet qu'un clic dessus (et que la rangée du picker « // »). La
+    /// borne et l'aiguillage (traduire → langues vs lancement direct) vivent dans
+    /// la closure `onSelect` posée au `show`. false si la palette n'est pas
+    /// ouverte → le digit retombe sur les pickers emoji/slash.
+    nonisolated private func handlePresenceActionDigit(_ n: Int) -> Bool {
+        MainActor.assumeIsolated {
+            guard presenceActions.isVisible else { return false }
+            Log.info(.input, "presence_actions_pick")
+            presenceActions.selectByKeyboard(rowIndex: n - 1)
+            return true
+        }
+    }
+
     nonisolated private func handleSlashPickerDigit(_ n: Int) -> Bool {
         MainActor.assumeIsolated {
             guard let state = slashPickerState,
@@ -3077,7 +3220,130 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// le prompt avec le chat-template du modèle instruct courant, ferme le
     /// picker et lance la génération en MODE PREVIEW : le résultat streame dans
     /// `transformHUD`, RIEN n'est écrit dans le champ avant Tab.
+    // MARK: - Palette d'actions au clic sur le badge de présence
+
+    /// Clic sur le badge → ouvre la palette d'actions (niveau 1 : les 5
+    /// transformations « // »). Le ghost et son tap cèdent la place : c'est une
+    /// apparition explicite que l'utilisateur vient chercher, pas une suggestion
+    /// inline. La portée à transformer est lue au MOMENT du choix (pas ici), pour
+    /// rester juste si le caret a bougé entre l'ouverture et la sélection.
+    private func openPresenceActions() {
+        // Re-clic sur le badge alors que la palette est déjà ouverte (root OU
+        // sous-menu langues) → toggle de fermeture. Le moniteur de clic extérieur
+        // ne voit PAS ce clic (badge = autre fenêtre de notre app, event local),
+        // donc c'est le seul endroit qui ferme sur re-clic.
+        if presenceActions.isVisible {
+            hidePresenceActions()
+            predictor.cancel()
+            return
+        }
+        predictor.cancel()
+        lastPredictedPrefix = nil
+        overlay.hide()
+        interceptor.setActive(false)
+        hideSlashPicker()
+        Log.info(.input, "presence_actions_opened")
+        showPresenceActionRoot()
+        // Arme la rangée 1–5 + Esc au CLAVIER, exactement comme le picker « // »
+        // (la palette EST un picker de lignes). Réutilise l'armement slashPicker :
+        // les deux ne sont jamais à l'écran ensemble. ⏎ coupé — la palette n'a pas
+        // de mode instruction libre.
+        interceptor.setSlashPickerArmed(true, digits: true, enter: false)
+    }
+
+    /// Replie la palette ET désarme le clavier (jumeau obligatoire de l'armement
+    /// d'`openPresenceActions`). Centralise tous les chemins de fermeture (choix,
+    /// Esc, clic extérieur, perte de focus) pour qu'aucun n'oublie le désarmement.
+    private func hidePresenceActions() {
+        // No-op si la palette n'est pas ouverte : sinon on désarmerait par erreur
+        // un VRAI picker « // » (même flag d'armement partagé) qui, lui, coexiste
+        // légitimement avec le badge de présence.
+        guard presenceActions.isVisible else { return }
+        presenceActions.hide()
+        interceptor.setSlashPickerArmed(false)
+    }
+
+    /// Niveau 1 : corriger · raccourcir · reformuler · ton · traduire. « Traduire »
+    /// descend d'un cran (choix de la langue) ; les autres lancent directement.
+    private func showPresenceActionRoot() {
+        presenceActions.show(
+            title: tr(fr: "Souffleuse · actions", en: "Souffleuse · actions"),
+            items: TransformationIntent.pickerOrder.map(\.displayName),
+            anchorFrameAppKit: presence.anchorFrameAppKit
+        ) { [weak self] index in
+            guard let self, TransformationIntent.pickerOrder.indices.contains(index) else { return }
+            let intent = TransformationIntent.pickerOrder[index]
+            if case .traduire = intent {
+                self.showPresenceLanguageMenu()
+            } else {
+                self.hidePresenceActions()
+                self.launchDirectTransform(intent: intent)
+            }
+        }
+    }
+
+    /// Niveau 2 : les langues cibles (EN/ES/DE/IT, ordre du cycle ⌘⇧→). Un choix
+    /// ÉPINGLE la cible comme sélection vivante (TTL `liveTargetSelectionTTL`) puis
+    /// lance « // traduire » — `launchTransform(.traduire)` la résout en priorité.
+    private func showPresenceLanguageMenu() {
+        let langs = TargetSelection.cycleOrder
+        presenceActions.show(
+            title: tr(fr: "Traduire vers…", en: "Translate to…"),
+            items: langs.map { "FR → \($0.code) · \($0.bareName)" },
+            anchorFrameAppKit: presence.anchorFrameAppKit
+        ) { [weak self] index in
+            guard let self, langs.indices.contains(index) else { return }
+            self.hidePresenceActions()
+            let bundleID = self.axClient.snapshot().bundleID
+            self.liveTargetSelection = (bundleID ?? "?", .fixed(langs[index]), Date())
+            self.launchDirectTransform(intent: .traduire)
+        }
+    }
+
+    /// Synthétise un `SlashTransformState` depuis le champ focus (portée = tout le
+    /// texte avant le caret, paragraphe-d'abord) SANS « // », puis emprunte la même
+    /// voie que le picker clavier (`launchTransform`) — preview Tab/Esc inclus,
+    /// armé par `transformHUD.onVisibilityChanged`. Champ vide/blanc → no-op loggé.
+    private func launchDirectTransform(intent: TransformationIntent) {
+        let snap = axClient.snapshot()
+        let caret = snap.caretIndex ?? 0
+        let prefix = snap.text.map { String($0.prefix(caret)) } ?? ""
+        guard let state = SlashTransformDetector.scopeForDirectTrigger(textBeforeCaret: prefix) else {
+            Log.info(.input, "presence_actions_empty_scope")
+            return
+        }
+        launchTransform(intent: intent, state: state)
+    }
+
+    /// Garde Studio : vrai si la feature payante est débloquée (kill switch off OU
+    /// licence active). Sinon affiche l'invite de déblocage et renvoie false. Point
+    /// d'entrée unique des features payantes — inerte tant que le paywall est off.
+    @discardableResult
+    private func ensureStudio() -> Bool {
+        if store.license.isPro { return true }
+        promptUnlockStudio()
+        return false
+    }
+
+    /// Invite « cette action fait partie de Studio » → ouvre les Préférences sur la
+    /// section Licence. Ne se déclenche jamais tant que `LicenseGate.paywallEnabled`
+    /// est false.
+    private func promptUnlockStudio() {
+        let alert = NSAlert()
+        alert.messageText = tr(fr: "Cette action fait partie de Souffleuse Studio", en: "This is a Souffleuse Studio feature")
+        alert.informativeText = tr(
+            fr: "Traduction, ton, transformations « // » et la personnalisation sont débloqués par une licence unique.",
+            en: "Translation, tone, “//” transforms and personalization are unlocked by a one-time license.")
+        alert.addButton(withTitle: tr(fr: "Débloquer Studio…", en: "Unlock Studio…"))
+        alert.addButton(withTitle: tr(fr: "Plus tard", en: "Later"))
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn {
+            openPreferences()
+        }
+    }
+
     private func launchTransform(intent: TransformationIntent, state: SlashTransformState) {
+        guard ensureStudio() else { return }
         let snap = axClient.snapshot()
         let bundleID = snap.bundleID
         // Préfixe au lancement — toute dérive ultérieure annule le preview.
@@ -3301,6 +3567,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         let windowTitle = snap.windowTitle
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            guard self.ensureStudio() else { return }
             let selection = self.currentTargetSelection(
                 forBundle: bundleID, windowTitle: windowTitle)
             let context = self.lastEnrichedVisible ?? ""
@@ -3665,6 +3932,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         lastPresenceFieldRect = nil
         presenceMissTicks = 0
         presence.hide()
+        // La palette est ancrée au badge : si le badge s'en va (focus perdu, app
+        // désactivée, idle-unload), elle n'a plus de raison d'être (+ désarmement).
+        hidePresenceActions()
     }
 
     @MainActor
@@ -4394,10 +4664,12 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
 }
 
 extension SouffleuseAppDelegate: NSMenuDelegate {
-    /// Rafraîchit l'état des bascules ET le carnet juste avant l'ouverture du menu,
-    /// pour que les chiffres soient toujours à jour au clic.
+    /// Rafraîchit l'état des bascules ET l'item par-app juste avant l'ouverture du
+    /// menu : élague les désactivations expirées, puis reconstruit « Désactiver/
+    /// Réactiver dans <App> » selon l'app focus courante et son état.
     func menuNeedsUpdate(_ menu: NSMenu) {
         refreshStatusItem()
-        refreshCarnet()
+        tempDisables.pruneExpired()
+        rebuildPerAppItem()
     }
 }

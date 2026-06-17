@@ -82,12 +82,34 @@ final class PreferencesWindow {
 
 /// Les sections des Préférences, rangées par FONCTION (les piliers de l'app),
 /// pas par accumulation historique. L'ordre = l'ordre d'affichage dans la
-/// sidebar. Apparence se pose juste après Souffle : on règle ce que le souffle
-/// DIT (Souffle), puis comment il SE MONTRE (Apparence).
+/// sidebar : d'abord ce que l'app FAIT au texte (souffle · traduction · ton ·
+/// aides), puis les données/comportement (personnalisation · contexte · par
+/// app), enfin le cosmétique et la config (apparence · réglages) — Apparence
+/// est volontairement en bas, c'est du réglage de FORME, pas un pilier.
 private enum PrefSection: String, CaseIterable, Identifiable {
-    case souffle, apparence, traduction, ton, personnalisation, contexte, parApp, reglages, aPropos
+    // `aides` (coquilles · emoji · transformations « // ») extrait de Souffle :
+    // ce sont des aides à la FRAPPE, indépendantes du souffle LLM — les noyer
+    // dans Souffle allongeait la page et mélangeait deux fonctions. Posé dans le
+    // cluster « actions sur le texte » (traduction · ton · aides).
+    case souffle, traduction, ton, aides, personnalisation, contexte, parApp, apparence, reglages, studio, aPropos
 
     var id: String { rawValue }
+
+    /// Sections affichées dans la sidebar : `studio` (licence) n'apparaît QUE quand
+    /// le paywall est armé — kill switch off → invisible, l'app reste « tout inclus ».
+    static var visible: [PrefSection] {
+        allCases.filter { $0 != .studio || LicenseGate.paywallEnabled }
+    }
+
+    /// Sections ENTIÈREMENT payantes (Studio) — cadenas sidebar + bannière quand la
+    /// licence n'est pas active. Les onglets MIXTES (Souffle, Aides) ont leurs aides
+    /// gratuites ET un bloc Studio ; ils sont gérés au niveau de la section, pas ici.
+    var isStudio: Bool {
+        switch self {
+        case .traduction, .ton, .personnalisation, .contexte: return true
+        default: return false
+        }
+    }
 
     var label: String {
         switch self {
@@ -95,10 +117,12 @@ private enum PrefSection: String, CaseIterable, Identifiable {
         case .apparence: return tr(fr: "Apparence", en: "Appearance")
         case .traduction: return tr(fr: "Traduction", en: "Translation")
         case .ton: return tr(fr: "Ton", en: "Tone")
+        case .aides: return tr(fr: "Aides à la frappe", en: "Typing aids")
         case .personnalisation: return tr(fr: "Personnalisation", en: "Personalization")
         case .contexte: return tr(fr: "Contexte", en: "Context")
         case .parApp: return tr(fr: "Par application", en: "Per app")
         case .reglages: return tr(fr: "Réglages", en: "General")
+        case .studio: return tr(fr: "Studio", en: "Studio")
         case .aPropos: return tr(fr: "À propos", en: "About")
         }
     }
@@ -109,12 +133,58 @@ private enum PrefSection: String, CaseIterable, Identifiable {
         case .apparence: return "paintpalette"
         case .traduction: return "globe"
         case .ton: return "textformat"
+        case .aides: return "wand.and.stars"
         case .personnalisation: return "person.crop.circle.badge.checkmark"
         case .contexte: return "doc.text.magnifyingglass"
         case .parApp: return "list.bullet.rectangle"
         case .reglages: return "gearshape"
+        case .studio: return "key.fill"
         case .aPropos: return "info.circle"
         }
+    }
+
+    /// Termes indexés pour la recherche (FR + EN) : les libellés des réglages de
+    /// la section, pour qu'un mot comme « emoji » ou « opacité » trouve sa page.
+    /// Pas besoin d'être exhaustif — les mots que l'utilisateur taperait.
+    var searchTerms: String {
+        switch self {
+        case .souffle:
+            return "souffle ghost whisper longueur length modèle model accepter accept mot word tab milieu ligne mid-line corriger préfixe"
+        case .apparence:
+            return "apparence appearance couleur color opacité opacity police font taille gris"
+        case .traduction:
+            return "traduction translation langue language cible target espagnol anglais allemand italien spanish english"
+        case .ton:
+            return "ton tone registre formel familier relecture reformuler"
+        case .aides:
+            return "aides frappe typing coquille typo faute emoji transformation slash // corriger raccourcir reformuler rédiger fix shorten rephrase compose"
+        case .personnalisation:
+            return "personnalisation personalization historique history apprendre learn style perso"
+        case .contexte:
+            return "contexte context capture écran screen ocr presse-papier clipboard enrichissement"
+        case .parApp:
+            return "par application per app allowlist autorisation bundle"
+        case .reglages:
+            return "réglages general général démarrage launch raccourci hotkey touche mise à jour update"
+        case .studio:
+            return "studio licence license clé key activer activation acheter buy débloquer unlock pro payant"
+        case .aPropos:
+            return "à propos about version crédits"
+        }
+    }
+
+    /// Pliage accents/casse (fr) — « OPACITÉ » et « opacite » doivent matcher.
+    private static func fold(_ s: String) -> String {
+        s.folding(options: [.diacriticInsensitive, .caseInsensitive],
+                  locale: Locale(identifier: "fr_FR"))
+    }
+
+    /// La section matche-t-elle la requête ? Sous-chaîne sur le libellé OU les
+    /// termes indexés, insensible casse/accents.
+    func matches(_ query: String) -> Bool {
+        let q = Self.fold(query)
+        guard !q.isEmpty else { return true }
+        return Self.fold(label).contains(q) || Self.fold(searchTerms).contains(q)
     }
 }
 
@@ -139,20 +209,56 @@ private struct PreferencesRoot: View {
     let onClearPersonalization: () -> Void
 
     @State private var selection: PrefSection? = .souffle
+    @State private var query = ""
+
+    /// Sections visibles selon la recherche — toutes si la requête est vide.
+    private var filteredSections: [PrefSection] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return PrefSection.visible }
+        return PrefSection.visible.filter { $0.matches(q) }
+    }
 
     var body: some View {
         HStack(spacing: 0) {
-            List(PrefSection.allCases, selection: $selection) { section in
-                Label(section.label, systemImage: section.systemImage)
-                    .tag(section)
+            VStack(spacing: 0) {
+                PreferencesSearchField(query: $query)
+                    .padding(.horizontal, 8)
+                    .padding(.top, 8)
+                    .padding(.bottom, 4)
+
+                if filteredSections.isEmpty {
+                    // Filet : requête sans résultat → message, pas une sidebar vide.
+                    Spacer()
+                    Text(tr(fr: "Aucun réglage", en: "No setting"))
+                        .font(.callout).foregroundStyle(.secondary)
+                    Spacer()
+                } else {
+                    List(filteredSections, selection: $selection) { section in
+                        HStack {
+                            Label(section.label, systemImage: section.systemImage)
+                            if section.isStudio && !store.license.isPro {
+                                Spacer()
+                                // Cadenas : signale les sections incluses dans Studio
+                                // tant que la licence n'est pas active.
+                                Image(systemName: "lock.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .tag(section)
+                    }
+                    .listStyle(.sidebar)
+                }
             }
-            .listStyle(.sidebar)
             .frame(width: 200)
 
             Divider()
 
             detail(for: selection ?? .souffle)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .modifier(StudioGate(
+                    locked: (selection ?? .souffle).isStudio && !store.license.isPro,
+                    onUnlock: { selection = .studio }))
         }
         .frame(width: 800, height: 560)
         // La voix unique : un seul accent sang-de-bœuf irrigue toggles, sliders,
@@ -178,6 +284,8 @@ private struct PreferencesRoot: View {
             TranslationTab(store: store)
         case .ton:
             ToneTab(store: store)
+        case .aides:
+            TypingAidsTab(store: store)
         case .personnalisation:
             PersonalizationTab(
                 store: store,
@@ -190,6 +298,8 @@ private struct PreferencesRoot: View {
             AllowlistTab(store: store)
         case .reglages:
             ReglagesTab(store: store, onOpenOnboarding: onOpenOnboarding)
+        case .studio:
+            LicenseTab(store: store)
         case .aPropos:
             AboutTab()
         }
@@ -449,30 +559,232 @@ private struct SouffleTab: View {
             }
 
             Section {
+                Toggle(tr(fr: "Corriger le texte avant de souffler", en: "Fix the text before whispering"), isOn: $store.prefixCorrectionEnabled)
+                Text(tr(fr: "Souffleuse répare discrètement les coquilles de votre texte AVANT de prédire la suite — pour que le souffle parte du bon mot. Ne change rien à ce que vous avez tapé.", en: "Souffleuse quietly fixes typos in your text BEFORE predicting what comes next — so the whisper starts from the right word. Doesn't change what you typed."))
+                    .font(.callout).foregroundStyle(.secondary)
+            } header: {
+                Text(tr(fr: "Avant de souffler", en: "Before whispering")).font(.headline)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+/// Onglet AIDES À LA FRAPPE — coquilles · emoji · transformations « // ».
+/// Extrait de Souffle (2026-06-17) : ces aides sont déclenchées par la FRAPPE
+/// elle-même, indépendamment du souffle LLM ; les noyer dans Souffle allongeait
+/// la page et mélangeait deux fonctions. Le bloc « // » a désormais un foyer
+/// découvrable, cohérent avec la palette d'actions ouverte au clic sur le badge.
+private struct TypingAidsTab: View {
+    @Bindable var store: PreferencesStore
+
+    var body: some View {
+        Form {
+            Section {
                 Toggle(tr(fr: "Corriger les coquilles", en: "Fix typos"), isOn: $store.typoEnabled)
                 Toggle(tr(fr: "Se taire quand une coquille est en cours", en: "Stay quiet while a typo is in progress"), isOn: $store.hideOnTypo)
                     .disabled(!store.typoEnabled)
+            } header: {
+                Text(tr(fr: "Coquilles", en: "Typos")).font(.headline)
+            }
+
+            Section {
                 Toggle(tr(fr: "Emoji — panneau dès « \u{003A} » et expansion (\u{003A}smile\u{003A} → 😄)", en: "Emoji — panel on “\u{003A}” and expansion (\u{003A}smile\u{003A} → 😄)"), isOn: $store.emojiEnabled)
+            } header: {
+                Text(tr(fr: "Emoji", en: "Emoji")).font(.headline)
+            }
+
+            Section {
                 Toggle(tr(fr: "Transformations « // » au clavier", en: "“//” keyboard transforms"), isOn: $store.slashTransformEnabled)
-                Text(tr(fr: "Tapez « // » après votre texte : corriger, raccourcir, reformuler, ton, traduire — ou une consigne libre validée par Entrée. En début de champ, « // » + quelques mots rédige le message complet. Le résultat s'affiche d'abord en aperçu ; Tab remplace, Esc annule.", en: "Type “//” after your text: fix, shorten, rephrase, tone, translate — or a free instruction confirmed with Return. At the start of a field, “//” + a few words drafts the whole message. The result shows first as a preview; Tab replaces, Esc cancels."))
+                    .disabled(!store.license.isPro)
+                Text(tr(fr: "Tapez « // » après votre texte : corriger, raccourcir, reformuler, ton, traduire — ou une consigne libre validée par Entrée. En début de champ, « // » + quelques mots rédige le message complet. Le résultat s'affiche d'abord en aperçu ; Tab remplace, Esc annule. Les mêmes actions sont accessibles en cliquant l'icône de présence au curseur.", en: "Type “//” after your text: fix, shorten, rephrase, tone, translate — or a free instruction confirmed with Return. At the start of a field, “//” + a few words drafts the whole message. The result shows first as a preview; Tab replaces, Esc cancels. The same actions are available by clicking the presence icon at the cursor."))
                     .font(.callout).foregroundStyle(.secondary)
                 Picker(tr(fr: "Rédiger en", en: "Draft in"), selection: $store.composeLanguage) {
                     ForEach(ComposeLanguage.allCases, id: \.self) { lang in
                         Text(lang.menuLabel).tag(lang)
                     }
                 }
-                .disabled(!store.slashTransformEnabled)
+                .disabled(!store.slashTransformEnabled || !store.license.isPro)
                 Text(tr(fr: "La langue par défaut quand vous rédigez depuis quelques mots — placée en ① du choix rapide au clavier ; les autres langues suivent (un chiffre change à la volée). « Suivre la conversation » met en tête la langue cible de traduction (ou celle du correspondant ; sinon la langue du système). Ne change pas corriger/reformuler, qui restent en français.", en: "The default language when you draft from a few words — placed at ① of the keyboard quick-pick; the other languages follow (a digit switches on the fly). “Follow the conversation” puts the translation target language at the top (or the correspondent's; otherwise the system language). Doesn't affect fix/rephrase, which stay in French."))
                     .font(.callout).foregroundStyle(.secondary)
-                Toggle(tr(fr: "Corriger le texte avant de souffler", en: "Fix the text before whispering"), isOn: $store.prefixCorrectionEnabled)
             } header: {
-                Text(tr(fr: "Corrections", en: "Corrections")).font(.headline)
+                HStack {
+                    Text(tr(fr: "Transformations « // »", en: "“//” transforms")).font(.headline)
+                    if !store.license.isPro { StudioChip() }
+                }
             } footer: {
                 Text(tr(fr: "Mis en sommeil dans Xcode, VS Code, JetBrains et les terminaux. La correction ne change que ce que voit Souffleuse — votre texte reste tel que tapé.", en: "Put to sleep in Xcode, VS Code, JetBrains and terminals. Correction only changes what Souffleuse sees — your text stays exactly as typed."))
                     .font(.callout).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+/// Champ de recherche de la sidebar (idiome Réglages Système) : filtre les
+/// sections par libellé OU mots-clés indexés. Un `TextField` stylé plutôt que
+/// `.searchable` — ce dernier exige un conteneur `NavigationStack`, absent ici
+/// (cf. la note de `PreferencesRoot` sur le choix `HStack`/`List`).
+private struct PreferencesSearchField: View {
+    @Binding var query: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            TextField(tr(fr: "Rechercher", en: "Search"), text: $query)
+                .textFieldStyle(.plain)
+            if !query.isEmpty {
+                Button {
+                    query = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(tr(fr: "Effacer", en: "Clear"))
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 7))
+    }
+}
+
+/// Verrou visuel d'un onglet Studio : bannière en tête + contenu désactivé/atténué
+/// tant que `locked`. Appliqué au niveau de `detail()` → aucun onglet à modifier.
+private struct StudioGate: ViewModifier {
+    let locked: Bool
+    let onUnlock: () -> Void
+
+    func body(content: Content) -> some View {
+        if locked {
+            VStack(spacing: 0) {
+                StudioLockBanner(onUnlock: onUnlock)
+                content
+                    .disabled(true)
+                    .opacity(0.5)
+            }
+        } else {
+            content
+        }
+    }
+}
+
+/// Petit badge « Studio » (cadenas) posé à côté d'un en-tête de section MIXTE
+/// (ex. la sous-section « // » dans Aides, où coquilles/emoji restent gratuits).
+private struct StudioChip: View {
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "lock.fill")
+            Text("Studio")
+        }
+        .font(.caption2.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(.quaternary.opacity(0.5), in: Capsule())
+    }
+}
+
+/// Bandeau « inclus dans Souffleuse Studio » + bouton de déblocage (navigue vers
+/// la section Studio). N'apparaît que paywall armé ET licence inactive.
+private struct StudioLockBanner: View {
+    let onUnlock: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "lock.fill").foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(tr(fr: "Inclus dans Souffleuse Studio", en: "Part of Souffleuse Studio"))
+                    .font(.callout).fontWeight(.semibold)
+                Text(tr(fr: "Débloqué par une licence unique, à vie.", en: "Unlocked by a one-time license, forever."))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button(tr(fr: "Débloquer…", en: "Unlock…"), action: onUnlock)
+                .buttonStyle(.borderedProminent)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(.quaternary.opacity(0.4))
+    }
+}
+
+/// Section LICENCE (Studio) — visible seulement quand le paywall est armé
+/// (`LicenseGate.paywallEnabled`). Activée : statut + désactiver. Non activée :
+/// coller-clé + activer + acheter. L'activation délègue au `LicenseStore` (un
+/// appel réseau, puis cache Keychain ; au runtime, zéro réseau).
+private struct LicenseTab: View {
+    @Bindable var store: PreferencesStore
+    @State private var keyInput = ""
+    @State private var errorMessage: String?
+    @State private var activating = false
+
+    var body: some View {
+        Form {
+            if store.license.isActivated {
+                Section {
+                    Label(tr(fr: "Souffleuse Studio est actif", en: "Souffleuse Studio is active"), systemImage: "checkmark.seal.fill")
+                        .foregroundStyle(.green)
+                    if let key = store.license.activatedKey {
+                        LabeledContent(tr(fr: "Licence", en: "License"), value: Self.masked(key))
+                    }
+                    Button(tr(fr: "Désactiver sur ce Mac", en: "Deactivate on this Mac"), role: .destructive) {
+                        store.license.deactivate()
+                        keyInput = ""
+                        errorMessage = nil
+                    }
+                } header: {
+                    Text(tr(fr: "Licence", en: "License")).font(.headline)
+                } footer: {
+                    Text(tr(fr: "La désactivation retire la licence de ce Mac uniquement.", en: "Deactivating removes the license from this Mac only."))
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+            } else {
+                Section {
+                    Text(tr(fr: "Traduction, ton, transformations « // » et personnalisation — une licence unique, à vie, sur ce Mac.", en: "Translation, tone, “//” transforms and personalization — one license, forever, on this Mac."))
+                        .font(.callout).foregroundStyle(.secondary)
+                    HStack {
+                        TextField(tr(fr: "Colle ta clé (SOUF-…)", en: "Paste your key (SOUF-…)"), text: $keyInput)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit(activate)
+                        Button(activating ? tr(fr: "Activation…", en: "Activating…") : tr(fr: "Activer", en: "Activate"), action: activate)
+                            .disabled(activating || keyInput.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                    if let errorMessage {
+                        Text(errorMessage).font(.callout).foregroundStyle(.red)
+                    }
+                } header: {
+                    Text(tr(fr: "Débloquer Studio", en: "Unlock Studio")).font(.headline)
+                }
+                Section {
+                    Button(tr(fr: "Acheter Souffleuse Studio…", en: "Buy Souffleuse Studio…")) {
+                        NSWorkspace.shared.open(LicenseGate.purchaseURL)
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private func activate() {
+        let key = keyInput
+        guard !activating, !key.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        activating = true
+        errorMessage = nil
+        Task { @MainActor in
+            let result = await store.license.activate(key: key)
+            activating = false
+            if case .failure(let e) = result { errorMessage = e.message }
+        }
+    }
+
+    /// Masque la clé pour l'affichage (garde un repère sans tout exposer).
+    private static func masked(_ key: String) -> String {
+        guard key.count > 8 else { return "••••" }
+        return key.prefix(5) + "•••••" + key.suffix(3)
     }
 }
 
