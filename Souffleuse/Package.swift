@@ -147,6 +147,10 @@ let package = Package(
             dependencies: ["SouffleuseLlama", "SouffleuseTyping"]
         ),
         .executableTarget(
+            name: "SouffleuseLicenseGen",
+            dependencies: ["SouffleuseCore"]
+        ),
+        .executableTarget(
             name: "SouffleuseTypoQualityProbe",
             dependencies: ["SouffleuseLlama"]
         ),

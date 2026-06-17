@@ -272,4 +272,47 @@ struct SlashTransformDetectorTests {
         #expect(String(raw) == "  Fin.  ")
         #expect(truncated == true)
     }
+
+    // MARK: - scopeForDirectTrigger (palette d'actions au clic sur le badge)
+
+    @Test("scope direct = tout le préfixe, filtre vide, suppression = portée brute")
+    func directScopeWholePrefix() {
+        let state = SlashTransformDetector.scopeForDirectTrigger(textBeforeCaret: "Bonjour monsieur")
+        #expect(state?.scopeText == "Bonjour monsieur")
+        #expect(state?.filter == "")
+        #expect(state?.isComposition == false)
+        #expect(state?.isScopeTruncated == false)
+        // Aucun « // » ni filtre à retirer : on remplace exactement la portée brute.
+        #expect(state?.deleteCharsOnAccept == "Bonjour monsieur".count)
+    }
+
+    @Test("scope direct compte le brut (trim du scopeText, deleteChars non trimé)")
+    func directScopeCountsRaw() {
+        let state = SlashTransformDetector.scopeForDirectTrigger(textBeforeCaret: "  Salut  ")
+        #expect(state?.scopeText == "Salut")
+        #expect(state?.deleteCharsOnAccept == "  Salut  ".count)
+    }
+
+    @Test("scope direct : champ vide ou que du blanc → nil")
+    func directScopeEmptyIsNil() {
+        #expect(SlashTransformDetector.scopeForDirectTrigger(textBeforeCaret: "") == nil)
+        #expect(SlashTransformDetector.scopeForDirectTrigger(textBeforeCaret: "   \n\t") == nil)
+    }
+
+    @Test("scope direct : paragraphe-d'abord comme « // » (UAT 11/06)")
+    func directScopeParagraphFirst() {
+        let text = "Premier paragraphe long.\n\nDeuxième para"
+        let state = SlashTransformDetector.scopeForDirectTrigger(textBeforeCaret: text)
+        #expect(state?.scopeText == "Deuxième para")
+        #expect(state?.isScopeTruncated == true)
+        #expect(state?.deleteCharsOnAccept == "Deuxième para".count)
+    }
+
+    @Test("scope direct : émoji compté en Character")
+    func directScopeEmojiCharacters() {
+        let text = "Bravo 🎉"
+        let state = SlashTransformDetector.scopeForDirectTrigger(textBeforeCaret: text)
+        #expect(state?.deleteCharsOnAccept == text.count)
+        #expect(state?.scopeText == "Bravo 🎉")
+    }
 }
