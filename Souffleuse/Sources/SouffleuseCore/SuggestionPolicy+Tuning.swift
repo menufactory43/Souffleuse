@@ -31,6 +31,19 @@ extension SuggestionPolicy {
             return 4
         }
 
+        /// `MW_ECHO_RUN_STANDALONE` — seuil du garde verbatim AUTONOME (non gaté par
+        /// `echoScore`) appliqué dans `beamPostFilter` : un run verbatim ≥ ce nombre
+        /// de mots recopié du tail est TRONQUÉ quoi qu'il arrive. Couvre le cas où
+        /// `echoScore` (sac-de-mots sur la DERNIÈRE phrase) est dilué par un point
+        /// récent (« …mieux. il faut » → dernière phrase « il faut » ⇒ score < 0.5,
+        /// le garde gaté ne se déclenche pas) alors que le ghost recopie une longue
+        /// boucle. Plus HAUT que `echoMinVerbatimRunWords` (4) pour zéro faux positif
+        /// sans le filet sac-de-mots. **Défaut 5.** `MW_ECHO_RUN_STANDALONE=0` désactive.
+        public static var standaloneEchoRunWords: Int {
+            if let s = ProcessInfo.processInfo.environment["MW_ECHO_RUN_STANDALONE"], let v = Int(s) { return max(0, v) }
+            return 5
+        }
+
         // MARK: - D-08 Routing thresholds
         ///
         /// Tightening pass 2026-05-26 (post 04-07 empirical validation):

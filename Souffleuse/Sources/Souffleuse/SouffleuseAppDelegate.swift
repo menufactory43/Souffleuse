@@ -3929,14 +3929,26 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                   self.partialAcceptedSoFar.hasPrefix(snapSoFar),
                   !self.partialRemainder.isEmpty,
                   remainder.hasSuffix(self.partialRemainder) else { return }
+            // Garde écho CUMULATIF (troncature) : le garde per-pas du beam ne voit
+            // pas une boucle assemblée en plusieurs pas de refill (« 100% des gens
+            // sont des menteurs » re-proposé mot-à-mot). Sur le ghost ASSEMBLÉ
+            // (remainder + extension) vs le texte tapé, on coupe la queue qui recopie
+            // un run verbatim ≥ seuil — on garde la tête utile, on ne supprime jamais
+            // le remainder déjà affiché. Tail cappé pour borner le coût.
+            let deLooped = BeamGhostShaper.truncateRefillEcho(
+                remainder: self.partialRemainder,
+                extension_: extension_,
+                tail: String(committedText.suffix(PredictorViewModel.userTailCap)),
+                minRun: SuggestionPolicy.Tuning.echoMinVerbatimRunWords)
+            guard !deLooped.isEmpty else { return }
             // APPEND (le reste reste affiché ; l'extension le prolonge au prochain
             // tick render). On préserve l'espacement : `extension_` porte déjà un
             // espace de tête unique, donc on dé-doublonne une éventuelle jointure.
             let appended: String
-            if self.partialRemainder.hasSuffix(" ") && extension_.hasPrefix(" ") {
-                appended = String(extension_.dropFirst())
+            if self.partialRemainder.hasSuffix(" ") && deLooped.hasPrefix(" ") {
+                appended = String(deLooped.dropFirst())
             } else {
-                appended = extension_
+                appended = deLooped
             }
             self.partialRemainder += appended
             // Fenêtre glissante : le bord DROIT grandit avec le refill. On garde la
