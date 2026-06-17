@@ -9,7 +9,7 @@
       "ink": { "role": "neutral", "displayName": "Ink", "canonical": "oklch(0.20 0.012 60)", "tonalRamp": ["oklch(0.15 0.012 60)", "oklch(0.20 0.012 60)", "oklch(0.32 0.014 60)", "oklch(0.43 0.014 60)", "oklch(0.55 0.013 60)", "oklch(0.68 0.012 60)", "oklch(0.81 0.012 60)", "oklch(0.94 0.010 60)"] },
       "ink-soft": { "role": "neutral", "displayName": "Ink Soft", "canonical": "oklch(0.36 0.014 60)" },
       "ink-faint": { "role": "neutral", "displayName": "Ink Faint", "canonical": "oklch(0.43 0.014 60)" },
-      "ghost": { "role": "neutral", "displayName": "Ghost", "canonical": "oklch(0.68 0.025 75)" },
+      "ghost": { "role": "neutral", "displayName": "Ghost", "canonical": "oklch(0.50 0.030 78)" },
       "paper": { "role": "neutral", "displayName": "Paper", "canonical": "oklch(0.93 0.025 85)", "tonalRamp": ["oklch(0.20 0.020 85)", "oklch(0.32 0.025 85)", "oklch(0.45 0.030 85)", "oklch(0.58 0.030 85)", "oklch(0.70 0.030 85)", "oklch(0.80 0.030 85)", "oklch(0.88 0.028 85)", "oklch(0.95 0.022 85)"] },
       "paper-deep": { "role": "neutral", "displayName": "Paper Deep", "canonical": "oklch(0.90 0.030 85)" },
       "paper-edge": { "role": "neutral", "displayName": "Paper Edge", "canonical": "oklch(0.86 0.034 85)" },
@@ -130,7 +130,7 @@
       "Don't clutter: no wall of identical icon-cards, no competing focal points. One dominant idea per fold.",
       "Don't add a sans-serif or monospace, or a second accent hue. Two serifs, one voice.",
       "Don't use soft blurred ambient shadows, glassmorphism, gradient text, or pill-rounded corners. If a shadow has blur, it is wrong.",
-      "Don't push the paper toward a brighter cream to feel warmer, or let ghost (#a99a82) carry real text. Warmth is in the ink and the type.",
+      "Don't push the paper toward a brighter cream to feel warmer, or lighten ghost (#786750) back below WCAG AA: it carries the suggested word, so it must stay readable. Warmth is in the ink and the type.",
       "Don't write with em dashes; use commas, colons, or parentheses, matching the existing French copy."
     ]
   }
