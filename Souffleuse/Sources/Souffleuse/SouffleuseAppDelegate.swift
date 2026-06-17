@@ -1450,6 +1450,740 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         if pendingTransformation != nil { cancelTransformPreview() }
     }
 
+    /// Append-or-create sur `/tmp/souffleuse-tick.log` (diagnostic dev hors audit,
+    /// gated par `SOUFFLEUSE_PREDICT_LOG`). Mutualise l'écriture des deux traces.
+    private static func appendTickLog(_ line: String) {
+        guard let data = line.data(using: .utf8) else { return }
+        let path = "/tmp/souffleuse-tick.log"
+        if let h = FileHandle(forWritingAtPath: path) {
+            h.seekToEndOfFile(); try? h.write(contentsOf: data); try? h.close()
+        } else {
+            FileManager.default.createFile(atPath: path, contents: data)
+        }
+    }
+
+    /// Trace dev : un échantillon par snapshot (caret/élément/queue de préfixe).
+    /// Diagnostic « // invisible dans Brave » — révèle un caretIndex décalé ou des
+    /// chars invisibles (ZWSP) côté Chromium. Extrait de `tick()` pour le garder lisible.
+    private func logTickSnapshot(_ snap: AXSnapshot) {
+        guard ProcessInfo.processInfo.environment["SOUFFLEUSE_PREDICT_LOG"]?.isEmpty == false,
+              let bid = snap.bundleID, !bid.contains("ghostty"), !bid.contains("Terminal") else { return }
+        let txtLen = snap.text?.count ?? -1
+        let caret = snap.caretIndex.map(String.init) ?? "nil"
+        let rect = snap.caretRect.map { "\($0.origin.x.rounded()),\($0.origin.y.rounded())" } ?? "nil"
+        let elem = snap.elementRect.map { "\($0.size.width.rounded())x\($0.size.height.rounded())" } ?? "nil"
+        let tail: String = {
+            guard let t = snap.text, let c = snap.caretIndex else { return "nil" }
+            let p = String(t.prefix(c))
+            let after = c < t.count ? String(String(t.dropFirst(c)).prefix(1)) : ""
+            return String(p.suffix(12)).debugDescription + " after=" + after.debugDescription
+        }()
+        let line = "[\(ISO8601DateFormatter().string(from: Date()))] tick_snap bundle=\(bid) textLen=\(txtLen) caretIdx=\(caret) isText=\(snap.isTextElement) secure=\(snap.isSecureField) caretRect=\(rect) elemRect=\(elem) tail=\(tail)\n"
+        Self.appendTickLog(line)
+    }
+
+    /// Trace dev : pourquoi le gate AX a bailé ce tick (enquête « Signal stops
+    /// working »). Logge le premier critère de gate échoué par bundle. Extrait de `tick()`.
+    private func logTickGateFail(_ snap: AXSnapshot) {
+        guard ProcessInfo.processInfo.environment["SOUFFLEUSE_PREDICT_LOG"]?.isEmpty == false else { return }
+        let reason: String
+        if snap.bundleID == nil { reason = "no_bundleID" }
+        else if let b = snap.bundleID, bundleBlocklist.contains(b) { reason = "blocklisted=\(b)" }
+        else if snap.isSecureField { reason = "secure_field" }
+        else if snap.isSearchField { reason = "search_field" }
+        else if snap.isAddressBar { reason = "address_bar" }
+        else if snap.isPickerField { reason = "picker_field" }
+        else if snap.text == nil { reason = "no_text" }
+        else if snap.caretIndex == nil { reason = "no_caret" }
+        else if !snap.isTextElement { reason = "not_text_element" }
+        else { reason = "unknown" }
+        let line = "[\(ISO8601DateFormatter().string(from: Date()))] tick_gate_fail bundle=\(snap.bundleID ?? "nil") reason=\(reason)\n"
+        Self.appendTickLog(line)
+    }
+
+    /// Résout le rect d'ancrage du ghost et la police à passer à l'overlay pour ce
+    /// tick. Met à jour les caches par-bundle (caretRect horodaté TTL, dernière
+    /// police fiable) et déclenche au besoin la résolution OCR async (non bloquante)
+    /// pour les hôtes web qui refusent `kAXBoundsForRangeParameterizedAttribute`.
+    /// Seules la police AX et la calibration OCR sont mises en cache : l'estimation
+    /// par hauteur de rect est déterministe et n'est jamais stockée. Extrait de `tick()`.
+    private func resolveCaretRectAndFont(snap: AXSnapshot, bundleID: String) -> (rect: CGRect?, font: NSFont?) {
+        // Cache fresh AX caretRect WITH a timestamp so we can expire stale
+        // anchors. When the host stops emitting bounds (zoom, scroll, reflow
+        // in Brave/Intercom/Notion), the previous rect would otherwise survive
+        // forever and our ghost would paint at the wrong screen coordinates.
+        if let rect = snap.caretRect {
+            lastCaretRectByApp[bundleID] = rect
+            lastCaretRectTimestampByApp[bundleID] = Date()
+        }
+        let cachedRect: CGRect? = {
+            guard let rect = lastCaretRectByApp[bundleID],
+                  let ts = lastCaretRectTimestampByApp[bundleID],
+                  Date().timeIntervalSince(ts) < Self.caretRectTTL
+            else { return nil }
+            return rect
+        }()
+        // Hosts that refuse `kAXBoundsForRangeParameterizedAttribute` for web
+        // content (Chromium-based browsers, contenteditable, some Electron
+        // apps) leave us with no real caret rect — but we still have
+        // `elementRect`, `text`, and `caretIndex`. The resolver picks the
+        // best available strategy (instant estimate now, OCR refinement
+        // async) without blocking the tick loop.
+        let resolvedRect: CGRect? = {
+            guard snap.caretRect == nil, cachedRect == nil else {
+                return nil
+            }
+            return caretResolver.resolve(snapshot: snap) { [weak self] in
+                // Async OCR completed: redraw on the next runloop turn.
+                self?.tickThrottled()
+            }
+        }()
+        let rectForGhost = snap.caretRect ?? cachedRect ?? resolvedRect
+
+        // Pick the font we'll hand to the overlay: AX's report wins (rare in
+        // web hosts), else the OCR-calibrated point size from the resolver,
+        // else the last reliable font we saw for this bundle (avoids feeding a
+        // degenerate empty-line rect to estimatedFont), else nil — letting
+        // `OverlayWindow` fall back to its conservative rect-height heuristic.
+        // Only AX font + OCR calibration are considered reliable; the estimate
+        // is never stored so the cache can never degrade.
+        let hostFontForOverlay: NSFont? = {
+            if let axFont = snap.caretFont {
+                let font = NSFont(name: axFont.familyName, size: CGFloat(axFont.pointSize))
+                    ?? .systemFont(ofSize: CGFloat(axFont.pointSize))
+                lastReliableFontByBundle[bundleID] = font
+                return font
+            }
+            if let metrics = caretResolver.calibration(for: bundleID) {
+                let font = NSFont.systemFont(ofSize: metrics.fontPointSize)
+                lastReliableFontByBundle[bundleID] = font
+                return font
+            }
+            // No reliable source — reuse the last known font for this bundle if
+            // we have one (typical on empty lines in Notes/TextEdit where AX
+            // stops reporting the font). Otherwise estimate from the caret-rect
+            // height using the PER-BUNDLE line-box→font ratio (Electron hosts
+            // like Signal need a tighter ratio than the 1.27 browser default).
+            // The estimate is never cached — it's deterministic from the rect,
+            // so the reliable-font cache can never be polluted by a guess.
+            if let cached = lastReliableFontByBundle[bundleID] { return cached }
+            return rectForGhost.flatMap {
+                OverlayWindow.estimatedFont(forCaretRectHeight: $0.height, bundleID: bundleID)
+            }
+        }()
+        return (rectForGhost, hostFontForOverlay)
+    }
+
+    /// Reflète l'état de capture (OCR) dans l'icône menubar via un poll async léger.
+    /// Fire-and-forget : ne bloque jamais la boucle de tick. Extrait de `tick()`.
+    private func pollCaptureIcon() {
+        Task { [weak self] in
+            guard let self else { return }
+            let cap = await self.enricher.isCapturing()
+            await MainActor.run {
+                self.iconCapturingNow = cap
+                self.refreshLivingIcon()
+            }
+        }
+    }
+
+    /// Applique la politique d'enrichment par app et relance un snapshot de contexte
+    /// quand le contexte focus change matériellement (bundle, ou titre de fenêtre au-
+    /// delà de `titleChangeRefireMinInterval`). Le refire vide `cachedEnrichmentPrefix`
+    /// puis le repeuple en async ; `suggestionOnly`/`clipboardOnly` modulent enrichment
+    /// et capture sans toucher au toggle global. Extrait de `tick()`.
+    private func manageEnrichment(snap: AXSnapshot, bundleID: String, allowMode: AllowlistMode) {
+        // Per-app enrichment policy: suggestionOnly disables enrichment for this
+        // bundle without disabling the global toggle.
+        let enrichmentAllowed = store.enrichmentEnabled && allowMode != .suggestionOnly
+        let captureAllowedHere = store.captureEnabled && allowMode != .clipboardOnly
+
+        // Refresh enrichment when the focused context materially changes:
+        //   - bundle changes (focus moved to a different app) — always honoured
+        //   - window title changes within the same bundle (typical browser tab
+        //     switch) — honoured if at least `titleChangeRefireMinInterval`
+        //     elapsed since the last refire, debouncing transient titles
+        //     during page loads ("Loading…" → "Inbox · Intercom")
+        //
+        // First tick after a refire uses the cached prefix (which has been
+        // cleared); subsequent ticks pick up the fresh snapshot once it
+        // completes.
+        let bundleChanged = bundleID != lastEnrichedBundleID
+        let titleChanged = snap.windowTitle != lastEnrichedWindowTitle
+        let elapsedSinceLast = Date().timeIntervalSince(lastEnrichmentAt)
+        let shouldRefire = enrichmentAllowed && (
+            bundleChanged ||
+            (titleChanged && elapsedSinceLast >= Self.titleChangeRefireMinInterval)
+        )
+        if shouldRefire {
+            lastEnrichedBundleID = bundleID
+            lastEnrichedWindowTitle = snap.windowTitle
+            lastEnrichmentAt = Date()
+            cachedEnrichmentPrefix = ""
+            lastEnrichedVisible = nil
+            let appliedCapture = captureAllowedHere
+            // Within-bundle title changes need an explicit cache invalidate —
+            // `visibleCache` in ContextEnricher is keyed on bundleID only and
+            // its 5s TTL would otherwise mask the new tab's content.
+            let invalidate = titleChanged && !bundleChanged
+            Task { [weak self] in
+                guard let self else { return }
+                if invalidate { await self.enricher.invalidate() }
+                // Temporarily toggle capture for this snapshot if the rule says clipboard-only.
+                await self.enricher.setCaptureEnabled(appliedCapture)
+                let enriched = await self.enricher.snapshot(focusedFieldRect: snap.elementRect)
+                // Restore global capture preference after the snapshot.
+                await self.enricher.setCaptureEnabled(self.store.captureEnabled)
+                await MainActor.run {
+                    self.cachedEnrichmentPrefix = enriched.prefix
+                    self.lastEnrichedVisible = enriched.visible
+                }
+            }
+        } else if !enrichmentAllowed {
+            cachedEnrichmentPrefix = ""
+            lastEnrichedVisible = nil
+            lastEnrichedBundleID = nil
+            lastEnrichedWindowTitle = nil
+        }
+    }
+
+    /// Picker « // » : dès « // » ouvert en début de mot avant le caret, affiche la
+    /// rangée d'intentions (transformation) ou une rangée par langue (rédaction) au
+    /// caret, gèle le pipeline ghost/typo/predict tant qu'il est ouvert, et applique
+    /// l'anti-empiètement (pause de frappe avant d'afficher en mode rédaction) et
+    /// l'ancre de refus (Esc). Retourne `true` quand `tick()` doit sortir (panneau
+    /// affiché ou en attente de pause), `false` pour laisser le tick continuer.
+    /// Placé AVANT la branche mid-line : un « // » tapé au milieu d'un texte doit
+    /// ouvrir le picker, pas laisser la pilule mid-line confisquer le tick.
+    /// Extrait de `tick()`.
+    private func handleSlashPicker(prefix: String, bundleID: String, snap: AXSnapshot, rectForGhost: CGRect?) -> Bool {
+        if store.slashTransformEnabled,
+           !snap.isSecureField,
+           !SlashTransformDetector.disabledBundles.contains(bundleID),
+           let slashState = SlashTransformDetector.detect(textBeforeCaret: prefix),
+           let rect = rectForGhost
+        {
+            // Ancre de refus : le préfixe jusqu'au « // » inclus. Tant qu'elle
+            // n'a pas changé après un Esc, le panneau reste fermé.
+            let anchor = String(prefix.prefix(prefix.count - slashState.filter.count))
+            // Anti-empiètement (rédaction) : tant que l'amorce est en cours de
+            // frappe, on n'affiche PAS les rangées (elles recouvriraient le
+            // texte). On attend une pause — préfixe complet stable depuis
+            // `composePauseSeconds`. Pendant l'attente : aucune rangée, aucun
+            // ghost, le champ reste net. (Les transformations sur texte existant
+            // ne sont pas concernées : on y tape un court filtre pour choisir.)
+            if slashState.isComposition {
+                let now = Date()
+                if composePauseAnchor != prefix {
+                    composePauseAnchor = prefix
+                    composePauseSince = now
+                }
+                if now.timeIntervalSince(composePauseSince) < Self.composePauseSeconds {
+                    hideSlashPicker()           // retire une rangée déjà posée si la frappe reprend
+                    predictor.cancel()
+                    lastPredictedPrefix = nil
+                    overlay.hide()
+                    interceptor.setActive(false)
+                    currentTypo = nil
+                    return true
+                }
+            }
+            if slashPickerDismissedAnchor != anchor {
+                slashPickerDismissedAnchor = nil
+                if slashPickerState == nil { Log.info(.input, "slash_picker_shown") }
+                slashPickerState = slashState
+                slashPickerAnchor = anchor
+                if slashState.isComposition {
+                    // Rédaction : « // » en début de champ + amorce → une rangée
+                    // PAR LANGUE. La préférence « Rédiger en » met une langue en
+                    // tête (①, prise aussi par ⏎) ; les autres suivent. Un chiffre
+                    // override la langue à la volée — sélection rapide, jamais
+                    // dépendante d'un ghost ni de l'OCR. La résolution (détection /
+                    // épingle / repli) est calculée UNE fois par session de
+                    // rédaction (cache sur l'ancre, stable tant que « // » ne bouge
+                    // pas) — sinon la détection NL tournerait à chaque tick.
+                    if composeRowsAnchor != anchor {
+                        composeRows = orderedComposeLanguages(
+                            forBundle: bundleID, windowTitle: snap.windowTitle)
+                        composeRowsAnchor = anchor
+                    }
+                    slashPickerMatches = composeRows.map { .rediger($0) }
+                    let labels = composeRows.enumerated().map { idx, lang -> String in
+                        let name = lang.promptLanguageName ?? ""
+                        return idx == 0 ? tr(fr: "rédiger · \(name)", en: "compose · \(name)") : name
+                    }
+                    transformPicker.show(labels: labels, freeInstruction: nil, at: rect)
+                    interceptor.setSlashPickerArmed(true, digits: true, enter: true)
+                } else {
+                    slashPickerMatches = TransformationIntent.matches(filter: slashState.filter)
+                    transformPicker.show(
+                        labels: slashPickerMatches.map(\.displayName),
+                        freeInstruction: slashPickerMatches.isEmpty ? slashState.filter : nil,
+                        at: rect)
+                    // Digits coupés en mode instruction libre (« //passe en 3 points »
+                    // reste saisissable) ; ⏎ armé seulement filtre non vide (« // » nu
+                    // + Entrée = saut de ligne normal dans l'app hôte).
+                    interceptor.setSlashPickerArmed(
+                        true,
+                        digits: !slashPickerMatches.isEmpty,
+                        enter: !slashState.filter.isEmpty)
+                }
+                predictor.cancel()
+                lastPredictedPrefix = nil
+                overlay.hide()
+                interceptor.setActive(false)
+                currentTypo = nil
+                return true
+            }
+        } else {
+            // Plus de trigger ouvert : fermer le panneau et ré-armer le
+            // déclenchement après un éventuel refus.
+            slashPickerDismissedAnchor = nil
+            composePauseAnchor = nil
+            hideSlashPicker()
+        }
+        return false
+    }
+
+    /// Suppression mid-texte : quand le caractère juste après le caret est un glyphe
+    /// non-blanc, l'utilisateur édite À L'INTÉRIEUR d'un texte existant — un ghost
+    /// inline tomberait au mauvais endroit. Si le mode mid-line (opt-in) est actif,
+    /// flotte plutôt la suggestion en pilule SOUS la ligne du caret (style Cotypist) ;
+    /// sinon masque tout. Retourne `true` quand `tick()` doit sortir. Extrait de `tick()`.
+    private func handleMidLineSuppression(prefix: String, text: String, caretIndex: Int, snap: AXSnapshot, rectForGhost: CGRect?, hostFont: NSFont?) -> Bool {
+        guard Self.shouldSuppressForCaretContext(text: text, caretIndex: caretIndex) else { return false }
+        if store.midLineGhostEnabled, let rect = rectForGhost {
+            runMidLineGhost(
+                prefix: prefix,
+                rect: rect,
+                text: text,
+                caretIndex: caretIndex,
+                snap: snap,
+                font: hostFont
+            )
+            return true
+        }
+        overlay.hide()
+        presenceHideNow()
+        interceptor.setActive(false)
+        return true
+    }
+
+    /// Fenêtre glissante bidirectionnelle (flag `midWordGhostRollingEnabled`). Quand une
+    /// ancre est active (même bundle, `ghostAnchorFull` non vide), une seule règle de slice
+    /// gère conso avant ET restauration arrière tant qu'on reste dans `[base, full)` :
+    ///   • caret DANS la fenêtre → ghost = suffixe de `ghostAnchorFull`, rendu via la
+    ///     machinerie partialRemainder, predict sauté → retourne `true`.
+    ///   • frappe en avant sur le chemin → étend le high-water (`ghostAnchorFull`) et
+    ///     laisse le predict gate repeindre (pas de sortie) → `false`.
+    ///   • divergence / sous la borne gauche → jette l'ancre, tombe dans le predict normal
+    ///     → `false`.
+    /// Hors flag, le `guard` court-circuite tout (byte-identique à l'historique). Extrait de `tick()`.
+    private func handleRollingWindow(prefix: String, bundleID: String, text: String, caretIndex: Int, snap: AXSnapshot, rectForGhost: CGRect?, hostFont: NSFont?) -> Bool {
+        guard SuggestionPolicy.Tuning.midWordGhostRollingEnabled,
+              !ghostAnchorFull.isEmpty,
+              ghostAnchorBundle == bundleID else { return false }
+        let lowerPrefix = prefix.lowercased()
+        let lowerFull = ghostAnchorFull.lowercased()
+        if lowerFull.hasPrefix(lowerPrefix),
+           prefix.count >= ghostAnchorBase.count,
+           prefix.count < ghostAnchorFull.count {
+            // BACKSPACE / CONSO À L'INTÉRIEUR DE LA FENÊTRE (high-water).
+            // `ghostAnchorFull` porte le HIGH-WATER MARK : sa partie GAUCHE jusqu'au
+            // caret est le texte que l'UTILISATEUR a réellement tapé (capté en avant,
+            // cf. la branche d'extension ci-dessous), sa partie DROITE est le ghost.
+            // Reculer dans cette fenêtre restaure donc le texte de l'utilisateur lui-
+            // même, pas une prédiction du modèle. On slice le suffixe et l'affiche,
+            // SANS rétrécir `ghostAnchorFull` (le high-water tient). On reconstruit
+            // l'état partialRemainder pour que refill rolling et accept repartent bon.
+            // CE BLOC PASSE AVANT la suppression mid-mot backspace : un restore d'ancre
+            // actif gagne toujours (return ici).
+            let ghost = String(ghostAnchorFull.dropFirst(prefix.count))
+            predictor.cancel()
+            partialAcceptedAtPrefix = ghostAnchorBase
+            partialAcceptedSoFar = String(ghostAnchorFull.prefix(prefix.count).dropFirst(ghostAnchorBase.count))
+            partialAcceptedAtBundleID = bundleID
+            partialRemainder = ghost
+            if let rect = rectForGhost {
+                overlay.show(text: ghost, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFont, fieldRect: snap.elementRect)
+                interceptor.setActive(true)
+                maybeSpawnRollingRefill(committedText: prefix, bundleID: bundleID)
+            } else {
+                overlay.hide()
+                interceptor.setActive(false)
+            }
+            return true
+        } else if lowerPrefix.hasPrefix(lowerFull),
+                  prefix.count >= ghostAnchorBase.count {
+            // FRAPPE EN AVANT QUI ÉTEND LE HIGH-WATER. Le préfixe a dépassé (ou égale)
+            // `ghostAnchorFull` tout en restant SUR LE CHEMIN (`prefix` commence par
+            // `ghostAnchorFull`). C'est exactement le cas où l'utilisateur tape un mot
+            // qui DIVERGE de la prédiction du modèle mais constitue son PROPRE texte :
+            // on capte ce texte dans le high-water. On met à jour
+            // `ghostAnchorFull = prefix + ghost-courant` (gauche = texte tapé réel),
+            // on GARDE `ghostAnchorBase` (borne gauche persistante), et on NE return
+            // PAS : on laisse le predict gate plus bas générer/peindre un ghost frais
+            // pour ce nouveau préfixe (qui ré-étendra le high-water via l'ancrage en
+            // bas de tick). Le ghost-courant n'est pris que s'il a été produit POUR ce
+            // préfixe exact ; sinon vide (la partie droite est rétablie au render).
+            let currentGhost = (predictor.predictedForPrefix == prefix) ? predictor.suggestion : ""
+            ghostAnchorFull = prefix + currentGhost
+            // pas de return : tombe dans la suppression / predict gate.
+        } else {
+            // DIVERGENCE (préfixe hors-chemin du high-water) ou SOUS LA BORNE GAUCHE →
+            // on jette l'ancre + tout reste de partial, et on tombe dans le predict
+            // normal. La prochaine génération fraîche reposera une ancre.
+            clearGhostAnchor()
+            if !partialRemainder.isEmpty {
+                partialRemainder = ""
+                partialAcceptedSoFar = ""
+                partialAcceptedAtPrefix = ""
+                partialAcceptedAtBundleID = nil
+            }
+            cancelRollingRefill()
+            Log.info(.predictor, "ghost_anchor_cleared")
+            // Pas de hide ici (anti-blank-frame) : le predict gate plus bas
+            // repeindra, ou un fresh ghost réancrera.
+        }
+        return false
+    }
+
+    /// Suppression mid-mot en backspace (flag `midWordGhostRollingEnabled`) : « compléter
+    /// ce qu'on TAPE, pas ce qu'on EFFACE ». Quand l'utilisateur recule à travers un mot
+    /// et que le fragment de queue est mid-mot (run de lettres non vide, pas un mot
+    /// complet, pas à une frontière), on masque le ghost pour ce tick (pas de predict).
+    /// Passe APRÈS l'anchor-slice (un restore d'ancre actif gagne) et AVANT le predict gate.
+    /// Hors flag, le `guard` court-circuite ⇒ byte-identique. Retourne `true` si supprimé.
+    /// Extrait de `tick()`.
+    private func handleMidWordBackspaceSuppression(prefix: String) -> Bool {
+        guard SuggestionPolicy.Tuning.midWordGhostRollingEnabled else { return false }
+        let isBackspacing = !lastTickPrefixForDelete.isEmpty
+            && prefix.count < lastTickPrefixForDelete.count
+            && lastTickPrefixForDelete.hasPrefix(prefix)
+        lastTickPrefixForDelete = prefix
+        let trailingFragment = OutputFilter.trailingPartialWord(prefix)
+        let isIncompleteFragment = !trailingFragment.isEmpty
+            && !SuggestionPolicy.defaultPartialWordIsComplete(prefix)
+        if isBackspacing, isIncompleteFragment {
+            overlay.hide()
+            interceptor.setActive(false)
+            predictor.cancel()
+            lastPredictedPrefix = nil
+            Log.info(.predictor, "ghost_backspace_suppress")
+            return true
+        }
+        return false
+    }
+
+    /// Live-consume promotion : si une suggestion LLM est active et que l'utilisateur
+    /// vient de taper des caractères qui matchent son début (espaces et ponctuation
+    /// inclus — pas de coupure aux frontières de mot, comportement Cotypist), promeut
+    /// la suggestion en état partial-remainder pour que `handlePartialRemainder` la
+    /// rende et saute le re-predict. Divergence ou ghost mid-mot périmé → masque le
+    /// ghost (la régénération repart du predict gate). Extrait de `tick()`.
+    private func promoteLiveConsume(prefix: String, bundleID: String) {
+        guard partialRemainder.isEmpty,
+              !predictor.suggestion.isEmpty,
+              let basePrefix = lastPredictedPrefix,
+              predictor.predictedForPrefix == basePrefix,
+              prefix.count > basePrefix.count,
+              prefix.hasPrefix(basePrefix) else { return }
+        let typedSince = String(prefix.dropFirst(basePrefix.count))
+        // Case-insensitive match: typing "Bonjour" should still consume
+        // a ghost starting with "bonjour" (and vice versa). The user's
+        // typed casing wins in the rendered text (AX writes verbatim);
+        // only the matching logic ignores case.
+        // ANTI-FLICKER (revertable — see note below). We used to also require
+        // `!isStaleMidWordCompletion` here, which forced a hide+re-predict on
+        // EVERY keystroke into a "word-completion + tail" ghost — now the
+        // common case with the corpus (e.g. "achète du Bitcoin."). That blinked
+        // the tail on each letter. We now let these enter the smooth
+        // partial-remainder consume too: a correctly-guessed word consumes
+        // letter-by-letter with no flicker, and a *wrong* guess ("envi" →
+        // "es de manger" while the user types "envie ") still self-corrects —
+        // the divergence break in the partial-remainder block below re-predicts.
+        // Trade-off: on a wrong guess the stale tail shows for ~1 keystroke
+        // before the divergence swap, instead of being hidden.
+        // TO REVERT: re-add `&& !Self.isStaleMidWordCompletion(basePrefix:
+        // basePrefix, ghost: predictor.suggestion)` to the condition below.
+        if Self.isLiveConsumeMatch(ghost: predictor.suggestion, typedSince: typedSince) {
+            // User is consuming the ghost letter-by-letter — set up
+            // partial state so the existing block below renders the
+            // remainder and skips re-prediction.
+            partialAcceptedAtPrefix = basePrefix
+            partialAcceptedSoFar = typedSince
+            partialAcceptedAtBundleID = bundleID
+            partialRemainder = String(predictor.suggestion.dropFirst(typedSince.count))
+            predictor.cancel()
+        } else {
+            // Either the typed char(s) do NOT match the start of the ghost
+            // (true divergence — the "applielle" bug), OR the ghost was a
+            // stale mid-word completion guess that the user is now typing
+            // past (the "envies de" bug). Both cases: hide the stale ghost
+            // NOW, then fall through. The predict gate at the bottom fires a
+            // fresh prediction because `lastPredictedPrefix` is reset to nil
+            // here (and was stale anyway). Without this clear, the old ghost
+            // stayed rendered.
+            clearStaleGhostOnDivergence()
+        }
+    }
+
+    /// Partial-accept guard : tant qu'un reste est dû (issu d'un accept Tab partiel
+    /// OU de la consommation au clavier), l'overlay l'affiche verbatim et on saute le
+    /// re-predict tant que le texte AX correspond à ce qu'on a injecté/consommé.
+    /// Quand le préfixe dépasse, on continue la conso si ça matche (refill rolling
+    /// inclus) ou on traite la divergence (record + reset + masque). Retourne `true`
+    /// quand `tick()` doit sortir ; `false` (reste consommé/divergent) laisse le
+    /// predict gate reprendre la main. Extrait de `tick()`.
+    private func handlePartialRemainder(prefix: String, bundleID: String, text: String, caretIndex: Int, snap: AXSnapshot, rectForGhost: CGRect?, hostFont: NSFont?) -> Bool {
+        guard !partialRemainder.isEmpty else { return false }
+        let expected = partialAcceptedAtPrefix + partialAcceptedSoFar
+        if prefix == expected {
+            // Synced — render remainder and skip predict.
+            if let rect = rectForGhost {
+                overlay.show(text: partialRemainder, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFont, fieldRect: snap.elementRect)
+                interceptor.setActive(true)
+                // ── ROLLING REFILL (mode sliding-window, flag OFF par défaut) ──
+                // Si le reste affiché descend SOUS le plancher de mots, on GÉNÈRE
+                // les mots suivants à droite pendant que l'utilisateur consomme à
+                // gauche → fenêtre glissante qui ne se vide jamais. Le reste
+                // courant reste affiché ; les mots générés l'étendront au prochain
+                // tick render. Jamais de hide pendant le refill.
+                maybeSpawnRollingRefill(committedText: expected, bundleID: bundleID)
+            } else {
+                overlay.hide()
+                interceptor.setActive(false)
+            }
+            return true
+        }
+        if expected.hasPrefix(prefix) {
+            // AX hasn't caught up to our latest inject yet. Keep showing
+            // the remainder, do not re-predict, wait for the next tick.
+            if let rect = rectForGhost {
+                overlay.show(text: partialRemainder, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFont, fieldRect: snap.elementRect)
+                interceptor.setActive(true)
+            }
+            return true
+        }
+        // Prefix has grown past expected — the user typed more. Could be
+        // (a) live consumption of the next letters of the remainder, or
+        // (b) divergence / word boundary requesting a regen.
+        if prefix.hasPrefix(expected), prefix.count > expected.count {
+            let typedSince = String(prefix.dropFirst(expected.count))
+            // Case-insensitive match: a typo correction or auto-capitalize
+            // shouldn't break the consume chain mid-suggestion.
+            if Self.isLiveConsumeMatch(ghost: partialRemainder, typedSince: typedSince) {
+                // Continue consuming — match keeps going regardless of
+                // whether the typed char is a space, punctuation, or
+                // letter. Only divergence breaks the consume.
+                partialAcceptedSoFar += typedSince
+                partialRemainder = String(partialRemainder.dropFirst(typedSince.count))
+                if partialRemainder.isEmpty {
+                    // Whole suggestion consumed by typing — record + reset,
+                    // let the next tick re-predict on the new prefix.
+                    recordPartialAcceptanceToHistoryIfAllowed()
+                    partialAcceptedSoFar = ""
+                    partialAcceptedAtPrefix = ""
+                    partialAcceptedAtBundleID = nil
+                    overlay.hide()
+                    interceptor.setActive(false)
+                    // Don't return — fall through so predict fires.
+                } else {
+                    if let rect = rectForGhost {
+                        overlay.show(text: partialRemainder, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFont, fieldRect: snap.elementRect)
+                        interceptor.setActive(true)
+                        // FLUX CONTINU : recharge le bord droit DÈS la conso active
+                        // (et pas seulement au tick synchronisé suivant), pour que la
+                        // fenêtre reste pleine pendant que tu tapes la suite du ghost.
+                        maybeSpawnRollingRefill(
+                            committedText: partialAcceptedAtPrefix + partialAcceptedSoFar,
+                            bundleID: bundleID)
+                    }
+                    return true
+                }
+            } else {
+                // Divergence — record what was consumed, reset, fall
+                // through to the predict gate below. Hide the stale ghost
+                // (the remainder rendered last tick) so it can't linger if
+                // the re-prediction is gated/empty.
+                recordPartialAcceptanceToHistoryIfAllowed()
+                partialRemainder = ""
+                partialAcceptedSoFar = ""
+                partialAcceptedAtPrefix = ""
+                partialAcceptedAtBundleID = nil
+                clearStaleGhostOnDivergence()
+            }
+        } else {
+            // Divergence (user deleted, moved caret, etc.) — record + reset.
+            // Hide the stale remainder ghost; re-prediction repaints later.
+            recordPartialAcceptanceToHistoryIfAllowed()
+            partialRemainder = ""
+            partialAcceptedSoFar = ""
+            partialAcceptedAtPrefix = ""
+            partialAcceptedAtBundleID = nil
+            clearStaleGhostOnDivergence()
+        }
+        return false
+    }
+
+    /// Expansion de raccourci emoji : quand le texte se termine par `:code:<space>`,
+    /// remplace via AX (pas d'UI ghost). Désactivé dans les bundles IDE/terminal où
+    /// `:tags:` est de la vraie syntaxe. Retourne `true` quand l'expansion a eu lieu
+    /// (`tick()` doit sortir). Extrait de `tick()`.
+    private func handleEmojiExpansion(prefix: String, bundleID: String) -> Bool {
+        guard store.emojiEnabled,
+              !EmojiExpander.disabledBundles.contains(bundleID),
+              let expansion = EmojiExpander.detect(textBeforeCaret: prefix)
+        else { return false }
+        DispatchQueue.global(qos: .userInitiated).async { [axClient] in
+            axClient.replaceTrailing(deleteChars: expansion.deleteChars, with: expansion.insert)
+        }
+        Log.info(.input, "emoji_expanded")
+        // L'expansion compte comme un usage → nourrit le ranking du picker.
+        store.incrementEmojiFrequency(expansion.shortcode)
+        hideEmojiPicker()
+        // Clear any pending suggestion so the LLM ghost doesn't blink.
+        predictor.cancel()
+        lastPredictedPrefix = nil
+        overlay.hide()
+        interceptor.setActive(false)
+        currentTypo = nil
+        return true
+    }
+
+    /// Picker emoji : dès « : » ouvert avant le caret, affiche une rangée de candidats
+    /// numérotés ①–⑨ au caret (parité Cotypist) ; la rangée physique 1–9 sans Maj
+    /// choisit, Esc ferme, taper filtre. Pendant que le panneau est ouvert, pas de
+    /// ghost LLM concurrent. L'ancre de refus garde le panneau fermé après un Esc tant
+    /// que le préfixe jusqu'au `:` n'a pas changé. Retourne `true` quand le panneau est
+    /// affiché (`tick()` doit sortir) ; sinon ferme un panneau orphelin. Extrait de `tick()`.
+    private func handleEmojiPicker(prefix: String, bundleID: String, rectForGhost: CGRect?) -> Bool {
+        if store.emojiEnabled,
+           !EmojiExpander.disabledBundles.contains(bundleID),
+           let pickerState = EmojiExpander.pickerCandidates(
+               textBeforeCaret: prefix, frequency: store.emojiFrequency),
+           let rect = rectForGhost
+        {
+            // Ancre de refus : le préfixe jusqu'au `:` d'ouverture inclus. Tant
+            // qu'il n'a pas changé après un Esc, le panneau reste fermé.
+            let anchor = String(prefix.prefix(prefix.count - pickerState.fragmentLength + 1))
+            if emojiPickerDismissedAnchor != anchor {
+                emojiPickerDismissedAnchor = nil
+                if emojiPickerState == nil {
+                    Log.info(.input, "emoji_picker_shown")
+                }
+                emojiPickerState = pickerState
+                emojiPickerAnchor = anchor
+                emojiPicker.show(emojis: pickerState.candidates.map(\.emoji), at: rect)
+                interceptor.setPickerArmed(true)
+                predictor.cancel()
+                lastPredictedPrefix = nil
+                overlay.hide()
+                interceptor.setActive(false)
+                currentTypo = nil
+                return true
+            }
+        } else {
+            // Plus de fragment ouvert : fermer le panneau et ré-armer le
+            // déclenchement après un éventuel refus.
+            emojiPickerDismissedAnchor = nil
+            hideEmojiPicker()
+        }
+        return false
+    }
+
+    /// Correction de typo (préempte le ghost LLM). Détecte le dernier mot sur frontière
+    /// de mot, debounce un mot encore en cours de frappe, puis affiche le panneau de
+    /// correction (rendu une seule fois par nouvelle suggestion). Gère aussi le cas
+    /// mid-mot (`hideOnTypo`) où le caret est DANS un mot suspect : on masque le ghost
+    /// pour ne pas prolonger la faute. Retourne `true` quand `tick()` doit sortir
+    /// (typo affichée, debounce, ou suppression mid-mot) ; `false` (pas de typo) remet
+    /// l'état à zéro et rend la main au predict gate. Extrait de `tick()`.
+    private func handleTypoCorrection(prefix: String, bundleID: String, caretIndex: Int, text: String, rectForGhost: CGRect?, hostFont: NSFont?, allowMode: AllowlistMode) -> Bool {
+        // Typo correction — preempts LLM ghost. Triggered only on word boundary
+        // (caret right after a non-word char like space/punct), so we don't
+        // flag the word the user is still typing.
+        let typoCandidate: TypoSuggestion? = {
+            guard store.typoEnabled,
+                  !EmojiExpander.disabledBundles.contains(bundleID),
+                  allowMode != .suggestionOnly  // honor per-app modes
+            else { return nil }
+            return typoDetector.checkLastWord(in: prefix, caretIndex: caretIndex)
+        }()
+
+        // Mid-word case: caret is INSIDE a misspelled word. We can't suggest a
+        // correction (no clear word boundary yet), but we should also stop the
+        // LLM from extending the typo with more wrong text. Bail before predict.
+        if store.hideOnTypo,
+           store.typoEnabled,
+           !EmojiExpander.disabledBundles.contains(bundleID),
+           typoCandidate == nil,
+           typoDetector.currentWordLooksSuspect(in: prefix, caretIndex: caretIndex)
+        {
+            currentTypo = nil
+            overlay.hide()
+            interceptor.setActive(false)
+            predictor.cancel()
+            lastPredictedPrefix = nil
+            return true
+        }
+
+        if let typo = typoCandidate {
+            // Chars between the word's end and the caret (the typo can fire after
+            // a trailing space). `prefix` ends at the caret, so this is that gap.
+            let trailing = String(prefix[typo.range.upperBound...])
+            // A word followed by a separator is "done" → correct immediately. A
+            // word at end-of-string may still be in progress → debounce so we
+            // don't flash a correction for each incomplete prefix while typing.
+            if trailing.isEmpty {
+                let settleKey = typo.original + "\u{1}" + String(prefix.count)
+                if settleKey != typoSettleKey {
+                    typoSettleKey = settleKey
+                    typoSettleSince = Date()
+                }
+                let settled = typoSettleSince.map { Date().timeIntervalSince($0) >= Self.typoDebounce } ?? false
+                if !settled {
+                    // Still settling: suppress (no flash) and don't predict on a
+                    // suspected mid-word typo. Hide any prior typo ghost.
+                    if currentTypo != nil {
+                        overlay.hide()
+                        interceptor.setActive(false)
+                        currentTypo = nil
+                    }
+                    return true
+                }
+            }
+            let isNewSuggestion = currentTypo != typo
+            currentTypo = typo
+            currentTypoTrailing = trailing
+            predictor.cancel()
+            lastPredictedPrefix = nil
+            if let rect = rectForGhost {
+                // Render once per new suggestion: the panel persists across the
+                // identical re-detections on subsequent ticks (currentTypo stays
+                // equal), so re-painting — and re-querying AX bounds — every tick
+                // is wasted. Any non-typo branch resets currentTypo, which makes
+                // the next typo tick "new" again and re-renders.
+                if isNewSuggestion {
+                    renderTypoSuggestion(
+                        typo,
+                        prefix: prefix,
+                        caretRect: rect,
+                        text: text,
+                        caretIndex: caretIndex,
+                        font: hostFont
+                    )
+                    Log.info(.input, "typo_suggested")
+                }
+                interceptor.setActive(true)
+            }
+            return true
+        }
+        currentTypo = nil
+        typoSettleKey = nil
+        return false
+    }
+
     private func tick() {
         guard store.enabled else { return }
         // Icône vivante : par défaut « pas de champ actif » ; repassé à vrai plus
@@ -1482,31 +2216,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         let snap = axClient.snapshot()
-
-        // Verbose tick observability — every snapshot result, gated by env var.
-        if ProcessInfo.processInfo.environment["SOUFFLEUSE_PREDICT_LOG"]?.isEmpty == false,
-           let bid = snap.bundleID, !bid.contains("ghostty"), !bid.contains("Terminal") {
-            let txtLen = snap.text?.count ?? -1
-            let caret = snap.caretIndex.map(String.init) ?? "nil"
-            let rect = snap.caretRect.map { "\($0.origin.x.rounded()),\($0.origin.y.rounded())" } ?? "nil"
-            let elem = snap.elementRect.map { "\($0.size.width.rounded())x\($0.size.height.rounded())" } ?? "nil"
-            // Queue du préfixe (12 chars, échappée) + 1er char après le caret :
-            // diagnostic « // invisible dans Brave » (UAT 11/06) — révèle un
-            // caretIndex décalé ou des chars invisibles (ZWSP) côté Chromium.
-            let tail: String = {
-                guard let t = snap.text, let c = snap.caretIndex else { return "nil" }
-                let p = String(t.prefix(c))
-                let after = c < t.count ? String(String(t.dropFirst(c)).prefix(1)) : ""
-                return String(p.suffix(12)).debugDescription + " after=" + after.debugDescription
-            }()
-            let line = "[\(ISO8601DateFormatter().string(from: Date()))] tick_snap bundle=\(bid) textLen=\(txtLen) caretIdx=\(caret) isText=\(snap.isTextElement) secure=\(snap.isSecureField) caretRect=\(rect) elemRect=\(elem) tail=\(tail)\n"
-            if let data = line.data(using: .utf8) {
-                let path = "/tmp/souffleuse-tick.log"
-                if let h = FileHandle(forWritingAtPath: path) {
-                    h.seekToEndOfFile(); try? h.write(contentsOf: data); try? h.close()
-                } else { FileManager.default.createFile(atPath: path, contents: data) }
-            }
-        }
+        logTickSnapshot(snap)
 
         // Gate: must be a non-blocklisted, non-secure text element.
         // isAddressBar : les omniboxes (Safari/Chromium/Firefox) sont des
@@ -1523,31 +2233,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
               let text = snap.text,
               let caretIndex = snap.caretIndex,
               snap.isTextElement else {
-            // Temporary diagnostic for "Signal stops working" investigation.
-            // Logs which AX gate fails per-bundle so we can see why we bail.
-            // Same env var as the predictor debug log.
-            if ProcessInfo.processInfo.environment["SOUFFLEUSE_PREDICT_LOG"]?.isEmpty == false {
-                let reason: String
-                if snap.bundleID == nil { reason = "no_bundleID" }
-                else if let b = snap.bundleID, bundleBlocklist.contains(b) { reason = "blocklisted=\(b)" }
-                else if snap.isSecureField { reason = "secure_field" }
-                else if snap.isSearchField { reason = "search_field" }
-                else if snap.isAddressBar { reason = "address_bar" }
-                else if snap.isPickerField { reason = "picker_field" }
-                else if snap.text == nil { reason = "no_text" }
-                else if snap.caretIndex == nil { reason = "no_caret" }
-                else if !snap.isTextElement { reason = "not_text_element" }
-                else { reason = "unknown" }
-                let line = "[\(ISO8601DateFormatter().string(from: Date()))] tick_gate_fail bundle=\(snap.bundleID ?? "nil") reason=\(reason)\n"
-                if let data = line.data(using: .utf8) {
-                    let path = "/tmp/souffleuse-tick.log"
-                    if let h = FileHandle(forWritingAtPath: path) {
-                        h.seekToEndOfFile(); try? h.write(contentsOf: data); try? h.close()
-                    } else {
-                        FileManager.default.createFile(atPath: path, contents: data)
-                    }
-                }
-            }
+            logTickGateFail(snap)
             overlay.hide()
             hideEmojiPicker()
             hideSlashPicker()
@@ -1622,69 +2308,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         rawInputText = text
         rawInputBundleID = bundleID
 
-        // Cache fresh AX caretRect WITH a timestamp so we can expire stale
-        // anchors. When the host stops emitting bounds (zoom, scroll, reflow
-        // in Brave/Intercom/Notion), the previous rect would otherwise survive
-        // forever and our ghost would paint at the wrong screen coordinates.
-        if let rect = snap.caretRect {
-            lastCaretRectByApp[bundleID] = rect
-            lastCaretRectTimestampByApp[bundleID] = Date()
-        }
-        let cachedRect: CGRect? = {
-            guard let rect = lastCaretRectByApp[bundleID],
-                  let ts = lastCaretRectTimestampByApp[bundleID],
-                  Date().timeIntervalSince(ts) < Self.caretRectTTL
-            else { return nil }
-            return rect
-        }()
-        // Hosts that refuse `kAXBoundsForRangeParameterizedAttribute` for web
-        // content (Chromium-based browsers, contenteditable, some Electron
-        // apps) leave us with no real caret rect — but we still have
-        // `elementRect`, `text`, and `caretIndex`. The resolver picks the
-        // best available strategy (instant estimate now, OCR refinement
-        // async) without blocking the tick loop.
-        let resolvedRect: CGRect? = {
-            guard snap.caretRect == nil, cachedRect == nil else {
-                return nil
-            }
-            return caretResolver.resolve(snapshot: snap) { [weak self] in
-                // Async OCR completed: redraw on the next runloop turn.
-                self?.tickThrottled()
-            }
-        }()
-        let rectForGhost = snap.caretRect ?? cachedRect ?? resolvedRect
-
-        // Pick the font we'll hand to the overlay: AX's report wins (rare in
-        // web hosts), else the OCR-calibrated point size from the resolver,
-        // else the last reliable font we saw for this bundle (avoids feeding a
-        // degenerate empty-line rect to estimatedFont), else nil — letting
-        // `OverlayWindow` fall back to its conservative rect-height heuristic.
-        // Only AX font + OCR calibration are considered reliable; the estimate
-        // is never stored so the cache can never degrade.
-        let hostFontForOverlay: NSFont? = {
-            if let axFont = snap.caretFont {
-                let font = NSFont(name: axFont.familyName, size: CGFloat(axFont.pointSize))
-                    ?? .systemFont(ofSize: CGFloat(axFont.pointSize))
-                lastReliableFontByBundle[bundleID] = font
-                return font
-            }
-            if let metrics = caretResolver.calibration(for: bundleID) {
-                let font = NSFont.systemFont(ofSize: metrics.fontPointSize)
-                lastReliableFontByBundle[bundleID] = font
-                return font
-            }
-            // No reliable source — reuse the last known font for this bundle if
-            // we have one (typical on empty lines in Notes/TextEdit where AX
-            // stops reporting the font). Otherwise estimate from the caret-rect
-            // height using the PER-BUNDLE line-box→font ratio (Electron hosts
-            // like Signal need a tighter ratio than the 1.27 browser default).
-            // The estimate is never cached — it's deterministic from the rect,
-            // so the reliable-font cache can never be polluted by a guess.
-            if let cached = lastReliableFontByBundle[bundleID] { return cached }
-            return rectForGhost.flatMap {
-                OverlayWindow.estimatedFont(forCaretRectHeight: $0.height, bundleID: bundleID)
-            }
-        }()
+        let (rectForGhost, hostFontForOverlay) = resolveCaretRectAndFont(snap: snap, bundleID: bundleID)
 
         // We've cleared every gate: focused, AX-trusted, not blocklisted, real
         // text element. Anchor the presence badge to the field's top-left so
@@ -1715,68 +2339,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
         dismissedForText = nil
 
-        // Reflect capture state in the menubar icon (lightweight async poll).
-        Task { [weak self] in
-            guard let self else { return }
-            let cap = await self.enricher.isCapturing()
-            await MainActor.run {
-                self.iconCapturingNow = cap
-                self.refreshLivingIcon()
-            }
-        }
-
-        // Per-app enrichment policy: suggestionOnly disables enrichment for this
-        // bundle without disabling the global toggle.
-        let enrichmentAllowed = store.enrichmentEnabled && allowMode != .suggestionOnly
-        let captureAllowedHere = store.captureEnabled && allowMode != .clipboardOnly
-
-        // Refresh enrichment when the focused context materially changes:
-        //   - bundle changes (focus moved to a different app) — always honoured
-        //   - window title changes within the same bundle (typical browser tab
-        //     switch) — honoured if at least `titleChangeRefireMinInterval`
-        //     elapsed since the last refire, debouncing transient titles
-        //     during page loads ("Loading…" → "Inbox · Intercom")
-        //
-        // First tick after a refire uses the cached prefix (which has been
-        // cleared); subsequent ticks pick up the fresh snapshot once it
-        // completes.
-        let bundleChanged = bundleID != lastEnrichedBundleID
-        let titleChanged = snap.windowTitle != lastEnrichedWindowTitle
-        let elapsedSinceLast = Date().timeIntervalSince(lastEnrichmentAt)
-        let shouldRefire = enrichmentAllowed && (
-            bundleChanged ||
-            (titleChanged && elapsedSinceLast >= Self.titleChangeRefireMinInterval)
-        )
-        if shouldRefire {
-            lastEnrichedBundleID = bundleID
-            lastEnrichedWindowTitle = snap.windowTitle
-            lastEnrichmentAt = Date()
-            cachedEnrichmentPrefix = ""
-            lastEnrichedVisible = nil
-            let appliedCapture = captureAllowedHere
-            // Within-bundle title changes need an explicit cache invalidate —
-            // `visibleCache` in ContextEnricher is keyed on bundleID only and
-            // its 5s TTL would otherwise mask the new tab's content.
-            let invalidate = titleChanged && !bundleChanged
-            Task { [weak self] in
-                guard let self else { return }
-                if invalidate { await self.enricher.invalidate() }
-                // Temporarily toggle capture for this snapshot if the rule says clipboard-only.
-                await self.enricher.setCaptureEnabled(appliedCapture)
-                let enriched = await self.enricher.snapshot(focusedFieldRect: snap.elementRect)
-                // Restore global capture preference after the snapshot.
-                await self.enricher.setCaptureEnabled(self.store.captureEnabled)
-                await MainActor.run {
-                    self.cachedEnrichmentPrefix = enriched.prefix
-                    self.lastEnrichedVisible = enriched.visible
-                }
-            }
-        } else if !enrichmentAllowed {
-            cachedEnrichmentPrefix = ""
-            lastEnrichedVisible = nil
-            lastEnrichedBundleID = nil
-            lastEnrichedWindowTitle = nil
-        }
+        pollCaptureIcon()
+        manageEnrichment(snap: snap, bundleID: bundleID, allowMode: allowMode)
 
         // First-keystroke gate: enrichment has been kicked off (pre-warming
         // for when the user actually types) but the UI stays silent — no
@@ -1824,90 +2388,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // d'un texte existant doit ouvrir le picker, pas laisser la pilule
         // mid-line confisquer le tick — le détecteur ne regarde que le préfixe,
         // il est insensible au texte après le caret.
-        if store.slashTransformEnabled,
-           !snap.isSecureField,
-           !SlashTransformDetector.disabledBundles.contains(bundleID),
-           let slashState = SlashTransformDetector.detect(textBeforeCaret: prefix),
-           let rect = rectForGhost
-        {
-            // Ancre de refus : le préfixe jusqu'au « // » inclus. Tant qu'elle
-            // n'a pas changé après un Esc, le panneau reste fermé.
-            let anchor = String(prefix.prefix(prefix.count - slashState.filter.count))
-            // Anti-empiètement (rédaction) : tant que l'amorce est en cours de
-            // frappe, on n'affiche PAS les rangées (elles recouvriraient le
-            // texte). On attend une pause — préfixe complet stable depuis
-            // `composePauseSeconds`. Pendant l'attente : aucune rangée, aucun
-            // ghost, le champ reste net. (Les transformations sur texte existant
-            // ne sont pas concernées : on y tape un court filtre pour choisir.)
-            if slashState.isComposition {
-                let now = Date()
-                if composePauseAnchor != prefix {
-                    composePauseAnchor = prefix
-                    composePauseSince = now
-                }
-                if now.timeIntervalSince(composePauseSince) < Self.composePauseSeconds {
-                    hideSlashPicker()           // retire une rangée déjà posée si la frappe reprend
-                    predictor.cancel()
-                    lastPredictedPrefix = nil
-                    overlay.hide()
-                    interceptor.setActive(false)
-                    currentTypo = nil
-                    return
-                }
-            }
-            if slashPickerDismissedAnchor != anchor {
-                slashPickerDismissedAnchor = nil
-                if slashPickerState == nil { Log.info(.input, "slash_picker_shown") }
-                slashPickerState = slashState
-                slashPickerAnchor = anchor
-                if slashState.isComposition {
-                    // Rédaction : « // » en début de champ + amorce → une rangée
-                    // PAR LANGUE. La préférence « Rédiger en » met une langue en
-                    // tête (①, prise aussi par ⏎) ; les autres suivent. Un chiffre
-                    // override la langue à la volée — sélection rapide, jamais
-                    // dépendante d'un ghost ni de l'OCR. La résolution (détection /
-                    // épingle / repli) est calculée UNE fois par session de
-                    // rédaction (cache sur l'ancre, stable tant que « // » ne bouge
-                    // pas) — sinon la détection NL tournerait à chaque tick.
-                    if composeRowsAnchor != anchor {
-                        composeRows = orderedComposeLanguages(
-                            forBundle: bundleID, windowTitle: snap.windowTitle)
-                        composeRowsAnchor = anchor
-                    }
-                    slashPickerMatches = composeRows.map { .rediger($0) }
-                    let labels = composeRows.enumerated().map { idx, lang -> String in
-                        let name = lang.promptLanguageName ?? ""
-                        return idx == 0 ? tr(fr: "rédiger · \(name)", en: "compose · \(name)") : name
-                    }
-                    transformPicker.show(labels: labels, freeInstruction: nil, at: rect)
-                    interceptor.setSlashPickerArmed(true, digits: true, enter: true)
-                } else {
-                    slashPickerMatches = TransformationIntent.matches(filter: slashState.filter)
-                    transformPicker.show(
-                        labels: slashPickerMatches.map(\.displayName),
-                        freeInstruction: slashPickerMatches.isEmpty ? slashState.filter : nil,
-                        at: rect)
-                    // Digits coupés en mode instruction libre (« //passe en 3 points »
-                    // reste saisissable) ; ⏎ armé seulement filtre non vide (« // » nu
-                    // + Entrée = saut de ligne normal dans l'app hôte).
-                    interceptor.setSlashPickerArmed(
-                        true,
-                        digits: !slashPickerMatches.isEmpty,
-                        enter: !slashState.filter.isEmpty)
-                }
-                predictor.cancel()
-                lastPredictedPrefix = nil
-                overlay.hide()
-                interceptor.setActive(false)
-                currentTypo = nil
-                return
-            }
-        } else {
-            // Plus de trigger ouvert : fermer le panneau et ré-armer le
-            // déclenchement après un éventuel refus.
-            slashPickerDismissedAnchor = nil
-            composePauseAnchor = nil
-            hideSlashPicker()
+        if handleSlashPicker(prefix: prefix, bundleID: bundleID, snap: snap, rectForGhost: rectForGhost) {
+            return
         }
 
         // Trace de latence : 1ᵉʳ tick qui VOIT ce préfixe (l'écart avec le
@@ -1927,27 +2409,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // is a non-whitespace glyph, the user is editing INSIDE existing text,
         // not appending — the ghost would land in the wrong position and suggest
         // the wrong continuation. Hide immediately and bail.
-        if Self.shouldSuppressForCaretContext(text: text, caretIndex: caretIndex) {
-            // Mid-line (opt-in): rather than suppress, float the suggestion as a
-            // pill BELOW the caret line (Cotypist "Mid-line completion"). Fires
-            // wherever the caret is — including INSIDE a word ("couc|ou" →
-            // "couche…"), which is exactly Cotypist's behaviour. Same
-            // prefix-continuation; only the render differs (an inline ghost would
-            // overlap the glyphs that follow the caret). Off by default.
-            if store.midLineGhostEnabled, let rect = rectForGhost {
-                runMidLineGhost(
-                    prefix: prefix,
-                    rect: rect,
-                    text: text,
-                    caretIndex: caretIndex,
-                    snap: snap,
-                    font: hostFontForOverlay
-                )
-                return
-            }
-            overlay.hide()
-            presenceHideNow()
-            interceptor.setActive(false)
+        if handleMidLineSuppression(prefix: prefix, text: text, caretIndex: caretIndex, snap: snap, rectForGhost: rectForGhost, hostFont: hostFontForOverlay) {
             return
         }
 
@@ -1964,71 +2426,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         //
         // Hors flag (default-OFF), ce bloc est entièrement court-circuité : le `guard`
         // sur le flag rend le chemin byte-identique à l'historique.
-        if SuggestionPolicy.Tuning.midWordGhostRollingEnabled,
-           !ghostAnchorFull.isEmpty,
-           ghostAnchorBundle == bundleID {
-            let lowerPrefix = prefix.lowercased()
-            let lowerFull = ghostAnchorFull.lowercased()
-            if lowerFull.hasPrefix(lowerPrefix),
-               prefix.count >= ghostAnchorBase.count,
-               prefix.count < ghostAnchorFull.count {
-                // BACKSPACE / CONSO À L'INTÉRIEUR DE LA FENÊTRE (high-water).
-                // `ghostAnchorFull` porte le HIGH-WATER MARK : sa partie GAUCHE jusqu'au
-                // caret est le texte que l'UTILISATEUR a réellement tapé (capté en avant,
-                // cf. la branche d'extension ci-dessous), sa partie DROITE est le ghost.
-                // Reculer dans cette fenêtre restaure donc le texte de l'utilisateur lui-
-                // même, pas une prédiction du modèle. On slice le suffixe et l'affiche,
-                // SANS rétrécir `ghostAnchorFull` (le high-water tient). On reconstruit
-                // l'état partialRemainder pour que refill rolling et accept repartent bon.
-                // CE BLOC PASSE AVANT la suppression mid-mot backspace : un restore d'ancre
-                // actif gagne toujours (return ici).
-                let ghost = String(ghostAnchorFull.dropFirst(prefix.count))
-                predictor.cancel()
-                partialAcceptedAtPrefix = ghostAnchorBase
-                partialAcceptedSoFar = String(ghostAnchorFull.prefix(prefix.count).dropFirst(ghostAnchorBase.count))
-                partialAcceptedAtBundleID = bundleID
-                partialRemainder = ghost
-                if let rect = rectForGhost {
-                    overlay.show(text: ghost, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFontForOverlay, fieldRect: snap.elementRect)
-                    interceptor.setActive(true)
-                    maybeSpawnRollingRefill(committedText: prefix, bundleID: bundleID)
-                } else {
-                    overlay.hide()
-                    interceptor.setActive(false)
-                }
-                return
-            } else if lowerPrefix.hasPrefix(lowerFull),
-                      prefix.count >= ghostAnchorBase.count {
-                // FRAPPE EN AVANT QUI ÉTEND LE HIGH-WATER. Le préfixe a dépassé (ou égale)
-                // `ghostAnchorFull` tout en restant SUR LE CHEMIN (`prefix` commence par
-                // `ghostAnchorFull`). C'est exactement le cas où l'utilisateur tape un mot
-                // qui DIVERGE de la prédiction du modèle mais constitue son PROPRE texte :
-                // on capte ce texte dans le high-water. On met à jour
-                // `ghostAnchorFull = prefix + ghost-courant` (gauche = texte tapé réel),
-                // on GARDE `ghostAnchorBase` (borne gauche persistante), et on NE return
-                // PAS : on laisse le predict gate plus bas générer/peindre un ghost frais
-                // pour ce nouveau préfixe (qui ré-étendra le high-water via l'ancrage en
-                // bas de tick). Le ghost-courant n'est pris que s'il a été produit POUR ce
-                // préfixe exact ; sinon vide (la partie droite est rétablie au render).
-                let currentGhost = (predictor.predictedForPrefix == prefix) ? predictor.suggestion : ""
-                ghostAnchorFull = prefix + currentGhost
-                // pas de return : tombe dans la suppression / predict gate.
-            } else {
-                // DIVERGENCE (préfixe hors-chemin du high-water) ou SOUS LA BORNE GAUCHE →
-                // on jette l'ancre + tout reste de partial, et on tombe dans le predict
-                // normal. La prochaine génération fraîche reposera une ancre.
-                clearGhostAnchor()
-                if !partialRemainder.isEmpty {
-                    partialRemainder = ""
-                    partialAcceptedSoFar = ""
-                    partialAcceptedAtPrefix = ""
-                    partialAcceptedAtBundleID = nil
-                }
-                cancelRollingRefill()
-                Log.info(.predictor, "ghost_anchor_cleared")
-                // Pas de hide ici (anti-blank-frame) : le predict gate plus bas
-                // repeindra, ou un fresh ghost réancrera.
-            }
+        if handleRollingWindow(prefix: prefix, bundleID: bundleID, text: text, caretIndex: caretIndex, snap: snap, rectForGhost: rectForGhost, hostFont: hostFontForOverlay) {
+            return
         }
 
         // ── SUPPRESSION MID-MOT EN BACKSPACE (flag `midWordGhostRollingEnabled`) ──
@@ -2048,354 +2447,85 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // "enceinte" dans la fenêtre restaure toujours) et AVANT le predict gate.
         // Hors flag, la garde court-circuite tout ⇒ byte-identique (seule la var
         // `lastTickPrefixForDelete` est écrite, sans effet observable).
-        if SuggestionPolicy.Tuning.midWordGhostRollingEnabled {
-            let isBackspacing = !lastTickPrefixForDelete.isEmpty
-                && prefix.count < lastTickPrefixForDelete.count
-                && lastTickPrefixForDelete.hasPrefix(prefix)
-            lastTickPrefixForDelete = prefix
-            let trailingFragment = OutputFilter.trailingPartialWord(prefix)
-            let isIncompleteFragment = !trailingFragment.isEmpty
-                && !SuggestionPolicy.defaultPartialWordIsComplete(prefix)
-            if isBackspacing, isIncompleteFragment {
-                overlay.hide()
-                interceptor.setActive(false)
-                predictor.cancel()
-                lastPredictedPrefix = nil
-                Log.info(.predictor, "ghost_backspace_suppress")
-                return
-            }
-        }
-
-        // Live-consume promotion: if there's an active LLM suggestion and the
-        // user just typed characters that match its beginning (INCLUDING
-        // spaces and punctuation), promote it into the partial-remainder
-        // state. We deliberately do NOT break on word boundaries — Cotypist's
-        // observed behaviour keeps the same ghost while the user types
-        // straight through "ça va ?" letter by letter, space included.
-        // Regeneration happens only on divergence (typed char ≠ next ghost
-        // char) or when the entire ghost has been consumed.
-        if partialRemainder.isEmpty,
-           !predictor.suggestion.isEmpty,
-           let basePrefix = lastPredictedPrefix,
-           predictor.predictedForPrefix == basePrefix,
-           prefix.count > basePrefix.count,
-           prefix.hasPrefix(basePrefix) {
-            let typedSince = String(prefix.dropFirst(basePrefix.count))
-            // Case-insensitive match: typing "Bonjour" should still consume
-            // a ghost starting with "bonjour" (and vice versa). The user's
-            // typed casing wins in the rendered text (AX writes verbatim);
-            // only the matching logic ignores case.
-            // ANTI-FLICKER (revertable — see note below). We used to also require
-            // `!isStaleMidWordCompletion` here, which forced a hide+re-predict on
-            // EVERY keystroke into a "word-completion + tail" ghost — now the
-            // common case with the corpus (e.g. "achète du Bitcoin."). That blinked
-            // the tail on each letter. We now let these enter the smooth
-            // partial-remainder consume too: a correctly-guessed word consumes
-            // letter-by-letter with no flicker, and a *wrong* guess ("envi" →
-            // "es de manger" while the user types "envie ") still self-corrects —
-            // the divergence break in the partial-remainder block below re-predicts.
-            // Trade-off: on a wrong guess the stale tail shows for ~1 keystroke
-            // before the divergence swap, instead of being hidden.
-            // TO REVERT: re-add `&& !Self.isStaleMidWordCompletion(basePrefix:
-            // basePrefix, ghost: predictor.suggestion)` to the condition below.
-            if Self.isLiveConsumeMatch(ghost: predictor.suggestion, typedSince: typedSince) {
-                // User is consuming the ghost letter-by-letter — set up
-                // partial state so the existing block below renders the
-                // remainder and skips re-prediction.
-                partialAcceptedAtPrefix = basePrefix
-                partialAcceptedSoFar = typedSince
-                partialAcceptedAtBundleID = bundleID
-                partialRemainder = String(predictor.suggestion.dropFirst(typedSince.count))
-                predictor.cancel()
-            } else {
-                // Either the typed char(s) do NOT match the start of the ghost
-                // (true divergence — the "applielle" bug), OR the ghost was a
-                // stale mid-word completion guess that the user is now typing
-                // past (the "envies de" bug). Both cases: hide the stale ghost
-                // NOW, then fall through. The predict gate at the bottom fires a
-                // fresh prediction because `lastPredictedPrefix` is reset to nil
-                // here (and was stale anyway). Without this clear, the old ghost
-                // stayed rendered.
-                clearStaleGhostOnDivergence()
-            }
-        }
-
-        // Partial-accept guard: while we still owe the user a remainder, the
-        // overlay shows that remainder verbatim. The remainder may originate
-        // from a Tab partial accept OR from live typing consumption (above).
-        // If the AX text still matches what we injected/consumed, do not
-        // request a new prediction. If it doesn't match, we either keep
-        // consuming (user typing more matching letters) or treat it as
-        // divergence and re-predict.
-        if !partialRemainder.isEmpty {
-            let expected = partialAcceptedAtPrefix + partialAcceptedSoFar
-            if prefix == expected {
-                // Synced — render remainder and skip predict.
-                if let rect = rectForGhost {
-                    overlay.show(text: partialRemainder, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFontForOverlay, fieldRect: snap.elementRect)
-                    interceptor.setActive(true)
-                    // ── ROLLING REFILL (mode sliding-window, flag OFF par défaut) ──
-                    // Si le reste affiché descend SOUS le plancher de mots, on GÉNÈRE
-                    // les mots suivants à droite pendant que l'utilisateur consomme à
-                    // gauche → fenêtre glissante qui ne se vide jamais. Le reste
-                    // courant reste affiché ; les mots générés l'étendront au prochain
-                    // tick render. Jamais de hide pendant le refill.
-                    maybeSpawnRollingRefill(committedText: expected, bundleID: bundleID)
-                } else {
-                    overlay.hide()
-                    interceptor.setActive(false)
-                }
-                return
-            }
-            if expected.hasPrefix(prefix) {
-                // AX hasn't caught up to our latest inject yet. Keep showing
-                // the remainder, do not re-predict, wait for the next tick.
-                if let rect = rectForGhost {
-                    overlay.show(text: partialRemainder, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFontForOverlay, fieldRect: snap.elementRect)
-                    interceptor.setActive(true)
-                }
-                return
-            }
-            // Prefix has grown past expected — the user typed more. Could be
-            // (a) live consumption of the next letters of the remainder, or
-            // (b) divergence / word boundary requesting a regen.
-            if prefix.hasPrefix(expected), prefix.count > expected.count {
-                let typedSince = String(prefix.dropFirst(expected.count))
-                // Case-insensitive match: a typo correction or auto-capitalize
-                // shouldn't break the consume chain mid-suggestion.
-                if Self.isLiveConsumeMatch(ghost: partialRemainder, typedSince: typedSince) {
-                    // Continue consuming — match keeps going regardless of
-                    // whether the typed char is a space, punctuation, or
-                    // letter. Only divergence breaks the consume.
-                    partialAcceptedSoFar += typedSince
-                    partialRemainder = String(partialRemainder.dropFirst(typedSince.count))
-                    if partialRemainder.isEmpty {
-                        // Whole suggestion consumed by typing — record + reset,
-                        // let the next tick re-predict on the new prefix.
-                        recordPartialAcceptanceToHistoryIfAllowed()
-                        partialAcceptedSoFar = ""
-                        partialAcceptedAtPrefix = ""
-                        partialAcceptedAtBundleID = nil
-                        overlay.hide()
-                        interceptor.setActive(false)
-                        // Don't return — fall through so predict fires.
-                    } else {
-                        if let rect = rectForGhost {
-                            overlay.show(text: partialRemainder, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFontForOverlay, fieldRect: snap.elementRect)
-                            interceptor.setActive(true)
-                            // FLUX CONTINU : recharge le bord droit DÈS la conso active
-                            // (et pas seulement au tick synchronisé suivant), pour que la
-                            // fenêtre reste pleine pendant que tu tapes la suite du ghost.
-                            maybeSpawnRollingRefill(
-                                committedText: partialAcceptedAtPrefix + partialAcceptedSoFar,
-                                bundleID: bundleID)
-                        }
-                        return
-                    }
-                } else {
-                    // Divergence — record what was consumed, reset, fall
-                    // through to the predict gate below. Hide the stale ghost
-                    // (the remainder rendered last tick) so it can't linger if
-                    // the re-prediction is gated/empty.
-                    recordPartialAcceptanceToHistoryIfAllowed()
-                    partialRemainder = ""
-                    partialAcceptedSoFar = ""
-                    partialAcceptedAtPrefix = ""
-                    partialAcceptedAtBundleID = nil
-                    clearStaleGhostOnDivergence()
-                }
-            } else {
-                // Divergence (user deleted, moved caret, etc.) — record + reset.
-                // Hide the stale remainder ghost; re-prediction repaints later.
-                recordPartialAcceptanceToHistoryIfAllowed()
-                partialRemainder = ""
-                partialAcceptedSoFar = ""
-                partialAcceptedAtPrefix = ""
-                partialAcceptedAtBundleID = nil
-                clearStaleGhostOnDivergence()
-            }
-        }
-
-        // Emoji shortcode expansion — fires when text ends with `:code:<space>`.
-        // No ghost UI: we just do the AX replace and let the user see the result.
-        // Disabled in IDE/terminal bundles where `:tags:` are real syntax.
-        if store.emojiEnabled,
-           !EmojiExpander.disabledBundles.contains(bundleID),
-           let expansion = EmojiExpander.detect(textBeforeCaret: prefix)
-        {
-            DispatchQueue.global(qos: .userInitiated).async { [axClient] in
-                axClient.replaceTrailing(deleteChars: expansion.deleteChars, with: expansion.insert)
-            }
-            Log.info(.input, "emoji_expanded")
-            // L'expansion compte comme un usage → nourrit le ranking du picker.
-            store.incrementEmojiFrequency(expansion.shortcode)
-            hideEmojiPicker()
-            // Clear any pending suggestion so the LLM ghost doesn't blink.
-            predictor.cancel()
-            lastPredictedPrefix = nil
-            overlay.hide()
-            interceptor.setActive(false)
-            currentTypo = nil
+        if handleMidWordBackspaceSuppression(prefix: prefix) {
             return
         }
 
-        // Picker emoji — dès « : » ouvert avant le caret, une rangée de
-        // candidats numérotés ①–⑨ s'affiche au caret (parité Cotypist) ; la
-        // rangée physique 1–9 SANS Maj choisit (voir `KeyInterceptor.Key.digit`
-        // pour l'astuce AZERTY), Esc ferme, taper filtre. Pendant que le
-        // panneau est ouvert, pas de ghost LLM concurrent.
-        if store.emojiEnabled,
-           !EmojiExpander.disabledBundles.contains(bundleID),
-           let pickerState = EmojiExpander.pickerCandidates(
-               textBeforeCaret: prefix, frequency: store.emojiFrequency),
-           let rect = rectForGhost
-        {
-            // Ancre de refus : le préfixe jusqu'au `:` d'ouverture inclus. Tant
-            // qu'il n'a pas changé après un Esc, le panneau reste fermé.
-            let anchor = String(prefix.prefix(prefix.count - pickerState.fragmentLength + 1))
-            if emojiPickerDismissedAnchor != anchor {
-                emojiPickerDismissedAnchor = nil
-                if emojiPickerState == nil {
-                    Log.info(.input, "emoji_picker_shown")
-                }
-                emojiPickerState = pickerState
-                emojiPickerAnchor = anchor
-                emojiPicker.show(emojis: pickerState.candidates.map(\.emoji), at: rect)
-                interceptor.setPickerArmed(true)
-                predictor.cancel()
-                lastPredictedPrefix = nil
-                overlay.hide()
-                interceptor.setActive(false)
-                currentTypo = nil
-                return
-            }
-        } else {
-            // Plus de fragment ouvert : fermer le panneau et ré-armer le
-            // déclenchement après un éventuel refus.
-            emojiPickerDismissedAnchor = nil
-            hideEmojiPicker()
-        }
+        // Promeut une suggestion LLM active en état partial-remainder quand
+        // l'utilisateur tape ses premières lettres (consommation lettre-à-lettre).
+        promoteLiveConsume(prefix: prefix, bundleID: bundleID)
 
-        // Typo correction — preempts LLM ghost. Triggered only on word boundary
-        // (caret right after a non-word char like space/punct), so we don't
-        // flag the word the user is still typing.
-        let typoCandidate: TypoSuggestion? = {
-            guard store.typoEnabled,
-                  !EmojiExpander.disabledBundles.contains(bundleID),
-                  allowMode != .suggestionOnly  // honor per-app modes
-            else { return nil }
-            return typoDetector.checkLastWord(in: prefix, caretIndex: caretIndex)
-        }()
-
-        // Mid-word case: caret is INSIDE a misspelled word. We can't suggest a
-        // correction (no clear word boundary yet), but we should also stop the
-        // LLM from extending the typo with more wrong text. Bail before predict.
-        if store.hideOnTypo,
-           store.typoEnabled,
-           !EmojiExpander.disabledBundles.contains(bundleID),
-           typoCandidate == nil,
-           typoDetector.currentWordLooksSuspect(in: prefix, caretIndex: caretIndex)
-        {
-            currentTypo = nil
-            overlay.hide()
-            interceptor.setActive(false)
-            predictor.cancel()
-            lastPredictedPrefix = nil
+        // Tant qu'on doit un reste à l'utilisateur, on l'affiche verbatim et on
+        // saute le predict — sauf divergence, qui rend la main au predict gate.
+        if handlePartialRemainder(prefix: prefix, bundleID: bundleID, text: text, caretIndex: caretIndex, snap: snap, rectForGhost: rectForGhost, hostFont: hostFontForOverlay) {
             return
         }
 
-        if let typo = typoCandidate {
-            // Chars between the word's end and the caret (the typo can fire after
-            // a trailing space). `prefix` ends at the caret, so this is that gap.
-            let trailing = String(prefix[typo.range.upperBound...])
-            // A word followed by a separator is "done" → correct immediately. A
-            // word at end-of-string may still be in progress → debounce so we
-            // don't flash a correction for each incomplete prefix while typing.
-            if trailing.isEmpty {
-                let settleKey = typo.original + "\u{1}" + String(prefix.count)
-                if settleKey != typoSettleKey {
-                    typoSettleKey = settleKey
-                    typoSettleSince = Date()
-                }
-                let settled = typoSettleSince.map { Date().timeIntervalSince($0) >= Self.typoDebounce } ?? false
-                if !settled {
-                    // Still settling: suppress (no flash) and don't predict on a
-                    // suspected mid-word typo. Hide any prior typo ghost.
-                    if currentTypo != nil {
-                        overlay.hide()
-                        interceptor.setActive(false)
-                        currentTypo = nil
-                    }
-                    return
-                }
-            }
-            let isNewSuggestion = currentTypo != typo
-            currentTypo = typo
-            currentTypoTrailing = trailing
-            predictor.cancel()
-            lastPredictedPrefix = nil
-            if let rect = rectForGhost {
-                // Render once per new suggestion: the panel persists across the
-                // identical re-detections on subsequent ticks (currentTypo stays
-                // equal), so re-painting — and re-querying AX bounds — every tick
-                // is wasted. Any non-typo branch resets currentTypo, which makes
-                // the next typo tick "new" again and re-renders.
-                if isNewSuggestion {
-                    renderTypoSuggestion(
-                        typo,
-                        prefix: prefix,
-                        caretRect: rect,
-                        text: text,
-                        caretIndex: caretIndex,
-                        font: hostFontForOverlay
-                    )
-                    Log.info(.input, "typo_suggested")
-                }
-                interceptor.setActive(true)
-            }
+        if handleEmojiExpansion(prefix: prefix, bundleID: bundleID) {
             return
         }
-        currentTypo = nil
-        typoSettleKey = nil
 
-        if prefix != lastPredictedPrefix {
-            // Debounce: every prefix change cancels the pending task and
-            // schedules a new one. The LLM only fires once the user has
-            // paused for at least `predictDebounceNanos`. This avoids
-            // bursts of cancel-and-restart cycles when the user types
-            // multiple characters between two poll ticks.
-            //
-            // Debounce CONDITIONNEL (opt-in A/B, 12/06) : quand la réserve beam
-            // paraît chaude, le predict sera servi par l'avancée (~1 ms, zéro
-            // coût LLM) — les 15 ms n'y protègent rien, on les saute.
-            predictDebounceTask?.cancel()
-            let capturedPrefix = prefix
-            let capturedContext = cachedEnrichmentPrefix
-            let capturedCustom = CustomInstructionsWindow.current()
-            let capturedSnap = snap                                    // Phase 2: forward live AX snapshot
-            let skipDebounce = SuggestionPolicy.Tuning.debounceSkipWarmReserveEnabled
-                && predictor.reserveLooksWarm(forPrefix: prefix)
-            if skipDebounce {
-                LatencyTrace.mark("debounce_skip", key: LatencyTrace.key(prefix))
-            }
-            predictDebounceTask = Task { @MainActor [weak self] in
-                if !skipDebounce {
-                    try? await Task.sleep(nanoseconds: Self.predictDebounceNanos)
-                }
-                guard !Task.isCancelled, let self else { return }
-                // Re-check freshness — another tick may have advanced
-                // lastPredictedPrefix already.
-                guard self.lastPredictedPrefix != capturedPrefix else { return }
-                self.lastPredictedPrefix = capturedPrefix
-                self.predictor.predict(
-                    prefix: capturedPrefix,
-                    contextPrefix: capturedContext,
-                    customInstructions: capturedCustom,
-                    axSnapshot: capturedSnap                           // Phase 2: feeds fieldContext + afterCursor slots
-                )
-            }
+        if handleEmojiPicker(prefix: prefix, bundleID: bundleID, rectForGhost: rectForGhost) {
+            return
         }
 
+        if handleTypoCorrection(prefix: prefix, bundleID: bundleID, caretIndex: caretIndex, text: text, rectForGhost: rectForGhost, hostFont: hostFontForOverlay, allowMode: allowMode) {
+            return
+        }
+
+        schedulePredictIfNeeded(prefix: prefix, snap: snap)
+        paintFreshGhostAndAnchor(prefix: prefix, bundleID: bundleID, text: text, caretIndex: caretIndex, snap: snap, rectForGhost: rectForGhost, hostFont: hostFontForOverlay)
+    }
+
+    /// Planifie la génération LLM débouncée : tout changement de préfixe annule la tâche
+    /// en vol et en reprogramme une (cancel-on-keystroke). Le LLM ne tire qu'après une
+    /// pause de `predictDebounceNanos` ; quand la réserve beam paraît chaude, le debounce
+    /// est sauté (l'avancée servira en ~1 ms). Extrait de `tick()`.
+    private func schedulePredictIfNeeded(prefix: String, snap: AXSnapshot) {
+        guard prefix != lastPredictedPrefix else { return }
+        // Debounce: every prefix change cancels the pending task and
+        // schedules a new one. The LLM only fires once the user has
+        // paused for at least `predictDebounceNanos`. This avoids
+        // bursts of cancel-and-restart cycles when the user types
+        // multiple characters between two poll ticks.
+        //
+        // Debounce CONDITIONNEL (opt-in A/B, 12/06) : quand la réserve beam
+        // paraît chaude, le predict sera servi par l'avancée (~1 ms, zéro
+        // coût LLM) — les 15 ms n'y protègent rien, on les saute.
+        predictDebounceTask?.cancel()
+        let capturedPrefix = prefix
+        let capturedContext = cachedEnrichmentPrefix
+        let capturedCustom = CustomInstructionsWindow.current()
+        let capturedSnap = snap                                    // Phase 2: forward live AX snapshot
+        let skipDebounce = SuggestionPolicy.Tuning.debounceSkipWarmReserveEnabled
+            && predictor.reserveLooksWarm(forPrefix: prefix)
+        if skipDebounce {
+            LatencyTrace.mark("debounce_skip", key: LatencyTrace.key(prefix))
+        }
+        predictDebounceTask = Task { @MainActor [weak self] in
+            if !skipDebounce {
+                try? await Task.sleep(nanoseconds: Self.predictDebounceNanos)
+            }
+            guard !Task.isCancelled, let self else { return }
+            // Re-check freshness — another tick may have advanced
+            // lastPredictedPrefix already.
+            guard self.lastPredictedPrefix != capturedPrefix else { return }
+            self.lastPredictedPrefix = capturedPrefix
+            self.predictor.predict(
+                prefix: capturedPrefix,
+                contextPrefix: capturedContext,
+                customInstructions: capturedCustom,
+                axSnapshot: capturedSnap                           // Phase 2: feeds fieldContext + afterCursor slots
+            )
+        }
+    }
+
+    /// Peint le ghost final si la suggestion courante est FRAÎCHE (produite pour ce
+    /// préfixe exact — `shouldRenderSuggestion` empêche un ghost périmé d'être repeint au
+    /// nouveau caret), puis, en mode rolling, pose/étend l'ancre high-water (`ghostAnchor*`)
+    /// pour qu'un backspace ultérieur restaure le ghost via le slice. Suggestion non
+    /// fraîche ou pas de rect → masque. Dernière étape de `tick()`. Extrait de `tick()`.
+    private func paintFreshGhostAndAnchor(prefix: String, bundleID: String, text: String, caretIndex: Int, snap: AXSnapshot, rectForGhost: CGRect?, hostFont: NSFont?) {
         let suggestion = predictor.suggestion
         // Freshness gate: only paint a suggestion that was generated for THIS
         // exact prefix. `predictor.suggestion` can outlive the prefix it was made
@@ -2427,7 +2557,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        overlay.show(text: suggestion, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFontForOverlay, fieldRect: snap.elementRect)
+        overlay.show(text: suggestion, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFont, fieldRect: snap.elementRect)
         interceptor.setActive(true)
 
         // ── ANCRAGE D'UNE GÉNÉRATION FRAÎCHE (flag `midWordGhostRollingEnabled`) ──
