@@ -1009,18 +1009,18 @@ private struct CommandsStepView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(tr(fr: "Pour aller plus loin", en: "Going further"))
                     .font(.system(size: 22, weight: .semibold, design: .serif))
-                Text(tr(fr: "Au-delà du souffle, Souffleuse corrige, reformule, traduit et glisse des emojis — sans quitter votre clavier.", en: "Beyond the whisper, Souffleuse fixes, rephrases, translates, and drops in emoji — without leaving your keyboard."))
+                Text(tr(fr: "Au-delà du souffle, Souffleuse corrige, reformule, rédige, traduit et glisse des emojis — sans quitter votre clavier.", en: "Beyond the whisper, Souffleuse fixes, rephrases, drafts, translates, and drops in emoji — without leaving your keyboard."))
                     .font(.system(size: 13, design: .serif))
                     .italic()
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            // Le couteau suisse texte : // au début d'un mot.
+            // Mode transformation : // APRÈS un texte → agit sur ce qui précède.
             CommandCard(
-                trigger: "//",
+                trigger: "texte //",
                 title: tr(fr: "Corriger, reformuler, traduire", en: "Fix, rephrase, translate"),
-                subtitle: tr(fr: "Tapez // au début d'un mot, puis un chiffre — ou décrivez ce que vous voulez.", en: "Type // at the start of a word, then a number — or describe what you want.")
+                subtitle: tr(fr: "Tapez // juste après ce que vous venez d'écrire, puis un chiffre — ou décrivez ce que vous voulez.", en: "Type // right after what you just wrote, then a number — or describe what you want.")
             ) {
                 VStack(alignment: .leading, spacing: 6) {
                     SlashIntent(number: "1", label: tr(fr: "Corriger", en: "Fix"), detail: tr(fr: "orthographe et grammaire", en: "spelling and grammar"))
@@ -1031,6 +1031,13 @@ private struct CommandsStepView: View {
                 }
                 .padding(.top, 2)
             }
+
+            // Mode rédaction : // EN DÉBUT de champ + amorce → texte neuf.
+            CommandCard(
+                trigger: "// notes",
+                title: tr(fr: "Rédiger d'une amorce", en: "Draft from a few words"),
+                subtitle: tr(fr: "Commencez par // puis vos mots-clés — Souffleuse les développe en un texte complet. Un chiffre choisit la langue.", en: "Start with // then your keywords — Souffleuse expands them into a full text. A number picks the language.")
+            )
 
             // Emojis : deux-points + nom.
             CommandCard(
