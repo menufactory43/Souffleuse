@@ -198,6 +198,70 @@ public enum BeamGhostShaper {
         return ghost
     }
 
+    // MARK: - Garde écho CUMULATIF du rolling-refill (troncature)
+
+    /// **Anti-boucle cumulatif (TRONCATURE).** Pendant le rolling-refill, le modèle
+    /// base/PT peut RECOPIER verbatim un long segment du texte déjà tapé (`tail`) —
+    /// « 100% des gens sont des menteurs » re-proposé. Le garde per-pas
+    /// (`beamPostFilter`) ne le voit pas : chaque pas de refill est court (< seuil),
+    /// la boucle s'assemble mot-à-mot SOUS le radar. Ici on regarde le ghost
+    /// ASSEMBLÉ (`remainder` + `extension`) : si l'extension introduit un run
+    /// verbatim ≥ `minRun` mots présent dans `tail`, on TRONQUE l'extension juste
+    /// avant le 1ᵉʳ mot du run (la tête utile est gardée — on ne RÉDUIT pas le ghost,
+    /// on l'empêche juste de grandir en boucle). Si la boucle commence déjà DANS le
+    /// `remainder` (déjà affiché), on n'appende rien (« ») sans toucher au remainder.
+    /// Espace de tête de l'extension préservé. Insensible à la casse. Pur/testable.
+    public nonisolated static func truncateRefillEcho(
+        remainder: String, extension_: String, tail: String, minRun: Int
+    ) -> String {
+        guard minRun > 0, !extension_.isEmpty else { return extension_ }
+        // Comparaison NORMALISÉE (casse pliée + ponctuation d'extrémité ignorée) :
+        // sans ça « mieux, »/« mieux. » ≠ « mieux » et le run verbatim casse à la
+        // 1ʳᵉ ponctuation collée (la boucle de l'écran #2 passait à travers).
+        let tailWords = tail.split(whereSeparator: { $0.isWhitespace })
+            .map(normalizedWord).filter { !$0.isEmpty }
+        guard tailWords.count >= minRun else { return extension_ }
+        let remWords = remainder.split(whereSeparator: { $0.isWhitespace })
+            .map(normalizedWord).filter { !$0.isEmpty }
+
+        // Mots de l'extension (normalisés pour la comparaison) + index de DÉBUT de
+        // chacun dans la chaîne BRUTE (pour tronquer en conservant l'espacement, espace
+        // de tête compris). Les tokens purement ponctuation (normalisé vide) sont sautés.
+        var extWords: [String] = []
+        var extStarts: [String.Index] = []
+        var i = extension_.startIndex
+        while i < extension_.endIndex {
+            if extension_[i].isWhitespace { i = extension_.index(after: i); continue }
+            let start = i
+            while i < extension_.endIndex, !extension_[i].isWhitespace { i = extension_.index(after: i) }
+            let norm = normalizedWord(extension_[start..<i])
+            if !norm.isEmpty { extWords.append(norm); extStarts.append(start) }
+        }
+        guard !extWords.isEmpty else { return extension_ }
+
+        // 1ᵉʳ index du ghost assemblé où démarre un run verbatim ≥ minRun du tail.
+        let combined = remWords + extWords
+        var loopStart: Int? = nil
+        for j in 0..<combined.count {
+            var best = 0
+            for k in 0..<tailWords.count where tailWords[k] == combined[j] {
+                var run = 0
+                while j + run < combined.count, k + run < tailWords.count,
+                      combined[j + run] == tailWords[k + run] { run += 1 }
+                if run > best { best = run }
+            }
+            if best >= minRun { loopStart = j; break }
+        }
+        guard let loopStart else { return extension_ }
+
+        // Boucle démarrant dans le remainder déjà affiché → ne rien appender.
+        let keepExtWords = loopStart - remWords.count
+        guard keepExtWords > 0 else { return "" }
+        var head = String(extension_[..<extStarts[keepExtWords]])
+        while head.last?.isWhitespace == true { head.removeLast() }
+        return head
+    }
+
     /// Sélection du ghost parmi les K candidats du beam (triés par score, best en
     /// tête). Hors mid-line : comportement HISTORIQUE byte-identique — seul le
     /// 1ᵉʳ candidat (best) compte, post-filtré. Mid-line : on prend le PREMIER
@@ -312,6 +376,17 @@ public enum BeamGhostShaper {
             let run = OutputFilter.longestVerbatimRunWords(ghost: result, tail: userTail)
             if run >= SuggestionPolicy.Tuning.echoMinVerbatimRunWords { return "" }
         }
+        // Garde verbatim AUTONOME (non gaté par echoScore) : on ne DOIT jamais
+        // afficher un long écho verbatim, même quand le modèle le produit légitimement
+        // (entrée répétitive sans autre contexte). echoScore (sac-de-mots sur la
+        // dernière phrase) est dilué par un point récent (« …mieux. il faut ») et
+        // laisse passer ; le run verbatim est un signal direct. On TRONQUE avant le
+        // run (tête utile gardée), seuil conservateur > le garde gaté → zéro faux
+        // positif. Couvre le seed ET le refill (chemin partagé).
+        result = truncateRefillEcho(
+            remainder: "", extension_: result, tail: userTail,
+            minRun: SuggestionPolicy.Tuning.standaloneEchoRunWords)
+        if result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "" }
         // Coupe à la 1ʳᵉ frontière de clause/phrase (newline . ! ? ; :), bornes
         // INCLUSES — exactement « comme d'hab » (long-ghost) : on montre la suite
         // jusqu'à la fin de phrase comprise, on ne va pas AU-DELÀ. Ne pas proposer

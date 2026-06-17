@@ -82,6 +82,7 @@ let sweepScenarios = Array(scenarios.prefix(4))
 struct StepResult {
     let prefix: String
     let ghost: String
+    let raw: String              // ghost BRUT du beam (AVANT beamPostFilter) — pour mesurer la GÉNÉRATION (boucles/écho) isolée des gardes texte.
     let ms: Int
     let gatedNewSentence: Bool   // G2 a fait taire (juste après un point).
     let midSentence: Bool        // la phrase en cours a ≥ minLetters lettres (zone « ne doit pas être vide »).
@@ -96,7 +97,7 @@ func stepGhost(_ beam: BeamGhostEngine, userTail: String, beamWidth: Int,
     let armed = BeamGhostShaper.sentenceArmed(userTail: userTail, minLetters: minLetters)
     let midSentence = BeamGhostShaper.currentSentenceLetterCount(userTail) >= minLetters
     if !armed {
-        return StepResult(prefix: userTail, ghost: "", ms: 0,
+        return StepResult(prefix: userTail, ghost: "", raw: "", ms: 0,
                           gatedNewSentence: true, midSentence: false)
     }
     let choice = BeamGhostShaper.beamConfigChoice(userTail: userTail, beamWidth: beamWidth)
@@ -105,12 +106,13 @@ func stepGhost(_ beam: BeamGhostEngine, userTail: String, beamWidth: Int,
     // tester 2/3 pour mesurer si la robustesse des après-espace s'améliore).
     let width = choice.isBoundary ? boundaryWidth : choice.width
     let result = await beam.ghost(prompt: prompt, requiredPrefix: choice.requiredPrefix, maxWidth: width)
+    let raw = result.best?.ghost ?? ""
     let caretAfterSpace = userTail.last == " " || userTail.last == "\t"
     let ghost = BeamGhostShaper.beamPostFilter(
-        rawGhost: result.best?.ghost ?? "", isBoundary: choice.isBoundary,
+        rawGhost: raw, isBoundary: choice.isBoundary,
         caretAfterSpace: caretAfterSpace, userTail: userTail, maxWords: maxWords)
     let ms = Int(Date().timeIntervalSince(t0) * 1000)
-    return StepResult(prefix: userTail, ghost: ghost, ms: ms,
+    return StepResult(prefix: userTail, ghost: ghost, raw: raw, ms: ms,
                       gatedNewSentence: false, midSentence: midSentence)
 }
 
@@ -137,6 +139,28 @@ func replaySentence(_ beam: BeamGhostEngine, _ sentence: String, beamWidth: Int,
         i += step
     }
     return SentenceRun(sentence: sentence, steps: steps)
+}
+
+// ── Métrique d'AUTO-RÉPÉTITION d'un ghost ──
+/// Nombre MAX de répétitions consécutives d'un n-gramme (n∈1…4) dans le ghost.
+/// « 7 min 7 min 7 min » → 3 ; « la qualité la rapidité la qualité » → 1 (pas
+/// consécutif) ; ghost propre → 1. Insensible à la casse. Le signal direct des
+/// boucles que `repeat_penalty` doit casser (orthogonal à l'écho du tail).
+func loopScore(_ ghost: String) -> Int {
+    let w = ghost.split(whereSeparator: { $0.isWhitespace }).map { $0.lowercased() }
+    guard w.count >= 2 else { return 1 }
+    var best = 1
+    for n in 1...min(4, w.count / 2) {
+        var i = 0
+        while i + n <= w.count {
+            var reps = 1
+            var j = i + n
+            while j + n <= w.count, Array(w[i..<i + n]) == Array(w[j..<j + n]) { reps += 1; j += n }
+            if reps > best { best = reps }
+            i += 1
+        }
+    }
+    return best
 }
 
 // ── Détection des régressions sur un run ──
@@ -194,6 +218,96 @@ guard await beam.load(modelPath: gguf, contextTokens: 4096) else {
 }
 
 func padR(_ s: String, _ n: Int) -> String { s.count >= n ? s : s + String(repeating: " ", count: n - s.count) }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MARK: - Mode A/B PÉNALITÉ DE RÉPÉTITION (fix #2).
+//   PROBE_REPEAT_AB=1 swift run -c release SouffleuseBeamGhostProbe
+//   PROBE_PENALTIES=1.0,1.1,1.3 PROBE_MAXWORDS=8 PROBE_REPEAT_AB=1 swift run …
+// Pour chaque pénalité : scénarios BAIT (dégénérés → boucles) mesurés en
+// auto-répétition (loopScore), + scénarios RÉALISTES mesurés en qualité
+// (non-vide %, mots/ghost, régressions) — pour vérifier qu'on casse les boucles
+// SANS effondrer les bons ghosts. La pénalité 1.0 = baseline OFF (doit reproduire
+// les boucles : c'est la VÉRIF du harnais).
+// ─────────────────────────────────────────────────────────────────────────────
+if (env["PROBE_REPEAT_AB"] ?? "0") == "1" {
+    await beam.unload()   // les itérations construisent leur propre engine.
+    let penalties: [Float] = env["PROBE_PENALTIES"]
+        .map { $0.split(separator: ",").compactMap { Float($0) } }
+        .flatMap { $0.isEmpty ? nil : $0 } ?? [1.0, 1.1, 1.2, 1.3]
+    let lastN = Int(env["PROBE_REPEAT_LASTN"] ?? "") ?? 64
+    let mw = Int(env["PROBE_MAXWORDS"] ?? "") ?? 8   // Long : zone où les boucles apparaissent.
+    let bait: [String] = [
+        "comment 100% des gens sont des menteurs, et que les gens sont des menteurs,",
+        "il faut toujours faire de son mieux, oui il faut toujours faire de son mieux.",
+        "je pense que c'est une très bonne idée, je pense que c'est une très bonne idée,",
+        "le serveur est encore tombé en panne ce matin, le serveur est encore tombé en",
+        "points clés la qualité la rapidité la qualité la rapidité la",
+    ]
+    let realistic = Array(scenarios.prefix(4))
+
+    print("")
+    print("════════════════════════════════════════════════════════════════════════")
+    print(" A/B PÉNALITÉ DE RÉPÉTITION — beam · maxWords=\(mw) · lastN=\(lastN) · pas=\(stepChars)")
+    print(" BAIT \(bait.count) phrases (boucles) · RÉALISTE \(realistic.count) phrases (qualité)")
+    print(" pénalité 1.0 = baseline OFF (doit REPRODUIRE les boucles = vérif du harnais)")
+    print("════════════════════════════════════════════════════════════════════════")
+    print("")
+    print(" Mesures sur le ghost BRUT (avant beamPostFilter) — isole la GÉNÉRATION.")
+    print(" echo = longestVerbatimRunWords(brut vs tapé) ; loop = auto-répétition consécutive.")
+    print("")
+    print(padR("penalty", 9) + padR("echo≥5%", 9) + padR("maxEcho", 9) + padR("loop≥3%", 9)
+        + padR("maxLoop", 9) + padR("réalNE%", 9) + padR("mots", 7) + padR("lat a/max", 12) + "régr")
+
+    for pen in penalties {
+        var cfg = baseConfig; cfg.maxWords = mw; cfg.repeatPenalty = pen; cfg.repeatLastN = lastN
+        let b = BeamGhostEngine(config: cfg)
+        guard await b.load(modelPath: gguf, contextTokens: 4096) else { continue }
+
+        // BAIT → métriques de boucle/écho sur le BRUT (génération isolée).
+        var maxLoop = 1, maxEcho = 0, loops3 = 0, echo5 = 0, baitSteps = 0
+        var worst = (score: 0, prefix: "", raw: "")
+        for s in bait {
+            let run = await replaySentence(b, s, beamWidth: beamWidth, maxWords: mw,
+                                           minLetters: minLetters, step: stepChars, boundaryWidth: boundaryWidth)
+            for st in run.steps where !st.gatedNewSentence && !st.raw.isEmpty {
+                baitSteps += 1
+                let ls = loopScore(st.raw)
+                let er = OutputFilter.longestVerbatimRunWords(ghost: st.raw, tail: st.prefix)
+                if ls > maxLoop { maxLoop = ls }
+                if er > maxEcho { maxEcho = er }
+                if ls >= 3 { loops3 += 1 }
+                if er >= 5 { echo5 += 1 }
+                if er > worst.score { worst = (er, st.prefix, st.raw) }
+            }
+        }
+        // RÉALISTE → qualité.
+        var rSteps = 0, rNonEmpty = 0, rRegs = 0
+        var rWords: [Int] = []; var rLats: [Int] = []
+        for s in realistic {
+            let run = await replaySentence(b, s, beamWidth: beamWidth, maxWords: mw,
+                                           minLetters: minLetters, step: stepChars, boundaryWidth: boundaryWidth)
+            rRegs += findRegressions(run).count
+            for st in run.steps where !st.gatedNewSentence {
+                rSteps += 1; rLats.append(st.ms)
+                if !st.ghost.isEmpty { rNonEmpty += 1; rWords.append(st.ghost.split(whereSeparator: { $0.isWhitespace }).count) }
+            }
+        }
+        let realNE = rSteps == 0 ? 0 : rNonEmpty * 100 / rSteps
+        let e5 = baitSteps == 0 ? 0 : echo5 * 100 / baitSteps
+        let l3 = baitSteps == 0 ? 0 : loops3 * 100 / baitSteps
+        let avgW = rWords.isEmpty ? 0 : Double(rWords.reduce(0, +)) / Double(rWords.count)
+        let avgMs = rLats.isEmpty ? 0 : rLats.reduce(0, +) / rLats.count
+        let maxMs = rLats.max() ?? 0
+        print(padR(String(format: "%.2f", pen), 9) + padR("\(e5)%", 9) + padR("\(maxEcho)", 9)
+            + padR("\(l3)%", 9) + padR("\(maxLoop)", 9) + padR("\(realNE)%", 9)
+            + padR(String(format: "%.1f", avgW), 7) + padR("\(avgMs)/\(maxMs)", 12) + "\(rRegs)")
+        print("     pire écho brut: …\(worst.prefix.suffix(24).debugDescription) → \(worst.raw.debugDescription)")
+        await b.unload()
+    }
+    print("")
+    print("FIN A/B. (bait≥2/≥3 = % de pas avec auto-répétition ; viser ↓ sans baisser réalNE%/mots ni monter lat)")
+    exit(0)
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MARK: - Mode BALAYAGE des knobs (exp × maxWords) sur 4 phrases.

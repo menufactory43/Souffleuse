@@ -575,8 +575,20 @@ final class ModelRuntime {
         // ghost retombe à ~3 mots pendant la conso. nil en Court/Moyen ⇒ inchangé.
         let genW: Int? = isLong ? max(1, maxWords) : nil
         let genT: Int? = isLong ? (max(1, maxWords) * 4 + 2) : nil
+        // MÊME choix de config que le SEED (`generateGhostBeam` ligne ~397) : si le
+        // texte visible finit MID-MOT (un pas de refill précédent a pu tronquer un
+        // mot, « …vous » → « …vo »), on contraint le beam avec ce fragment comme
+        // `requiredPrefix` au lieu de décoder libre depuis une frontière supposée.
+        // `ghostText` (requiredPrefixLen != 0) renvoie alors la COMPLÉTION sans
+        // métaspace (« us »), et on ne force PAS d'espace de tête → le join colle
+        // « vo » + « us » = « vous ». Sans ça (ancien `requiredPrefix: ""` +
+        // `isBoundary: true` + espace forcé), la complétion repartait en frontière
+        // et l'espace forcé donnait « vo us » (régression vue au clavier). À une
+        // VRAIE frontière (`isBoundary == true`), `requiredPrefix == ""` → chemin
+        // byte-identique à l'ancien.
+        let cfg = BeamGhostShaper.beamConfigChoice(userTail: request.userTail, beamWidth: 1)
         GpuGate.shared.ghostBegan()
-        let result = await beamEngine.ghost(prompt: prompt, requiredPrefix: "", maxWidth: 1,
+        let result = await beamEngine.ghost(prompt: prompt, requiredPrefix: cfg.requiredPrefix, maxWidth: cfg.width,
                                             genMaxTokens: genT, genMaxWords: genW)
         GpuGate.shared.ghostEnded()
         if Task.isCancelled { return nil }
@@ -587,14 +599,17 @@ final class ModelRuntime {
         LatencyTrace.mark("refill_prefill_ms", key: LatencyTrace.key(request.prefix), info: result.prefillMillis)
         LatencyTrace.mark("refill_decode_ms", key: LatencyTrace.key(request.prefix), info: result.decodeMillis)
         var ext = BeamGhostShaper.beamPostFilter(
-            rawGhost: result.best?.ghost ?? "", isBoundary: true, caretAfterSpace: false,
+            rawGhost: result.best?.ghost ?? "", isBoundary: cfg.isBoundary, caretAfterSpace: false,
             userTail: request.userTail, maxWords: maxWords, trimDanglingTail: isLong)
         // Mid-line : un refill qui recopie le texte après le caret réintroduirait
         // la duplication que `selectGhost` vient d'éviter au seed — même coupe.
         // `axTextAfterCaret` est nil sur le chemin end-of-line → no-op.
         ext = BeamGhostShaper.afterCaretEchoCut(ghost: ext, afterCaret: request.axTextAfterCaret)
         guard !ext.isEmpty else { return nil }
-        if ext.first != " " { ext = " " + ext }   // espace de tête pour se concaténer au reste
+        // Espace de tête SEULEMENT à une frontière (mot neuf à concaténer au reste).
+        // Mid-mot, l'extension COMPLÈTE le fragment (« vo » + « us ») → on la laisse
+        // collée, sinon on recrée le « vo us » que ce fix corrige.
+        if cfg.isBoundary, ext.first != " " { ext = " " + ext }
         Log.info(.predictor, "ghost_beam_refill_ms", count: result.elapsedMillis)
         return ext
     }
