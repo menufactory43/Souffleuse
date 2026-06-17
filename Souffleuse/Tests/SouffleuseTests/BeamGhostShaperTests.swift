@@ -180,6 +180,95 @@ struct BeamGhostShaperTests {
         #expect(out == "mer")
     }
 
+    @Test func refill_midWordCompletionGluesNoSpuriousSpace() {
+        // RÉGRESSION « vo us » : pendant le rolling-refill, un mot peut être généré
+        // en DEUX pas (« …vous » tronqué en « …vo », puis « us » au pas suivant). Le
+        // refill DOIT réutiliser `beamConfigChoice` (comme le seed) — sinon il forçait
+        // `isBoundary: true` + un espace de tête et le join donnait « vo us ».
+        let visible = "comment allez vo"
+        let cfg = BeamGhostShaper.beamConfigChoice(userTail: visible, beamWidth: 1)
+        // Visible mid-mot ⇒ PAS une frontière, le fragment devient `requiredPrefix`.
+        #expect(cfg.isBoundary == false)
+        #expect(cfg.requiredPrefix == "vo")
+        // Avec ce choix, `ghostText` (requiredPrefixLen != 0) renvoie la complétion
+        // « us » SANS métaspace → le post-filtre la garde COLLÉE (le refill ne force
+        // alors pas d'espace) → join « vo » + « us » = « vous ».
+        let fixed = BeamGhostShaper.beamPostFilter(
+            rawGhost: "us", isBoundary: cfg.isBoundary, caretAfterSpace: false,
+            userTail: visible, maxWords: 8)
+        #expect(fixed == "us")
+        // Documente la CAUSE : l'ancien `isBoundary: true` en dur insérait l'espace.
+        let buggy = BeamGhostShaper.beamPostFilter(
+            rawGhost: "us", isBoundary: true, caretAfterSpace: false,
+            userTail: visible, maxWords: 8)
+        #expect(buggy == " us")
+    }
+
+    // MARK: - Garde écho CUMULATIF du rolling-refill (troncature)
+
+    @Test func refillEcho_dropsFullVerbatimLoop() {
+        // RÉGRESSION écran : le refill recopie tout « 100% des gens sont des … » déjà
+        // tapé. Le run verbatim ≥ 4 mots ⇒ extension entièrement coupée (rien à
+        // appender), le remainder existant n'est PAS touché.
+        let tail = "comment 100% des gens sont des menteurs, et que les gens sont des menteurs,"
+        let out = BeamGhostShaper.truncateRefillEcho(
+            remainder: "", extension_: " 100% des gens sont des mente", tail: tail, minRun: 4)
+        #expect(out == "")
+    }
+
+    @Test func refillEcho_keepsUsefulHeadTruncatesLoopTail() {
+        // Tête neuve (« vraiment ») gardée, queue bouclante coupée.
+        let tail = "100% des gens sont des menteurs"
+        let out = BeamGhostShaper.truncateRefillEcho(
+            remainder: "je pense que", extension_: " vraiment 100% des gens sont",
+            tail: tail, minRun: 4)
+        #expect(out == " vraiment")
+    }
+
+    @Test func refillEcho_loopStartingInRemainderYieldsEmpty() {
+        // La boucle commence dans le remainder DÉJÀ affiché → on n'appende rien,
+        // sans rogner le remainder (on ne RÉDUIT pas le ghost existant).
+        let tail = "le serveur est en panne le serveur est en panne"
+        let out = BeamGhostShaper.truncateRefillEcho(
+            remainder: "le serveur est", extension_: " en panne demain", tail: tail, minRun: 4)
+        #expect(out == "")
+    }
+
+    @Test func refillEcho_shortReuseNotGated() {
+        // Réutilisation courte (< minRun mots contigus) = légitime → inchangé.
+        let tail = "merci beaucoup pour votre aide précieuse"
+        let out = BeamGhostShaper.truncateRefillEcho(
+            remainder: "je dis", extension_: " merci beaucoup à vous", tail: tail, minRun: 4)
+        #expect(out == " merci beaucoup à vous")
+    }
+
+    @Test func refillEcho_noEchoUntouched() {
+        // Aucun recouvrement → extension renvoyée telle quelle (espace de tête inclus).
+        let out = BeamGhostShaper.truncateRefillEcho(
+            remainder: "bonjour", extension_: " bonne journée à tous", tail: "rien à voir ici",
+            minRun: 4)
+        #expect(out == " bonne journée à tous")
+    }
+
+    @Test func filter_standaloneVerbatimLoopTruncatedDespitePeriod() {
+        // CAS ÉCRAN #2 : écho à cheval sur un point — echoScore (dernière phrase
+        // « il faut ») est dilué sous 0.5, le garde gaté ne se déclenche pas, mais le
+        // garde verbatim AUTONOME coupe la boucle (run ≥ 5).
+        let tail = "il faut toujours faire de son mieux, oui il faut toujours faire de son mieux. il faut"
+        let out = BeamGhostShaper.beamPostFilter(
+            rawGhost: "toujours faire de son mieux oui il faut", isBoundary: false, caretAfterSpace: false,
+            userTail: tail, maxWords: 20)
+        #expect(out.isEmpty)
+    }
+
+    @Test func filter_standaloneKeepsShortReuse() {
+        // Réutilisation < seuil autonome (5) → NON coupée (zéro faux positif).
+        let out = BeamGhostShaper.beamPostFilter(
+            rawGhost: "de son mieux vraiment", isBoundary: false, caretAfterSpace: false,
+            userTail: "il faut faire de son mieux", maxWords: 20)
+        #expect(out == "de son mieux vraiment")
+    }
+
     // MARK: - Post-filtre : dédup d'un mot répété en tête
 
     @Test func filter_dedupLeadingRepeatedWord() {
