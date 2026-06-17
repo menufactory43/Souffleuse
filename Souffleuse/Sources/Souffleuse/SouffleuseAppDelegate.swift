@@ -1647,6 +1647,104 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Picker « // » : dès « // » ouvert en début de mot avant le caret, affiche la
+    /// rangée d'intentions (transformation) ou une rangée par langue (rédaction) au
+    /// caret, gèle le pipeline ghost/typo/predict tant qu'il est ouvert, et applique
+    /// l'anti-empiètement (pause de frappe avant d'afficher en mode rédaction) et
+    /// l'ancre de refus (Esc). Retourne `true` quand `tick()` doit sortir (panneau
+    /// affiché ou en attente de pause), `false` pour laisser le tick continuer.
+    /// Placé AVANT la branche mid-line : un « // » tapé au milieu d'un texte doit
+    /// ouvrir le picker, pas laisser la pilule mid-line confisquer le tick.
+    /// Extrait de `tick()`.
+    private func handleSlashPicker(prefix: String, bundleID: String, snap: AXSnapshot, rectForGhost: CGRect?) -> Bool {
+        if store.slashTransformEnabled,
+           !snap.isSecureField,
+           !SlashTransformDetector.disabledBundles.contains(bundleID),
+           let slashState = SlashTransformDetector.detect(textBeforeCaret: prefix),
+           let rect = rectForGhost
+        {
+            // Ancre de refus : le préfixe jusqu'au « // » inclus. Tant qu'elle
+            // n'a pas changé après un Esc, le panneau reste fermé.
+            let anchor = String(prefix.prefix(prefix.count - slashState.filter.count))
+            // Anti-empiètement (rédaction) : tant que l'amorce est en cours de
+            // frappe, on n'affiche PAS les rangées (elles recouvriraient le
+            // texte). On attend une pause — préfixe complet stable depuis
+            // `composePauseSeconds`. Pendant l'attente : aucune rangée, aucun
+            // ghost, le champ reste net. (Les transformations sur texte existant
+            // ne sont pas concernées : on y tape un court filtre pour choisir.)
+            if slashState.isComposition {
+                let now = Date()
+                if composePauseAnchor != prefix {
+                    composePauseAnchor = prefix
+                    composePauseSince = now
+                }
+                if now.timeIntervalSince(composePauseSince) < Self.composePauseSeconds {
+                    hideSlashPicker()           // retire une rangée déjà posée si la frappe reprend
+                    predictor.cancel()
+                    lastPredictedPrefix = nil
+                    overlay.hide()
+                    interceptor.setActive(false)
+                    currentTypo = nil
+                    return true
+                }
+            }
+            if slashPickerDismissedAnchor != anchor {
+                slashPickerDismissedAnchor = nil
+                if slashPickerState == nil { Log.info(.input, "slash_picker_shown") }
+                slashPickerState = slashState
+                slashPickerAnchor = anchor
+                if slashState.isComposition {
+                    // Rédaction : « // » en début de champ + amorce → une rangée
+                    // PAR LANGUE. La préférence « Rédiger en » met une langue en
+                    // tête (①, prise aussi par ⏎) ; les autres suivent. Un chiffre
+                    // override la langue à la volée — sélection rapide, jamais
+                    // dépendante d'un ghost ni de l'OCR. La résolution (détection /
+                    // épingle / repli) est calculée UNE fois par session de
+                    // rédaction (cache sur l'ancre, stable tant que « // » ne bouge
+                    // pas) — sinon la détection NL tournerait à chaque tick.
+                    if composeRowsAnchor != anchor {
+                        composeRows = orderedComposeLanguages(
+                            forBundle: bundleID, windowTitle: snap.windowTitle)
+                        composeRowsAnchor = anchor
+                    }
+                    slashPickerMatches = composeRows.map { .rediger($0) }
+                    let labels = composeRows.enumerated().map { idx, lang -> String in
+                        let name = lang.promptLanguageName ?? ""
+                        return idx == 0 ? tr(fr: "rédiger · \(name)", en: "compose · \(name)") : name
+                    }
+                    transformPicker.show(labels: labels, freeInstruction: nil, at: rect)
+                    interceptor.setSlashPickerArmed(true, digits: true, enter: true)
+                } else {
+                    slashPickerMatches = TransformationIntent.matches(filter: slashState.filter)
+                    transformPicker.show(
+                        labels: slashPickerMatches.map(\.displayName),
+                        freeInstruction: slashPickerMatches.isEmpty ? slashState.filter : nil,
+                        at: rect)
+                    // Digits coupés en mode instruction libre (« //passe en 3 points »
+                    // reste saisissable) ; ⏎ armé seulement filtre non vide (« // » nu
+                    // + Entrée = saut de ligne normal dans l'app hôte).
+                    interceptor.setSlashPickerArmed(
+                        true,
+                        digits: !slashPickerMatches.isEmpty,
+                        enter: !slashState.filter.isEmpty)
+                }
+                predictor.cancel()
+                lastPredictedPrefix = nil
+                overlay.hide()
+                interceptor.setActive(false)
+                currentTypo = nil
+                return true
+            }
+        } else {
+            // Plus de trigger ouvert : fermer le panneau et ré-armer le
+            // déclenchement après un éventuel refus.
+            slashPickerDismissedAnchor = nil
+            composePauseAnchor = nil
+            hideSlashPicker()
+        }
+        return false
+    }
+
     private func tick() {
         guard store.enabled else { return }
         // Icône vivante : par défaut « pas de champ actif » ; repassé à vrai plus
@@ -1851,90 +1949,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // d'un texte existant doit ouvrir le picker, pas laisser la pilule
         // mid-line confisquer le tick — le détecteur ne regarde que le préfixe,
         // il est insensible au texte après le caret.
-        if store.slashTransformEnabled,
-           !snap.isSecureField,
-           !SlashTransformDetector.disabledBundles.contains(bundleID),
-           let slashState = SlashTransformDetector.detect(textBeforeCaret: prefix),
-           let rect = rectForGhost
-        {
-            // Ancre de refus : le préfixe jusqu'au « // » inclus. Tant qu'elle
-            // n'a pas changé après un Esc, le panneau reste fermé.
-            let anchor = String(prefix.prefix(prefix.count - slashState.filter.count))
-            // Anti-empiètement (rédaction) : tant que l'amorce est en cours de
-            // frappe, on n'affiche PAS les rangées (elles recouvriraient le
-            // texte). On attend une pause — préfixe complet stable depuis
-            // `composePauseSeconds`. Pendant l'attente : aucune rangée, aucun
-            // ghost, le champ reste net. (Les transformations sur texte existant
-            // ne sont pas concernées : on y tape un court filtre pour choisir.)
-            if slashState.isComposition {
-                let now = Date()
-                if composePauseAnchor != prefix {
-                    composePauseAnchor = prefix
-                    composePauseSince = now
-                }
-                if now.timeIntervalSince(composePauseSince) < Self.composePauseSeconds {
-                    hideSlashPicker()           // retire une rangée déjà posée si la frappe reprend
-                    predictor.cancel()
-                    lastPredictedPrefix = nil
-                    overlay.hide()
-                    interceptor.setActive(false)
-                    currentTypo = nil
-                    return
-                }
-            }
-            if slashPickerDismissedAnchor != anchor {
-                slashPickerDismissedAnchor = nil
-                if slashPickerState == nil { Log.info(.input, "slash_picker_shown") }
-                slashPickerState = slashState
-                slashPickerAnchor = anchor
-                if slashState.isComposition {
-                    // Rédaction : « // » en début de champ + amorce → une rangée
-                    // PAR LANGUE. La préférence « Rédiger en » met une langue en
-                    // tête (①, prise aussi par ⏎) ; les autres suivent. Un chiffre
-                    // override la langue à la volée — sélection rapide, jamais
-                    // dépendante d'un ghost ni de l'OCR. La résolution (détection /
-                    // épingle / repli) est calculée UNE fois par session de
-                    // rédaction (cache sur l'ancre, stable tant que « // » ne bouge
-                    // pas) — sinon la détection NL tournerait à chaque tick.
-                    if composeRowsAnchor != anchor {
-                        composeRows = orderedComposeLanguages(
-                            forBundle: bundleID, windowTitle: snap.windowTitle)
-                        composeRowsAnchor = anchor
-                    }
-                    slashPickerMatches = composeRows.map { .rediger($0) }
-                    let labels = composeRows.enumerated().map { idx, lang -> String in
-                        let name = lang.promptLanguageName ?? ""
-                        return idx == 0 ? tr(fr: "rédiger · \(name)", en: "compose · \(name)") : name
-                    }
-                    transformPicker.show(labels: labels, freeInstruction: nil, at: rect)
-                    interceptor.setSlashPickerArmed(true, digits: true, enter: true)
-                } else {
-                    slashPickerMatches = TransformationIntent.matches(filter: slashState.filter)
-                    transformPicker.show(
-                        labels: slashPickerMatches.map(\.displayName),
-                        freeInstruction: slashPickerMatches.isEmpty ? slashState.filter : nil,
-                        at: rect)
-                    // Digits coupés en mode instruction libre (« //passe en 3 points »
-                    // reste saisissable) ; ⏎ armé seulement filtre non vide (« // » nu
-                    // + Entrée = saut de ligne normal dans l'app hôte).
-                    interceptor.setSlashPickerArmed(
-                        true,
-                        digits: !slashPickerMatches.isEmpty,
-                        enter: !slashState.filter.isEmpty)
-                }
-                predictor.cancel()
-                lastPredictedPrefix = nil
-                overlay.hide()
-                interceptor.setActive(false)
-                currentTypo = nil
-                return
-            }
-        } else {
-            // Plus de trigger ouvert : fermer le panneau et ré-armer le
-            // déclenchement après un éventuel refus.
-            slashPickerDismissedAnchor = nil
-            composePauseAnchor = nil
-            hideSlashPicker()
+        if handleSlashPicker(prefix: prefix, bundleID: bundleID, snap: snap, rectForGhost: rectForGhost) {
+            return
         }
 
         // Trace de latence : 1ᵉʳ tick qui VOIT ce préfixe (l'écart avec le
