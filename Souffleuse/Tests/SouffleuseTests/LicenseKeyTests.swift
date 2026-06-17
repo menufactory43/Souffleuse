@@ -28,9 +28,13 @@ struct LicenseKeyTests {
     func tamperedKeyFails() {
         let (priv, pub) = Self.freshPair()
         let key = LicenseKey.sign(email: "a@b.com", privateKeyBase64: priv)!
-        // On flippe un caractère de la signature.
-        let tampered = String(key.dropLast()) + (key.hasSuffix("A") ? "B" : "A")
-        #expect(LicenseKey.verify(tampered, publicKeyBase64: pub) == nil)
+        // Altère un caractère AU MILIEU de la signature. (Le DERNIER caractère
+        // base64 porte des bits inutilisés → un flip y est parfois sans effet,
+        // ce qui rendait le test flaky selon la clé tirée.)
+        var chars = Array(key)
+        let i = chars.count - 10
+        chars[i] = (chars[i] == "A") ? "B" : "A"
+        #expect(LicenseKey.verify(String(chars), publicKeyBase64: pub) == nil)
     }
 
     @Test("vérif avec une AUTRE clé publique → invalide")
