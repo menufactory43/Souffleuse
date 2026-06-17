@@ -61,6 +61,16 @@ private func deriveMidWordContinuation(contextBefore: String, accepted: String) 
 
 @MainActor
 final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
+    /// Clés UserDefaults de l'onboarding, centralisées (cf. conventions : jamais
+    /// inline). `progressStepLegacy` n'est plus écrite — conservée pour le nettoyage
+    /// rétrocompat de l'ancienne clé au démarrage « fresh ».
+    private enum K {
+        static let onboardingDone = "onboardingDone"
+        static let onboardingCompletedVersion = "onboardingCompletedVersion"
+        static let onboardingProgressStep = "onboardingProgressStep2"
+        static let progressStepLegacy = "onboardingProgressStep"
+    }
+
     private var statusItem: NSStatusItem!
     /// Canal de mise à jour beta (manuel-only). Armé dès le lancement pour que
     /// Sparkle s'initialise avant l'affichage du menu.
@@ -623,16 +633,16 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // (efface la reprise) ; =1 force l'affichage sans toucher aux clés.
         if let env = ProcessInfo.processInfo.environment["SOUFFLEUSE_ONBOARDING"] {
             if env == "fresh" {
-                UserDefaults.standard.removeObject(forKey: "onboardingProgressStep")
-                UserDefaults.standard.removeObject(forKey: "onboardingProgressStep2")
+                UserDefaults.standard.removeObject(forKey: K.progressStepLegacy)
+                UserDefaults.standard.removeObject(forKey: K.onboardingProgressStep)
                 return true
             }
             if env == "1" { return true }
         }
         // Rétrocompat : accepte l'ancienne clé `onboardingDone` ET la nouvelle
         // `onboardingCompletedVersion` (wizard terminé via `onFinished`).
-        let onboarded = UserDefaults.standard.bool(forKey: "onboardingDone")
-            || UserDefaults.standard.integer(forKey: "onboardingCompletedVersion") >= Self.onboardingVersion
+        let onboarded = UserDefaults.standard.bool(forKey: K.onboardingDone)
+            || UserDefaults.standard.integer(forKey: K.onboardingCompletedVersion) >= Self.onboardingVersion
         // On ré-affiche tant que le souffle ne peut pas générer : permission AX
         // manquante OU GGUF du souffle introuvable (l'utilisateur a pu quitter
         // avant la fin du téléchargement). `isResolvable` couvre aussi le dossier
@@ -657,8 +667,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
         // Reprise : si SOUFFLEUSE_ONBOARDING=fresh, on repart de l'étape 0.
         let isFresh = ProcessInfo.processInfo.environment["SOUFFLEUSE_ONBOARDING"] == "fresh"
-        let alreadyOnboarded = UserDefaults.standard.bool(forKey: "onboardingDone")
-            || UserDefaults.standard.integer(forKey: "onboardingCompletedVersion") >= Self.onboardingVersion
+        let alreadyOnboarded = UserDefaults.standard.bool(forKey: K.onboardingDone)
+            || UserDefaults.standard.integer(forKey: K.onboardingCompletedVersion) >= Self.onboardingVersion
         // Décision pure (mode + étape de départ), testée dans OnboardingFlowTests :
         //  - revisit où SEULES des permissions manquent (souffle déjà là) → mode
         //    permissions-only : une étape, pas de réintro ;
@@ -672,7 +682,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             axGranted: AXClient.isTrusted,
             inputMonitoringGranted: inputMonitoringGranted,
             ghostReady: GGUFModelOption.option(forID: store.ggufModelID).isResolvable,
-            savedStep: UserDefaults.standard.integer(forKey: "onboardingProgressStep2")
+            savedStep: UserDefaults.standard.integer(forKey: K.onboardingProgressStep)
         )
         return OnboardingWindow(
             modelDownloads: store.modelDownloads,
@@ -709,13 +719,13 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             },
             onFinished: {
                 // Complétion versionnée écrite ICI, à la fin du wizard — jamais à l'ouverture.
-                UserDefaults.standard.set(Self.onboardingVersion, forKey: "onboardingCompletedVersion")
+                UserDefaults.standard.set(Self.onboardingVersion, forKey: K.onboardingCompletedVersion)
             },
             initialStep: plan.initialStep.rawValue,
             permissionsOnly: plan.mode == .permissionsOnly,
             onProgress: { step in
                 // Persiste l'étape atteinte pour la reprise après un relancement forcé par macOS.
-                UserDefaults.standard.set(step, forKey: "onboardingProgressStep2")
+                UserDefaults.standard.set(step, forKey: K.onboardingProgressStep)
             }
         )
     }

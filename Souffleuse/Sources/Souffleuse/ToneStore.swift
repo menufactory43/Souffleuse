@@ -32,9 +32,7 @@ final class ToneStore {
     @ObservationIgnored private let fileURL: URL
 
     convenience init() {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Souffleuse", isDirectory: true)
-        try? FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
+        let support = FileManager.souffleuseSupportDirectory()
         self.init(fileURL: support.appendingPathComponent("tones.json"))
     }
 
