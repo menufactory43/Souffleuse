@@ -129,6 +129,26 @@ public enum SlashTransformDetector {
         )
     }
 
+    /// Portée de transformation pour un déclenchement HORS « // » — la palette
+    /// d'actions ouverte au CLIC sur le badge de présence. Même résolution
+    /// paragraphe-d'abord que `detect` (paragraphe du caret, repli champ entier /
+    /// dernière ligne au-delà du cap), mais sans trigger ni filtre : la portée est
+    /// tout le texte AVANT le caret. `deleteCharsOnAccept` = portée brute seule
+    /// (aucun « // » + filtre à retirer à l'acceptation). `filter` vide.
+    /// Renvoie nil quand il n'y a rien à transformer (champ vide ou que du blanc
+    /// avant le caret). Pur, testable sans UI.
+    public static func scopeForDirectTrigger(textBeforeCaret: String) -> SlashTransformState? {
+        let (rawScope, truncated) = resolveScope(prefixBeforeTrigger: Substring(textBeforeCaret))
+        let scopeText = rawScope.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !scopeText.isEmpty else { return nil }
+        return SlashTransformState(
+            scopeText: scopeText,
+            isScopeTruncated: truncated,
+            filter: "",
+            deleteCharsOnAccept: rawScope.count
+        )
+    }
+
     /// Résout la portée, paragraphe-d'abord (UAT 11/06 : « // » collé à un
     /// paragraphe doit viser CE paragraphe, pas tout le champ) :
     /// 1. S'il y a une ligne vide (« \n\n ») au-dessus et que le paragraphe du
