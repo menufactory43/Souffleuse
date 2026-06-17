@@ -2473,44 +2473,59 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        if prefix != lastPredictedPrefix {
-            // Debounce: every prefix change cancels the pending task and
-            // schedules a new one. The LLM only fires once the user has
-            // paused for at least `predictDebounceNanos`. This avoids
-            // bursts of cancel-and-restart cycles when the user types
-            // multiple characters between two poll ticks.
-            //
-            // Debounce CONDITIONNEL (opt-in A/B, 12/06) : quand la réserve beam
-            // paraît chaude, le predict sera servi par l'avancée (~1 ms, zéro
-            // coût LLM) — les 15 ms n'y protègent rien, on les saute.
-            predictDebounceTask?.cancel()
-            let capturedPrefix = prefix
-            let capturedContext = cachedEnrichmentPrefix
-            let capturedCustom = CustomInstructionsWindow.current()
-            let capturedSnap = snap                                    // Phase 2: forward live AX snapshot
-            let skipDebounce = SuggestionPolicy.Tuning.debounceSkipWarmReserveEnabled
-                && predictor.reserveLooksWarm(forPrefix: prefix)
-            if skipDebounce {
-                LatencyTrace.mark("debounce_skip", key: LatencyTrace.key(prefix))
-            }
-            predictDebounceTask = Task { @MainActor [weak self] in
-                if !skipDebounce {
-                    try? await Task.sleep(nanoseconds: Self.predictDebounceNanos)
-                }
-                guard !Task.isCancelled, let self else { return }
-                // Re-check freshness — another tick may have advanced
-                // lastPredictedPrefix already.
-                guard self.lastPredictedPrefix != capturedPrefix else { return }
-                self.lastPredictedPrefix = capturedPrefix
-                self.predictor.predict(
-                    prefix: capturedPrefix,
-                    contextPrefix: capturedContext,
-                    customInstructions: capturedCustom,
-                    axSnapshot: capturedSnap                           // Phase 2: feeds fieldContext + afterCursor slots
-                )
-            }
-        }
+        schedulePredictIfNeeded(prefix: prefix, snap: snap)
+        paintFreshGhostAndAnchor(prefix: prefix, bundleID: bundleID, text: text, caretIndex: caretIndex, snap: snap, rectForGhost: rectForGhost, hostFont: hostFontForOverlay)
+    }
 
+    /// Planifie la génération LLM débouncée : tout changement de préfixe annule la tâche
+    /// en vol et en reprogramme une (cancel-on-keystroke). Le LLM ne tire qu'après une
+    /// pause de `predictDebounceNanos` ; quand la réserve beam paraît chaude, le debounce
+    /// est sauté (l'avancée servira en ~1 ms). Extrait de `tick()`.
+    private func schedulePredictIfNeeded(prefix: String, snap: AXSnapshot) {
+        guard prefix != lastPredictedPrefix else { return }
+        // Debounce: every prefix change cancels the pending task and
+        // schedules a new one. The LLM only fires once the user has
+        // paused for at least `predictDebounceNanos`. This avoids
+        // bursts of cancel-and-restart cycles when the user types
+        // multiple characters between two poll ticks.
+        //
+        // Debounce CONDITIONNEL (opt-in A/B, 12/06) : quand la réserve beam
+        // paraît chaude, le predict sera servi par l'avancée (~1 ms, zéro
+        // coût LLM) — les 15 ms n'y protègent rien, on les saute.
+        predictDebounceTask?.cancel()
+        let capturedPrefix = prefix
+        let capturedContext = cachedEnrichmentPrefix
+        let capturedCustom = CustomInstructionsWindow.current()
+        let capturedSnap = snap                                    // Phase 2: forward live AX snapshot
+        let skipDebounce = SuggestionPolicy.Tuning.debounceSkipWarmReserveEnabled
+            && predictor.reserveLooksWarm(forPrefix: prefix)
+        if skipDebounce {
+            LatencyTrace.mark("debounce_skip", key: LatencyTrace.key(prefix))
+        }
+        predictDebounceTask = Task { @MainActor [weak self] in
+            if !skipDebounce {
+                try? await Task.sleep(nanoseconds: Self.predictDebounceNanos)
+            }
+            guard !Task.isCancelled, let self else { return }
+            // Re-check freshness — another tick may have advanced
+            // lastPredictedPrefix already.
+            guard self.lastPredictedPrefix != capturedPrefix else { return }
+            self.lastPredictedPrefix = capturedPrefix
+            self.predictor.predict(
+                prefix: capturedPrefix,
+                contextPrefix: capturedContext,
+                customInstructions: capturedCustom,
+                axSnapshot: capturedSnap                           // Phase 2: feeds fieldContext + afterCursor slots
+            )
+        }
+    }
+
+    /// Peint le ghost final si la suggestion courante est FRAÎCHE (produite pour ce
+    /// préfixe exact — `shouldRenderSuggestion` empêche un ghost périmé d'être repeint au
+    /// nouveau caret), puis, en mode rolling, pose/étend l'ancre high-water (`ghostAnchor*`)
+    /// pour qu'un backspace ultérieur restaure le ghost via le slice. Suggestion non
+    /// fraîche ou pas de rect → masque. Dernière étape de `tick()`. Extrait de `tick()`.
+    private func paintFreshGhostAndAnchor(prefix: String, bundleID: String, text: String, caretIndex: Int, snap: AXSnapshot, rectForGhost: CGRect?, hostFont: NSFont?) {
         let suggestion = predictor.suggestion
         // Freshness gate: only paint a suggestion that was generated for THIS
         // exact prefix. `predictor.suggestion` can outlive the prefix it was made
@@ -2542,7 +2557,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        overlay.show(text: suggestion, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFontForOverlay, fieldRect: snap.elementRect)
+        overlay.show(text: suggestion, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFont, fieldRect: snap.elementRect)
         interceptor.setActive(true)
 
         // ── ANCRAGE D'UNE GÉNÉRATION FRAÎCHE (flag `midWordGhostRollingEnabled`) ──
