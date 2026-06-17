@@ -6,20 +6,18 @@ import SouffleuseLog
 
 /// **Kill switch GLOBAL du paywall.** `false` (défaut) → `isPro` est TOUJOURS
 /// vrai : tout Souffleuse Studio est déverrouillé, le gating dort, rien ne change
-/// pour personne. Passe-le à `true` pour activer le mur (licence requise pour les
-/// features Studio) ; repasse-le à `false` pour **revert instantanément**. C'est
-/// une constante compile-time : un flip = un rebuild, aucune migration, aucune
-/// donnée touchée.
+/// pour personne. Passe-le à `true` pour activer le mur (licence requise) ;
+/// repasse-le à `false` pour **revert instantanément**. Constante compile-time :
+/// un flip = un rebuild, aucune migration, aucune donnée touchée.
 enum LicenseGate {
     static let paywallEnabled = false
 
-    /// URL d'achat (Lemon Squeezy) — placeholder tant que le produit n'existe pas.
-    static let purchaseURL = URL(string: "https://souffleuse.app/studio")!
+    /// Checkout Lemon Squeezy du produit « Souffleuse Studio ».
+    static let purchaseURL = URL(string: "https://souffleuse.lemonsqueezy.com/checkout/buy/a798a4d6-841e-4900-a21e-c1ca679c384d")!
 
-    /// Clé PUBLIQUE Ed25519 (base64 raw) qui vérifie les licences signées, hors
-    /// ligne. ⚠️ Paire de DÉV pour l'instant — en prod, régénère une paire avec
-    /// `swift run SouffleuseLicenseGen genkeys`, colle la PUBLIQUE ici, et garde la
-    /// PRIVÉE secrète (c'est elle qui signe ce que tu vends).
+    /// Clé PUBLIQUE Ed25519 (base64) — utilisée UNIQUEMENT par la voie offline
+    /// signée (`SignedLicenseActivator`), conservée en fallback. Inutilisée tant
+    /// qu'on est sur l'activation Lemon Squeezy.
     static let publicKeyBase64 = "tfdPVUpavMpqzZ/ot13LjekSl//OyXI5pCgpiQnXqR8="
 }
 
@@ -40,93 +38,148 @@ enum LicenseError: Error, Equatable {
     }
 }
 
-/// Frontière d'activation (le SEUL moment réseau). Stubbée tant que le produit
-/// Lemon Squeezy n'existe pas ; à remplacer par un `LemonSqueezyActivator` qui
-/// appelle l'endpoint `/v1/licenses/activate`. Isolée derrière un protocole pour
-/// rester testable sans réseau.
+/// Frontière d'activation. `activate` valide la clé (réseau pour LS, signature
+/// pour l'offline) et renvoie un identifiant d'instance opaque à conserver pour
+/// la désactivation (nil si le modèle n'en a pas). `deactivate` libère le siège
+/// côté serveur (no-op pour l'offline). Isolée derrière un protocole → testable.
 protocol LicenseActivating: Sendable {
-    /// Réussit silencieusement si la clé est valide, throw `LicenseError` sinon.
-    func activate(key: String) async throws
+    func activate(key: String) async throws -> String?
+    func deactivate(key: String, instanceId: String?) async throws
+}
+
+/// Activateur **Lemon Squeezy** : POST `/v1/licenses/activate` (sans clé secrète —
+/// endpoint client). UN appel réseau à l'activation, puis cache local → runtime
+/// offline. Récupère LS aussi : limite d'appareils + révocation + visibilité.
+struct LemonSqueezyActivator: LicenseActivating {
+    private static let base = "https://api.lemonsqueezy.com/v1/licenses/"
+
+    func activate(key: String) async throws -> String? {
+        let json = try await post("activate", [
+            "license_key": key,
+            "instance_name": Self.deviceName,
+        ])
+        guard (json["activated"] as? Bool) == true else {
+            throw Self.mapError(json["error"] as? String)
+        }
+        // instance.id (UUID string) à conserver pour libérer le siège plus tard.
+        return (json["instance"] as? [String: Any])?["id"] as? String
+    }
+
+    func deactivate(key: String, instanceId: String?) async throws {
+        guard let instanceId else { return }
+        _ = try? await post("deactivate", ["license_key": key, "instance_id": instanceId])
+    }
+
+    private func post(_ path: String, _ params: [String: String]) async throws -> [String: Any] {
+        guard let url = URL(string: Self.base + path) else { throw LicenseError.network }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        req.httpBody = params
+            .map { "\($0.key)=\(Self.encode($0.value))" }
+            .joined(separator: "&")
+            .data(using: .utf8)
+        let (data, _) = try await URLSession.shared.data(for: req)
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw LicenseError.network
+        }
+        return json
+    }
+
+    nonisolated static var deviceName: String { Host.current().localizedName ?? "Mac" }
+
+    private static let allowed: CharacterSet = {
+        var s = CharacterSet.alphanumerics
+        s.insert(charactersIn: "-_.~")
+        return s
+    }()
+    private static func encode(_ s: String) -> String {
+        s.addingPercentEncoding(withAllowedCharacters: allowed) ?? s
+    }
+
+    static func mapError(_ error: String?) -> LicenseError {
+        let e = (error ?? "").lowercased()
+        if e.contains("limit") || e.contains("activation usage") { return .deviceLimitReached }
+        return .invalidKey
+    }
 }
 
 /// Stub de dev (placeholder) : accepte une clé non vide préfixée « SOUF- », sans
-/// vérifier la signature. Conservé pour les TESTS qui n'embarquent pas de clé.
+/// réseau. Conservé pour les TESTS.
 struct StubLicenseActivator: LicenseActivating {
-    func activate(key: String) async throws {
+    func activate(key: String) async throws -> String? {
         guard key.hasPrefix("SOUF-"), key.count >= 10 else { throw LicenseError.invalidKey }
+        return nil
     }
+    func deactivate(key: String, instanceId: String?) async throws {}
 }
 
-/// Activateur RÉEL : vérifie la signature Ed25519 de la clé avec la clé publique
-/// embarquée — **hors ligne, zéro réseau**. C'est le pendant in-app du générateur
-/// `SouffleuseLicenseGen`. Remplace le stub par défaut.
+/// Activateur OFFLINE signé (Ed25519, `LicenseKey`) — fallback conservé si on
+/// repasse au modèle hors-ligne. Vérifie la signature avec la clé publique
+/// embarquée, zéro réseau.
 struct SignedLicenseActivator: LicenseActivating {
-    func activate(key: String) async throws {
+    func activate(key: String) async throws -> String? {
         guard LicenseKey.verify(key, publicKeyBase64: LicenseGate.publicKeyBase64) != nil else {
             throw LicenseError.invalidKey
         }
+        return nil
     }
+    func deactivate(key: String, instanceId: String?) async throws {}
 }
 
-/// Licence « Studio » (achat unique). L'activation fait UN appel réseau (délégué
-/// à `LicenseActivating`), puis le résultat est mis en cache LOCALEMENT (Keychain,
-/// device-only) — au runtime, `isPro` lit le cache, **zéro réseau** (invariant
-/// respecté, même catégorie que le download de modèle).
+/// Enregistrement de licence en cache (clé + instance LS pour la désactivation).
+private struct CachedLicense: Codable {
+    let key: String
+    let instanceId: String?
+}
+
+/// Licence « Studio » (achat unique). Activation déléguée à `LicenseActivating`
+/// (Lemon Squeezy par défaut : UN appel réseau), résultat mis en cache LOCALEMENT
+/// (Keychain device-only) → au runtime, `isPro` lit le cache, **zéro réseau**.
 @MainActor
 @Observable
 final class LicenseStore {
     /// Clé activée et en cache, nil si non activée.
     private(set) var activatedKey: String?
+    /// Instance LS associée (siège), pour la désactivation.
+    @ObservationIgnored private var instanceId: String?
 
     @ObservationIgnored private let activator: LicenseActivating
 
-    init(activator: LicenseActivating = SignedLicenseActivator()) {
+    init(activator: LicenseActivating = LemonSqueezyActivator()) {
         self.activator = activator
-        self.activatedKey = Self.loadVerifiedCachedKey()
-    }
-
-    /// Charge la clé en cache ET **re-vérifie sa signature** contre la clé publique
-    /// embarquée. Une clé qui ne valide plus (paire tournée → révocation, ou cache
-    /// trafiqué) est jetée → retour au tier gratuit. Sans ça, la signature ne serait
-    /// contrôlée qu'à l'activation et le cache accepterait n'importe quelle chaîne
-    /// (vérification « théâtre »). Lié au modèle B (offline signé) ; un modèle en
-    /// ligne (LS) revaliderait autrement.
-    nonisolated static func loadVerifiedCachedKey() -> String? {
-        guard let cached = loadCachedKey() else { return nil }
-        if LicenseKey.verify(cached, publicKeyBase64: LicenseGate.publicKeyBase64) != nil {
-            return cached
+        if let cached = Self.loadCached() {
+            self.activatedKey = cached.key
+            self.instanceId = cached.instanceId
         }
-        clearCache()   // périmée / invalide → on nettoie
-        return nil
     }
 
-    /// **Studio débloqué ?** Kill switch off → toujours vrai (tout inclus). Sinon,
-    /// vrai seulement si une licence est activée et en cache. C'est LE point de
-    /// gating unique : chaque feature Studio appelle `isPro`.
+    /// **Studio débloqué ?** Kill switch off → toujours vrai. Sinon, vrai si une
+    /// licence est activée et en cache.
     var isPro: Bool {
         Self.isProValue(paywallEnabled: LicenseGate.paywallEnabled, hasLicense: activatedKey != nil)
     }
 
-    /// Vérité du gating, pure et testable (le drapeau réel est une constante
-    /// compile-time, intestable directement) : paywall off → toujours débloqué ;
+    /// Vrai si une licence est activée (indépendant du kill switch), pour l'UI.
+    var isActivated: Bool { activatedKey != nil }
+
+    /// Vérité du gating, pure et testable : paywall off → toujours débloqué ;
     /// paywall on → débloqué seulement avec une licence.
     nonisolated static func isProValue(paywallEnabled: Bool, hasLicense: Bool) -> Bool {
         !paywallEnabled || hasLicense
     }
 
-    /// Vrai si une licence est effectivement activée (indépendant du kill switch) —
-    /// pour l'UI de la section Licence.
-    var isActivated: Bool { activatedKey != nil }
-
-    /// Active une clé : appel réseau UNIQUE via l'activateur, puis cache Keychain.
+    /// Active une clé : délègue à l'activateur (réseau pour LS), puis cache.
     @discardableResult
     func activate(key: String) async -> Result<Void, LicenseError> {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return .failure(.empty) }
         do {
-            try await activator.activate(key: trimmed)
-            Self.cacheKey(trimmed)
+            let instance = try await activator.activate(key: trimmed)
+            Self.cache(CachedLicense(key: trimmed, instanceId: instance))
             activatedKey = trimmed
+            instanceId = instance
             Log.info(.ui, "license_activated")
             return .success(())
         } catch let e as LicenseError {
@@ -138,20 +191,27 @@ final class LicenseStore {
         }
     }
 
-    /// Retire la licence du cache (changement de Mac, test). N'appelle pas le
-    /// réseau — la désactivation serveur (libérer un siège) se fera côté portail.
+    /// Désactive sur ce Mac : retire le cache TOUT DE SUITE (local) et libère le
+    /// siège LS en arrière-plan (best-effort — n'échoue pas si hors ligne).
     func deactivate() {
+        let key = activatedKey
+        let inst = instanceId
         Self.clearCache()
         activatedKey = nil
+        instanceId = nil
         Log.info(.ui, "license_deactivated")
+        if let key {
+            let act = activator
+            Task { try? await act.deactivate(key: key, instanceId: inst) }
+        }
     }
 
     // MARK: - Cache Keychain (device-only, ne se synchronise pas via iCloud)
 
     nonisolated private static let service = "app.cocotypist.Souffleuse.license"
-    nonisolated private static let account = "studio.licenseKey"
+    nonisolated private static let account = "studio.license"
 
-    nonisolated static func loadCachedKey() -> String? {
+    nonisolated private static func loadCached() -> CachedLicense? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -162,11 +222,13 @@ final class LicenseStore {
         var item: CFTypeRef?
         let status = withUnsafeMutablePointer(to: &item) { SecItemCopyMatching(query as CFDictionary, $0) }
         guard status == errSecSuccess, let data = item as? Data,
-              let s = String(data: data, encoding: .utf8), !s.isEmpty else { return nil }
-        return s
+              let cached = try? JSONDecoder().decode(CachedLicense.self, from: data),
+              !cached.key.isEmpty else { return nil }
+        return cached
     }
 
-    nonisolated static func cacheKey(_ key: String) {
+    nonisolated private static func cache(_ license: CachedLicense) {
+        guard let data = try? JSONEncoder().encode(license) else { return }
         let base: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -174,13 +236,14 @@ final class LicenseStore {
         ]
         SecItemDelete(base as CFDictionary)
         var add = base
-        add[kSecValueData as String] = Data(key.utf8)
+        add[kSecValueData as String] = data
         add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        let status = SecItemAdd(add as CFDictionary, nil)
-        if status != errSecSuccess { Log.warn(.ui, "license_cache_write_failed") }
+        if SecItemAdd(add as CFDictionary, nil) != errSecSuccess {
+            Log.warn(.ui, "license_cache_write_failed")
+        }
     }
 
-    nonisolated static func clearCache() {
+    nonisolated private static func clearCache() {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

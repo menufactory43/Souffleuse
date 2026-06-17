@@ -1400,7 +1400,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// (item de menu « Vérifier les mises à jour… »). Aucun check passif — manuel-only.
     @objc private func checkForUpdates() { updater.checkForUpdates() }
 
-    @objc private func openPreferences() {
+    private func ensurePreferences() {
         if preferences == nil {
             preferences = PreferencesWindow(
                 store: store,
@@ -1416,7 +1416,18 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 onClearPersonalization: { [weak self] in self?.clearPersonalization() }
             )
         }
+    }
+
+    @objc private func openPreferences() {
+        ensurePreferences()
         preferences?.show()
+    }
+
+    /// Ouvre les Préférences directement sur la section Studio (deep-link de
+    /// l'invite « Débloquer Studio »).
+    private func openPreferencesAtStudio() {
+        ensurePreferences()
+        preferences?.showStudio()
     }
 
     private func openHistoryViewer() {
@@ -3338,7 +3349,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: tr(fr: "Plus tard", en: "Later"))
         NSApp.activate(ignoringOtherApps: true)
         if alert.runModal() == .alertFirstButtonReturn {
-            openPreferences()
+            openPreferencesAtStudio()
         }
     }
 
