@@ -34,9 +34,10 @@
 <meta name="twitter:description" content="Une aide à l'écriture pour Mac, entièrement privée. Vos textes ne quittent jamais votre Mac." />
 <meta name="twitter:image" content="https://souffleuse.app/og.png" />
 
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,500;0,6..96,700;0,6..96,900;1,6..96,500&family=Spectral:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet" />
+<!-- Fonts self-hébergées : aucune requête tierce au runtime (promesse 100% local). -->
+<link rel="preload" href="/assets/fonts/bodoni-moda-700-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="preload" href="/assets/fonts/spectral-400-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="stylesheet" href="/assets/fonts.css" />
 
 <!-- Données structurées : aide Google à présenter Souffleuse comme une app (carte enrichie). -->
 <script type="application/ld+json">
@@ -1781,7 +1782,7 @@
   <!-- La distribution des salles : un bandeau de programme qui défile
        lentement. La piste est dupliquée en JS pour boucler sans couture ;
        sans JS elle reste une ligne fixe, lisible. -->
-  <div class="tournee" role="marquee" aria-label="Souffleuse joue dans la plupart des apps du Mac : Mail, Notes, Messages, Safari, Pages, Slack, et presque partout où l'on écrit.">
+  <div class="tournee" role="img" aria-label="Souffleuse joue dans la plupart des apps du Mac : Mail, Notes, Messages, Safari, Pages, Slack, et presque partout où l'on écrit.">
     <div class="tournee__track" id="tournee-track" aria-hidden="true">
       <span class="tournee__item tournee__item--lede">En tournée ce soir, sur votre Mac&nbsp;:</span>
       <span class="tournee__fleuron" aria-hidden="true">❧</span>
@@ -1822,6 +1823,8 @@
         <video id="reel-video" src="./assets/souffleuse-demo.mp4" muted loop autoplay playsinline preload="metadata"
                aria-label="Capture réelle : on tape « Bonjour, je reviens vers vous » et Souffleuse propose « dès que possible pour vous faire… » ; Tab pour accepter."></video>
         <span class="preuve__soundhint" id="reel-hint"><span class="verb-key">🔊 Survolez pour le son</span><span class="verb-touch">🔊 Touchez pour le son</span></span>
+        <!-- Filet de sécurité : si la capture ne se charge pas, la bande ne reste pas vide. -->
+        <p id="reel-fallback" hidden style="margin:0;padding:2.4rem 1.2rem;text-align:center;color:var(--ink-soft);font-style:italic;">La capture n'a pas pu se charger. <a href="./Souffleuse.dmg" download style="color:var(--rouge);">Essayez Souffleuse directement</a>, c'est plus parlant encore.</p>
       </figure>
       <figcaption class="preuve__cap">Tab. Et c'est dit.</figcaption>
     </div>
@@ -1835,6 +1838,12 @@
       if (reduce) { try { v.pause(); } catch (e) {} }
       var on = function () { v.muted = false; v.volume = 0.85; var p = v.play(); if (p && p.catch) p.catch(function(){}); f.classList.add('is-on'); };
       var off = function () { v.muted = true; f.classList.remove('is-on'); };
+      // Si la source échoue (404, codec), on masque le lecteur et on montre le filet.
+      v.addEventListener('error', function () {
+        v.style.display = 'none';
+        var fb = document.getElementById('reel-fallback');
+        if (fb) fb.hidden = false;
+      });
       f.addEventListener('mouseenter', on);
       f.addEventListener('mouseleave', off);
       f.addEventListener('click', function () { v.muted ? on() : off(); });
