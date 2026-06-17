@@ -29,6 +29,11 @@ Au-delà du ghost, l'app fait aussi : **traduction** (HUD, langue cible par conv
 - **Chiffrement au repos** : `CSQLCipher` (SQLCipher + CommonCrypto, sans OpenSSL) → `history.db`. Clé AES-256 en Keychain via `KeychainKey`.
 - **Tests** : Swift Testing / XCTest, target `SouffleuseTests` (`Tests/SouffleuseTests/`).
 - **Build/sign** : `make-app.sh` → `.app` ; `codesign` cert hard-codé `A798891AB1B0A8C0B46AFADBD95094BABF680037` (overridable `SIGN_IDENTITY`), stable pour préserver le TCC entre rebuilds.
+- **Vocabulaire de build (commandes que l'utilisateur nomme) :**
+  - **« dev release »** → `RELEASE=1 NOTARIZE=0 SIGN_IDENTITY=A798891AB1B0A8C0B46AFADBD95094BABF680037 ./make-app.sh` : config **Release** mais signée avec le **cert dev** (Apple Development, TCC-stable → pas de re-prompt permissions), **sans notarisation**, DMG signé. Pour tester en local.
+  - **« go vercel sparkle »** → la **totale release sur le site** : `RELEASE=1 ./make-app.sh` (Developer ID + `--timestamp` + runtime durci + **notarisation** + staple + DMG), puis bump appcast **Sparkle** et déploiement **Vercel** du site. C'est l'artefact public shippable.
+- **⚠️ Déploiement du site = depuis la branche `launch/souffleuse-video-social`, PAS `main`.** Tout le travail du site vit sur `launch` (badge de version dynamique, promo, rôles…) ; `main` n'a qu'une version amputée. Déployer depuis `main` casse le site live. Process release : (1) le **code app** (fix + bump `Info.plist` + `appcast.xml`) va sur `main` ; (2) pour publier le site, copier l'`appcast.xml` 0.x.y + le DMG notarisé (`website/dl/Souffleuse.dmg`, gitignored) dans la branche `launch`, puis `cd website && vercel --prod --yes` (lien projet dans `website/.vercel`, projet « website »).
+  - Régénérer la signature appcast : `Souffleuse/.build/artifacts/sparkle/Sparkle/bin/sign_update <dmg>` (le `find` générique attrape par erreur l'ancien script DSA — utiliser ce chemin EdDSA explicite). Le badge du site est **dynamique** (lit `/appcast.xml`) → pas besoin d'éditer `index.html`, sauf le JSON-LD `softwareVersion` (SEO, non visible).
 
 ### Configuration & fichiers
 - `Package.swift` — 11 libs + 14 exécutables + 1 test target.
