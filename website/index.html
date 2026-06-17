@@ -64,7 +64,7 @@
     --ink:          #1a1613;
     --ink-soft:     #463d33;
     --ink-faint:    #5e5446;   /* assombri pour passer AA sur petits textes */
-    --ghost:        #a99a82;   /* l'encre pâle du souffle — décoratif uniquement */
+    --ghost:        #786750;   /* l'encre du souffle : la plus pâle des encres, mais assez dense pour se lire — porte le mot suggéré, donc AA (4.5:1 sur papier) */
     --rouge:        #8c2b21;   /* sang-de-boeuf */
     --rouge-deep:   #6f2018;
 
@@ -294,6 +294,17 @@
     color: var(--ink-faint);
   }
   .cta-note b { font-style: normal; font-weight: 700; color: var(--rouge); }
+
+  /* La ligne de confiance, juste sous le bouton : taille, signature Apple et
+     rappel de confidentialité, là où l'anxiété du téléchargement se joue.
+     Plus discrète que la note de gratuité — on rassure, on ne crie pas. */
+  .cta-trust {
+    margin: 0.45rem 0 0;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    color: var(--ink-faint);
+    letter-spacing: 0.01em;
+  }
 
   /* Le décompte de la salle : combien de gens ont déjà pris leur billet.
      Peuplé par /api/stats. Masqué tant que le total n'a pas atteint un seuil
@@ -583,7 +594,7 @@
   }
   /* Bref éclat sur le texte au moment où la réplique vient d'être prise. */
   @keyframes prise-eclat {
-    0%   { background: rgba(168, 154, 130, 0.30); }
+    0%   { background: rgba(120, 103, 80, 0.22); }
     100% { background: transparent; }
   }
   .typed.just-took { animation: prise-eclat 0.6s ease forwards; border-radius: 2px; }
@@ -1150,6 +1161,16 @@
     .langswitch a { padding-block: 0.7rem; }
   }
 
+  /* Étiquettes tactiles : sur un écran sans clavier, on touche la réplique grise
+     ou les boutons (qui sont, eux, bel et bien cliquables) — évoquer Tab / Esc / ↓
+     n'a aucun sens au doigt. On bascule le libellé, jamais l'interaction. */
+  .verb-touch { display: none; }
+  @media (pointer: coarse) {
+    .verb-key   { display: none; }
+    .verb-touch { display: inline; }
+    .hint-key--touchable kbd { display: none; }
+  }
+
   /* ---------- La mascotte : la souffleuse, dans la marge gauche ---------- */
   /* Silhouette d'encre penchée pour souffler la réplique. Purement décorative
      (aria-hidden), ne capte jamais le clic, et ne paraît que là où la marge
@@ -1697,6 +1718,7 @@
           <a href="#souffle" class="btn btn--ghost">Voir comment elle souffle →</a>
         </div>
         <p class="cta-note ink-rise k5"><b>Gratuit pendant la bêta.</b> Pour Mac à puce Apple Silicon.</p>
+        <p class="cta-trust ink-rise k5">~6,5 Mo · notarisée par Apple · vos textes ne quittent jamais votre Mac.</p>
       </div>
 
       <!-- ===== ÉLÉMENT SIGNATURE : le trou du souffleur ===== -->
@@ -1743,14 +1765,14 @@
               <p class="souffleur__line tryline" id="demo-tryline"><span class="typed tryinput" id="demo-input" contenteditable="plaintext-only" role="textbox" aria-multiline="false" spellcheck="false" aria-label="Écrivez une phrase ; Souffleuse propose la suite. Tab pour la prendre, flèche bas pour une autre idée." data-placeholder="Écrivez ici…"></span><span class="souffle tryghost" id="demo-ghost" aria-hidden="true"></span></p>
               <p class="tryline__live sr-only" id="demo-live" role="status" aria-live="polite"></p>
               <div class="souffleur__hint">
-                <button type="button" class="hint-key" id="demo-take2" disabled><kbd>Tab</kbd> pour prendre</button>
-                <button type="button" class="hint-key" id="demo-cycle" disabled><kbd>↓</kbd> autre idée<span class="hint-count" id="demo-count"></span></button>
-                <button type="button" class="hint-key" id="demo-drop2" disabled><kbd>Esc</kbd> pour laisser</button>
+                <button type="button" class="hint-key hint-key--touchable" id="demo-take2" disabled><kbd>Tab</kbd> <span class="verb-key">pour prendre</span><span class="verb-touch">Toucher pour prendre</span></button>
+                <button type="button" class="hint-key hint-key--touchable" id="demo-cycle" disabled><kbd>↓</kbd> <span class="verb-key">autre idée</span><span class="verb-touch">Une autre idée</span><span class="hint-count" id="demo-count"></span></button>
+                <button type="button" class="hint-key hint-key--touchable" id="demo-drop2" disabled><kbd>Esc</kbd> <span class="verb-key">pour laisser</span><span class="verb-touch">Laisser</span></button>
               </div>
             </div>
           </div>
         </div>
-        <p class="souffleur__caption stage-dir">Survolez ou choisissez une scène : elle joue une fois, puis se tait.</p>
+        <p class="souffleur__caption stage-dir"><span class="verb-key">Survolez ou choisissez une scène : elle joue une fois, puis se tait.</span><span class="verb-touch">Touchez une scène : elle joue une fois, puis se tait.</span></p>
       </figure>
     </div>
   </section>
@@ -1799,7 +1821,7 @@
       <figure class="preuve__frame" id="reel-frame">
         <video id="reel-video" src="./assets/souffleuse-demo.mp4" muted loop autoplay playsinline preload="metadata"
                aria-label="Capture réelle : on tape « Bonjour, je reviens vers vous » et Souffleuse propose « dès que possible pour vous faire… » ; Tab pour accepter."></video>
-        <span class="preuve__soundhint" id="reel-hint">🔊 Survolez pour le son</span>
+        <span class="preuve__soundhint" id="reel-hint"><span class="verb-key">🔊 Survolez pour le son</span><span class="verb-touch">🔊 Touchez pour le son</span></span>
       </figure>
       <figcaption class="preuve__cap">Tab. Et c'est dit.</figcaption>
     </div>
@@ -1991,6 +2013,7 @@
       <div class="section-head">
         <span class="smallcaps">Côté jardin, côté cour</span>
         <h2 id="coulisses-titre">Ce qui se dit en coulisse reste en coulisse</h2>
+        <p class="stage-dir">En clair : la confidentialité, par construction.</p>
       </div>
       <p class="coulisses__lede">
         Souffleuse ne fonctionne que parce qu'elle lit ce que vous écrivez. Alors on a fait
@@ -2101,7 +2124,7 @@
         <details class="qa">
           <summary>C'est gratuit ? Combien ça coûte ?</summary>
           <div class="qa__body">
-            <p>Pendant la bêta, Souffleuse est entièrement gratuite. Aucune limite de mots par jour, aucune carte demandée : vous téléchargez, et vous écrivez. On vous préviendra clairement, et à l'avance, si la tarification évolue après la bêta.</p>
+            <p>Pendant la bêta, Souffleuse est entièrement gratuite. Aucune limite de mots par jour, aucune carte demandée : vous téléchargez, et vous écrivez. Et notre intention est tenue d'avance : si Souffleuse devient payante après la bêta, ce sera un achat unique, à un prix juste, jamais un abonnement caché. On vous préviendra clairement, et bien à l'avance.</p>
           </div>
         </details>
         <details class="qa">
@@ -2166,6 +2189,7 @@
         Télécharger pour Mac
       </a>
       <p class="cta-note"><b>Gratuit pendant la bêta.</b> macOS Sonoma (14) ou plus récent · puce Apple Silicon.</p>
+      <p class="cta-trust">~6,5 Mo · notarisée par Apple · vos textes ne quittent jamais votre Mac.</p>
       <p class="tally" id="tally" hidden aria-live="polite">
         Déjà <b id="tally-n"></b> Mac l'ont accueillie pendant la bêta.
       </p>
