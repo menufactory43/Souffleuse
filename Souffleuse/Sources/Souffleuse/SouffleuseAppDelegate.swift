@@ -1745,6 +1745,136 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         return false
     }
 
+    /// Suppression mid-texte : quand le caractère juste après le caret est un glyphe
+    /// non-blanc, l'utilisateur édite À L'INTÉRIEUR d'un texte existant — un ghost
+    /// inline tomberait au mauvais endroit. Si le mode mid-line (opt-in) est actif,
+    /// flotte plutôt la suggestion en pilule SOUS la ligne du caret (style Cotypist) ;
+    /// sinon masque tout. Retourne `true` quand `tick()` doit sortir. Extrait de `tick()`.
+    private func handleMidLineSuppression(prefix: String, text: String, caretIndex: Int, snap: AXSnapshot, rectForGhost: CGRect?, hostFont: NSFont?) -> Bool {
+        guard Self.shouldSuppressForCaretContext(text: text, caretIndex: caretIndex) else { return false }
+        if store.midLineGhostEnabled, let rect = rectForGhost {
+            runMidLineGhost(
+                prefix: prefix,
+                rect: rect,
+                text: text,
+                caretIndex: caretIndex,
+                snap: snap,
+                font: hostFont
+            )
+            return true
+        }
+        overlay.hide()
+        presenceHideNow()
+        interceptor.setActive(false)
+        return true
+    }
+
+    /// Fenêtre glissante bidirectionnelle (flag `midWordGhostRollingEnabled`). Quand une
+    /// ancre est active (même bundle, `ghostAnchorFull` non vide), une seule règle de slice
+    /// gère conso avant ET restauration arrière tant qu'on reste dans `[base, full)` :
+    ///   • caret DANS la fenêtre → ghost = suffixe de `ghostAnchorFull`, rendu via la
+    ///     machinerie partialRemainder, predict sauté → retourne `true`.
+    ///   • frappe en avant sur le chemin → étend le high-water (`ghostAnchorFull`) et
+    ///     laisse le predict gate repeindre (pas de sortie) → `false`.
+    ///   • divergence / sous la borne gauche → jette l'ancre, tombe dans le predict normal
+    ///     → `false`.
+    /// Hors flag, le `guard` court-circuite tout (byte-identique à l'historique). Extrait de `tick()`.
+    private func handleRollingWindow(prefix: String, bundleID: String, text: String, caretIndex: Int, snap: AXSnapshot, rectForGhost: CGRect?, hostFont: NSFont?) -> Bool {
+        guard SuggestionPolicy.Tuning.midWordGhostRollingEnabled,
+              !ghostAnchorFull.isEmpty,
+              ghostAnchorBundle == bundleID else { return false }
+        let lowerPrefix = prefix.lowercased()
+        let lowerFull = ghostAnchorFull.lowercased()
+        if lowerFull.hasPrefix(lowerPrefix),
+           prefix.count >= ghostAnchorBase.count,
+           prefix.count < ghostAnchorFull.count {
+            // BACKSPACE / CONSO À L'INTÉRIEUR DE LA FENÊTRE (high-water).
+            // `ghostAnchorFull` porte le HIGH-WATER MARK : sa partie GAUCHE jusqu'au
+            // caret est le texte que l'UTILISATEUR a réellement tapé (capté en avant,
+            // cf. la branche d'extension ci-dessous), sa partie DROITE est le ghost.
+            // Reculer dans cette fenêtre restaure donc le texte de l'utilisateur lui-
+            // même, pas une prédiction du modèle. On slice le suffixe et l'affiche,
+            // SANS rétrécir `ghostAnchorFull` (le high-water tient). On reconstruit
+            // l'état partialRemainder pour que refill rolling et accept repartent bon.
+            // CE BLOC PASSE AVANT la suppression mid-mot backspace : un restore d'ancre
+            // actif gagne toujours (return ici).
+            let ghost = String(ghostAnchorFull.dropFirst(prefix.count))
+            predictor.cancel()
+            partialAcceptedAtPrefix = ghostAnchorBase
+            partialAcceptedSoFar = String(ghostAnchorFull.prefix(prefix.count).dropFirst(ghostAnchorBase.count))
+            partialAcceptedAtBundleID = bundleID
+            partialRemainder = ghost
+            if let rect = rectForGhost {
+                overlay.show(text: ghost, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFont, fieldRect: snap.elementRect)
+                interceptor.setActive(true)
+                maybeSpawnRollingRefill(committedText: prefix, bundleID: bundleID)
+            } else {
+                overlay.hide()
+                interceptor.setActive(false)
+            }
+            return true
+        } else if lowerPrefix.hasPrefix(lowerFull),
+                  prefix.count >= ghostAnchorBase.count {
+            // FRAPPE EN AVANT QUI ÉTEND LE HIGH-WATER. Le préfixe a dépassé (ou égale)
+            // `ghostAnchorFull` tout en restant SUR LE CHEMIN (`prefix` commence par
+            // `ghostAnchorFull`). C'est exactement le cas où l'utilisateur tape un mot
+            // qui DIVERGE de la prédiction du modèle mais constitue son PROPRE texte :
+            // on capte ce texte dans le high-water. On met à jour
+            // `ghostAnchorFull = prefix + ghost-courant` (gauche = texte tapé réel),
+            // on GARDE `ghostAnchorBase` (borne gauche persistante), et on NE return
+            // PAS : on laisse le predict gate plus bas générer/peindre un ghost frais
+            // pour ce nouveau préfixe (qui ré-étendra le high-water via l'ancrage en
+            // bas de tick). Le ghost-courant n'est pris que s'il a été produit POUR ce
+            // préfixe exact ; sinon vide (la partie droite est rétablie au render).
+            let currentGhost = (predictor.predictedForPrefix == prefix) ? predictor.suggestion : ""
+            ghostAnchorFull = prefix + currentGhost
+            // pas de return : tombe dans la suppression / predict gate.
+        } else {
+            // DIVERGENCE (préfixe hors-chemin du high-water) ou SOUS LA BORNE GAUCHE →
+            // on jette l'ancre + tout reste de partial, et on tombe dans le predict
+            // normal. La prochaine génération fraîche reposera une ancre.
+            clearGhostAnchor()
+            if !partialRemainder.isEmpty {
+                partialRemainder = ""
+                partialAcceptedSoFar = ""
+                partialAcceptedAtPrefix = ""
+                partialAcceptedAtBundleID = nil
+            }
+            cancelRollingRefill()
+            Log.info(.predictor, "ghost_anchor_cleared")
+            // Pas de hide ici (anti-blank-frame) : le predict gate plus bas
+            // repeindra, ou un fresh ghost réancrera.
+        }
+        return false
+    }
+
+    /// Suppression mid-mot en backspace (flag `midWordGhostRollingEnabled`) : « compléter
+    /// ce qu'on TAPE, pas ce qu'on EFFACE ». Quand l'utilisateur recule à travers un mot
+    /// et que le fragment de queue est mid-mot (run de lettres non vide, pas un mot
+    /// complet, pas à une frontière), on masque le ghost pour ce tick (pas de predict).
+    /// Passe APRÈS l'anchor-slice (un restore d'ancre actif gagne) et AVANT le predict gate.
+    /// Hors flag, le `guard` court-circuite ⇒ byte-identique. Retourne `true` si supprimé.
+    /// Extrait de `tick()`.
+    private func handleMidWordBackspaceSuppression(prefix: String) -> Bool {
+        guard SuggestionPolicy.Tuning.midWordGhostRollingEnabled else { return false }
+        let isBackspacing = !lastTickPrefixForDelete.isEmpty
+            && prefix.count < lastTickPrefixForDelete.count
+            && lastTickPrefixForDelete.hasPrefix(prefix)
+        lastTickPrefixForDelete = prefix
+        let trailingFragment = OutputFilter.trailingPartialWord(prefix)
+        let isIncompleteFragment = !trailingFragment.isEmpty
+            && !SuggestionPolicy.defaultPartialWordIsComplete(prefix)
+        if isBackspacing, isIncompleteFragment {
+            overlay.hide()
+            interceptor.setActive(false)
+            predictor.cancel()
+            lastPredictedPrefix = nil
+            Log.info(.predictor, "ghost_backspace_suppress")
+            return true
+        }
+        return false
+    }
+
     private func tick() {
         guard store.enabled else { return }
         // Icône vivante : par défaut « pas de champ actif » ; repassé à vrai plus
@@ -1970,27 +2100,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // is a non-whitespace glyph, the user is editing INSIDE existing text,
         // not appending — the ghost would land in the wrong position and suggest
         // the wrong continuation. Hide immediately and bail.
-        if Self.shouldSuppressForCaretContext(text: text, caretIndex: caretIndex) {
-            // Mid-line (opt-in): rather than suppress, float the suggestion as a
-            // pill BELOW the caret line (Cotypist "Mid-line completion"). Fires
-            // wherever the caret is — including INSIDE a word ("couc|ou" →
-            // "couche…"), which is exactly Cotypist's behaviour. Same
-            // prefix-continuation; only the render differs (an inline ghost would
-            // overlap the glyphs that follow the caret). Off by default.
-            if store.midLineGhostEnabled, let rect = rectForGhost {
-                runMidLineGhost(
-                    prefix: prefix,
-                    rect: rect,
-                    text: text,
-                    caretIndex: caretIndex,
-                    snap: snap,
-                    font: hostFontForOverlay
-                )
-                return
-            }
-            overlay.hide()
-            presenceHideNow()
-            interceptor.setActive(false)
+        if handleMidLineSuppression(prefix: prefix, text: text, caretIndex: caretIndex, snap: snap, rectForGhost: rectForGhost, hostFont: hostFontForOverlay) {
             return
         }
 
@@ -2007,71 +2117,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         //
         // Hors flag (default-OFF), ce bloc est entièrement court-circuité : le `guard`
         // sur le flag rend le chemin byte-identique à l'historique.
-        if SuggestionPolicy.Tuning.midWordGhostRollingEnabled,
-           !ghostAnchorFull.isEmpty,
-           ghostAnchorBundle == bundleID {
-            let lowerPrefix = prefix.lowercased()
-            let lowerFull = ghostAnchorFull.lowercased()
-            if lowerFull.hasPrefix(lowerPrefix),
-               prefix.count >= ghostAnchorBase.count,
-               prefix.count < ghostAnchorFull.count {
-                // BACKSPACE / CONSO À L'INTÉRIEUR DE LA FENÊTRE (high-water).
-                // `ghostAnchorFull` porte le HIGH-WATER MARK : sa partie GAUCHE jusqu'au
-                // caret est le texte que l'UTILISATEUR a réellement tapé (capté en avant,
-                // cf. la branche d'extension ci-dessous), sa partie DROITE est le ghost.
-                // Reculer dans cette fenêtre restaure donc le texte de l'utilisateur lui-
-                // même, pas une prédiction du modèle. On slice le suffixe et l'affiche,
-                // SANS rétrécir `ghostAnchorFull` (le high-water tient). On reconstruit
-                // l'état partialRemainder pour que refill rolling et accept repartent bon.
-                // CE BLOC PASSE AVANT la suppression mid-mot backspace : un restore d'ancre
-                // actif gagne toujours (return ici).
-                let ghost = String(ghostAnchorFull.dropFirst(prefix.count))
-                predictor.cancel()
-                partialAcceptedAtPrefix = ghostAnchorBase
-                partialAcceptedSoFar = String(ghostAnchorFull.prefix(prefix.count).dropFirst(ghostAnchorBase.count))
-                partialAcceptedAtBundleID = bundleID
-                partialRemainder = ghost
-                if let rect = rectForGhost {
-                    overlay.show(text: ghost, at: rect, hostText: text, caretIndex: caretIndex, hostFont: hostFontForOverlay, fieldRect: snap.elementRect)
-                    interceptor.setActive(true)
-                    maybeSpawnRollingRefill(committedText: prefix, bundleID: bundleID)
-                } else {
-                    overlay.hide()
-                    interceptor.setActive(false)
-                }
-                return
-            } else if lowerPrefix.hasPrefix(lowerFull),
-                      prefix.count >= ghostAnchorBase.count {
-                // FRAPPE EN AVANT QUI ÉTEND LE HIGH-WATER. Le préfixe a dépassé (ou égale)
-                // `ghostAnchorFull` tout en restant SUR LE CHEMIN (`prefix` commence par
-                // `ghostAnchorFull`). C'est exactement le cas où l'utilisateur tape un mot
-                // qui DIVERGE de la prédiction du modèle mais constitue son PROPRE texte :
-                // on capte ce texte dans le high-water. On met à jour
-                // `ghostAnchorFull = prefix + ghost-courant` (gauche = texte tapé réel),
-                // on GARDE `ghostAnchorBase` (borne gauche persistante), et on NE return
-                // PAS : on laisse le predict gate plus bas générer/peindre un ghost frais
-                // pour ce nouveau préfixe (qui ré-étendra le high-water via l'ancrage en
-                // bas de tick). Le ghost-courant n'est pris que s'il a été produit POUR ce
-                // préfixe exact ; sinon vide (la partie droite est rétablie au render).
-                let currentGhost = (predictor.predictedForPrefix == prefix) ? predictor.suggestion : ""
-                ghostAnchorFull = prefix + currentGhost
-                // pas de return : tombe dans la suppression / predict gate.
-            } else {
-                // DIVERGENCE (préfixe hors-chemin du high-water) ou SOUS LA BORNE GAUCHE →
-                // on jette l'ancre + tout reste de partial, et on tombe dans le predict
-                // normal. La prochaine génération fraîche reposera une ancre.
-                clearGhostAnchor()
-                if !partialRemainder.isEmpty {
-                    partialRemainder = ""
-                    partialAcceptedSoFar = ""
-                    partialAcceptedAtPrefix = ""
-                    partialAcceptedAtBundleID = nil
-                }
-                cancelRollingRefill()
-                Log.info(.predictor, "ghost_anchor_cleared")
-                // Pas de hide ici (anti-blank-frame) : le predict gate plus bas
-                // repeindra, ou un fresh ghost réancrera.
-            }
+        if handleRollingWindow(prefix: prefix, bundleID: bundleID, text: text, caretIndex: caretIndex, snap: snap, rectForGhost: rectForGhost, hostFont: hostFontForOverlay) {
+            return
         }
 
         // ── SUPPRESSION MID-MOT EN BACKSPACE (flag `midWordGhostRollingEnabled`) ──
@@ -2091,22 +2138,8 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // "enceinte" dans la fenêtre restaure toujours) et AVANT le predict gate.
         // Hors flag, la garde court-circuite tout ⇒ byte-identique (seule la var
         // `lastTickPrefixForDelete` est écrite, sans effet observable).
-        if SuggestionPolicy.Tuning.midWordGhostRollingEnabled {
-            let isBackspacing = !lastTickPrefixForDelete.isEmpty
-                && prefix.count < lastTickPrefixForDelete.count
-                && lastTickPrefixForDelete.hasPrefix(prefix)
-            lastTickPrefixForDelete = prefix
-            let trailingFragment = OutputFilter.trailingPartialWord(prefix)
-            let isIncompleteFragment = !trailingFragment.isEmpty
-                && !SuggestionPolicy.defaultPartialWordIsComplete(prefix)
-            if isBackspacing, isIncompleteFragment {
-                overlay.hide()
-                interceptor.setActive(false)
-                predictor.cancel()
-                lastPredictedPrefix = nil
-                Log.info(.predictor, "ghost_backspace_suppress")
-                return
-            }
+        if handleMidWordBackspaceSuppression(prefix: prefix) {
+            return
         }
 
         // Live-consume promotion: if there's an active LLM suggestion and the
