@@ -62,6 +62,15 @@ public struct BeamConfig: Sendable {
     public var maxTokens: Int
     /// Budget dur de mots du ghost retourné (esprit du long-ghost ~4 mots).
     public var maxWords: Int
+    /// **Pénalité de répétition** (style llama.cpp `penalty_repeat`). Démote les
+    /// logits des tokens déjà vus dans la fenêtre récente → casse les boucles
+    /// d'auto-répétition (« 7 min 7 min 7 min ») que le beam, sans sampler
+    /// llama.cpp, produit sur entrée pauvre en contexte. **1.0 = désactivé**
+    /// (chemin byte-identique) ; > 1 pénalise (1.1 doux ↔ Cotabby 1.05 / greedy 1.1).
+    public var repeatPenalty: Float
+    /// Fenêtre de la pénalité : nombre de tokens récents (queue du prompt + tokens
+    /// propres de la branche) considérés. Sans effet si `repeatPenalty <= 1`.
+    public var repeatLastN: Int
 
     public static let cotypistDefault = BeamConfig(
         maxSearchWidth: 9,
@@ -101,7 +110,16 @@ public struct BeamConfig: Sendable {
         // milieu classique (façon GNMT). Override live via `SOUFFLEUSE_BEAM_EXP`.
         positionExponent: 0.7,
         maxTokens: 12,
-        maxWords: 3
+        maxWords: 3,
+        // Pénalité de répétition (fix #2) : casse l'écho verbatim/boucle du beam à
+        // la GÉNÉRATION (le beam n'a pas le sampler llama.cpp du greedy). Validé par
+        // SouffleuseBeamGhostProbe (PROBE_REPEAT_AB) sur le modèle base/pt de prod :
+        // écho verbatim ≥5 mots 27 % → 0 %, maxEcho 8 → 1, à coût quasi nul
+        // (ghosts non-vides 94 % → 93 %, longueur ↑, latence stable). 1.2 = coude
+        // (1.1 trop faible : écho survit ; 1.3 ≡ 1.2 mais plus dur). Overridable
+        // live via `SOUFFLEUSE_BEAM_REPEAT_PENALTY` (1.0 = OFF).
+        repeatPenalty: 1.2,
+        repeatLastN: 64
     )
 
     /// Config du cœur de prod avec overrides d'ENVIRONNEMENT (A/B sans rebuild) :
@@ -116,11 +134,15 @@ public struct BeamConfig: Sendable {
         if let s = env["SOUFFLEUSE_BEAM_K"], let v = Int(s), v > 0 { c.maxSearchWidth = v; c.maxResultWidth = v }
         if let s = env["SOUFFLEUSE_BEAM_MAXTOK"], let v = Int(s), v > 0 { c.maxTokens = v }
         if let s = env["SOUFFLEUSE_BEAM_MAXWORDS"], let v = Int(s), v > 0 { c.maxWords = v }
+        // Pénalité de répétition (A/B sans rebuild) — défaut 1.0 = OFF, byte-identique.
+        if let s = env["SOUFFLEUSE_BEAM_REPEAT_PENALTY"], let v = Float(s) { c.repeatPenalty = v }
+        if let s = env["SOUFFLEUSE_BEAM_REPEAT_LASTN"], let v = Int(s), v >= 0 { c.repeatLastN = v }
         return c
     }
 
     public init(maxSearchWidth: Int, maxResultWidth: Int, minBranchProbability: Double,
-                relativeCutoff: Double, positionExponent: Double, maxTokens: Int, maxWords: Int) {
+                relativeCutoff: Double, positionExponent: Double, maxTokens: Int, maxWords: Int,
+                repeatPenalty: Float = 1.0, repeatLastN: Int = 64) {
         self.maxSearchWidth = maxSearchWidth
         self.maxResultWidth = maxResultWidth
         self.minBranchProbability = minBranchProbability
@@ -128,6 +150,8 @@ public struct BeamConfig: Sendable {
         self.positionExponent = positionExponent
         self.maxTokens = maxTokens
         self.maxWords = maxWords
+        self.repeatPenalty = repeatPenalty
+        self.repeatLastN = repeatLastN
     }
 
     /// Construit la config en lisant d'éventuels overrides d'environnement
@@ -530,6 +554,31 @@ public actor BeamGhostEngine {
         return applied
     }
 
+    /// **Pénalité de répétition** (style llama.cpp `penalty_repeat`) appliquée AUX
+    /// LOGITS d'une branche, in place, AVANT l'ouverture des branches. Démote les
+    /// tokens déjà vus dans la fenêtre récente (queue du prompt + tokens propres de
+    /// la branche) pour casser les boucles d'AUTO-RÉPÉTITION (« 7 min 7 min 7 min »)
+    /// que le beam, dépourvu du sampler llama.cpp, produit sur entrée pauvre en
+    /// contexte. Règle llama.cpp : si logit > 0 on DIVISE par la pénalité, sinon on
+    /// MULTIPLIE (les deux abaissent la proba). Chaque id pénalisé une seule fois.
+    /// Contrairement au boost corpus (découplé du score), la pénalité AFFECTE le
+    /// score — les branches qui bouclent sont classées plus bas (voulu).
+    private func applyRepeatPenalty(
+        to logits: UnsafeMutablePointer<Float>, branchTokens: [Int32], promptTail: [Int32],
+        penalty: Float, lastN: Int, nVocab: Int
+    ) {
+        guard penalty > 1.0, lastN > 0 else { return }
+        var recent = promptTail
+        recent.append(contentsOf: branchTokens)
+        if recent.count > lastN { recent.removeFirst(recent.count - lastN) }
+        var seen = Set<Int32>()
+        for id in recent where id >= 0 && Int(id) < nVocab {
+            guard seen.insert(id).inserted else { continue }
+            let v = logits[Int(id)]
+            logits[Int(id)] = v > 0 ? v / penalty : v * penalty
+        }
+    }
+
     deinit {
         if let h = handles {
             llama_free(h.context)
@@ -739,6 +788,14 @@ public actor BeamGhostEngine {
         let biasPromptTail: [Int32] = biasActive
             ? Array(promptTokens.suffix(LlamaCorpusSuffixArray.maxMatchLen)) : []
 
+        // ── Pénalité de répétition (config.repeatPenalty > 1) — état par génération ─
+        // Queue du prompt figée une fois ; combinée aux tokens propres de chaque
+        // branche dans `applyRepeatPenalty`. Inactif (penalty ≤ 1) ⇒ aucune lecture/
+        // écriture des logits → chemin byte-identique.
+        let repeatActive = config.repeatPenalty > 1.0 && config.repeatLastN > 0
+        let penaltyPromptTail: [Int32] = repeatActive
+            ? Array(promptTokens.suffix(config.repeatLastN)) : []
+
         // ── Boucle de décodage pas-à-pas ─────────────────────────────────────
         // À chaque étape : on décode UN batch multi-séquences (un token « dernier »
         // par branche vivante), on lit les logits par séquence, on étend.
@@ -775,6 +832,15 @@ public actor BeamGhostEngine {
                 if biasActive {
                     appliedBoosts = applyCorpusBias(to: logits, branchTokens: branch.tokens,
                                                     promptTail: biasPromptTail, nVocab: nVocab)
+                }
+                // Pénalité de répétition APRÈS le bias, UNIQUEMENT en free-decode
+                // (préfixe obligatoire consommé) — ne pas gêner la complétion mid-mot.
+                // Démote les tokens récents → casse l'auto-répétition (« 7 min 7 min »).
+                if repeatActive, branch.remainingRequiredPrefix.isEmpty {
+                    applyRepeatPenalty(to: logits, branchTokens: branch.tokens,
+                                       promptTail: penaltyPromptTail,
+                                       penalty: config.repeatPenalty, lastN: config.repeatLastN,
+                                       nVocab: nVocab)
                 }
                 // ── Seuil de branche vs contrainte requiredPrefix ───────────────
                 // CRUCIAL : tant que le préfixe obligatoire mid-mot n'est pas
