@@ -31,9 +31,7 @@ final class ModelDownloadManager: NSObject {
     @ObservationIgnored nonisolated let modelsDir: URL
 
     override init() {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Souffleuse/Models", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dir = FileManager.souffleuseSupportDirectory(subpath: "Models")
         modelsDir = dir
         super.init()
         session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
