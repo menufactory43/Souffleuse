@@ -7,7 +7,7 @@ colors:
   ink: "#1a1613"
   ink-soft: "#463d33"
   ink-faint: "#5e5446"
-  ghost: "#a99a82"
+  ghost: "#786750"
   paper: "#f3ead9"
   paper-deep: "#ece0c9"
   paper-edge: "#e3d5ba"
@@ -121,7 +121,7 @@ A warm printed-paper field of low-chroma neutrals, governed by a single deep oxb
 - **Ink** (`#1a1613`): primary text, hairline filets, primary-button rest state, and the inverted dark surfaces (the `.feature--wide` key card, the "coulisses" privacy section).
 - **Ink Soft** (`#463d33`): secondary prose, ledes, body copy inside sections, stage directions.
 - **Ink Faint** (`#5e5446`): tertiary labels, captions, footer meta. Deliberately darkened from a paler value to clear WCAG AA on small text; hold this floor.
-- **Ghost** (`#a99a82`): the pale ink of the *souffle* itself, the unaccepted whisper. Decorative / illustrative only. Never load-bearing text.
+- **Ghost** (`#786750`): the ink of the *souffle* itself, the unaccepted whisper. The palest ink on the page, but it carries the suggested word in the demo, so it clears WCAG AA (≥4.5:1 on paper). Hold this floor; the whisper reads as a whisper through italic + the blur-in motion + the red caret, not through low contrast.
 - **Paper** (`#f3ead9`): the body background, the page.
 - **Paper Deep** (`#ece0c9`): the next surface up: manifesto band, footer, demo title bar, inline shortcode chips.
 - **Paper Edge** (`#e3d5ba`): text and hairline borders *on* the dark ink surfaces.
@@ -212,5 +212,5 @@ The hero's prompter window. A programme-bar header (fleuron seal + tracked app n
 - **Don't** clutter: no wall of identical icon-cards, no competing focal points. One dominant idea per fold.
 - **Don't** add a sans-serif or monospace, or a second accent hue. Two serifs, one voice.
 - **Don't** use soft blurred ambient shadows, glassmorphism, gradient text, or pill-rounded corners. If a shadow has blur, it is wrong.
-- **Don't** push the paper toward a brighter cream to feel "warmer", or let ghost (`#a99a82`) carry real text. Warmth is in the ink and the type.
+- **Don't** push the paper toward a brighter cream to feel "warmer", or lighten ghost (`#786750`) back below WCAG AA: it carries the suggested word, so it must stay readable. Warmth is in the ink and the type.
 - **Don't** write with em dashes; use commas, colons, or parentheses, matching the existing French copy.
