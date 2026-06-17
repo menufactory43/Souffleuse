@@ -1631,6 +1631,35 @@
   }
   .preuve__frame.is-on .preuve__soundhint { opacity: 0; }
   .preuve__cap { text-align: center; font-style: italic; color: var(--ink-faint); margin-top: 1rem; }
+
+  /* Au chapeau — modale de don Bitcoin/Lightning */
+  .don-modal { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 1.2rem; }
+  .don-modal[hidden] { display: none; }
+  .don-modal__backdrop { position: absolute; inset: 0; background: rgba(20,16,10,0.55); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
+  .don-modal__panel {
+    position: relative; z-index: 1; width: min(420px, 100%);
+    background: var(--paper); border: var(--filet); box-shadow: 0 18px 50px rgba(20,16,10,0.35);
+    padding: 2rem 1.8rem; text-align: center; max-height: 90vh; overflow-y: auto;
+    animation: donRise 0.25s ease;
+  }
+  @keyframes donRise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  .don-modal__close { position: absolute; top: 0.4rem; right: 0.7rem; border: 0; background: none; font-size: 1.8rem; line-height: 1; color: var(--ink-faint); cursor: pointer; }
+  .don-modal__close:hover { color: var(--rouge); }
+  .don-modal__title { margin: 0 0 0.6rem; }
+  .don-modal__intro { font-size: 0.95rem; color: var(--ink-faint); margin: 0 0 1.4rem; }
+  .don-modal__lbl { font-size: 0.74rem; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-faint); margin: 0 0 0.45rem; }
+  .don-addr {
+    display: inline-flex; align-items: center; gap: 0.7rem; max-width: 100%;
+    font-family: var(--body); font-size: 1.02rem; padding: 0.55rem 0.85rem;
+    border: var(--filet); background: #fff; cursor: pointer; color: var(--ink);
+  }
+  .don-addr__val { font-weight: 600; word-break: break-all; }
+  .don-addr__act { font-size: 0.76rem; color: var(--rouge); border-left: 1px solid var(--ink); padding-left: 0.6rem; white-space: nowrap; }
+  .don-addr.is-copied .don-addr__act { color: var(--rouge-deep); }
+  .don-modal__or { font-size: 0.85rem; color: var(--ink-faint); margin: 1.3rem 0 0.8rem; }
+  .don-modal__qr { display: inline-block; line-height: 0; padding: 0.6rem; border: var(--filet); background: #fff; }
+  .don-modal__qr img { width: 168px; height: 168px; display: block; }
+  .don-modal__note { font-size: 0.8rem; color: var(--ink-faint); margin: 1.4rem 0 0; }
 </style>
 <script>
 // Le rideau ne se lève qu'une fois par session : au retour, la page est déjà
@@ -1680,6 +1709,7 @@
         <a href="#fonctions">Ce qu'elle fait</a>
         <a href="#coulisses">Les coulisses</a>
         <a href="#faq">Questions</a>
+        <a href="#soutenir" data-don-open>Au chapeau (don)</a>
       </nav>
       <div class="langswitch" role="group" aria-label="Langue / Language">
         <a href="/" hreflang="fr" aria-current="true">FR</a>
@@ -2217,6 +2247,30 @@
     </div>
   </section>
 
+  <!-- Au chapeau : don en Bitcoin (Lightning / BOLT12), montant libre,
+       self-custodial — l'offer pointe vers le nœud phoenixd de l'auteur. -->
+  <!-- Au chapeau : modale de don, ouverte par les liens [data-don-open] (nav + footer).
+       Adresse Lightning don@pay.souffleuse.app (LNURL, marche sans canal) en héros,
+       + QR du BOLT12 offer pour le scan. -->
+  <div class="don-modal" id="soutenir" hidden>
+    <div class="don-modal__backdrop" data-don-close></div>
+    <div class="don-modal__panel" role="dialog" aria-modal="true" aria-labelledby="don-titre">
+      <button type="button" class="don-modal__close" data-don-close aria-label="Fermer">&times;</button>
+      <h2 id="don-titre" class="don-modal__title">Au chapeau</h2>
+      <p class="don-modal__intro">Souffleuse est gratuite et le restera. Si elle vous souffle de bons mots, glissez une pièce dans le chapeau — en Bitcoin, par le Lightning Network. Montant libre, aucun compte, directement sur le nœud de l'auteur.</p>
+      <p class="don-modal__lbl">Adresse Lightning</p>
+      <button type="button" class="don-addr" data-copy="don@pay.souffleuse.app">
+        <span class="don-addr__val">don@pay.souffleuse.app</span>
+        <span class="don-addr__act">Copier</span>
+      </button>
+      <p class="don-modal__or">— ou scannez —</p>
+      <a class="don-modal__qr" href="lightning:lno1zrxq8pjw7qjlm68mtp7e3yvxee4y5xrgjhhyf2fxhlphpckrvevh50u0qw65jvgm9s88gn7pflwwud4e8k3pvh5c4mdezg7s0jyl9v8su5mt2qszxratlkv86maemf6fw05r2g7epq9k9u4tkvejr73wj6gpjpz2zgaqqv6yuu0xg7wqxlj3y3nyayzkyrpvwkffzwhurqtxkkga4kafs46nw9zk2cc4wvrzsqvdl7tpam0tm6uptd64q0k4ew637mqcdewpswl8l6u7r525g8qdqtjxy8s8l4sdurxhaghmxqqse5w40w6dwtcu7sfjuk0qu0hjus" aria-label="Ouvrir le QR (BOLT12) dans un portefeuille Lightning">
+        <img src="./assets/btc-don-qr.svg" width="168" height="168" alt="QR Lightning (BOLT12) pour soutenir Souffleuse" loading="lazy">
+      </a>
+      <p class="don-modal__note">Bitcoin · Lightning · 100&nbsp;% non-custodial. Aucune carte, aucun intermédiaire.</p>
+    </div>
+  </div>
+
 </main>
 
 <footer>
@@ -2233,6 +2287,7 @@
   <nav class="shell foot__links" aria-label="Liens utiles">
     <a href="/confidentialite.html">Confidentialité &amp; sécurité</a>
     <a href="#faq">Questions</a>
+    <a href="#soutenir" data-don-open>Au chapeau (don)</a>
     <a href="mailto:contact@souffleuse.app">Écrire à la souffleuse</a>
   </nav>
   <div class="shell colophon">
@@ -3025,6 +3080,57 @@
       el.hidden = false;
     })
     .catch(function () { /* KV indisponible : on reste muet. */ });
+})();
+</script>
+<script>
+// Au chapeau : modale de don (ouverture via [data-don-open], fermeture backdrop/×/Échap)
+// + copie de l'adresse Lightning ([data-copy]) avec feedback éphémère.
+(function () {
+  var modal = document.getElementById("soutenir");
+  if (!modal) return;
+  var lastFocus = null;
+  function open(e) {
+    if (e) e.preventDefault();
+    lastFocus = document.activeElement;
+    modal.hidden = false;
+    document.body.style.overflow = "hidden";
+    var c = modal.querySelector(".don-modal__close");
+    if (c) c.focus();
+  }
+  function close() {
+    modal.hidden = true;
+    document.body.style.overflow = "";
+    if (lastFocus && lastFocus.focus) lastFocus.focus();
+  }
+  Array.prototype.forEach.call(document.querySelectorAll("[data-don-open]"), function (el) {
+    el.addEventListener("click", open);
+  });
+  Array.prototype.forEach.call(modal.querySelectorAll("[data-don-close]"), function (el) {
+    el.addEventListener("click", close);
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && !modal.hidden) close();
+  });
+  // Copie de l'adresse Lightning.
+  Array.prototype.forEach.call(modal.querySelectorAll("[data-copy]"), function (btn) {
+    var act = btn.querySelector(".don-addr__act");
+    btn.addEventListener("click", function () {
+      var val = btn.getAttribute("data-copy");
+      var done = function () {
+        btn.classList.add("is-copied");
+        if (act) { var t = act.textContent; act.textContent = "Copié ✓";
+          setTimeout(function () { act.textContent = t; btn.classList.remove("is-copied"); }, 2000); }
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(val).then(done).catch(done);
+      } else {
+        var ta = document.createElement("textarea");
+        ta.value = val; document.body.appendChild(ta); ta.select();
+        try { document.execCommand("copy"); } catch (e2) {}
+        document.body.removeChild(ta); done();
+      }
+    });
+  });
 })();
 </script>
 </body>
