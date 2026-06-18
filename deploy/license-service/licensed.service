@@ -1,0 +1,14 @@
+[Unit]
+Description=Souffleuse licence service (Lightning -> jeton signe Ed25519)
+After=phoenixd.service
+Wants=phoenixd.service
+
+[Service]
+User=phoenix
+Group=phoenix
+ExecStart=/usr/bin/python3 /opt/licensed/licensed.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
