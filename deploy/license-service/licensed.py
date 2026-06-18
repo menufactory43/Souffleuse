@@ -257,6 +257,18 @@ PAGE_STR = {
         "copyKey": "Copier la clé",
         "keepNote": "Cette clé est rattachée à votre e-mail. Gardez-la précieusement.",
         "footSmall": "souffleuse.app — 100% sur votre Mac",
+        "mktTitle": "Souffleuse Studio — l'atelier de texte, à vie",
+        "mktIntro": "Souffleuse écrit avec vous directement dans n'importe quelle app de votre Mac : un souffle gris au curseur, accepté d'une touche.",
+        "feats": [
+            ("Traduction", "instantanée, vers la langue de votre conversation"),
+            ("Ton &amp; reformulation", "réécrivez selon le registre de chaque app"),
+            ("Transformations « // »", "corriger, raccourcir, reformuler, traduire — au clavier ou d'un clic"),
+            ("Personnalisation", "Souffleuse apprend votre style au fil du temps"),
+            ("Contexte", "des suggestions nourries par ce que vous lisez à l'écran"),
+            ("100% sur votre Mac", "rien ne part sur Internet"),
+        ],
+        "mktOnce": "Un seul paiement, à vie. Pas d'abonnement.",
+        "mktReq": "macOS 14+ · Apple Silicon",
         "locale": "fr",
         "js": {"invalidEmail": "E-mail invalide", "creating": "Création de la facture…",
                "waiting": "En attente du paiement…", "expired": "Facture expirée.",
@@ -282,6 +294,18 @@ PAGE_STR = {
         "copyKey": "Copy the key",
         "keepNote": "This key is tied to your email. Keep it safe.",
         "footSmall": "souffleuse.app — 100% on your Mac",
+        "mktTitle": "Souffleuse Studio — your text workshop, for life",
+        "mktIntro": "Souffleuse writes with you right inside any app on your Mac: a grey whisper at the caret, accepted with a single key.",
+        "feats": [
+            ("Translation", "instant, into the language of your conversation"),
+            ("Tone &amp; rephrasing", "rewrite to match each app's register"),
+            ("“//” transforms", "fix, shorten, rephrase, translate — by keyboard or one click"),
+            ("Personalization", "Souffleuse learns your style over time"),
+            ("Context", "suggestions fed by what you read on screen"),
+            ("100% on your Mac", "nothing leaves your computer"),
+        ],
+        "mktOnce": "One payment, for life. No subscription.",
+        "mktReq": "macOS 14+ · Apple Silicon",
         "locale": "en",
         "js": {"invalidEmail": "Invalid email", "creating": "Creating invoice…",
                "waiting": "Waiting for payment…", "expired": "Invoice expired.",
@@ -293,8 +317,14 @@ PAGE_STR = {
 def build_page(lang: str) -> str:
     s = PAGE_STR.get(lang, PAGE_STR["fr"])
     html = PAGE_TEMPLATE
+    feats_html = "".join(
+        f'<div class="feat"><div class="ft">{t}</div><div class="fd">{d}</div></div>'
+        for t, d in s["feats"]
+    )
     repl = {
         "{{lang}}": s["locale"], "{{title}}": s["title"], "{{sub1}}": s["sub1"],
+        "{{mktTitle}}": s["mktTitle"], "{{mktIntro}}": s["mktIntro"], "{{featsHtml}}": feats_html,
+        "{{mktOnce}}": s["mktOnce"], "{{mktReq}}": s["mktReq"],
         "{{emailLabel}}": s["emailLabel"], "{{emailPh}}": s["emailPh"], "{{buyHtml}}": s["buyHtml"],
         "{{payNote}}": s["payNote"], "{{pay2}}": s["pay2"], "{{lnlink}}": s["lnlink"],
         "{{copyInvoice}}": s["copyInvoice"], "{{wait}}": s["wait"], "{{regen}}": s["regen"],
@@ -331,7 +361,28 @@ border:2px solid var(--ox);border-radius:8px;padding:14px;color:#1a1613;margin:1
 .ok{color:var(--ox);font-weight:700;font-size:18px;text-align:center;margin:6px 0}
 .muted{color:#6b6052;font-size:13px}.hide{display:none}a.ln{display:inline-block;margin-top:10px;color:var(--ox)}
 small{color:#8a7f70}
-</style></head><body><div class="card">
+.wrap{display:flex;gap:34px;align-items:flex-start;max-width:920px;width:100%}
+.mkt{flex:1 1 0;min-width:0;padding:8px 2px}
+.mkt-h{font-size:22px;font-weight:700;color:var(--ox);line-height:1.25;margin:0 0 12px}
+.mkt-intro{font-size:15px;line-height:1.55;color:#3a342c;margin:0 0 20px}
+.feat{margin:14px 0;padding-left:18px;position:relative}
+.feat::before{content:"";position:absolute;left:0;top:7px;width:7px;height:7px;border-radius:50%;background:var(--ox)}
+.feat .ft{font-weight:700;font-size:15px}
+.feat .fd{color:#6b6052;font-size:13.5px;line-height:1.45;margin-top:2px}
+.mkt-once{font-weight:700;font-size:15px;margin:22px 0 4px}
+.mkt-req{color:#8a7f70;font-style:italic;font-size:13px;margin:0}
+.card{flex:0 0 420px}
+@media(max-width:780px){.wrap{flex-direction:column;align-items:stretch;max-width:440px;gap:22px}
+.card{flex:1 1 auto}.mkt{padding:0}}
+</style></head><body><div class="wrap">
+<section class="mkt">
+<h2 class="mkt-h">{{mktTitle}}</h2>
+<p class="mkt-intro">{{mktIntro}}</p>
+{{featsHtml}}
+<p class="mkt-once">{{mktOnce}}</p>
+<p class="mkt-req">{{mktReq}}</p>
+</section>
+<div class="card">
 <div id="step1">
 <h1>Souffleuse</h1><p class="sub">{{sub1}}</p>
 <label for="email">{{emailLabel}}</label>
@@ -359,7 +410,7 @@ small{color:#8a7f70}
 <p class="muted" style="margin-top:12px">{{keepNote}}</p>
 </div>
 <small style="display:block;margin-top:18px;text-align:center">{{footSmall}}</small>
-</div>
+</div></div>
 <script>
 const LOCALE="{{locale}}"; const L={{ljson}};
 const $=s=>document.querySelector(s);
