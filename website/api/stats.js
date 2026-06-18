@@ -2,6 +2,7 @@
 //
 //   GET /api/stats            → totaux cumulés (total / site / sparkle)
 //   GET /api/stats?day=YYYY-MM-DD → ajoute les compteurs du jour demandé
+//   GET /api/stats?versions=1 → ajoute la ventilation par release (adoption)
 //
 // Utilise le token read-only de KV si disponible (sinon le token standard).
 // Aucune écriture. Réponse JSON, non mise en cache.
@@ -37,7 +38,42 @@ async function mget(keys) {
     }
 }
 
+/// SMEMBERS via l'API REST Upstash : liste les membres d'un SET (les versions
+/// vues). Retourne [] si vide/absent. Lève si KV injoignable.
+async function smembers(key) {
+    const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL
+    const token =
+        process.env.KV_REST_API_READ_ONLY_TOKEN ||
+        process.env.KV_REST_API_TOKEN ||
+        process.env.UPSTASH_REDIS_REST_READ_ONLY_TOKEN ||
+        process.env.UPSTASH_REDIS_REST_TOKEN
+    if (!url || !token) throw new Error('KV non configuré')
+
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), KV_TIMEOUT_MS)
+    try {
+        const res = await fetch(`${url}/smembers/${encodeURIComponent(key)}`, {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: ctrl.signal,
+        })
+        const body = await res.json()
+        return body.result ?? []
+    } finally {
+        clearTimeout(timer)
+    }
+}
+
 const toInt = (v) => (v == null ? 0 : parseInt(v, 10) || 0)
+
+// Tri sémantique des versions (0.9.0 < 0.10.0), récent d'abord.
+const cmpVerDesc = (a, b) => {
+    const pa = a.split('.').map(Number), pb = b.split('.').map(Number)
+    for (let i = 0; i < 3; i++) {
+        const d = (pb[i] || 0) - (pa[i] || 0)
+        if (d) return d
+    }
+    return 0
+}
 
 export default async function handler(request) {
     const { searchParams } = new URL(request.url)
@@ -45,6 +81,7 @@ export default async function handler(request) {
 
     // Validation stricte du paramètre jour (évite d'injecter des clés arbitraires).
     const dayValid = day && /^\d{4}-\d{2}-\d{2}$/.test(day)
+    const wantVersions = searchParams.get('versions') === '1'
 
     const keys = ['dl:total', 'dl:site', 'dl:sparkle']
     if (dayValid) keys.push(`dl:${day}:total`, `dl:${day}:site`, `dl:${day}:sparkle`)
@@ -62,6 +99,24 @@ export default async function handler(request) {
                 total: toInt(vals[3]),
                 site: toInt(vals[4]),
                 sparkle: toInt(vals[5]),
+            }
+        }
+        if (wantVersions) {
+            // Liste des releases vues, puis leurs compteurs (total/site/sparkle).
+            const versions = (await smembers('dl:versions')).filter((v) => /^\d+\.\d+(?:\.\d+)?$/.test(v))
+            if (versions.length) {
+                const vkeys = versions.flatMap((v) => [`dl:ver:${v}`, `dl:ver:${v}:site`, `dl:ver:${v}:sparkle`])
+                const vvals = await mget(vkeys)
+                payload.versions = versions
+                    .map((v, i) => ({
+                        version: v,
+                        total: toInt(vvals[i * 3]),
+                        site: toInt(vvals[i * 3 + 1]),
+                        sparkle: toInt(vvals[i * 3 + 2]),
+                    }))
+                    .sort((a, b) => cmpVerDesc(a.version, b.version))
+            } else {
+                payload.versions = []
             }
         }
         return Response.json(payload, {

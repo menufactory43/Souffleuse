@@ -15,7 +15,8 @@
 //
 // Privacy : on lit le User-Agent uniquement pour classer site vs Sparkle (test
 // de sous-chaîne), on ne le stocke pas. Aucune IP, aucun cookie, aucune PII —
-// que des compteurs agrégés.
+// que des compteurs agrégés. Le comptage PAR VERSION lit la version courante
+// dans l'appcast (source de vérité du site, pas une donnée utilisateur).
 
 export const config = { runtime: 'edge' }
 
@@ -26,10 +27,38 @@ const DMG_PATH = '/dl/Souffleuse.dmg'
 // ne doit jamais retarder un téléchargement.
 const KV_TIMEOUT_MS = 800
 
+// --- Version courante (depuis l'appcast) pour le comptage par release ---------
+// L'appcast porte UNE seule <item> = la version courante. On la lit cote serveur
+// (best-effort, court timeout) et on la met en cache au niveau du module : un
+// instance d'edge function est reutilisee, donc la plupart des hits ne refont pas
+// le fetch. Format strict (chiffres + points) -> aucune cle KV arbitraire.
+const VERSION_TTL_MS = 5 * 60 * 1000
+const VERSION_RE = /^\d+\.\d+(?:\.\d+)?$/
+let _verCache = { v: null, at: 0 }
+
+async function currentVersion(baseUrl) {
+    const now = Date.now()
+    if (_verCache.v && now - _verCache.at < VERSION_TTL_MS) return _verCache.v
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 600)
+    try {
+        const res = await fetch(new URL('/appcast.xml', baseUrl).toString(), { signal: ctrl.signal })
+        const xml = await res.text()
+        const m = xml.match(/<sparkle:shortVersionString>([^<]+)<\/sparkle:shortVersionString>/)
+        const v = m && m[1].trim()
+        if (v && VERSION_RE.test(v)) { _verCache = { v, at: now } }
+    } catch {
+        // Appcast lent/injoignable : on garde l'eventuelle valeur en cache (stale).
+    } finally {
+        clearTimeout(timer)
+    }
+    return _verCache.v
+}
+
 /// Incrémente les compteurs en un seul aller-retour (pipeline Upstash REST).
 /// No-op silencieux si KV n'est pas configuré (env absentes) ou en erreur :
 /// le download ne dépend jamais du compteur.
-async function bumpCounters(channel) {
+async function bumpCounters(channel, version) {
     // Selon l'intégration, Vercel expose soit KV_REST_API_* (store « KV »), soit
     // UPSTASH_REDIS_REST_* (intégration Upstash directe). On accepte les deux.
     const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL
@@ -44,6 +73,15 @@ async function bumpCounters(channel) {
         ['INCR', `dl:${day}:total`],
         ['INCR', `dl:${day}:${channel}`],
     ]
+    // Comptage par release (si la version a pu être lue dans l'appcast). `dl:versions`
+    // est un SET qui liste les versions vues → /api/stats?versions=1 les énumère.
+    if (version) {
+        commands.push(
+            ['SADD', 'dl:versions', version],
+            ['INCR', `dl:ver:${version}`],
+            ['INCR', `dl:ver:${version}:${channel}`],
+        )
+    }
 
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), KV_TIMEOUT_MS)
@@ -69,7 +107,8 @@ export default async function handler(request) {
     // Sparkle s'annonce dans son UA (ex: "Souffleuse/0.8.1 Sparkle/2.x").
     const channel = ua.includes('Sparkle') ? 'sparkle' : 'site'
 
-    await bumpCounters(channel)
+    const version = await currentVersion(request.url)
+    await bumpCounters(channel, version)
 
     // Location absolue dérivée de l'origine de la requête (robuste pour Sparkle).
     const target = new URL(DMG_PATH, request.url).toString()
