@@ -18,6 +18,10 @@ DB = "/opt/licensed/licenses.db"
 KEYFILE = "/opt/licensed/signing_key.b64"
 LISTEN = ("127.0.0.1", 8089)
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+# Jeton SOUF- (base64url . base64url). Charset strict — sert a valider la cle
+# reflechie dans la page de rebond /buy/activate (anti-injection : on ne reflete
+# JAMAIS une valeur hors de cet alphabet, donc aucun <,>,&," possible).
+TOKEN_RE = re.compile(r"^SOUF-[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+$")
 
 # --- Signature au format LicenseKey : SOUF-<b64url(email_canon)>.<b64url(sig)> ---
 def b64url(b: bytes) -> str:
@@ -151,10 +155,12 @@ def _resend_key():
 def _email_html(token: str, s: dict) -> str:
     # HTML email-safe : tables + styles inline, police web-safe (Georgia/serif),
     # accent sang-de-boeuf #8c2b21. Rendu fiable Gmail/Apple Mail.
-    # Le bouton « Activer » est un deep link souffleuse://activate?key=… : un clic
-    # ouvre l'app et active la cle. Fallback : cle copiable a la main juste au-dessus
-    # (un vrai bouton « copier » est impossible en e-mail — JS bloque par les clients).
-    deeplink = "souffleuse://activate?key=" + urllib.parse.quote(token, safe="")
+    # Le bouton « Activer » pointe sur la page de rebond https /buy/activate :
+    # Gmail (et la plupart des webmails) BLOQUENT les liens a scheme custom
+    # (souffleuse://) — un href direct y est rendu mort. La page https, elle, passe
+    # partout puis declenche le deep link cote navigateur. Fallback copier/coller
+    # de la cle juste au-dessus (un vrai bouton « copier » est impossible en e-mail).
+    deeplink = "https://pay.souffleuse.app/buy/activate?key=" + urllib.parse.quote(token, safe="")
     return (
         '<table width="100%" cellpadding="0" cellspacing="0" role="presentation" '
         'style="background:#f3efe7;padding:32px 12px;font-family:Georgia,\'Times New Roman\',serif;">'
@@ -245,6 +251,8 @@ PAGE_STR = {
         "emailPh": "vous@exemple.fr",
         "buyHtml": 'Acheter — <span class="price">39 &euro;</span>',
         "payNote": "Paiement en bitcoin (Lightning). La clé de licence s'affiche dès réception.",
+        "refund": "Remboursé sous 14 jours, sans justification.",
+        "cardAlt": "Pas de Bitcoin&nbsp;? Payer par carte",
         "pay2": 'Payez <span class="price">39 &euro;</span>',
         "lnlink": "Ouvrir dans un portefeuille",
         "copyInvoice": "Copier la facture",
@@ -282,6 +290,8 @@ PAGE_STR = {
         "emailPh": "you@example.com",
         "buyHtml": 'Buy — <span class="price">&euro;39</span>',
         "payNote": "Payment in bitcoin (Lightning). Your licence key appears on receipt.",
+        "refund": "14-day refund, no questions asked.",
+        "cardAlt": "No Bitcoin? Pay by card",
         "pay2": 'Pay <span class="price">&euro;39</span>',
         "lnlink": "Open in a wallet",
         "copyInvoice": "Copy the invoice",
@@ -327,6 +337,7 @@ def build_page(lang: str) -> str:
         "{{mktOnce}}": s["mktOnce"], "{{mktReq}}": s["mktReq"],
         "{{emailLabel}}": s["emailLabel"], "{{emailPh}}": s["emailPh"], "{{buyHtml}}": s["buyHtml"],
         "{{payNote}}": s["payNote"], "{{pay2}}": s["pay2"], "{{lnlink}}": s["lnlink"],
+        "{{refund}}": s["refund"], "{{cardAlt}}": s["cardAlt"], "{{lemon}}": LEMON_URL,
         "{{copyInvoice}}": s["copyInvoice"], "{{wait}}": s["wait"], "{{regen}}": s["regen"],
         "{{thanksOk}}": s["thanksOk"], "{{tokenSub}}": s["tokenSub"], "{{copyKey}}": s["copyKey"],
         "{{activateKey}}": s["activateKey"], "{{activateNote}}": s["activateNote"],
@@ -360,6 +371,7 @@ border:1px solid #e2d8c6;border-radius:8px;padding:10px;color:#5e5446}
 border:2px solid var(--ox);border-radius:8px;padding:14px;color:#1a1613;margin:10px 0}
 .ok{color:var(--ox);font-weight:700;font-size:18px;text-align:center;margin:6px 0}
 .muted{color:#6b6052;font-size:13px}.hide{display:none}a.ln{display:inline-block;margin-top:10px;color:var(--ox)}
+.guarantee{color:#346524;font-size:13px;font-weight:600;margin:12px 0 0}
 small{color:#8a7f70}
 .wrap{display:flex;gap:34px;align-items:flex-start;max-width:920px;width:100%}
 .mkt{flex:1 1 0;min-width:0;padding:8px 2px}
@@ -388,7 +400,9 @@ small{color:#8a7f70}
 <label for="email">{{emailLabel}}</label>
 <input id="email" type="email" placeholder="{{emailPh}}" autocomplete="email">
 <button id="buy">{{buyHtml}}</button>
-<p class="muted" style="margin-top:14px">{{payNote}}</p>
+<p class="guarantee">&#10003; {{refund}}</p>
+<p class="muted" style="margin-top:10px">{{payNote}}</p>
+<p style="margin-top:8px"><a class="ln" href="{{lemon}}">{{cardAlt}} &rarr;</a></p>
 </div>
 <div id="step2" class="hide">
 <h1>{{pay2}}</h1><p class="sub" id="amt"></p>
@@ -471,6 +485,7 @@ CHOOSE_STR = {
         "cardNote": "Carte bancaire, Apple Pay, PayPal — via Lemon Squeezy.",
         "btc": "Payer en Bitcoin &#9889;",
         "btcNote": "Lightning. La clé s'affiche dès réception.",
+        "refund": "Remboursé sous 14 jours, sans justification.",
         "foot": "souffleuse.app — 100% sur votre Mac",
     },
     "en": {
@@ -483,6 +498,7 @@ CHOOSE_STR = {
         "cardNote": "Credit card, Apple Pay, PayPal — via Lemon Squeezy.",
         "btc": "Pay with Bitcoin &#9889;",
         "btcNote": "Lightning. Your key appears on receipt.",
+        "refund": "14-day refund, no questions asked.",
         "foot": "souffleuse.app — 100% on your Mac",
     },
 }
@@ -507,6 +523,7 @@ small{color:#8a7f70;display:block;margin-top:20px;text-align:center}
 <p class="price">{{priceLine}}</p>
 <a class="opt primary" href="{{lemon}}"><div class="t">{{card}} &rarr;</div><div class="n">{{cardNote}}</div></a>
 <a class="opt" href="/buy"><div class="t">{{btc}} &rarr;</div><div class="n">{{btcNote}}</div></a>
+<p style="color:#346524;font-size:13px;font-weight:600;margin:16px 0 0;text-align:center">&#10003; {{refund}}</p>
 <small>{{foot}}</small>
 </div></body></html>"""
 
@@ -517,9 +534,93 @@ def build_choose(lang: str) -> str:
         "{{lang}}": s["locale"], "{{title}}": s["title"], "{{h1}}": s["h1"],
         "{{sub}}": s["sub"], "{{priceLine}}": s["priceLine"], "{{card}}": s["card"],
         "{{cardNote}}": s["cardNote"], "{{btc}}": s["btc"], "{{btcNote}}": s["btcNote"],
-        "{{foot}}": s["foot"], "{{lemon}}": LEMON_URL,
+        "{{foot}}": s["foot"], "{{lemon}}": LEMON_URL, "{{refund}}": s["refund"],
     }
     for k, v in repl.items():
+        html = html.replace(k, v)
+    return html
+
+# --- Page de REBOND https -> souffleuse:// (/buy/activate?key=…) ---------------
+# Gmail (et la plupart des webmails) refusent les liens a scheme custom : le bouton
+# « Activer » de l'e-mail pointe donc sur cette page https, qui declenche le deep
+# link cote navigateur (geste de page) + offre un fallback copier/coller manuel.
+ACT_STR = {
+    "fr": {
+        "locale": "fr",
+        "title": "Activer Souffleuse",
+        "h1": "Activation de Souffleuse",
+        "opening": "Souffleuse devrait s'ouvrir et activer votre licence. Sinon, cliquez le bouton ci-dessous.",
+        "retry": "Ouvrir Souffleuse",
+        "copy": "Copier la clé",
+        "copied": "Copié !",
+        "manual": "Rien ne se passe ? Copiez la clé et collez-la dans Souffleuse (Réglages → Studio).",
+        "invalid": "Lien d'activation invalide ou incomplet.",
+        "back": "Retour",
+    },
+    "en": {
+        "locale": "en",
+        "title": "Activate Souffleuse",
+        "h1": "Souffleuse activation",
+        "opening": "Souffleuse should open and activate your licence. If not, click the button below.",
+        "retry": "Open Souffleuse",
+        "copy": "Copy the key",
+        "copied": "Copied!",
+        "manual": "Nothing happens? Copy the key and paste it into Souffleuse (Settings → Studio).",
+        "invalid": "Invalid or incomplete activation link.",
+        "back": "Back",
+    },
+}
+
+ACTIVATE_TEMPLATE = r"""<!doctype html><html lang="{{lang}}"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{title}}</title><style>
+:root{--ox:#8c2b21}
+*{box-sizing:border-box}body{font-family:Georgia,'Times New Roman',serif;background:#f3efe7;color:#1a1613;
+margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center}
+.card{background:#fbf8f2;border:1px solid #e2d8c6;border-radius:14px;max-width:420px;width:100%;
+padding:32px;box-shadow:0 6px 30px rgba(140,43,33,.07)}
+h1{font-size:22px;margin:0 0 8px}.sub{color:#6b6052;font-size:14px;line-height:1.5;margin:0 0 18px}
+.tok{font-family:ui-monospace,monospace;font-size:13px;word-break:break-all;background:#fff;
+border:2px solid var(--ox);border-radius:8px;padding:14px;color:#1a1613;margin:10px 0;user-select:all}
+a.btn{display:block;text-decoration:none;margin-top:14px;padding:12px;border-radius:8px;background:var(--ox);
+color:#fff;font-size:15px;font-weight:600}
+button{width:100%;margin-top:10px;padding:11px;border:1px solid var(--ox);border-radius:8px;background:#fff;
+color:var(--ox);font-family:inherit;font-size:15px;font-weight:600;cursor:pointer}
+.muted{color:#6b6052;font-size:13px;margin-top:14px}
+</style></head><body><div class="card">{{body}}</div>
+<script>
+var DL={{dljson}};
+if(DL){setTimeout(function(){location.href=DL;},150);}
+var c=document.getElementById("copy");
+if(c){c.onclick=function(){var t=document.getElementById("tok").textContent,o=c.textContent;
+  navigator.clipboard.writeText(t);c.textContent={{copiedjson}};setTimeout(function(){c.textContent=o;},2000);};}
+</script></body></html>"""
+
+def build_activate(lang: str, key: str) -> str:
+    s = ACT_STR.get(lang, ACT_STR["fr"])
+    valid = bool(key) and bool(TOKEN_RE.match(key))
+    if valid:
+        dl = "souffleuse://activate?key=" + urllib.parse.quote(key, safe="")
+        body = (
+            f'<h1>{s["h1"]}</h1>'
+            f'<p class="sub">{s["opening"]}</p>'
+            f'<div class="tok" id="tok">{key}</div>'
+            f'<a class="btn" id="retry" href="{dl}">{s["retry"]} &rarr;</a>'
+            f'<button id="copy">{s["copy"]}</button>'
+            f'<p class="muted">{s["manual"]}</p>'
+        )
+    else:
+        dl = ""
+        body = (
+            f'<h1>{s["h1"]}</h1>'
+            f'<p class="sub">{s["invalid"]}</p>'
+            f'<a class="btn" href="/buy/studio">{s["back"]} &rarr;</a>'
+        )
+    html = ACTIVATE_TEMPLATE
+    for k, v in {
+        "{{lang}}": s["locale"], "{{title}}": s["title"], "{{body}}": body,
+        "{{dljson}}": json.dumps(dl), "{{copiedjson}}": json.dumps(s["copied"]),
+    }.items():
         html = html.replace(k, v)
     return html
 
@@ -544,6 +645,9 @@ class H(BaseHTTPRequestHandler):
             self._html(build_page(detect_lang(self.headers.get("Accept-Language"))))
         elif u.path in ("/buy/studio", "/buy/studio/"):
             self._html(build_choose(detect_lang(self.headers.get("Accept-Language"))))
+        elif u.path in ("/buy/activate", "/buy/activate/"):
+            key = urllib.parse.parse_qs(u.query).get("key", [""])[0]
+            self._html(build_activate(detect_lang(self.headers.get("Accept-Language")), key))
         elif u.path == "/buy/status":
             h = urllib.parse.parse_qs(u.query).get("h", [""])[0]
             row = order_get(h)
