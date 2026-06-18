@@ -69,6 +69,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         static let onboardingCompletedVersion = "onboardingCompletedVersion"
         static let onboardingProgressStep = "onboardingProgressStep2"
         static let progressStepLegacy = "onboardingProgressStep"
+        /// Repère du dernier rapport de plantage déjà proposé (timeIntervalSince1970)
+        /// — pour ne pas reproposer le même crash à chaque lancement.
+        static let lastSeenCrashTime = "lastSeenCrashReportTime"
     }
 
     private var statusItem: NSStatusItem!
@@ -653,6 +656,10 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         installGlobalHotkey()
         if shouldShowOnboarding() {
             showOnboarding()
+        } else {
+            // Pas d'onboarding à l'écran → on peut proposer le rapport de plantage
+            // éventuel sans empiler de modale sur le wizard.
+            checkForRecentCrash()
         }
     }
 
@@ -1649,6 +1656,73 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: config) { _, _ in
             Task { @MainActor in NSApp.terminate(nil) }
         }
+    }
+
+    // MARK: - Crash report (local, opt-in)
+
+    /// Au démarrage : si macOS a écrit un rapport de plantage de Souffleuse depuis
+    /// la dernière fois, propose UNE fois de l'envoyer. Zéro-réseau/zéro-télémétrie
+    /// oblige : on ne lit que les rapports déjà sur disque, rien n'est transmis
+    /// automatiquement (l'utilisateur copie et écrit lui-même l'e-mail).
+    private func checkForRecentCrash() {
+        let dir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Logs/DiagnosticReports", isDirectory: true)
+        guard let items = try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: [.contentModificationDateKey]
+        ) else { return }
+
+        let reports: [(url: URL, date: Date)] = items.compactMap { url in
+            guard CrashReportDetector.isOurReport(filename: url.lastPathComponent),
+                  let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            else { return nil }
+            return (url, date)
+        }
+
+        let since: Date? = {
+            let t = UserDefaults.standard.double(forKey: K.lastSeenCrashTime)
+            return t > 0 ? Date(timeIntervalSince1970: t) : nil
+        }()
+        guard let found = CrashReportDetector.newestUnseen(reports: reports, since: since, now: Date()) else { return }
+
+        // Marqué « vu » AVANT l'alerte : même si l'utilisateur refuse, on ne
+        // reproposera pas ce plantage-là au prochain lancement.
+        UserDefaults.standard.set(found.date.timeIntervalSince1970, forKey: K.lastSeenCrashTime)
+        presentCrashReportOffer(reportURL: found.url)
+    }
+
+    private func presentCrashReportOffer(reportURL: URL) {
+        let alert = NSAlert()
+        alert.messageText = tr(fr: "Souffleuse a quitté inopinément", en: "Souffleuse quit unexpectedly")
+        alert.informativeText = tr(
+            fr: "Un rapport technique (pas vos textes) a été créé la dernière fois. M'aider à corriger le souci ? Rien n'est envoyé automatiquement — vous copiez et écrivez l'e-mail vous-même.",
+            en: "A technical report (not your text) was created last time. Help me fix it? Nothing is sent automatically — you copy and write the email yourself."
+        )
+        alert.addButton(withTitle: tr(fr: "Copier le rapport et écrire l'e-mail", en: "Copy report and write the email"))
+        alert.addButton(withTitle: tr(fr: "Pas maintenant", en: "Not now"))
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        copyReportAndOpenMail(reportURL: reportURL)
+    }
+
+    /// Copie le rapport dans le presse-papier et ouvre un brouillon d'e-mail vers
+    /// le contact. mailto ne permet pas de pièce jointe → l'utilisateur colle le
+    /// rapport (Cmd+V) dans le corps. Tout reste sous son contrôle.
+    private func copyReportAndOpenMail(reportURL: URL) {
+        if let content = try? String(contentsOf: reportURL, encoding: .utf8) {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(content, forType: .string)
+        }
+        var comps = URLComponents()
+        comps.scheme = "mailto"
+        comps.path = "contact@souffleuse.app"
+        comps.queryItems = [
+            URLQueryItem(name: "subject", value: tr(fr: "Rapport de plantage Souffleuse", en: "Souffleuse crash report")),
+            URLQueryItem(name: "body", value: tr(
+                fr: "Bonjour,\n\nSouffleuse a planté. Voici le rapport (collez-le ci-dessous avec Cmd+V) :\n\n",
+                en: "Hello,\n\nSouffleuse crashed. Here is the report (paste it below with Cmd+V):\n\n"
+            )),
+        ]
+        if let url = comps.url { NSWorkspace.shared.open(url) }
     }
 
     /// Append-or-create sur `/tmp/souffleuse-tick.log` (diagnostic dev hors audit,
