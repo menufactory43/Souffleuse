@@ -1,15 +1,15 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Privacy &amp; security — Souffleuse</title>
-<meta name="description" content="How Souffleuse protects your writing: 100% on-device, no account, no telemetry, encrypted at rest. What stays on your Mac, and what never leaves it." />
+<title>Mentions légales — Souffleuse</title>
+<meta name="description" content="Mentions légales de Souffleuse : éditeur, directeur de la publication, hébergeur du site et contact. Souffleuse est une marque éditée par une société." />
 
-<link rel="canonical" href="https://souffleuse.app/en/privacy.html" />
-<link rel="alternate" hreflang="fr" href="https://souffleuse.app/confidentialite.html" />
-<link rel="alternate" hreflang="en" href="https://souffleuse.app/en/privacy.html" />
-<link rel="alternate" hreflang="x-default" href="https://souffleuse.app/confidentialite.html" />
+<link rel="canonical" href="https://souffleuse.app/mentions-legales.html" />
+<link rel="alternate" hreflang="fr" href="https://souffleuse.app/mentions-legales.html" />
+<link rel="alternate" hreflang="en" href="https://souffleuse.app/en/legal-notice.html" />
+<link rel="alternate" hreflang="x-default" href="https://souffleuse.app/mentions-legales.html" />
 <meta name="theme-color" content="#f3ead9" />
 <meta name="robots" content="index,follow" />
 
@@ -19,10 +19,10 @@
 
 <meta property="og:type" content="article" />
 <meta property="og:site_name" content="Souffleuse" />
-<meta property="og:locale" content="en_US" />
-<meta property="og:url" content="https://souffleuse.app/en/privacy.html" />
-<meta property="og:title" content="Privacy & security — Souffleuse" />
-<meta property="og:description" content="100% on-device, no account, no telemetry, encrypted at rest. What stays on your Mac, and what never leaves it." />
+<meta property="og:locale" content="fr_FR" />
+<meta property="og:url" content="https://souffleuse.app/mentions-legales.html" />
+<meta property="og:title" content="Mentions légales — Souffleuse" />
+<meta property="og:description" content="Éditeur, directeur de la publication, hébergeur du site et contact." />
 <meta property="og:image" content="https://souffleuse.app/og.png" />
 
 <!-- Fonts self-hébergées : aucune requête tierce au runtime (promesse 100% local). -->
@@ -68,6 +68,7 @@
   header, main, footer { position: relative; z-index: 1; }
   .shell { width: min(72ch, 92vw); margin-inline: auto; }
 
+  /* Barre de tête, alignée sur le livret. */
   .topbar { border-bottom: var(--filet); background: var(--paper-deep); }
   .topbar__inner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-block: 0.9rem; }
   .brand { display: inline-flex; align-items: center; gap: 0.6rem; color: var(--ink); text-decoration: none; }
@@ -102,6 +103,7 @@
   .doc ul { max-width: 64ch; padding-left: 1.2rem; }
   .doc li { margin-block: 0.35rem; }
 
+  /* Le sceau « ce qui ne sort pas » : un encadré sang-de-bœuf discret. */
   .seal {
     margin: 2rem 0; padding: 1.2rem 1.4rem;
     border: 1px solid var(--rouge); border-left-width: 3px;
@@ -124,7 +126,7 @@
 
 <header class="topbar">
   <div class="shell topbar__inner">
-    <a href="/en/" class="brand" aria-label="Souffleuse, home">
+    <a href="/" class="brand" aria-label="Souffleuse, accueil">
       <svg class="brand__mark" width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
         <path d="M2 22 Q13 2 24 22" fill="none" stroke="currentColor" stroke-width="1.4"/>
         <path d="M6 22 Q13 9 20 22" fill="none" stroke="currentColor" stroke-width="1"/>
@@ -132,15 +134,15 @@
       </svg>
       <span>
         <span class="brand__name">Souffleuse</span>
-        <span class="brand__sub">Privacy</span>
+        <span class="brand__sub">Mentions légales</span>
       </span>
     </a>
     <div class="topbar__right">
-      <a href="/en/" class="topback">← Back to the playbill</a>
+      <a href="/" class="topback">← Retour au livret</a>
       <div class="langswitch" role="group" aria-label="Langue / Language">
-        <a href="/confidentialite.html" hreflang="fr">FR</a>
+        <a href="/mentions-legales.html" hreflang="fr" aria-current="true">FR</a>
         <span class="langswitch__sep" aria-hidden="true">·</span>
-        <a href="/en/privacy.html" hreflang="en" aria-current="true">EN</a>
+        <a href="/en/legal-notice.html" hreflang="en">EN</a>
       </div>
     </div>
   </div>
@@ -148,90 +150,67 @@
 
 <main class="doc">
   <div class="shell">
-    <span class="doc__eyebrow">From the wings</span>
-    <h1>Privacy &amp; security</h1>
+    <span class="doc__eyebrow">Qui est derrière le rideau</span>
+    <h1>Mentions légales</h1>
     <p class="doc__lede">
-      Souffleuse only works because it reads what you write. So we made sure it has
-      <b>no way to tell anyone</b>: no account, no cloud, no "we anonymize it." There simply
-      is no way out.
+      Les informations légales requises pour identifier l'éditeur de Souffleuse et l'hébergeur
+      de ce site. Souffleuse est une marque, éditée par une société.
     </p>
-    <p class="doc__updated">Last updated: 14 June 2026 · beta.</p>
-
-    <h2>Everything happens on your Mac</h2>
-    <p>
-      Generating the whispered text, translation, tone rewriting, learning your style —
-      it all runs <b>locally</b>, on your Mac's Apple chip. None of your text is sent to a
-      server to be processed, not ours, not a third party's. Once installed, the app works
-      <b>fully offline</b>.
-    </p>
+    <p class="doc__updated">Dernière mise à jour : 18 juin 2026 · version bêta.</p>
 
     <div class="seal">
-      <p><b>The rule, in one line:</b> your text never leaves your Mac. Souffleuse's only
-      network connection is to download the language model, once, at install — never to send
-      what you write.</p>
+      <p><b>À lire d'abord :</b> ce document est un modèle sérieux mais il ne remplace pas un
+      avis juridique. Les éléments entre crochets — comme <b>[SOCIÉTÉ]</b> ou
+      <b>[ADRESSE DE DOMICILIATION]</b> — doivent être complétés par l'éditeur avant publication
+      définitive.</p>
     </div>
 
-    <h2>What connects to the internet — and when</h2>
-    <p>Souffleuse uses the network in only two cases, both explicit:</p>
+    <h2>Éditeur du site et de l'application</h2>
+    <!-- Vie privée : indiquer ici une ADRESSE DE DOMICILIATION COMMERCIALE (siège social
+         déclaré au registre), JAMAIS l'adresse du domicile personnel du dirigeant. -->
+    <p>
+      <b>Souffleuse</b> est une marque éditée par <b>[SOCIÉTÉ]</b>, <b>[FORME JURIDIQUE]</b>
+      au capital de <b>[CAPITAL]</b>, immatriculée sous le numéro <b>[RCS/SIREN]</b>.
+    </p>
     <ul>
-      <li><b>Downloading the model</b>, once, on first run (from Hugging Face). That is the only time bytes come in.</li>
-      <li><b>Checking for app updates</b>, which you can switch off. It fetches a simple version file; it sends no data about you.</li>
+      <li><b>Siège social</b> (adresse de domiciliation) : <b>[ADRESSE DE DOMICILIATION]</b></li>
+      <li><b>Directeur de la publication</b> : <b>[REPRÉSENTANT LÉGAL]</b></li>
+      <li><b>Contact</b> : <a href="mailto:contact@souffleuse.app">contact@souffleuse.app</a></li>
     </ul>
+
+    <h2>Vendeur officiel (Merchant of Record)</h2>
     <p>
-      Beyond that: <b>no telemetry, no "ping," no analytics, no cookies, no tracking pixels.</b>
-      No account to create, no email required to use the app.
+      Lorsque l'application est payante, les achats sont traités par <b>Lemon Squeezy</b>, qui
+      agit en qualité de vendeur officiel (Merchant of Record). Le contrat de vente se conclut
+      avec Lemon Squeezy, qui émet la facture, collecte la TVA et traite remboursements et
+      rétractations selon sa propre politique. Voir nos
+      <a href="/conditions.html">conditions générales</a> pour le détail.
     </p>
 
-    <h2>Sensitive fields — it doesn't see them</h2>
+    <h2>Hébergeur du site</h2>
     <p>
-      macOS marks secure fields — passwords, codes, card numbers. Souffleuse turns away from
-      them: <b>no reading, no suggestion, no trace</b>. And you can tell it to stay silent
-      entirely in specific apps, one by one, from its settings.
+      Ce site est hébergé par <b>Vercel Inc.</b>, 340 S Lemon Ave #4133, Walnut, CA 91789,
+      États-Unis (<a href="https://vercel.com" rel="nofollow noopener" target="_blank">vercel.com</a>).
     </p>
 
-    <h2>What it remembers about you is encrypted</h2>
+    <h2>Propriété intellectuelle</h2>
     <p>
-      To whisper in <i>your</i> voice, Souffleuse keeps a record of phrasings you accept. That
-      memory lives in a single folder on your Mac, in an <b>encrypted (AES-256)</b> store whose
-      key is held in the macOS <b>Keychain</b> — so it's protected by your login. No one else,
-      not even us, can read it: there is no copy anywhere else, by design.
+      La marque <b>Souffleuse</b>, le logiciel, son code, son design et les contenus de ce site
+      sont la propriété de l'Éditeur et de ses concédants, sauf composants tiers régis par leurs
+      propres licences (voir le <a href="/licence.html">Contrat de Licence Utilisateur Final</a>).
     </p>
 
-    <h2>The clipboard and the screen</h2>
+    <h2>Données personnelles</h2>
     <p>
-      If a feature needs the clipboard to understand context better, you stay in control: a
-      blocklist lets you exclude any apps you choose. Screen capture (to locate the cursor in a
-      few rare apps) is <b>off by default</b> and only turns on if you explicitly allow it. Here
-      too, everything is processed on the spot.
+      Souffleuse fonctionne 100 % localement, sans compte ni collecte au runtime. Le détail de ce
+      qui reste sur votre Mac — et de ce qui n'en part jamais — figure dans notre
+      <a href="/confidentialite.html">politique de confidentialité</a>.
     </p>
 
-    <h2>The macOS permissions it asks for</h2>
-    <ul>
-      <li><b>Accessibility</b> — to read the field you're writing in and slip the whisper in. This is the core of how it works.</li>
-      <li><b>Apple Events</b> — to talk cleanly to the active app.</li>
-      <li><b>Screen Recording</b> — optional, off by default, only to locate the cursor when accessibility isn't enough.</li>
-    </ul>
-    <p>You grant, and revoke, each of these at any time in <b>System Settings &gt; Privacy &amp; Security</b>.</p>
-
-    <h2>The download counter, in full transparency</h2>
+    <h2>Contact</h2>
     <p>
-      The website (not the app) counts how many times the installer is downloaded, to show an
-      honest total. That counter records only <b>aggregate totals</b>: <b>no IP address, no
-      cookie, no personal data</b> is kept. That's where it stops, and it only concerns the
-      download page.
-    </p>
-
-    <h2>Uninstalling leaves nothing behind</h2>
-    <p>
-      Like any Mac app: drag it from Applications to the Trash. What it had learned of your
-      style lives in that one encrypted folder; delete it too and <b>nothing remains</b>. No
-      copy survives anywhere else, because there never was an "anywhere else."
-    </p>
-
-    <h2>A question?</h2>
-    <p>
-      Write to the prompter: <a href="mailto:contact@souffleuse.app">contact@souffleuse.app</a>.
-      We reply, and we keep it plain.
+      Pour toute question, écrivez à la souffleuse :
+      <a href="mailto:contact@souffleuse.app">contact@souffleuse.app</a>.
     </p>
   </div>
 </main>
@@ -239,14 +218,13 @@
 <footer>
   <div class="shell foot">
     <span class="foot__brand">Souffleuse</span>
-    <p style="margin:0;">Made on Mac, stays on your Mac.</p>
-    <nav class="foot__links" aria-label="Useful links">
-      <a href="/en/">Home</a>
-      <a href="/en/terms.html">Terms</a>
-      <a href="/en/license.html">License</a>
-      <a href="/en/legal-notice.html">Legal notice</a>
-      <a href="/en/#faq">Questions</a>
-      <a href="mailto:contact@souffleuse.app">Write to the prompter</a>
+    <p style="margin:0;">Fait sur Mac, reste sur votre Mac.</p>
+    <nav class="foot__links" aria-label="Liens utiles">
+      <a href="/">Accueil</a>
+      <a href="/confidentialite.html">Confidentialité</a>
+      <a href="/conditions.html">Conditions</a>
+      <a href="/licence.html">Licence</a>
+      <a href="mailto:contact@souffleuse.app">Écrire à la souffleuse</a>
     </nav>
   </div>
 </footer>
