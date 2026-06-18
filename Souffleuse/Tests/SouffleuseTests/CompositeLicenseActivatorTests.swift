@@ -84,4 +84,28 @@ struct CompositeLicenseActivatorTests {
         #expect(await offline.seenKey == token)
         #expect(await online.seenKey == nil)
     }
+
+    @Test("voie offline RÉELLE : SignedLicenseActivator (code de prod) accepte un jeton bien signé")
+    func realOfflineActivatorAccepts() async throws {
+        let (pub, token) = freshKeypairAndToken(email: "btc@exemple.fr")
+        let online = SpyActivator(tag: "online")
+        let composite = CompositeLicenseActivator(
+            offline: SignedLicenseActivator(publicKeyBase64: pub),  // le VRAI activateur, pas un spy
+            online: online,
+            publicKeyBase64: pub
+        )
+        // Ne throw pas = jeton accepté par le même code que l'app en prod.
+        let instance = try await composite.activate(key: token)
+        #expect(instance == nil)                  // SignedLicenseActivator ne renvoie pas d'instance
+        #expect(await online.seenKey == nil)      // la voie LS n'est jamais sollicitée
+    }
+
+    @Test("voie offline RÉELLE : un jeton à signature invalide est rejeté")
+    func realOfflineActivatorRejectsBadToken() async {
+        let (pub, _) = freshKeypairAndToken(email: "x@x.fr")
+        let offline = SignedLicenseActivator(publicKeyBase64: pub)
+        await #expect(throws: LicenseError.invalidKey) {
+            try await offline.activate(key: "SOUF-zzzz.zzzz")
+        }
+    }
 }

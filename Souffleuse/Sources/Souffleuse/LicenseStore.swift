@@ -119,8 +119,16 @@ struct StubLicenseActivator: LicenseActivating {
 /// repasse au modèle hors-ligne. Vérifie la signature avec la clé publique
 /// embarquée, zéro réseau.
 struct SignedLicenseActivator: LicenseActivating {
+    /// Clé publique de vérif. Défaut = celle embarquée ; injectable pour les tests
+    /// (signer avec une paire de test sans dépendre de la clé de prod).
+    let publicKeyBase64: String
+
+    init(publicKeyBase64: String = LicenseGate.publicKeyBase64) {
+        self.publicKeyBase64 = publicKeyBase64
+    }
+
     func activate(key: String) async throws -> String? {
-        guard LicenseKey.verify(key, publicKeyBase64: LicenseGate.publicKeyBase64) != nil else {
+        guard LicenseKey.verify(key, publicKeyBase64: publicKeyBase64) != nil else {
             throw LicenseError.invalidKey
         }
         return nil
