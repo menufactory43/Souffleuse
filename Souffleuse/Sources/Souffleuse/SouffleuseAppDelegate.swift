@@ -1513,6 +1513,47 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         preferences?.showStudio()
     }
 
+    // MARK: - Deep link (souffleuse://activate?key=…)
+
+    /// Reçoit les URLs `souffleuse://…` — déclenchées par le bouton « Activer dans
+    /// Souffleuse » de l'e-mail de licence (Resend) ou de la page de paiement.
+    /// macOS livre ce callback dès que le scheme est déclaré dans `Info.plist`
+    /// (`CFBundleURLTypes`). Seule la route `activate` est traitée.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls where url.scheme?.lowercased() == "souffleuse" {
+            handleDeepLink(url)
+        }
+    }
+
+    /// `souffleuse://activate?key=SOUF-…` → active la clé, ouvre les Préférences
+    /// sur Studio et confirme (ou explique l'échec) par une alerte. L'app est en
+    /// `.accessory` (pas d'icône Dock), d'où le `activate(ignoringOtherApps:)`
+    /// explicite pour ramener l'alerte au premier plan.
+    private func handleDeepLink(_ url: URL) {
+        guard url.host?.lowercased() == "activate",
+              let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let key = comps.queryItems?.first(where: { $0.name == "key" })?.value,
+              !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        Task { @MainActor in
+            let result = await store.license.activate(key: key)
+            NSApp.activate(ignoringOtherApps: true)
+            openPreferencesAtStudio()
+            let alert = NSAlert()
+            switch result {
+            case .success:
+                alert.messageText = tr(fr: "Licence activée ✓", en: "Licence activated ✓")
+                alert.informativeText = tr(fr: "Souffleuse Studio est débloqué. Merci pour votre achat !",
+                                           en: "Souffleuse Studio is unlocked. Thank you for your purchase!")
+            case .failure(let e):
+                alert.alertStyle = .warning
+                alert.messageText = tr(fr: "Activation impossible", en: "Activation failed")
+                alert.informativeText = e.message
+            }
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        }
+    }
+
     private func openHistoryViewer() {
         if historyViewer == nil {
             historyViewer = HistoryViewerWindow(history: store.history)

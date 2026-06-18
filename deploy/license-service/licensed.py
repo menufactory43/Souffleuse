@@ -106,8 +106,12 @@ EMAIL_STR = {
         "subject": "Votre licence Souffleuse",
         "tagline": "Le mot juste, soufflé au creux du curseur.",
         "hi": "Merci pour votre achat !",
-        "intro": "Voici votre clé de licence Souffleuse :",
-        "steps": "Activation",
+        "intro": "Votre licence Souffleuse Studio est prête. Activez-la en un clic, ou copiez la clé ci-dessous.",
+        "keyLabel": "Votre clé de licence",
+        "copyHint": "Astuce : triple-cliquez la clé (ou appui long sur mobile) pour tout sélectionner.",
+        "activateBtn": "Activer dans Souffleuse",
+        "activateNote": "Souffleuse doit être installé sur ce Mac. Le bouton ouvre l'app et active la clé automatiquement.",
+        "steps": "Activation manuelle",
         "s1": "Ouvrez Souffleuse (barre de menus, en haut à droite)",
         "s2": "Réglages → Studio",
         "s3": "Collez la clé ci-dessus",
@@ -118,8 +122,12 @@ EMAIL_STR = {
         "subject": "Your Souffleuse licence",
         "tagline": "The right word, whispered at your caret.",
         "hi": "Thank you for your purchase!",
-        "intro": "Here is your Souffleuse licence key:",
-        "steps": "Activation",
+        "intro": "Your Souffleuse Studio licence is ready. Activate it in one click, or copy the key below.",
+        "keyLabel": "Your licence key",
+        "copyHint": "Tip: triple-click the key (or long-press on mobile) to select it all.",
+        "activateBtn": "Activate in Souffleuse",
+        "activateNote": "Souffleuse must be installed on this Mac. The button opens the app and activates the key automatically.",
+        "steps": "Manual activation",
         "s1": "Open Souffleuse (menu bar, top right)",
         "s2": "Settings → Studio",
         "s3": "Paste the key above",
@@ -138,29 +146,56 @@ def _resend_key():
 def _email_html(token: str, s: dict) -> str:
     # HTML email-safe : tables + styles inline, police web-safe (Georgia/serif),
     # accent sang-de-boeuf #8c2b21. Rendu fiable Gmail/Apple Mail.
+    # Le bouton « Activer » est un deep link souffleuse://activate?key=… : un clic
+    # ouvre l'app et active la cle. Fallback : cle copiable a la main juste au-dessus
+    # (un vrai bouton « copier » est impossible en e-mail — JS bloque par les clients).
+    deeplink = "souffleuse://activate?key=" + urllib.parse.quote(token, safe="")
     return (
         '<table width="100%" cellpadding="0" cellspacing="0" role="presentation" '
-        'style="background:#f3efe7;padding:28px 12px;font-family:Georgia,serif;">'
+        'style="background:#f3efe7;padding:32px 12px;font-family:Georgia,\'Times New Roman\',serif;">'
         '<tr><td align="center">'
-        '<table width="480" cellpadding="0" cellspacing="0" role="presentation" '
-        'style="max-width:480px;background:#fbf8f2;border:1px solid #e2d8c6;border-radius:14px;">'
-        '<tr><td style="padding:32px;">'
-        '<div style="font-size:26px;font-weight:bold;color:#8c2b21;letter-spacing:.01em;">Souffleuse</div>'
-        f'<div style="font-style:italic;color:#6b6052;font-size:14px;margin-top:4px;">{s["tagline"]}</div>'
-        f'<p style="color:#1a1613;font-size:15px;margin:24px 0 6px;">{s["hi"]}</p>'
-        f'<p style="color:#1a1613;font-size:15px;margin:0 0 14px;">{s["intro"]}</p>'
-        '<div style="font-family:Menlo,Consolas,monospace;font-size:13px;word-break:break-all;'
-        f'background:#ffffff;border:2px solid #8c2b21;border-radius:8px;padding:14px;color:#1a1613;">{token}</div>'
-        '<p style="color:#8c2b21;font-weight:bold;font-size:12px;text-transform:uppercase;'
-        f'letter-spacing:.06em;margin:24px 0 8px;">{s["steps"]}</p>'
-        '<ol style="color:#1a1613;font-size:14px;margin:0;padding-left:20px;">'
-        f'<li style="margin:4px 0;">{s["s1"]}</li>'
-        f'<li style="margin:4px 0;">{s["s2"]}</li>'
-        f'<li style="margin:4px 0;">{s["s3"]}</li></ol>'
-        f'<p style="color:#6b6052;font-size:13px;margin:22px 0 0;">{s["keep"]}</p>'
-        '<hr style="border:none;border-top:1px solid #e2d8c6;margin:24px 0 12px;">'
+        '<table width="520" cellpadding="0" cellspacing="0" role="presentation" '
+        'style="max-width:520px;background:#fbf8f2;border:1px solid #e2d8c6;border-radius:16px;overflow:hidden;">'
+        # En-tete
+        '<tr><td style="padding:34px 36px 22px;border-bottom:1px solid #efe7d8;">'
+        '<div style="font-size:27px;font-weight:bold;color:#8c2b21;letter-spacing:.01em;">Souffleuse</div>'
+        f'<div style="font-style:italic;color:#6b6052;font-size:14px;margin-top:5px;">{s["tagline"]}</div>'
+        '</td></tr>'
+        # Corps : message + cle
+        '<tr><td style="padding:26px 36px 6px;">'
+        f'<p style="color:#1a1613;font-size:16px;font-weight:bold;margin:0 0 6px;">{s["hi"]}</p>'
+        f'<p style="color:#3a342c;font-size:15px;line-height:1.55;margin:0 0 20px;">{s["intro"]}</p>'
+        f'<div style="color:#8c2b21;font-weight:bold;font-size:11px;text-transform:uppercase;'
+        f'letter-spacing:.07em;margin:0 0 7px;">{s["keyLabel"]}</div>'
+        '<div style="font-family:Menlo,Consolas,monospace;font-size:14px;line-height:1.5;word-break:break-all;'
+        'background:#ffffff;border:2px solid #8c2b21;border-radius:10px;padding:16px;color:#1a1613;'
+        f'-webkit-user-select:all;user-select:all;">{token}</div>'
+        f'<div style="color:#8a7f70;font-size:12px;margin:7px 0 0;">{s["copyHint"]}</div>'
+        # Bouton deep link (un clic = activation)
+        '<table cellpadding="0" cellspacing="0" role="presentation" style="margin:22px 0 4px;">'
+        '<tr><td style="border-radius:10px;background:#8c2b21;">'
+        f'<a href="{deeplink}" style="display:inline-block;padding:14px 28px;'
+        'font-family:Georgia,serif;font-size:15px;font-weight:bold;color:#ffffff;'
+        f'text-decoration:none;border-radius:10px;">{s["activateBtn"]} &rarr;</a>'
+        '</td></tr></table>'
+        f'<div style="color:#8a7f70;font-size:12px;margin:6px 0 0;">{s["activateNote"]}</div>'
+        '</td></tr>'
+        # Activation manuelle (fallback)
+        '<tr><td style="padding:20px 36px 0;">'
+        f'<div style="color:#8c2b21;font-weight:bold;font-size:11px;text-transform:uppercase;'
+        f'letter-spacing:.07em;margin:0 0 8px;">{s["steps"]}</div>'
+        '<ol style="color:#3a342c;font-size:14px;line-height:1.5;margin:0;padding-left:20px;">'
+        f'<li style="margin:5px 0;">{s["s1"]}</li>'
+        f'<li style="margin:5px 0;">{s["s2"]}</li>'
+        f'<li style="margin:5px 0;">{s["s3"]}</li></ol>'
+        f'<p style="color:#6b6052;font-size:13px;line-height:1.5;margin:20px 0 0;">{s["keep"]}</p>'
+        '</td></tr>'
+        # Pied
+        '<tr><td style="padding:22px 36px 30px;">'
+        '<hr style="border:none;border-top:1px solid #efe7d8;margin:0 0 14px;">'
         f'<div style="color:#8a7f70;font-size:12px;">souffleuse.app &middot; {s["foot"]}</div>'
-        '</td></tr></table></td></tr></table>'
+        '</td></tr>'
+        '</table></td></tr></table>'
     )
 
 def _email_text(token: str, s: dict) -> str:
@@ -211,7 +246,9 @@ PAGE_STR = {
         "wait": "En attente du paiement&hellip;",
         "regen": "Régénérer la facture",
         "thanksOk": "&#10003; Merci !",
-        "tokenSub": "Votre clé de licence. Copiez-la, puis collez-la dans Souffleuse (Réglages &rarr; Studio).",
+        "tokenSub": "Votre clé de licence. Activez-la en un clic, ou copiez-la pour la coller dans Souffleuse (Réglages &rarr; Studio).",
+        "activateKey": "Activer dans Souffleuse",
+        "activateNote": "Souffleuse doit être installé sur ce Mac.",
         "copyKey": "Copier la clé",
         "keepNote": "Cette clé est rattachée à votre e-mail. Gardez-la précieusement.",
         "footSmall": "souffleuse.app — 100% sur votre Mac",
@@ -234,7 +271,9 @@ PAGE_STR = {
         "wait": "Waiting for payment&hellip;",
         "regen": "Regenerate invoice",
         "thanksOk": "&#10003; Thank you!",
-        "tokenSub": "Your licence key. Copy it, then paste it into Souffleuse (Settings &rarr; Studio).",
+        "tokenSub": "Your licence key. Activate it in one click, or copy it to paste into Souffleuse (Settings &rarr; Studio).",
+        "activateKey": "Activate in Souffleuse",
+        "activateNote": "Souffleuse must be installed on this Mac.",
         "copyKey": "Copy the key",
         "keepNote": "This key is tied to your email. Keep it safe.",
         "footSmall": "souffleuse.app — 100% on your Mac",
@@ -255,6 +294,7 @@ def build_page(lang: str) -> str:
         "{{payNote}}": s["payNote"], "{{pay2}}": s["pay2"], "{{lnlink}}": s["lnlink"],
         "{{copyInvoice}}": s["copyInvoice"], "{{wait}}": s["wait"], "{{regen}}": s["regen"],
         "{{thanksOk}}": s["thanksOk"], "{{tokenSub}}": s["tokenSub"], "{{copyKey}}": s["copyKey"],
+        "{{activateKey}}": s["activateKey"], "{{activateNote}}": s["activateNote"],
         "{{keepNote}}": s["keepNote"], "{{footSmall}}": s["footSmall"], "{{locale}}": s["locale"],
         "{{ljson}}": json.dumps(s["js"]),
     }
@@ -275,6 +315,9 @@ label{display:block;font-size:13px;color:#6b6052;margin:0 0 6px}
 input{width:100%;padding:11px 12px;border:1px solid #d8ccb8;border-radius:8px;font-size:15px;font-family:inherit;background:#fff}
 button{width:100%;margin-top:16px;padding:12px;border:0;border-radius:8px;background:var(--ox);color:#fff;
 font-family:inherit;font-size:15px;font-weight:600;cursor:pointer}button:disabled{opacity:.5;cursor:default}
+a.btn{display:block;text-align:center;text-decoration:none;margin-top:16px;padding:12px;border-radius:8px;
+background:var(--ox);color:#fff;font-size:15px;font-weight:600}
+button.sec{background:#fff;color:var(--ox);border:1px solid var(--ox)}
 .price{font-weight:700}.qr{text-align:center;margin:18px 0}.qr svg{width:220px;height:220px}
 .inv{font-family:ui-monospace,monospace;font-size:11px;word-break:break-all;background:#f3efe7;
 border:1px solid #e2d8c6;border-radius:8px;padding:10px;color:#5e5446}
@@ -305,7 +348,9 @@ small{color:#8a7f70}
 <div class="ok">{{thanksOk}}</div>
 <p class="sub">{{tokenSub}}</p>
 <div class="tok" id="token"></div>
-<button id="copy">{{copyKey}}</button>
+<a class="btn" id="activate" href="#">{{activateKey}}</a>
+<button id="copy" class="sec">{{copyKey}}</button>
+<p class="muted" style="margin-top:8px">{{activateNote}}</p>
 <p class="muted" style="margin-top:12px">{{keepNote}}</p>
 </div>
 <small style="display:block;margin-top:18px;text-align:center">{{footSmall}}</small>
@@ -335,7 +380,9 @@ async function poll(){
   if(!hash)return;
   const d=await (await fetch("/buy/status?h="+hash)).json();
   if(d.paid&&d.token){clearInterval(pollT);clearInterval(cdT);
-    $("#token").textContent=d.token;$("#step2").classList.add("hide");$("#step3").classList.remove("hide");}
+    $("#token").textContent=d.token;
+    $("#activate").href="souffleuse://activate?key="+encodeURIComponent(d.token);
+    $("#step2").classList.add("hide");$("#step3").classList.remove("hide");}
   else if(d.expired){expired();}
 }
 $("#buy").onclick=async()=>{
@@ -349,7 +396,9 @@ $("#buy").onclick=async()=>{
     $("#buy").disabled=false;$("#buy").textContent=L.buyPlain;}
 };
 $("#regen").onclick=()=>createInvoice().catch(err=>alert(L.errorPrefix+err.message));
-$("#copy").onclick=()=>{navigator.clipboard.writeText($("#token").textContent);$("#copy").textContent=L.copied;};
+$("#copy").onclick=()=>{const b=$("#copy"),o=b.textContent;
+  navigator.clipboard.writeText($("#token").textContent);b.textContent=L.copied;
+  setTimeout(()=>{b.textContent=o;},2000);};
 </script></body></html>"""
 
 class H(BaseHTTPRequestHandler):
