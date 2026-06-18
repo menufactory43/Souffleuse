@@ -11,6 +11,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 CONF = "/home/phoenix/.phoenix/phoenix.conf"
 API = "http://127.0.0.1:9740"
 PRICE_EUR = 39.0
+TEST_SATS = None                   # ⚠️ OVERRIDE DE TEST : facture ce montant fixe en sats
+                                   # (ignore PRICE_EUR/taux). Mettre a None pour revenir au prix reel.
 EXPIRY_S = 900                     # 15 min : borne la derive de change sur la facture
 DB = "/opt/licensed/licenses.db"
 KEYFILE = "/opt/licensed/signing_key.b64"
@@ -404,7 +406,7 @@ class H(BaseHTTPRequestHandler):
             if not EMAIL_RE.match(email):
                 self._json({"error": "email invalide"}, 400); return
             lang = detect_lang(self.headers.get("Accept-Language"))
-            sats = eur_to_sat(PRICE_EUR)
+            sats = TEST_SATS if TEST_SATS is not None else eur_to_sat(PRICE_EUR)
             inv = phx("/createinvoice", {"amountSat": sats, "description": "Souffleuse - licence",
                                          "expirySeconds": EXPIRY_S})
             h, bolt11 = inv["paymentHash"], inv["serialized"]
