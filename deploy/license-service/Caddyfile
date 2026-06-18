@@ -1,0 +1,13 @@
+pay.souffleuse.app {
+	encode gzip
+
+	# Licences Souffleuse (achat unique, Lightning -> jeton signe)
+	handle /buy* {
+		reverse_proxy 127.0.0.1:8089
+	}
+
+	# Dons LNURL-pay (don@pay.souffleuse.app) + reste
+	handle {
+		reverse_proxy 127.0.0.1:8088
+	}
+}
