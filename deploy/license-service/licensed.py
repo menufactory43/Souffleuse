@@ -257,8 +257,8 @@ PAGE_STR = {
         "copyKey": "Copier la clé",
         "keepNote": "Cette clé est rattachée à votre e-mail. Gardez-la précieusement.",
         "footSmall": "souffleuse.app — 100% sur votre Mac",
-        "mktTitle": "Souffleuse Studio — l'atelier de texte, à vie",
-        "mktIntro": "Souffleuse écrit avec vous directement dans n'importe quelle app de votre Mac : un souffle gris au curseur, accepté d'une touche.",
+        "mktTitle": "Écrivez mieux, partout sur votre Mac. En local.",
+        "mktIntro": "Le souffle qui complète vos phrases est gratuit. <b>Souffleuse Studio</b> débloque ce qui change vraiment le quotidien : traduction, ton sur mesure, commandes « // » et personnalisation.",
         "feats": [
             ("Traduction", "instantanée, vers la langue de votre conversation"),
             ("Ton &amp; reformulation", "réécrivez selon le registre de chaque app"),
@@ -294,8 +294,8 @@ PAGE_STR = {
         "copyKey": "Copy the key",
         "keepNote": "This key is tied to your email. Keep it safe.",
         "footSmall": "souffleuse.app — 100% on your Mac",
-        "mktTitle": "Souffleuse Studio — your text workshop, for life",
-        "mktIntro": "Souffleuse writes with you right inside any app on your Mac: a grey whisper at the caret, accepted with a single key.",
+        "mktTitle": "Write better, everywhere on your Mac. On-device.",
+        "mktIntro": "The whisper that completes your sentences is free. <b>Souffleuse Studio</b> unlocks what truly changes your day: translation, custom tone, “//” commands and personalization.",
         "feats": [
             ("Translation", "instant, into the language of your conversation"),
             ("Tone &amp; rephrasing", "rewrite to match each app's register"),
