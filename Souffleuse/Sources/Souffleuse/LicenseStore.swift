@@ -18,7 +18,7 @@ enum LicenseGate {
     /// Clé PUBLIQUE Ed25519 (base64) — utilisée UNIQUEMENT par la voie offline
     /// signée (`SignedLicenseActivator`), conservée en fallback. Inutilisée tant
     /// qu'on est sur l'activation Lemon Squeezy.
-    static let publicKeyBase64 = "tfdPVUpavMpqzZ/ot13LjekSl//OyXI5pCgpiQnXqR8="
+    static let publicKeyBase64 = "XIFWI8qTZ1bjLdWVlPK1F5IDlPWhfIpiI+uhVQkhIec="
 }
 
 /// Erreurs d'activation, avec message FR/EN prêt pour l'UI.
