@@ -72,6 +72,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var statusItem: NSStatusItem!
+    /// Popover de confirmation de présence (fin d'onboarding) — retenu le temps de
+    /// l'afficher puis l'auto-fermer.
+    private var presencePopover: NSPopover?
     /// Canal de mise à jour beta (manuel-only). Armé dès le lancement pour que
     /// Sparkle s'initialise avant l'affichage du menu.
     private let updater = UpdaterController()
@@ -751,9 +754,12 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 // moteur pour que le ghost marche sans relancer l'app.
                 Task { await self?.predictor.reloadAfterDownload() }
             },
-            onFinished: {
+            onFinished: { [weak self] in
                 // Complétion versionnée écrite ICI, à la fin du wizard — jamais à l'ouverture.
                 UserDefaults.standard.set(Self.onboardingVersion, forKey: K.onboardingCompletedVersion)
+                // App menu-bar sans fenêtre : pointer l'icône une fois pour ancrer
+                // « voilà où je vis » juste après le lever de rideau.
+                self?.confirmPresenceInMenuBar()
             },
             initialStep: plan.initialStep.rawValue,
             permissionsOnly: plan.mode == .permissionsOnly,
@@ -1342,6 +1348,38 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             button.title = state == .capturing ? "👁" : "S"
             button.alphaValue = alpha
         }
+    }
+
+    /// Confirme la présence dans la barre de menus à la sortie du wizard : un
+    /// popover fléché sur l'icône + une légère pulsation pour attirer l'œil. Montré
+    /// une seule fois (déclenché par `onFinished`), auto-fermé après ~4 s.
+    private func confirmPresenceInMenuBar() {
+        guard let button = statusItem?.button else { return }
+        pulseStatusIcon()
+        let popover = PresenceConfirmation.makePopover()
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        presencePopover = popover
+        // Auto-dismiss : on ne laisse pas la bulle traîner — c'est un cue, pas un mur.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+            self?.presencePopover?.performClose(nil)
+            self?.presencePopover = nil
+        }
+    }
+
+    /// Deux pulsations douces de l'opacité de l'icône (≈1,4 s) pour attirer l'œil.
+    /// `CABasicAnimation` auto-reverse : transitoire, revient à la valeur de repos
+    /// (n'écrase pas l'alpha posé par `refreshLivingIcon` selon l'état) → pas de
+    /// resync nécessaire, et pas de closure récursive (concurrence Swift 6 propre).
+    private func pulseStatusIcon() {
+        guard let button = statusItem?.button else { return }
+        button.wantsLayer = true
+        let anim = CABasicAnimation(keyPath: "opacity")
+        anim.toValue = 0.2
+        anim.duration = 0.35
+        anim.autoreverses = true
+        anim.repeatCount = 2
+        anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        button.layer?.add(anim, forKey: "presencePulse")
     }
 
     /// LSUIElement apps have no menu bar, so Cmd+C/V/X/A/Z don't reach text views
