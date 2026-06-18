@@ -188,6 +188,11 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     private var transformMissTicks = 0
     /// ~1 s au poll de 80 ms — même ordre de grandeur que la grâce du badge.
     private static let transformGraceTicks = 12
+
+    /// Détecteur « autorisé mais aveugle » (grant TCC périmé : isTrusted vrai mais
+    /// lectures AX mortes). Consulté dans `tick()`, réagit via `presentAXBlindNotice`.
+    /// Pas de re-spam : le détecteur garde `noticed` jusqu'à ce que l'AX réponde.
+    private var axBlindness = AXBlindnessDetector()
     /// Pause de frappe exigée avant d'afficher les rangées-langues du mode
     /// rédaction. L'amorce se tape sur plusieurs mots ; afficher les rangées dès
     /// la 1ʳᵉ lettre recouvrirait le texte (« ça empiète »). On attend que le
@@ -1564,6 +1569,50 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         if pendingTransformation != nil { cancelTransformPreview() }
     }
 
+    /// Réaction à l'état « autorisé mais aveugle » : une alerte unique, claire et
+    /// actionnable. Transforme un cul-de-sac silencieux (ghost muet sans indice) en
+    /// problème guidé. Émise une seule fois par épisode (le détecteur garde `noticed`
+    /// jusqu'au retour de l'AX). Le bouton « Relancer » est clé : un grant ré-accordé
+    /// ne s'applique JAMAIS au processus déjà lancé.
+    private func presentAXBlindNotice() {
+        let alert = NSAlert()
+        alert.messageText = tr(
+            fr: "Souffleuse a perdu l'accès à l'accessibilité",
+            en: "Souffleuse lost accessibility access"
+        )
+        alert.informativeText = tr(
+            fr: "macOS a peut-être révoqué l'autorisation après une mise à jour, même si elle paraît encore cochée. Le souffle ne peut pas s'afficher tant que vous ne l'avez pas ré-accordée dans les Réglages, puis relancé Souffleuse.",
+            en: "macOS may have revoked the permission after an update, even if it still looks enabled. The whisper can't appear until you re-grant it in Settings, then relaunch Souffleuse."
+        )
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: tr(fr: "Ouvrir les Réglages", en: "Open Settings"))
+        alert.addButton(withTitle: tr(fr: "Relancer Souffleuse", en: "Relaunch Souffleuse"))
+        alert.addButton(withTitle: tr(fr: "Plus tard", en: "Later"))
+
+        // Accessory app (LSUIElement) : sans activation, l'alerte naît en arrière-plan.
+        NSApp.activate(ignoringOtherApps: true)
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            NSWorkspace.shared.open(
+                URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+            )
+        case .alertSecondButtonReturn:
+            relaunchApp()
+        default:
+            break  // « Plus tard » : on ne redemande pas tant que l'AX ne répond pas.
+        }
+    }
+
+    /// Quitte et relance Souffleuse dans une nouvelle instance — le seul moyen pour
+    /// un processus de prendre en compte un grant TCC fraîchement (ré)accordé.
+    private func relaunchApp() {
+        let config = NSWorkspace.OpenConfiguration()
+        config.createsNewApplicationInstance = true
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: config) { _, _ in
+            Task { @MainActor in NSApp.terminate(nil) }
+        }
+    }
+
     /// Append-or-create sur `/tmp/souffleuse-tick.log` (diagnostic dev hors audit,
     /// gated par `SOUFFLEUSE_PREDICT_LOG`). Mutualise l'écriture des deux traces.
     private static func appendTickLog(_ line: String) {
@@ -2335,6 +2384,15 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
         let snap = axClient.snapshot()
         logTickSnapshot(snap)
+
+        // « Autorisé mais aveugle » : on a passé `guard AXClient.isTrusted`, donc
+        // l'AX est CENSÉE répondre — mais un grant TCC périmé (post-MAJ Sparkle,
+        // re-signature) fait échouer toutes les lectures tout en gardant isTrusted
+        // vrai. Le détecteur repère cet état (focus introuvable, soutenu, multi-app)
+        // et on guide l'utilisateur au lieu de le laisser dans un cul-de-sac muet.
+        if axBlindness.observe(bundleID: snap.bundleID, focusedRoleIsNil: snap.role == nil, now: Date()) {
+            presentAXBlindNotice()
+        }
 
         // Gate: must be a non-blocklisted, non-secure text element.
         // isAddressBar : les omniboxes (Safari/Chromium/Firefox) sont des
