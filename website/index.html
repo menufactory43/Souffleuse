@@ -296,6 +296,18 @@
   }
   .cta-note b { font-style: normal; font-weight: 700; color: var(--rouge); }
 
+  /* Numéro de version, juste à côté du bouton — peuplé depuis l'appcast Sparkle
+     (la source de vérité de la release publiée), donc toujours à jour. */
+  .version-badge {
+    display: inline-block;
+    margin-left: 0.35rem;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    color: var(--ink-soft);
+  }
+  .version-badge::before { content: "·"; margin-right: 0.45rem; color: var(--rouge); }
+  .version-badge:empty { display: none; } /* rien tant que le JS n'a pas rempli */
+
   /* La ligne de confiance, juste sous le bouton : taille, signature Apple et
      rappel de confidentialité, là où l'anxiété du téléchargement se joue.
      Plus discrète que la note de gratuité — on rassure, on ne crie pas. */
@@ -1674,7 +1686,7 @@
         <span class="langswitch__sep" aria-hidden="true">·</span>
         <a href="/en/" hreflang="en">EN</a>
       </div>
-      <a href="./Souffleuse.dmg" download class="btn btn--small">Télécharger</a>
+      <a href="./Souffleuse.dmg" download class="btn btn--small">Télécharger</a><span class="version-badge" data-version></span>
     </div>
   </div>
 </header>
@@ -1718,7 +1730,7 @@
           </a>
           <a href="#souffle" class="btn btn--ghost">Voir comment elle souffle →</a>
         </div>
-        <p class="cta-note ink-rise k5"><b>Gratuit pendant la bêta.</b> Pour Mac à puce Apple Silicon.</p>
+        <p class="cta-note ink-rise k5"><b>Gratuit pendant la bêta.</b> Pour Mac à puce Apple Silicon.<span class="version-badge" data-version hidden></span></p>
         <p class="cta-trust ink-rise k5">~6,5 Mo · notarisée par Apple · vos textes ne quittent jamais votre Mac.</p>
       </div>
 
@@ -2197,7 +2209,7 @@
         </svg>
         Télécharger pour Mac
       </a>
-      <p class="cta-note"><b>Gratuit pendant la bêta.</b> macOS Sonoma (14) ou plus récent · puce Apple Silicon.</p>
+      <p class="cta-note"><b>Gratuit pendant la bêta.</b> macOS Sonoma (14) ou plus récent · puce Apple Silicon.<span class="version-badge" data-version hidden></span></p>
       <p class="cta-trust">~6,5 Mo · notarisée par Apple · vos textes ne quittent jamais votre Mac.</p>
       <p class="tally" id="tally" hidden aria-live="polite">
         Déjà <b id="tally-n"></b> Mac l'ont accueillie pendant la bêta.
@@ -2221,7 +2233,7 @@
   <nav class="shell foot__links" aria-label="Liens utiles">
     <a href="/confidentialite.html">Confidentialité &amp; sécurité</a>
     <a href="#faq">Questions</a>
-    <a href="mailto:souffleuse.app@gmail.com">Écrire à la souffleuse</a>
+    <a href="mailto:contact@souffleuse.app">Écrire à la souffleuse</a>
   </nav>
   <div class="shell colophon">
     <p>
@@ -2971,6 +2983,27 @@
   document.addEventListener("visibilitychange", function () {
     document.title = document.hidden ? "En coulisse… · Souffleuse" : titre;
   });
+})();
+</script>
+<script>
+// Numéro de version, lu depuis l'appcast Sparkle (la source de vérité de la
+// release publiée) : le badge se met à jour seul à chaque déploiement, on voit
+// d'un coup d'œil si la mise à jour a bien pris. Échec silencieux.
+(function () {
+  "use strict";
+  var badges = document.querySelectorAll("[data-version]");
+  if (!badges.length || !window.fetch) return;
+  fetch("/appcast.xml", { cache: "no-cache" })
+    .then(function (r) { return r.ok ? r.text() : null; })
+    .then(function (t) {
+      var m = t && t.match(/<sparkle:shortVersionString>([^<]+)</);
+      if (!m) return;
+      for (var i = 0; i < badges.length; i++) {
+        badges[i].textContent = "v" + m[1];
+        badges[i].hidden = false;
+      }
+    })
+    .catch(function () {});
 })();
 </script>
 <script>
