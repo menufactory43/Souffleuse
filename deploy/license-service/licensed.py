@@ -100,6 +100,11 @@ def order_set_token(h, token):
 # cle ou echec, la page de succes affiche la cle quand meme.
 RESEND_FROM = "Souffleuse <contact@souffleuse.app>"
 
+# Checkout Lemon Squeezy (carte / Apple Pay / PayPal) — cible du bouton « Payer
+# par carte » de la page de choix /buy/studio. L'app (LicenseGate.purchaseURL)
+# pointe sur /buy/studio, pas directement ici.
+LEMON_URL = "https://souffleuse.lemonsqueezy.com/checkout/buy/a798a4d6-841e-4900-a21e-c1ca679c384d"
+
 # Chaines localisees du recu (FR / EN). Detection via Accept-Language au checkout.
 EMAIL_STR = {
     "fr": {
@@ -401,6 +406,72 @@ $("#copy").onclick=()=>{const b=$("#copy"),o=b.textContent;
   setTimeout(()=>{b.textContent=o;},2000);};
 </script></body></html>"""
 
+# --- Page de CHOIX du moyen de paiement (/buy/studio) : carte (Lemon Squeezy) ---
+# --- ou Bitcoin (Lightning, /buy). Ouverte par le bouton « Acheter » de l'app  ---
+# --- ET liable depuis le site landing. Localisee FR/EN via Accept-Language.    ---
+CHOOSE_STR = {
+    "fr": {
+        "locale": "fr",
+        "title": "Souffleuse Studio — licence",
+        "h1": "Souffleuse Studio",
+        "sub": "Licence complète, à vie, sur ce Mac.",
+        "priceLine": 'Achat unique — <b>39 &euro;</b>',
+        "card": "Payer par carte",
+        "cardNote": "Carte bancaire, Apple Pay, PayPal — via Lemon Squeezy.",
+        "btc": "Payer en Bitcoin &#9889;",
+        "btcNote": "Lightning. La clé s'affiche dès réception.",
+        "foot": "souffleuse.app — 100% sur votre Mac",
+    },
+    "en": {
+        "locale": "en",
+        "title": "Souffleuse Studio — licence",
+        "h1": "Souffleuse Studio",
+        "sub": "Full licence, lifetime, on this Mac.",
+        "priceLine": 'One-time — <b>&euro;39</b>',
+        "card": "Pay by card",
+        "cardNote": "Credit card, Apple Pay, PayPal — via Lemon Squeezy.",
+        "btc": "Pay with Bitcoin &#9889;",
+        "btcNote": "Lightning. Your key appears on receipt.",
+        "foot": "souffleuse.app — 100% on your Mac",
+    },
+}
+
+CHOOSE_TEMPLATE = r"""<!doctype html><html lang="{{lang}}"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{title}}</title><style>
+:root{--ox:#8c2b21}
+*{box-sizing:border-box}body{font-family:Georgia,'Times New Roman',serif;background:#f3efe7;color:#1a1613;
+margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+.card{background:#fbf8f2;border:1px solid #e2d8c6;border-radius:14px;max-width:420px;width:100%;
+padding:32px;box-shadow:0 6px 30px rgba(140,43,33,.07)}
+h1{font-size:24px;margin:0 0 4px}.sub{font-style:italic;color:#6b6052;margin:0 0 6px;font-size:14px}
+.price{font-size:15px;margin:0 0 8px}.price b{color:var(--ox)}
+a.opt{display:block;text-decoration:none;margin-top:14px;padding:14px 16px;border-radius:10px;
+border:1px solid #d8ccb8;background:#fff;color:#1a1613}
+a.opt.primary{background:var(--ox);border-color:var(--ox);color:#fff}
+.opt .t{font-size:16px;font-weight:700}.opt .n{font-size:12.5px;opacity:.85;margin-top:3px}
+small{color:#8a7f70;display:block;margin-top:20px;text-align:center}
+</style></head><body><div class="card">
+<h1>{{h1}}</h1><p class="sub">{{sub}}</p>
+<p class="price">{{priceLine}}</p>
+<a class="opt primary" href="{{lemon}}"><div class="t">{{card}} &rarr;</div><div class="n">{{cardNote}}</div></a>
+<a class="opt" href="/buy"><div class="t">{{btc}} &rarr;</div><div class="n">{{btcNote}}</div></a>
+<small>{{foot}}</small>
+</div></body></html>"""
+
+def build_choose(lang: str) -> str:
+    s = CHOOSE_STR.get(lang, CHOOSE_STR["fr"])
+    html = CHOOSE_TEMPLATE
+    repl = {
+        "{{lang}}": s["locale"], "{{title}}": s["title"], "{{h1}}": s["h1"],
+        "{{sub}}": s["sub"], "{{priceLine}}": s["priceLine"], "{{card}}": s["card"],
+        "{{cardNote}}": s["cardNote"], "{{btc}}": s["btc"], "{{btcNote}}": s["btcNote"],
+        "{{foot}}": s["foot"], "{{lemon}}": LEMON_URL,
+    }
+    for k, v in repl.items():
+        html = html.replace(k, v)
+    return html
+
 class H(BaseHTTPRequestHandler):
     def _json(self, obj, code=200):
         body = json.dumps(obj).encode()
@@ -420,6 +491,8 @@ class H(BaseHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path)
         if u.path in ("/buy", "/buy/"):
             self._html(build_page(detect_lang(self.headers.get("Accept-Language"))))
+        elif u.path in ("/buy/studio", "/buy/studio/"):
+            self._html(build_choose(detect_lang(self.headers.get("Accept-Language"))))
         elif u.path == "/buy/status":
             h = urllib.parse.parse_qs(u.query).get("h", [""])[0]
             row = order_get(h)
