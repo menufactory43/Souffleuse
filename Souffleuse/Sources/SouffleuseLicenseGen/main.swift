@@ -7,6 +7,7 @@ import SouffleuseCore
 //
 //   swift run SouffleuseLicenseGen genkeys
 //   swift run SouffleuseLicenseGen sign --private <b64> --email gabriel@exemple.fr
+//   swift run SouffleuseLicenseGen verify --key SOUF-… --public <b64>
 //
 // La clé PRIVÉE reste secrète chez toi (sert à signer ce que tu vends). La clé
 // PUBLIQUE s'embarque dans l'app (`LicenseGate.publicKeyBase64`) pour vérifier.
@@ -21,7 +22,7 @@ func fail(_ msg: String) -> Never {
 }
 
 guard args.count >= 2 else {
-    fail("Usage:\n  SouffleuseLicenseGen genkeys\n  SouffleuseLicenseGen sign --private <b64> --email <email>")
+    fail("Usage:\n  SouffleuseLicenseGen genkeys\n  SouffleuseLicenseGen sign --private <b64> --email <email>\n  SouffleuseLicenseGen verify --key <SOUF-…> --public <b64>")
 }
 
 switch args[1] {
@@ -51,6 +52,30 @@ case "sign":
         fail("Erreur : clé privée invalide.")
     }
     print(key)
+
+case "verify":
+    // Preuve bout-en-bout du flux Bitcoin : vérifier HORS LIGNE qu'un jeton
+    // (émis après paiement, signé par la clé privée) est valide pour la clé
+    // publique embarquée — exactement ce que fait l'app à l'activation.
+    var keyArg: String?
+    var publicB64: String?
+    var i = 2
+    while i < args.count {
+        switch args[i] {
+        case "--key":    i += 1; keyArg = i < args.count ? args[i] : nil
+        case "--public": i += 1; publicB64 = i < args.count ? args[i] : nil
+        default: break
+        }
+        i += 1
+    }
+    guard let k = keyArg, let pub = publicB64 else {
+        fail("Erreur : --key <SOUF-…> et --public <b64> sont requis.")
+    }
+    if let email = LicenseKey.verify(k, publicKeyBase64: pub) {
+        print("VALID — licence signée pour : \(email)")
+    } else {
+        fail("INVALID — signature non valide pour cette clé publique.")
+    }
 
 default:
     fail("Commande inconnue : \(args[1])")
