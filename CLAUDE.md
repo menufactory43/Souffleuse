@@ -9,7 +9,7 @@ Au-delà du ghost, l'app fait aussi : **traduction** (HUD, langue cible par conv
 
 ### Dépôt (canonique)
 - **Remote principal : `git@github.com/menufactory43/Souffleuse`** (HTTPS : `https://github.com/menufactory43/Souffleuse.git`), compte GitHub **`menufactory43`**. C'est le `origin` officiel depuis la migration du 16/06/2026.
-- **Branches** : `main` (code app + releases) et `launch/souffleuse-video-social` (site souffleuse.app : landing, appcast Sparkle, vidéo). Le site se déploie via `vercel --prod` depuis `website/` (projet Vercel lié, org `family-flow-ios`) — **pas** par git push ; le `Souffleuse.dmg` reste gitignored (`website/.gitignore`).
+- **Branches** : `main` est la branche canonique **du code app ET du site** (`website/` : landing, appcast Sparkle, vidéo) — c'est depuis `main` que le site est réellement déployé. `launch/souffleuse-video-social` est une branche historique du site qui a divergé (badge de version d'un côté, compteur de DL/appcast à jour de l'autre) ; **ne plus déployer depuis elle** pour éviter le split-brain. Le site se déploie via `vercel --prod` depuis `website/` (projet Vercel lié, org `family-flow-ios`) — **pas** par git push ; le `Souffleuse.dmg` reste gitignored (`website/.gitignore`).
 - **L'ancien remote `meffysto/cocotypist-llama` est mort** (404 / accès révoqué) : ne plus l'utiliser. L'auth git passe par le credential `gh` du compte `menufactory43` (`gh auth setup-git`).
 
 ### Constraints
