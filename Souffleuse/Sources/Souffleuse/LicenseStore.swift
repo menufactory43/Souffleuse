@@ -128,6 +128,47 @@ struct SignedLicenseActivator: LicenseActivating {
     func deactivate(key: String, instanceId: String?) async throws {}
 }
 
+/// Activateur COMPOSITE : un SEUL champ d'activation accepte les DEUX rails de
+/// vente, sans que l'app sache « comment » l'utilisateur a payé.
+///
+/// - Un **jeton auto-signé** (`SOUF-…`, émis après paiement par n'importe quel
+///   canal — Bitcoin/BTCPay, virement, etc.) → vérifié **hors ligne** par la
+///   signature (zéro réseau, fidèle à l'invariant).
+/// - Sinon, la clé est traitée comme une **clé Lemon Squeezy** → activation en
+///   ligne (limite d'appareils, révocation).
+///
+/// Le tri se fait par la FORME du jeton (signature valide pour la clé publique
+/// embarquée), pas par essai/erreur réseau. `publicKeyBase64` est injectable pour
+/// la testabilité du routage.
+struct CompositeLicenseActivator: LicenseActivating {
+    let offline: LicenseActivating
+    let online: LicenseActivating
+    let publicKeyBase64: String
+
+    init(
+        offline: LicenseActivating = SignedLicenseActivator(),
+        online: LicenseActivating = LemonSqueezyActivator(),
+        publicKeyBase64: String = LicenseGate.publicKeyBase64
+    ) {
+        self.offline = offline
+        self.online = online
+        self.publicKeyBase64 = publicKeyBase64
+    }
+
+    /// Jeton auto-signé valide pour notre clé publique ? → voie hors ligne.
+    private func isSignedToken(_ key: String) -> Bool {
+        LicenseKey.verify(key, publicKeyBase64: publicKeyBase64) != nil
+    }
+
+    func activate(key: String) async throws -> String? {
+        try await (isSignedToken(key) ? offline : online).activate(key: key)
+    }
+
+    func deactivate(key: String, instanceId: String?) async throws {
+        try await (isSignedToken(key) ? offline : online).deactivate(key: key, instanceId: instanceId)
+    }
+}
+
 /// Enregistrement de licence en cache (clé + instance LS pour la désactivation).
 private struct CachedLicense: Codable {
     let key: String
@@ -147,7 +188,7 @@ final class LicenseStore {
 
     @ObservationIgnored private let activator: LicenseActivating
 
-    init(activator: LicenseActivating = LemonSqueezyActivator()) {
+    init(activator: LicenseActivating = CompositeLicenseActivator()) {
         self.activator = activator
         if let cached = Self.loadCached() {
             self.activatedKey = cached.key
