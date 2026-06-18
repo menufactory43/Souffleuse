@@ -10,7 +10,11 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 CONF = "/home/phoenix/.phoenix/phoenix.conf"
 API = "http://127.0.0.1:9740"
-PRICE_EUR = 39.0
+# Prix Bitcoin/Lightning (cette page facture en sats au cours). MOINS CHER que la
+# carte : pas de frais Merchant of Record, encaissement quasi gratuit → on
+# repercute l'economie au bitcoiner. La carte (Lemon Squeezy) reste a CARD_PRICE_EUR.
+PRICE_EUR = 29.0
+CARD_PRICE_EUR = 39.0              # tarif carte (LS) — affichage uniquement, LS impose le sien
 TEST_SATS = None                   # ⚠️ OVERRIDE DE TEST : facture ce montant fixe en sats
                                    # (ignore PRICE_EUR/taux). Mettre a None pour revenir au prix reel.
 EXPIRY_S = 900                     # 15 min : borne la derive de change sur la facture
@@ -249,11 +253,11 @@ PAGE_STR = {
         "sub1": "Licence complète — achat unique, paiement Lightning.",
         "emailLabel": "Votre e-mail (votre licence y sera rattachée)",
         "emailPh": "vous@exemple.fr",
-        "buyHtml": 'Acheter — <span class="price">39 &euro;</span>',
-        "payNote": "Paiement en bitcoin (Lightning). La clé de licence s'affiche dès réception.",
+        "buyHtml": 'Acheter — <span class="price">29 &euro;</span>',
+        "payNote": "Paiement en bitcoin (Lightning) — <b>29 €</b> au lieu de 39 € en carte. La clé s'affiche dès réception.",
         "refund": "Remboursé sous 14 jours, sans justification.",
-        "cardAlt": "Pas de Bitcoin&nbsp;? Payer par carte",
-        "pay2": 'Payez <span class="price">39 &euro;</span>',
+        "cardAlt": "Pas de Bitcoin&nbsp;? Payer par carte (39 €)",
+        "pay2": 'Payez <span class="price">29 &euro;</span>',
         "lnlink": "Ouvrir dans un portefeuille",
         "copyInvoice": "Copier la facture",
         "wait": "En attente du paiement&hellip;",
@@ -281,18 +285,18 @@ PAGE_STR = {
         "js": {"invalidEmail": "E-mail invalide", "creating": "Création de la facture…",
                "waiting": "En attente du paiement…", "expired": "Facture expirée.",
                "expiresIn": "Expire dans ", "copied": "Copié !", "errorPrefix": "Erreur : ",
-               "buyPlain": "Acheter — 39 €"},
+               "buyPlain": "Acheter — 29 €"},
     },
     "en": {
         "title": "Souffleuse — licence",
         "sub1": "Full licence — one-time purchase, Lightning payment.",
         "emailLabel": "Your email (your licence will be tied to it)",
         "emailPh": "you@example.com",
-        "buyHtml": 'Buy — <span class="price">&euro;39</span>',
-        "payNote": "Payment in bitcoin (Lightning). Your licence key appears on receipt.",
+        "buyHtml": 'Buy — <span class="price">&euro;29</span>',
+        "payNote": "Payment in bitcoin (Lightning) — <b>€29</b> instead of €39 by card. Your key appears on receipt.",
         "refund": "14-day refund, no questions asked.",
-        "cardAlt": "No Bitcoin? Pay by card",
-        "pay2": 'Pay <span class="price">&euro;39</span>',
+        "cardAlt": "No Bitcoin? Pay by card (€39)",
+        "pay2": 'Pay <span class="price">&euro;29</span>',
         "lnlink": "Open in a wallet",
         "copyInvoice": "Copy the invoice",
         "wait": "Waiting for payment&hellip;",
@@ -320,7 +324,7 @@ PAGE_STR = {
         "js": {"invalidEmail": "Invalid email", "creating": "Creating invoice…",
                "waiting": "Waiting for payment…", "expired": "Invoice expired.",
                "expiresIn": "Expires in ", "copied": "Copied!", "errorPrefix": "Error: ",
-               "buyPlain": "Buy — €39"},
+               "buyPlain": "Buy — €29"},
     },
 }
 
@@ -480,11 +484,14 @@ CHOOSE_STR = {
         "title": "Souffleuse Studio — licence",
         "h1": "Souffleuse Studio",
         "sub": "Licence complète, à vie, sur ce Mac.",
-        "priceLine": 'Achat unique — <b>39 &euro;</b>',
+        "priceLine": 'Achat unique, à vie — dès <b>29 &euro;</b>.',
         "card": "Payer par carte",
+        "cardPrice": "39 €",
         "cardNote": "Carte bancaire, Apple Pay, PayPal — via Lemon Squeezy.",
         "btc": "Payer en Bitcoin &#9889;",
-        "btcNote": "Lightning. La clé s'affiche dès réception.",
+        "btcPrice": "29 €",
+        "save": "&minus;10 €",
+        "btcNote": "Lightning, sans frais. La clé s'affiche dès réception.",
         "refund": "Remboursé sous 14 jours, sans justification.",
         "foot": "souffleuse.app — 100% sur votre Mac",
     },
@@ -493,11 +500,14 @@ CHOOSE_STR = {
         "title": "Souffleuse Studio — licence",
         "h1": "Souffleuse Studio",
         "sub": "Full licence, lifetime, on this Mac.",
-        "priceLine": 'One-time — <b>&euro;39</b>',
+        "priceLine": 'One-time, for life — from <b>&euro;29</b>.',
         "card": "Pay by card",
+        "cardPrice": "€39",
         "cardNote": "Credit card, Apple Pay, PayPal — via Lemon Squeezy.",
         "btc": "Pay with Bitcoin &#9889;",
-        "btcNote": "Lightning. Your key appears on receipt.",
+        "btcPrice": "€29",
+        "save": "&minus;€10",
+        "btcNote": "Lightning, no fees. Your key appears on receipt.",
         "refund": "14-day refund, no questions asked.",
         "foot": "souffleuse.app — 100% on your Mac",
     },
@@ -517,12 +527,15 @@ a.opt{display:block;text-decoration:none;margin-top:14px;padding:14px 16px;borde
 border:1px solid #d8ccb8;background:#fff;color:#1a1613}
 a.opt.primary{background:var(--ox);border-color:var(--ox);color:#fff}
 .opt .t{font-size:16px;font-weight:700}.opt .n{font-size:12.5px;opacity:.85;margin-top:3px}
+.opt .pr{font-weight:700;margin-left:4px}
+.opt .save{display:inline-block;font-size:12px;font-weight:700;background:#dad45e;color:#1a1613;
+border-radius:6px;padding:1px 7px;margin-left:6px;vertical-align:1px}
 small{color:#8a7f70;display:block;margin-top:20px;text-align:center}
 </style></head><body><div class="card">
 <h1>{{h1}}</h1><p class="sub">{{sub}}</p>
 <p class="price">{{priceLine}}</p>
-<a class="opt primary" href="{{lemon}}"><div class="t">{{card}} &rarr;</div><div class="n">{{cardNote}}</div></a>
-<a class="opt" href="/buy"><div class="t">{{btc}} &rarr;</div><div class="n">{{btcNote}}</div></a>
+<a class="opt primary" href="/buy"><div class="t">{{btc}}<span class="pr">{{btcPrice}}</span><span class="save">{{save}}</span> &rarr;</div><div class="n">{{btcNote}}</div></a>
+<a class="opt" href="{{lemon}}"><div class="t">{{card}}<span class="pr">{{cardPrice}}</span> &rarr;</div><div class="n">{{cardNote}}</div></a>
 <p style="color:#346524;font-size:13px;font-weight:600;margin:16px 0 0;text-align:center">&#10003; {{refund}}</p>
 <small>{{foot}}</small>
 </div></body></html>"""
@@ -534,6 +547,7 @@ def build_choose(lang: str) -> str:
         "{{lang}}": s["locale"], "{{title}}": s["title"], "{{h1}}": s["h1"],
         "{{sub}}": s["sub"], "{{priceLine}}": s["priceLine"], "{{card}}": s["card"],
         "{{cardNote}}": s["cardNote"], "{{btc}}": s["btc"], "{{btcNote}}": s["btcNote"],
+        "{{cardPrice}}": s["cardPrice"], "{{btcPrice}}": s["btcPrice"], "{{save}}": s["save"],
         "{{foot}}": s["foot"], "{{lemon}}": LEMON_URL, "{{refund}}": s["refund"],
     }
     for k, v in repl.items():
