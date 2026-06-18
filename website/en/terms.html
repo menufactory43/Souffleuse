@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Terms of service &amp; sale — Souffleuse</title>
+<meta name="description" content="Souffleuse terms of use and sale: perpetual licence, purchase via Lemon Squeezy (Merchant of Record), pricing, withdrawal, refunds, warranty and liability." />
+
+<link rel="canonical" href="https://souffleuse.app/en/terms.html" />
+<link rel="alternate" hreflang="fr" href="https://souffleuse.app/conditions.html" />
+<link rel="alternate" hreflang="en" href="https://souffleuse.app/en/terms.html" />
+<link rel="alternate" hreflang="x-default" href="https://souffleuse.app/conditions.html" />
+<meta name="theme-color" content="#f3ead9" />
+<meta name="robots" content="index,follow" />
+
+<link rel="icon" href="/favicon.ico" sizes="any" />
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="Souffleuse" />
+<meta property="og:locale" content="en_US" />
+<meta property="og:url" content="https://souffleuse.app/en/terms.html" />
+<meta property="og:title" content="Terms of service & sale — Souffleuse" />
+<meta property="og:description" content="Terms of use and sale: perpetual licence, purchase via Lemon Squeezy, withdrawal, refunds, warranty and liability." />
+<meta property="og:image" content="https://souffleuse.app/og.png" />
+
+<!-- Fonts self-hébergées : aucune requête tierce au runtime (promesse 100% local). -->
+<link rel="preload" href="/assets/fonts/bodoni-moda-700-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="preload" href="/assets/fonts/spectral-400-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="stylesheet" href="/assets/fonts.css" />
+
+<style>
+  :root {
+    --paper:      #f3ead9;
+    --paper-deep: #ece0c9;
+    --paper-edge: #e3d5ba;
+    --ink:        #1a1613;
+    --ink-soft:   #463d33;
+    --ink-faint:  #5e5446;
+    --rouge:      #8c2b21;
+    --display: "Bodoni Moda", Georgia, serif;
+    --body:    "Spectral", Georgia, serif;
+    --filet:   1px solid var(--ink);
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background-color: var(--paper);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: clamp(1rem, 0.95rem + 0.35vw, 1.12rem);
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    position: relative;
+  }
+  body::before {
+    content: "";
+    position: fixed; inset: 0; z-index: 0;
+    pointer-events: none; opacity: 0.45; mix-blend-mode: multiply;
+    background-image:
+      radial-gradient(rgba(60,45,25,0.06) 1px, transparent 1px),
+      radial-gradient(rgba(60,45,25,0.04) 1px, transparent 1px);
+    background-size: 3px 3px, 5px 5px;
+  }
+  header, main, footer { position: relative; z-index: 1; }
+  .shell { width: min(72ch, 92vw); margin-inline: auto; }
+
+  .topbar { border-bottom: var(--filet); background: var(--paper-deep); }
+  .topbar__inner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-block: 0.9rem; }
+  .brand { display: inline-flex; align-items: center; gap: 0.6rem; color: var(--ink); text-decoration: none; }
+  .brand__mark { display: block; }
+  .brand__name { font-family: var(--display); font-weight: 700; font-size: 1.1rem; letter-spacing: 0.04em; display: block; line-height: 1; }
+  .brand__sub { font-style: italic; font-size: 0.8rem; color: var(--ink-faint); }
+  .topbar__right { display: flex; align-items: center; gap: 1.2rem; }
+  .topback { color: var(--ink-soft); text-decoration: none; font-size: 0.9rem; border-bottom: 1px solid transparent; }
+  .topback:hover { color: var(--rouge); border-bottom-color: var(--rouge); }
+  .langswitch { display: inline-flex; gap: 0.4rem; font-size: 0.9rem; letter-spacing: 0.06em; }
+  .langswitch a { color: var(--ink-soft); text-decoration: none; border-bottom: 1px solid transparent; }
+  .langswitch a:hover { color: var(--ink); border-bottom-color: var(--rouge); }
+  .langswitch a[aria-current="true"] { color: var(--rouge); border-bottom-color: var(--rouge); }
+  .langswitch__sep { color: var(--ink-faint); opacity: 0.5; }
+
+  .doc { padding-block: clamp(2.6rem, 6vw, 4.4rem) clamp(3rem, 7vw, 5rem); }
+  .doc__eyebrow { font-variant: small-caps; letter-spacing: 0.28em; text-transform: lowercase; color: var(--rouge); font-size: 0.82rem; display: block; margin-bottom: 0.7rem; }
+  .doc h1 { font-family: var(--display); font-weight: 900; font-size: clamp(2rem, 5vw, 3rem); line-height: 1.05; margin: 0 0 1rem; }
+  .doc__lede { font-size: 1.12rem; color: var(--ink-soft); max-width: 60ch; }
+  .doc__updated { font-style: italic; font-size: 0.86rem; color: var(--ink-faint); margin-top: 0.4rem; }
+
+  .doc h2 {
+    font-family: var(--display); font-weight: 700;
+    font-size: clamp(1.3rem, 3vw, 1.65rem);
+    margin: 2.8rem 0 0.6rem; padding-top: 1.6rem;
+    border-top: 1px solid rgba(26,22,19,0.18);
+  }
+  .doc h2:first-of-type { border-top: none; padding-top: 0; }
+  .doc h3 { font-family: var(--display); font-weight: 700; font-size: 1.12rem; margin: 1.6rem 0 0.3rem; }
+  .doc p { max-width: 64ch; }
+  .doc b, .doc strong { font-weight: 700; color: var(--ink); }
+  .doc a { color: var(--rouge); }
+  .doc ul { max-width: 64ch; padding-left: 1.2rem; }
+  .doc li { margin-block: 0.35rem; }
+
+  .seal {
+    margin: 2rem 0; padding: 1.2rem 1.4rem;
+    border: 1px solid var(--rouge); border-left-width: 3px;
+    background: rgba(140,43,33,0.04);
+  }
+  .seal p { margin: 0; max-width: none; }
+  .seal b { color: var(--rouge); }
+
+  footer { border-top: var(--filet); background: var(--paper-deep); padding-block: 2.2rem; margin-top: 2rem; }
+  .foot { display: flex; flex-direction: column; gap: 0.5rem; align-items: center; text-align: center; font-size: 0.86rem; color: var(--ink-faint); }
+  .foot a { color: var(--ink-soft); text-decoration: none; border-bottom: 1px solid transparent; }
+  .foot a:hover { color: var(--rouge); border-bottom-color: var(--rouge); }
+  .foot__brand { font-family: var(--display); font-weight: 700; font-size: 1.05rem; color: var(--ink); letter-spacing: 0.04em; }
+  .foot__links { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5rem 1.4rem; margin-top: 0.4rem; }
+
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="shell topbar__inner">
+    <a href="/en/" class="brand" aria-label="Souffleuse, home">
+      <svg class="brand__mark" width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
+        <path d="M2 22 Q13 2 24 22" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <path d="M6 22 Q13 9 20 22" fill="none" stroke="currentColor" stroke-width="1"/>
+        <circle cx="13" cy="22" r="1.4" fill="currentColor"/>
+      </svg>
+      <span>
+        <span class="brand__name">Souffleuse</span>
+        <span class="brand__sub">Terms</span>
+      </span>
+    </a>
+    <div class="topbar__right">
+      <a href="/en/" class="topback">← Back to the playbill</a>
+      <div class="langswitch" role="group" aria-label="Langue / Language">
+        <a href="/conditions.html" hreflang="fr">FR</a>
+        <span class="langswitch__sep" aria-hidden="true">·</span>
+        <a href="/en/terms.html" hreflang="en" aria-current="true">EN</a>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="doc">
+  <div class="shell">
+    <span class="doc__eyebrow">The contract, in plain words</span>
+    <h1>Terms of service &amp; sale</h1>
+    <p class="doc__lede">
+      These are the rules that govern your use of Souffleuse and, the day you buy it, the sale
+      of your licence. We've tried to say them plainly, without giving up legal precision.
+    </p>
+    <p class="doc__updated">Last updated: 18 June 2026 · beta.</p>
+
+    <div class="seal">
+      <p><b>Read this first:</b> this document is a serious template but it is not a substitute
+      for legal advice. Items in brackets — such as <b>[COMPANY]</b> or
+      <b>[GOVERNING LAW]</b> — must be completed by the publisher before final
+      publication.</p>
+    </div>
+
+    <h2>1. Purpose and acceptance</h2>
+    <p>
+      These terms of service and sale (the "<b>Terms</b>") govern access to and use of the
+      <b>Souffleuse</b> software (the "<b>Application</b>"). <b>Souffleuse</b> is a brand published
+      by <b>[COMPANY]</b> (the "<b>Publisher</b>", "we"). The Publisher's full identity is set out
+      in the <a href="/en/legal-notice.html">legal notice</a>. These Terms also govern any purchase
+      of a usage licence.
+    </p>
+    <p>
+      By downloading, installing or using the Application, you acknowledge that you have read
+      and accept these Terms without reservation. If you do not accept them, do not install or
+      use the Application.
+    </p>
+
+    <h2>2. Description of the service</h2>
+    <p>
+      Souffleuse is a macOS typing-assistance application that suggests text at the cursor,
+      translates, rephrases by tone and keeps a usage log. Processing is <b>entirely
+      on-device</b> on your Mac: the Application does not use a user account and does not send
+      your text to a server. The details are in our
+      <a href="/en/privacy.html">privacy policy</a>, which forms an integral part of these
+      Terms.
+    </p>
+    <p>
+      The Application is distributed outside the App Store, signed and notarized by Apple
+      (Developer ID), and receives updates through the Sparkle mechanism.
+    </p>
+
+    <h2>3. Usage licence</h2>
+    <p>
+      Subject to payment of the price where due, the Publisher grants you a <b>perpetual,
+      personal, non-exclusive, non-transferable licence, revocable in case of breach</b>,
+      authorizing you to install and use the Application on the Macs you own or control, for
+      your own personal or professional needs.
+    </p>
+    <p>
+      The licence is <b>perpetual</b> for the version purchased: it does not turn into a
+      subscription and does not expire. The precise licence terms — including restrictions —
+      are set out in the <a href="/en/license.html">End-User License Agreement (EULA)</a>, which
+      prevails over this section in case of conflict regarding the scope of the licence.
+    </p>
+
+    <h2>4. Beta phase and temporary free access</h2>
+    <p>
+      During the beta phase, the Application is made available <b>free of charge</b>, as is, for
+      evaluation purposes. A beta version may carry limitations, defects or change without
+      notice. At the end of the beta, the Application will move to a <b>one-time purchase</b>
+      model (perpetual licence) described below; this transition creates no obligation for you
+      to buy.
+    </p>
+
+    <h2>5. Pricing, purchase and Merchant of Record</h2>
+    <p>
+      When the Application becomes paid, the licence is acquired through a <b>one-time
+      purchase</b> at the price displayed at the time of order. Prices are shown in the currency
+      specified at checkout.
+    </p>
+    <p>
+      Purchases are processed by <b>Lemon Squeezy</b>, acting as the <b>Merchant of Record</b>.
+      As such, <b>the sales contract is concluded with Lemon Squeezy, not directly with the
+      Publisher</b>: Lemon Squeezy is the seller in legal terms, it collects payment, issues the
+      invoice, collects and remits applicable taxes, and handles refund and withdrawal requests
+      under its own policy. The Publisher, for its part, provides you with the <b>software under
+      licence</b> (see section 3 and the <a href="/en/license.html">End-User License Agreement</a>).
+      By placing an order, you also accept
+      <a href="https://www.lemonsqueezy.com/terms" rel="nofollow noopener" target="_blank">Lemon Squeezy's terms</a>,
+      its <a href="https://www.lemonsqueezy.com/refund-policy" rel="nofollow noopener" target="_blank">refund policy</a>
+      and its privacy policy, available on its website.
+    </p>
+
+    <h3>5.1 Taxes</h3>
+    <p>
+      Applicable taxes (in particular <b>VAT</b> or equivalent taxes) are determined and applied
+      by Lemon Squeezy based on your location. The tax amount is shown at checkout and appears
+      on the invoice issued by Lemon Squeezy.
+    </p>
+
+    <h2>6. Right of withdrawal and refunds</h2>
+    <p>
+      The Application is <b>digital content supplied on an intangible medium</b>, and its
+      performance begins as soon as it is downloaded. In accordance with the rules applicable to
+      the sale of digital content, where you request immediate access to the product and
+      acknowledge that such access entails the <b>loss of the right of withdrawal</b>, that right
+      may no longer apply once the download has started.
+    </p>
+    <p>
+      Notwithstanding the above, withdrawal and refund requests are handled by the Merchant of
+      Record <b>Lemon Squeezy</b>, in accordance with its applicable
+      <a href="https://www.lemonsqueezy.com/refund-policy" rel="nofollow noopener" target="_blank">refund policy</a>,
+      and without prejudice to your mandatory rights under applicable consumer law. For any
+      request, contact
+      us at <a href="mailto:contact@souffleuse.app">contact@souffleuse.app</a>: we will relay or
+      facilitate the request to the Merchant of Record.
+    </p>
+
+    <h2>7. Updates</h2>
+    <p>
+      The Publisher may release corrective or feature updates through Sparkle. Unless stated
+      otherwise, updates to the version for which you hold a licence are provided at no extra
+      cost. The Publisher does not, however, undertake to provide new major versions
+      indefinitely, which may be subject to a separate licence.
+    </p>
+
+    <h2>8. Statutory warranty and no additional warranty</h2>
+    <p>
+      You benefit from the mandatory <b>statutory warranties</b> provided by applicable law, in
+      particular, where relevant, the warranty of conformity for digital content. Nothing in
+      these Terms limits those mandatory warranties.
+    </p>
+    <p>
+      Beyond those statutory warranties, and to the extent permitted by law, the Application is
+      provided <b>"as is" and "as available"</b>, without express or implied warranty of
+      merchantability, fitness for a particular purpose, continuity or freedom from error.
+      Suggested text is generated automatically and may be inaccurate or unsuitable; it is up to
+      you to review it before accepting.
+    </p>
+
+    <h2>9. Limitation of liability</h2>
+    <p>
+      To the fullest extent permitted by law, the Publisher shall not be liable for indirect,
+      incidental or consequential damages (loss of data, loss of business, loss of profit,
+      reputational harm) arising from the use of or inability to use the Application. In any
+      event, the Publisher's total liability, on any basis, is limited to the amount you
+      actually paid for the licence in the twelve months preceding the triggering event.
+    </p>
+    <p>
+      These limitations do not apply in case of gross negligence or willful misconduct, personal
+      injury, or where the law prohibits such a limitation.
+    </p>
+
+    <h2>10. Intellectual property</h2>
+    <p>
+      The Application, its code, brand and content remain the exclusive property of the Publisher
+      and its licensors. Nothing in these Terms transfers any ownership right to you; you are
+      granted a usage licence only. The Application includes third-party components under
+      open-source licences, detailed in the
+      <a href="/en/license.html">End-User License Agreement</a>.
+    </p>
+
+    <h2>11. Termination</h2>
+    <p>
+      The licence terminates automatically if you breach a substantial obligation of these Terms
+      or of the EULA. You may stop using the Application and uninstall it at any time.
+      Termination does not give rise to a refund beyond what the Merchant of Record's policy or
+      mandatory law provides. Clauses that by their nature survive termination (intellectual
+      property, liability, governing law) remain in force.
+    </p>
+
+    <h2>12. Changes to the Terms</h2>
+    <p>
+      The Publisher may amend these Terms to reflect legal or functional changes. The applicable
+      version is the one in force on the date of your order for sale-related matters, and the
+      version published on this site for usage-related matters. The last-updated date appears at
+      the top of the page.
+    </p>
+
+    <h2>13. Governing law and jurisdiction</h2>
+    <p>
+      These Terms are governed by the law of <b>[GOVERNING LAW]</b>, without prejudice
+      to more protective mandatory provisions of the consumer's country of residence. Any dispute
+      shall be submitted to the competent courts of <b>[GOVERNING LAW]</b>, subject to
+      the mandatory jurisdiction rules applicable to consumers. The Publisher's full identity is
+      set out in the <a href="/en/legal-notice.html">legal notice</a>.
+    </p>
+
+    <h2>14. Contact</h2>
+    <p>
+      For any question about these Terms, write to the prompter:
+      <a href="mailto:contact@souffleuse.app">contact@souffleuse.app</a>. For billing and refund
+      matters, the Merchant of Record is <b>Lemon Squeezy</b>.
+    </p>
+  </div>
+</main>
+
+<footer>
+  <div class="shell foot">
+    <span class="foot__brand">Souffleuse</span>
+    <p style="margin:0;">Made on Mac, stays on your Mac.</p>
+    <nav class="foot__links" aria-label="Useful links">
+      <a href="/en/">Home</a>
+      <a href="/en/privacy.html">Privacy</a>
+      <a href="/en/license.html">License</a>
+      <a href="/en/legal-notice.html">Legal notice</a>
+      <a href="mailto:contact@souffleuse.app">Write to the prompter</a>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>

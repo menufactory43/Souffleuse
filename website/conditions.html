@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Conditions générales — Souffleuse</title>
+<meta name="description" content="Conditions générales d'utilisation et de vente de Souffleuse : licence perpétuelle, achat via Lemon Squeezy (vendeur officiel), prix, rétractation, remboursement, garantie et responsabilité." />
+
+<link rel="canonical" href="https://souffleuse.app/conditions.html" />
+<link rel="alternate" hreflang="fr" href="https://souffleuse.app/conditions.html" />
+<link rel="alternate" hreflang="en" href="https://souffleuse.app/en/terms.html" />
+<link rel="alternate" hreflang="x-default" href="https://souffleuse.app/conditions.html" />
+<meta name="theme-color" content="#f3ead9" />
+<meta name="robots" content="index,follow" />
+
+<link rel="icon" href="/favicon.ico" sizes="any" />
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="Souffleuse" />
+<meta property="og:locale" content="fr_FR" />
+<meta property="og:url" content="https://souffleuse.app/conditions.html" />
+<meta property="og:title" content="Conditions générales — Souffleuse" />
+<meta property="og:description" content="Conditions générales d'utilisation et de vente : licence perpétuelle, achat via Lemon Squeezy, rétractation, remboursement, garantie et responsabilité." />
+<meta property="og:image" content="https://souffleuse.app/og.png" />
+
+<!-- Fonts self-hébergées : aucune requête tierce au runtime (promesse 100% local). -->
+<link rel="preload" href="/assets/fonts/bodoni-moda-700-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="preload" href="/assets/fonts/spectral-400-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="stylesheet" href="/assets/fonts.css" />
+
+<style>
+  :root {
+    --paper:      #f3ead9;
+    --paper-deep: #ece0c9;
+    --paper-edge: #e3d5ba;
+    --ink:        #1a1613;
+    --ink-soft:   #463d33;
+    --ink-faint:  #5e5446;
+    --rouge:      #8c2b21;
+    --display: "Bodoni Moda", Georgia, serif;
+    --body:    "Spectral", Georgia, serif;
+    --filet:   1px solid var(--ink);
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background-color: var(--paper);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: clamp(1rem, 0.95rem + 0.35vw, 1.12rem);
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    position: relative;
+  }
+  body::before {
+    content: "";
+    position: fixed; inset: 0; z-index: 0;
+    pointer-events: none; opacity: 0.45; mix-blend-mode: multiply;
+    background-image:
+      radial-gradient(rgba(60,45,25,0.06) 1px, transparent 1px),
+      radial-gradient(rgba(60,45,25,0.04) 1px, transparent 1px);
+    background-size: 3px 3px, 5px 5px;
+  }
+  header, main, footer { position: relative; z-index: 1; }
+  .shell { width: min(72ch, 92vw); margin-inline: auto; }
+
+  /* Barre de tête, alignée sur le livret. */
+  .topbar { border-bottom: var(--filet); background: var(--paper-deep); }
+  .topbar__inner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-block: 0.9rem; }
+  .brand { display: inline-flex; align-items: center; gap: 0.6rem; color: var(--ink); text-decoration: none; }
+  .brand__mark { display: block; }
+  .brand__name { font-family: var(--display); font-weight: 700; font-size: 1.1rem; letter-spacing: 0.04em; display: block; line-height: 1; }
+  .brand__sub { font-style: italic; font-size: 0.8rem; color: var(--ink-faint); }
+  .topbar__right { display: flex; align-items: center; gap: 1.2rem; }
+  .topback { color: var(--ink-soft); text-decoration: none; font-size: 0.9rem; border-bottom: 1px solid transparent; }
+  .topback:hover { color: var(--rouge); border-bottom-color: var(--rouge); }
+  .langswitch { display: inline-flex; gap: 0.4rem; font-size: 0.9rem; letter-spacing: 0.06em; }
+  .langswitch a { color: var(--ink-soft); text-decoration: none; border-bottom: 1px solid transparent; }
+  .langswitch a:hover { color: var(--ink); border-bottom-color: var(--rouge); }
+  .langswitch a[aria-current="true"] { color: var(--rouge); border-bottom-color: var(--rouge); }
+  .langswitch__sep { color: var(--ink-faint); opacity: 0.5; }
+
+  .doc { padding-block: clamp(2.6rem, 6vw, 4.4rem) clamp(3rem, 7vw, 5rem); }
+  .doc__eyebrow { font-variant: small-caps; letter-spacing: 0.28em; text-transform: lowercase; color: var(--rouge); font-size: 0.82rem; display: block; margin-bottom: 0.7rem; }
+  .doc h1 { font-family: var(--display); font-weight: 900; font-size: clamp(2rem, 5vw, 3rem); line-height: 1.05; margin: 0 0 1rem; }
+  .doc__lede { font-size: 1.12rem; color: var(--ink-soft); max-width: 60ch; }
+  .doc__updated { font-style: italic; font-size: 0.86rem; color: var(--ink-faint); margin-top: 0.4rem; }
+
+  .doc h2 {
+    font-family: var(--display); font-weight: 700;
+    font-size: clamp(1.3rem, 3vw, 1.65rem);
+    margin: 2.8rem 0 0.6rem; padding-top: 1.6rem;
+    border-top: 1px solid rgba(26,22,19,0.18);
+  }
+  .doc h2:first-of-type { border-top: none; padding-top: 0; }
+  .doc h3 { font-family: var(--display); font-weight: 700; font-size: 1.12rem; margin: 1.6rem 0 0.3rem; }
+  .doc p { max-width: 64ch; }
+  .doc b, .doc strong { font-weight: 700; color: var(--ink); }
+  .doc a { color: var(--rouge); }
+  .doc ul { max-width: 64ch; padding-left: 1.2rem; }
+  .doc li { margin-block: 0.35rem; }
+
+  /* Le sceau « ce qui ne sort pas » : un encadré sang-de-bœuf discret. */
+  .seal {
+    margin: 2rem 0; padding: 1.2rem 1.4rem;
+    border: 1px solid var(--rouge); border-left-width: 3px;
+    background: rgba(140,43,33,0.04);
+  }
+  .seal p { margin: 0; max-width: none; }
+  .seal b { color: var(--rouge); }
+
+  footer { border-top: var(--filet); background: var(--paper-deep); padding-block: 2.2rem; margin-top: 2rem; }
+  .foot { display: flex; flex-direction: column; gap: 0.5rem; align-items: center; text-align: center; font-size: 0.86rem; color: var(--ink-faint); }
+  .foot a { color: var(--ink-soft); text-decoration: none; border-bottom: 1px solid transparent; }
+  .foot a:hover { color: var(--rouge); border-bottom-color: var(--rouge); }
+  .foot__brand { font-family: var(--display); font-weight: 700; font-size: 1.05rem; color: var(--ink); letter-spacing: 0.04em; }
+  .foot__links { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5rem 1.4rem; margin-top: 0.4rem; }
+
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="shell topbar__inner">
+    <a href="/" class="brand" aria-label="Souffleuse, accueil">
+      <svg class="brand__mark" width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
+        <path d="M2 22 Q13 2 24 22" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <path d="M6 22 Q13 9 20 22" fill="none" stroke="currentColor" stroke-width="1"/>
+        <circle cx="13" cy="22" r="1.4" fill="currentColor"/>
+      </svg>
+      <span>
+        <span class="brand__name">Souffleuse</span>
+        <span class="brand__sub">Conditions</span>
+      </span>
+    </a>
+    <div class="topbar__right">
+      <a href="/" class="topback">← Retour au livret</a>
+      <div class="langswitch" role="group" aria-label="Langue / Language">
+        <a href="/conditions.html" hreflang="fr" aria-current="true">FR</a>
+        <span class="langswitch__sep" aria-hidden="true">·</span>
+        <a href="/en/terms.html" hreflang="en">EN</a>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="doc">
+  <div class="shell">
+    <span class="doc__eyebrow">Le contrat, en clair</span>
+    <h1>Conditions générales d'utilisation et de vente</h1>
+    <p class="doc__lede">
+      Voici les règles qui encadrent l'usage de Souffleuse et, le jour où vous l'achetez,
+      la vente de votre licence. On a essayé de les dire simplement, sans renoncer à la
+      précision juridique.
+    </p>
+    <p class="doc__updated">Dernière mise à jour : 18 juin 2026 · version bêta.</p>
+
+    <div class="seal">
+      <p><b>À lire d'abord :</b> ce document est un modèle sérieux mais il ne remplace pas un
+      avis juridique. Les éléments entre crochets — comme <b>[SOCIÉTÉ]</b> ou
+      <b>[PAYS / DROIT APPLICABLE]</b> — doivent être complétés par l'éditeur avant publication
+      définitive.</p>
+    </div>
+
+    <h2>1. Objet et acceptation</h2>
+    <p>
+      Les présentes conditions générales d'utilisation et de vente (les « <b>Conditions</b> »)
+      régissent l'accès à et l'usage du logiciel <b>Souffleuse</b> (l'« <b>Application</b> »).
+      <b>Souffleuse</b> est une marque éditée par <b>[SOCIÉTÉ]</b> (l'« <b>Éditeur</b> »,
+      « nous »). L'identité complète de l'Éditeur figure dans les
+      <a href="/mentions-legales.html">mentions légales</a>. Les présentes Conditions régissent
+      également l'achat éventuel d'une licence d'utilisation.
+    </p>
+    <p>
+      En téléchargeant, installant ou utilisant l'Application, vous reconnaissez avoir pris
+      connaissance des présentes Conditions et les accepter sans réserve. Si vous n'acceptez
+      pas ces Conditions, n'installez pas et n'utilisez pas l'Application.
+    </p>
+
+    <h2>2. Description du service</h2>
+    <p>
+      Souffleuse est une application macOS d'assistance à la frappe qui suggère du texte au
+      curseur, traduit, reformule selon le ton et tient un carnet d'usage. Le traitement est
+      <b>entièrement local</b> sur votre Mac : l'Application ne fonctionne pas avec un compte
+      utilisateur et n'envoie pas vos textes vers un serveur. Le détail figure dans notre
+      <a href="/confidentialite.html">politique de confidentialité</a>, qui fait partie
+      intégrante des présentes.
+    </p>
+    <p>
+      L'Application est distribuée hors de l'App Store, signée et notarisée par Apple
+      (Developer ID), et reçoit ses mises à jour via le mécanisme Sparkle.
+    </p>
+
+    <h2>3. Licence d'utilisation</h2>
+    <p>
+      Sous réserve du paiement du prix lorsqu'il est exigible, l'Éditeur vous concède une
+      licence <b>perpétuelle, personnelle, non-exclusive, non-transférable et révocable
+      en cas de manquement</b>, vous autorisant à installer et utiliser l'Application sur
+      les Mac que vous possédez ou contrôlez, pour vos besoins propres, personnels ou
+      professionnels.
+    </p>
+    <p>
+      La licence est <b>perpétuelle</b> pour la version achetée : elle ne se transforme pas en
+      abonnement et n'expire pas. Les conditions précises de la licence — y compris les
+      restrictions — sont détaillées dans le <a href="/licence.html">Contrat de Licence
+      Utilisateur Final (EULA)</a>, qui prévaut sur le présent article en cas de divergence
+      portant sur la portée de la licence.
+    </p>
+
+    <h2>4. Phase bêta et gratuité temporaire</h2>
+    <p>
+      Pendant la phase bêta, l'Application est mise à disposition <b>gratuitement</b>, en
+      l'état, à des fins d'évaluation. Une version bêta peut comporter des limitations, des
+      anomalies ou évoluer sans préavis. À l'issue de la bêta, l'Application basculera vers un
+      modèle d'<b>achat unique</b> (licence perpétuelle) décrit ci-après ; cette transition ne
+      crée aucune obligation d'achat à votre charge.
+    </p>
+
+    <h2>5. Prix, achat et vendeur officiel (Merchant of Record)</h2>
+    <p>
+      Lorsque l'Application devient payante, la licence s'acquiert par un <b>achat unique</b>
+      au prix affiché au moment de la commande. Les prix sont indiqués dans la devise précisée
+      lors du paiement.
+    </p>
+    <p>
+      Les achats sont traités par <b>Lemon Squeezy</b>, qui agit en qualité de
+      <b>vendeur officiel (Merchant of Record)</b>. À ce titre, <b>le contrat de vente se conclut
+      avec Lemon Squeezy, et non en direct avec l'Éditeur</b> : Lemon Squeezy est le vendeur au
+      sens juridique, il encaisse le paiement, émet la facture, collecte et reverse les taxes
+      applicables, et traite les demandes de remboursement et de rétractation selon sa propre
+      politique. L'Éditeur, lui, vous fournit le <b>logiciel sous licence</b> (voir l'article 3
+      et le <a href="/licence.html">Contrat de Licence Utilisateur Final</a>). En passant
+      commande, vous acceptez les
+      <a href="https://www.lemonsqueezy.com/terms" rel="nofollow noopener" target="_blank">conditions de Lemon Squeezy</a>,
+      sa <a href="https://www.lemonsqueezy.com/refund-policy" rel="nofollow noopener" target="_blank">politique de remboursement</a>
+      et sa politique de confidentialité, disponibles sur son site.
+    </p>
+
+    <h3>5.1 Taxes</h3>
+    <p>
+      Les taxes applicables (notamment la <b>TVA</b> ou taxes équivalentes) sont déterminées et
+      appliquées par Lemon Squeezy en fonction de votre localisation. Le montant des taxes
+      est indiqué au moment du paiement et figure sur la facture émise par Lemon Squeezy.
+    </p>
+
+    <h2>6. Droit de rétractation et remboursement</h2>
+    <p>
+      L'Application est un <b>contenu numérique fourni sur un support immatériel</b> et son
+      exécution commence dès le téléchargement. Conformément à la réglementation applicable
+      à la vente de contenus numériques, lorsque vous demandez l'accès immédiat au produit et
+      reconnaissez que cet accès entraîne la <b>perte du droit de rétractation</b>, ce droit
+      peut ne plus s'appliquer une fois le téléchargement entamé.
+    </p>
+    <p>
+      Indépendamment de ce qui précède, la rétractation et les demandes de remboursement sont
+      traitées par le vendeur officiel <b>Lemon Squeezy</b>, selon sa
+      <a href="https://www.lemonsqueezy.com/refund-policy" rel="nofollow noopener" target="_blank">politique de remboursement</a>
+      en vigueur, et sans préjudice de vos droits impératifs au titre du droit de la consommation
+      applicable. Pour toute demande, contactez-nous à
+      <a href="mailto:contact@souffleuse.app">contact@souffleuse.app</a> : nous relaierons ou
+      faciliterons la demande auprès du vendeur officiel.
+    </p>
+
+    <h2>7. Mises à jour</h2>
+    <p>
+      L'Éditeur peut publier des mises à jour correctives ou évolutives via Sparkle. Sauf
+      indication contraire, les mises à jour de la version pour laquelle vous détenez une
+      licence vous sont fournies sans frais supplémentaires. L'Éditeur ne s'engage toutefois
+      pas à fournir indéfiniment de nouvelles versions majeures, qui peuvent faire l'objet
+      d'une licence distincte.
+    </p>
+
+    <h2>8. Garantie légale et absence de garantie additionnelle</h2>
+    <p>
+      Vous bénéficiez des <b>garanties légales</b> impératives prévues par le droit applicable,
+      notamment, le cas échéant, la garantie de conformité du contenu numérique. Rien dans les
+      présentes ne limite ces garanties impératives.
+    </p>
+    <p>
+      Au-delà de ces garanties légales, et dans les limites permises par la loi, l'Application
+      est fournie <b>« en l'état » et « selon disponibilité »</b>, sans garantie expresse ou
+      implicite de qualité marchande, d'adéquation à un usage particulier, de continuité, ni
+      d'absence d'erreur. Les textes suggérés sont générés automatiquement et peuvent être
+      inexacts ou inadaptés ; il vous appartient de les relire avant de les valider.
+    </p>
+
+    <h2>9. Limitation de responsabilité</h2>
+    <p>
+      Dans toute la mesure permise par la loi, la responsabilité de l'Éditeur ne saurait être
+      engagée pour les dommages indirects, accessoires ou consécutifs (perte de données, perte
+      d'exploitation, manque à gagner, atteinte à la réputation) résultant de l'usage ou de
+      l'impossibilité d'usage de l'Application. En tout état de cause, la responsabilité totale
+      de l'Éditeur, toutes causes confondues, est limitée au montant que vous avez effectivement
+      payé pour la licence au cours des douze mois précédant le fait générateur.
+    </p>
+    <p>
+      Les présentes limitations ne s'appliquent pas en cas de faute lourde ou dolosive, de
+      dommage corporel, ni dans les cas où la loi interdit une telle limitation.
+    </p>
+
+    <h2>10. Propriété intellectuelle</h2>
+    <p>
+      L'Application, son code, sa marque et ses contenus restent la propriété exclusive de
+      l'Éditeur et de ses concédants. Aucune disposition des présentes ne vous transfère de
+      droit de propriété ; seule une licence d'utilisation vous est concédée. L'Application
+      intègre des composants tiers sous licences open source, détaillés dans le
+      <a href="/licence.html">Contrat de Licence Utilisateur Final</a>.
+    </p>
+
+    <h2>11. Résiliation</h2>
+    <p>
+      La licence prend fin automatiquement si vous manquez à une obligation substantielle des
+      présentes ou de l'EULA. Vous pouvez à tout moment cesser d'utiliser l'Application et la
+      désinstaller. La résiliation ne donne pas lieu à remboursement au-delà de ce que prévoit
+      la politique du vendeur officiel ou la loi impérative. Les clauses qui, par nature,
+      survivent à la résiliation (propriété intellectuelle, responsabilité, droit applicable)
+      demeurent en vigueur.
+    </p>
+
+    <h2>12. Modification des Conditions</h2>
+    <p>
+      L'Éditeur peut modifier les présentes Conditions pour refléter des évolutions légales ou
+      fonctionnelles. La version applicable est celle en vigueur à la date de votre commande
+      pour les aspects relatifs à la vente, et la version publiée sur ce site pour les aspects
+      relatifs à l'usage. La date de dernière mise à jour figure en tête de page.
+    </p>
+
+    <h2>13. Droit applicable et juridiction</h2>
+    <p>
+      Les présentes Conditions sont régies par le droit de <b>[PAYS / DROIT APPLICABLE]</b>,
+      sans préjudice des dispositions impératives plus protectrices du pays de résidence du
+      consommateur. Tout litige sera soumis aux tribunaux compétents de
+      <b>[PAYS / DROIT APPLICABLE]</b>, sous réserve des règles de compétence impératives
+      applicables aux consommateurs. L'identité complète de l'Éditeur figure dans les
+      <a href="/mentions-legales.html">mentions légales</a>.
+    </p>
+
+    <h2>14. Contact</h2>
+    <p>
+      Pour toute question relative aux présentes Conditions, écrivez à la souffleuse :
+      <a href="mailto:contact@souffleuse.app">contact@souffleuse.app</a>. Pour les questions
+      de facturation et de remboursement, le vendeur officiel est <b>Lemon Squeezy</b>.
+    </p>
+  </div>
+</main>
+
+<footer>
+  <div class="shell foot">
+    <span class="foot__brand">Souffleuse</span>
+    <p style="margin:0;">Fait sur Mac, reste sur votre Mac.</p>
+    <nav class="foot__links" aria-label="Liens utiles">
+      <a href="/">Accueil</a>
+      <a href="/confidentialite.html">Confidentialité</a>
+      <a href="/licence.html">Licence</a>
+      <a href="/mentions-legales.html">Mentions légales</a>
+      <a href="mailto:contact@souffleuse.app">Écrire à la souffleuse</a>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>
