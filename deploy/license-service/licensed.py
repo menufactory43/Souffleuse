@@ -4,8 +4,7 @@
 # Ed25519 au format LicenseKey, lie a l'email. Livraison = page de succes.
 # Taux : mempool.space (bitcoiner, non-CEX) -> repli CoinGecko. Facture a la volee,
 # montant en sats au cours du moment, expiration courte (15 min) + regeneration.
-import json, base64, sqlite3, subprocess, urllib.request, urllib.parse, re, time, smtplib, ssl
-from email.message import EmailMessage
+import json, base64, sqlite3, subprocess, urllib.request, urllib.parse, re, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -82,42 +81,43 @@ def order_get(h):
 def order_set_token(h, token):
     c = _db(); c.execute("UPDATE orders SET token=? WHERE hash=?", (token, h)); c.commit(); c.close()
 
-# --- E-mail du recu (iCloud SMTPS 465 ; SPF/DKIM deja alignes sur le domaine) ---
-# Config dans /opt/licensed/smtp.conf (600) : host/port/user/password/from.
-# Best-effort : si pas de conf ou echec, la page de succes affiche la cle quand meme.
-def _smtp_conf():
-    cfg = {}
+# --- E-mail du recu (Resend, HTTPS) ---
+# Cle d'envoi (scope "sending only") lue depuis /opt/licensed/resend.key (600).
+# Aucun compte perso implique ; From = domaine verifie. Best-effort : si pas de
+# cle ou echec, la page de succes affiche la cle quand meme.
+RESEND_FROM = "Souffleuse <contact@souffleuse.app>"
+
+def _resend_key():
     try:
-        for line in open("/opt/licensed/smtp.conf"):
-            line = line.strip()
-            if "=" in line and not line.startswith("#"):
-                k, v = line.split("=", 1); cfg[k.strip()] = v.strip()
+        k = open("/opt/licensed/resend.key").read().strip()
+        return k or None
     except FileNotFoundError:
         return None
-    return cfg if cfg.get("host") and cfg.get("user") and cfg.get("password") else None
 
 def send_license_email(to_email: str, token: str) -> bool:
-    cfg = _smtp_conf()
-    if not cfg:
+    key = _resend_key()
+    if not key:
         return False
-    msg = EmailMessage()
-    msg["Subject"] = "Votre licence Souffleuse"
-    msg["From"] = cfg.get("from", cfg["user"])
-    msg["To"] = to_email
-    msg.set_content(
-        "Merci pour votre achat !\n\n"
-        "Voici votre cle de licence Souffleuse :\n\n"
-        f"{token}\n\n"
-        "Pour l'activer : ouvrez Souffleuse, menu Reglages -> Studio, puis collez la cle.\n\n"
-        "Gardez ce message : la cle est rattachee a votre e-mail.\n\n"
-        "— Souffleuse\nhttps://souffleuse.app"
-    )
+    payload = json.dumps({
+        "from": RESEND_FROM,
+        "to": [to_email],
+        "subject": "Votre licence Souffleuse",
+        "text": (
+            "Merci pour votre achat !\n\n"
+            "Voici votre cle de licence Souffleuse :\n\n"
+            f"{token}\n\n"
+            "Pour l'activer : ouvrez Souffleuse, menu Reglages -> Studio, puis collez la cle.\n\n"
+            "Gardez ce message : la cle est rattachee a votre e-mail.\n\n"
+            "— Souffleuse\nhttps://souffleuse.app"
+        ),
+    }).encode()
+    req = urllib.request.Request("https://api.resend.com/emails", data=payload, method="POST")
+    req.add_header("Authorization", "Bearer " + key)
+    req.add_header("Content-Type", "application/json")
+    req.add_header("User-Agent", "souffleuse-licence/1.0")  # sinon Cloudflare bloque urllib (err 1010)
     try:
-        with smtplib.SMTP_SSL(cfg["host"], int(cfg.get("port", "465")),
-                              timeout=20, context=ssl.create_default_context()) as s:
-            s.login(cfg["user"], cfg["password"])
-            s.send_message(msg)
-        return True
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return r.status in (200, 201)
     except Exception:
         return False
 
