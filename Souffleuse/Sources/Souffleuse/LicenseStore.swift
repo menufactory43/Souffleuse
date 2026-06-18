@@ -12,8 +12,11 @@ import SouffleuseLog
 enum LicenseGate {
     static let paywallEnabled = false
 
-    /// Checkout Lemon Squeezy du produit « Souffleuse Studio ».
-    static let purchaseURL = URL(string: "https://souffleuse.lemonsqueezy.com/checkout/buy/a798a4d6-841e-4900-a21e-c1ca679c384d")!
+    /// Page de **choix du moyen de paiement** (carte via Lemon Squeezy, ou Bitcoin
+    /// via Lightning). Hébergée par le service de licences (`/buy/studio`), localisée
+    /// FR/EN. Le bouton « Acheter » des Préférences l'ouvre ; la cible Lemon Squeezy
+    /// directe vit désormais côté serveur (`LEMON_URL` dans `licensed.py`).
+    static let purchaseURL = URL(string: "https://pay.souffleuse.app/buy/studio")!
 
     /// Clé PUBLIQUE Ed25519 (base64) — utilisée UNIQUEMENT par la voie offline
     /// signée (`SignedLicenseActivator`), conservée en fallback. Inutilisée tant
