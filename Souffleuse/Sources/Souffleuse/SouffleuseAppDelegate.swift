@@ -244,6 +244,7 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     private var customInstructions = CustomInstructionsWindow()
     private var preferences: PreferencesWindow?
     private var historyViewer: HistoryViewerWindow?
+    private var about: AboutWindow?
     private var hotkeyMonitor: Any?
 
     private let store = PreferencesStore()
@@ -1082,6 +1083,14 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         let updateItem = NSMenuItem(title: tr(fr: "Vérifier les mises à jour…", en: "Check for Updates…"), action: #selector(checkForUpdates), keyEquivalent: "")
         updateItem.target = self
         menu.addItem(updateItem)
+        menu.addItem(NSMenuItem.separator())
+        // ── Groupe À PROPOS / AIDE : carte d'identité de l'app + accès support.
+        let aboutItem = NSMenuItem(title: tr(fr: "À propos de Souffleuse", en: "About Souffleuse"), action: #selector(openAbout), keyEquivalent: "")
+        aboutItem.target = self
+        menu.addItem(aboutItem)
+        let supportItem = NSMenuItem(title: tr(fr: "Aide / Signaler un bug", en: "Help / Report a bug"), action: #selector(contactSupport), keyEquivalent: "")
+        supportItem.target = self
+        menu.addItem(supportItem)
         #if DEBUG
         menu.addItem(NSMenuItem.separator())
         let inspectorItem = NSMenuItem(
@@ -1449,6 +1458,30 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// Déclenche la vérification des mises à jour sur action explicite utilisateur
     /// (item de menu « Vérifier les mises à jour… »). Aucun check passif — manuel-only.
     @objc private func checkForUpdates() { updater.checkForUpdates() }
+
+    /// Ouvre (ou ramène au premier plan) la fenêtre « À propos ». Crée l'instance
+    /// au premier clic et la retient — `AboutWindow.show()` est idempotent.
+    @objc private func openAbout() {
+        if about == nil { about = AboutWindow() }
+        about?.show()
+    }
+
+    /// Accès support : ouvre le client mail sur contact@souffleuse.app avec un
+    /// sujet pré-rempli (FR/EN). `URLComponents` encode proprement le sujet ;
+    /// `NSWorkspace` délègue l'ouverture au gestionnaire mailto du système.
+    @objc private func contactSupport() {
+        var components = URLComponents()
+        components.scheme = "mailto"
+        components.path = "contact@souffleuse.app"
+        components.queryItems = [
+            URLQueryItem(
+                name: "subject",
+                value: tr(fr: "Souffleuse — aide / bug", en: "Souffleuse — help / bug")
+            )
+        ]
+        guard let url = components.url else { return }
+        NSWorkspace.shared.open(url)
+    }
 
     private func ensurePreferences() {
         if preferences == nil {
