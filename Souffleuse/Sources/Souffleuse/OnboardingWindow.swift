@@ -548,7 +548,18 @@ private struct PermissionsStepView: View {
     let imGranted: Bool
     let screenGranted: Bool
 
-    @State private var helpExpanded = false
+    @State private var helpExpanded: Bool
+
+    init(axGranted: Bool, imGranted: Bool, screenGranted: Bool) {
+        self.axGranted = axGranted
+        self.imGranted = imGranted
+        self.screenGranted = screenGranted
+        // Ouvre l'aide d'emblée si une permission REQUISE manque encore : celui
+        // qui bloque sur cet écran (le seul endroit où l'on peut vraiment décrocher)
+        // voit les conseils anti-galère sans avoir à déplier. Replié si tout est
+        // déjà accordé — pas de bruit pour le chemin heureux.
+        _helpExpanded = State(initialValue: !(axGranted && imGranted))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -893,10 +904,17 @@ private struct ModelCard: View {
             }
             .controlSize(.small)
         case .failed:
-            Button(tr(fr: "Réessayer", en: "Retry")) {
-                manager.download(model)
+            // Échec nu = cul-de-sac : on dit quoi faire avant de proposer le retry.
+            VStack(alignment: .leading, spacing: 6) {
+                Text(tr(fr: "Le téléchargement a échoué — vérifiez votre connexion, puis réessayez.", en: "The download failed — check your connection, then try again."))
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button(tr(fr: "Réessayer", en: "Retry")) {
+                    manager.download(model)
+                }
+                .controlSize(.small)
             }
-            .controlSize(.small)
         }
     }
 }
@@ -980,6 +998,19 @@ private struct HowItWorksStepView: View {
                         .fill(Color(nsColor: .textBackgroundColor))
                         .shadow(color: .black.opacity(0.06), radius: 3, y: 1)
                 )
+
+                // Dire POURQUOI c'est une maquette figée : sans ça, l'utilisateur
+                // croit que rien ne réagit. La voix se télécharge encore à l'étape
+                // d'avant — l'essai réel s'activera dès qu'elle est prête.
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.down.circle")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                    Text(tr(fr: "Aperçu figé : la voix finit de se télécharger. L'essai en direct s'activera dès qu'elle est prête.", en: "Frozen preview: the voice is still downloading. The live try-out turns on as soon as it's ready."))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             VStack(alignment: .leading, spacing: 12) {
@@ -1196,7 +1227,26 @@ private struct DoneStepView: View {
         return false
     }
 
+    /// Phase locale de l'étape finale. `settings` = la fiche (toggle + CTA) ;
+    /// `preparing` = la séquence de mise en scène jouée APRÈS le clic sur
+    /// « Commencer à écrire », avant la vraie fermeture.
+    private enum Phase { case settings, preparing }
+    @State private var phase: Phase = .settings
+
     var body: some View {
+        switch phase {
+        case .settings:
+            settingsBody
+        case .preparing:
+            // Le « lever de rideau » : checklist animée dont la 1re ligne attend
+            // le vrai signal moteur (ghostReady). onFinished n'est appelé qu'au
+            // bout de la séquence → la fenêtre se ferme sur un final propre.
+            PreparingStepView(ghostReady: ghostReady, onReady: onFinished)
+                .frame(maxWidth: 340)
+        }
+    }
+
+    private var settingsBody: some View {
         VStack(spacing: 24) {
             // Checkmark sang-de-bœuf
             ZStack {
@@ -1246,13 +1296,192 @@ private struct DoneStepView: View {
             }
             .frame(maxWidth: 300)
 
-            Button(tr(fr: "Commencer à écrire", en: "Start writing")) { onFinished() }
-                .buttonStyle(SangDeBoeufButtonStyle())
-                .controlSize(.large)
-                .disabled(!canFinish)
-                .help(canFinish ? "" : tr(fr: "Accordez Accessibilité et Surveillance des entrées pour commencer.", en: "Grant Accessibility and Input Monitoring to start."))
+            Button(tr(fr: "Commencer à écrire", en: "Start writing")) {
+                withAnimation(.easeInOut(duration: 0.3)) { phase = .preparing }
+            }
+            .buttonStyle(SangDeBoeufButtonStyle())
+            .controlSize(.large)
+            .disabled(!canFinish)
+            .help(canFinish ? "" : tr(fr: "Accordez Accessibilité et Surveillance des entrées pour commencer.", en: "Grant Accessibility and Input Monitoring to start."))
         }
         .frame(maxWidth: 340)
+    }
+}
+
+// MARK: - Step: Preparing (lever de rideau)
+
+/// Mise en scène finale jouée après « Commencer à écrire ». Trois lignes qui se
+/// cochent une à une, puis un final « Souffleuse est prête » avant la fermeture.
+///
+/// Honnêteté du « faux chargement » : la 1re ligne (« Réveil de la voix ») attend
+/// le VRAI signal `ghostReady()` — si le moteur llama n'est pas encore chargé, on
+/// patiente pour de bon (plafonné, pour ne jamais bloquer). Les deux suivantes
+/// sont du rythme théâtral, mais nomment des sous-systèmes réels (CaretEstimator,
+/// KV cache) qui s'initialisent bel et bien au premier souffle. On illustre, on
+/// ne ment pas. Reduce Motion : pas de théâtre, on confirme et on file.
+@MainActor
+private struct PreparingStepView: View {
+    let ghostReady: () -> Bool
+    let onReady: () -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private static let stages: [(fr: String, en: String)] = [
+        (fr: "Réveil de la voix", en: "Waking the voice"),
+        (fr: "Calibrage du curseur", en: "Calibrating the caret"),
+        (fr: "Affûtage des suggestions", en: "Sharpening suggestions"),
+    ]
+
+    /// Nombre de lignes déjà cochées (0…stages.count).
+    @State private var completed = 0
+    /// Final atteint : le spinner devient un grand ✓ et le titre bascule.
+    @State private var finished = false
+
+    var body: some View {
+        VStack(spacing: 24) {
+            header
+            VStack(alignment: .leading, spacing: 14) {
+                ForEach(Array(Self.stages.enumerated()), id: \.offset) { idx, stage in
+                    StageRow(
+                        text: tr(fr: stage.fr, en: stage.en),
+                        state: rowState(idx)
+                    )
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 8)
+        }
+        .task { await run() }
+    }
+
+    @ViewBuilder
+    private var header: some View {
+        ZStack {
+            Circle()
+                .fill(Color.sangDeBoeuf.opacity(0.12))
+                .shadow(color: Color.sangDeBoeuf.opacity(0.08), radius: 8, y: 2)
+            if finished {
+                Text("✓")
+                    .font(.system(size: 28, weight: .semibold, design: .serif))
+                    .foregroundStyle(Color.sangDeBoeuf)
+                    .transition(.scale.combined(with: .opacity))
+            } else {
+                // Notre signature, pas le spinner système : le caret qui respire
+                // (même motif que le ghost et le site).
+                BreathingCaret(height: 26)
+            }
+        }
+        .frame(width: 64, height: 64)
+        .animation(.spring(response: 0.4, dampingFraction: 0.6), value: finished)
+
+        Text(finished
+            ? tr(fr: "Souffleuse est prête", en: "Souffleuse is ready")
+            : tr(fr: "Derniers préparatifs…", en: "Final touches…"))
+            .font(.system(size: 22, weight: .semibold, design: .serif))
+            .animation(.easeInOut(duration: 0.25), value: finished)
+    }
+
+    private func rowState(_ idx: Int) -> StageRow.State {
+        if completed > idx { return .done }
+        if completed == idx && !finished { return .active }
+        return .pending
+    }
+
+    private func run() async {
+        // Reduce Motion : on saute la mise en scène, on attend juste le vrai
+        // signal (plafonné) puis on confirme.
+        if reduceMotion {
+            await waitForGhost(timeoutMs: 4000)
+            onReady()
+            return
+        }
+        // Durée d'attente AVANT de cocher chaque ligne. La dernière s'attarde
+        // volontairement : c'est le « dernier truc qui tourne » qu'on veut voir
+        // vivre avant le final. (idx ≥ count : repli, jamais atteint à 3 stages.)
+        let dwellMs: [Int] = [380, 780, 1200]
+        for idx in Self.stages.indices {
+            // Ligne 0 = la voix : on attend le VRAI moteur avant de la cocher.
+            if idx == 0 { await waitForGhost(timeoutMs: 4000) }
+            try? await Task.sleep(for: .milliseconds(idx < dwellMs.count ? dwellMs[idx] : 780))
+            withAnimation(.easeInOut(duration: 0.3)) { completed = idx + 1 }
+        }
+        // Respiration avant le lever de rideau, puis maintien du final « prête »
+        // assez long pour être lu sans se sentir bloqué.
+        try? await Task.sleep(for: .milliseconds(550))
+        withAnimation { finished = true }
+        try? await Task.sleep(for: .milliseconds(1400))
+        onReady()
+    }
+
+    /// Poll `ghostReady()` jusqu'au vrai prêt ou au plafond — jamais de hang si
+    /// le téléchargement traîne (l'étape Done autorisait déjà à finir pendant le DL).
+    private func waitForGhost(timeoutMs: Int) async {
+        var elapsed = 0
+        while !ghostReady() && elapsed < timeoutMs {
+            try? await Task.sleep(for: .milliseconds(100))
+            elapsed += 100
+        }
+    }
+}
+
+/// Caret sang-de-bœuf qui « respire » (opacité pulsée) — la signature visuelle de
+/// Souffleuse (le ghost au caret, le curseur du site). Remplace le spinner système
+/// pour rester dans la DA. Reduce Motion : caret fixe, pas de pulsation.
+private struct BreathingCaret: View {
+    var height: CGFloat = 15
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var dim = false
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 1.25, style: .continuous)
+            .fill(Color.sangDeBoeuf)
+            .frame(width: 2.5, height: height)
+            .opacity(dim ? 0.28 : 1)
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(.easeInOut(duration: 0.72).repeatForever(autoreverses: true)) {
+                    dim = true
+                }
+            }
+    }
+}
+
+/// Une ligne de la checklist de préparation : pastille d'état + libellé.
+private struct StageRow: View {
+    enum State { case pending, active, done }
+
+    let text: String
+    let state: State
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                switch state {
+                case .pending:
+                    Circle()
+                        .fill(Color.secondary.opacity(0.22))
+                        .frame(width: 6, height: 6)
+                case .active:
+                    // Le caret qui respire signe la ligne en cours.
+                    BreathingCaret(height: 15)
+                case .done:
+                    // ✓ serif sang-de-bœuf, accordé à l'étape « C'est prêt ».
+                    Text("✓")
+                        .font(.system(size: 15, weight: .semibold, design: .serif))
+                        .foregroundStyle(Color.sangDeBoeuf)
+                        .transition(.scale.combined(with: .opacity))
+                }
+            }
+            .frame(width: 20, height: 20)
+
+            Text(text)
+                .font(.system(size: 14, design: .serif))
+                .foregroundStyle(state == .pending ? .secondary : .primary)
+
+            Spacer(minLength: 0)
+        }
+        .animation(.easeInOut(duration: 0.25), value: state)
     }
 }
 
