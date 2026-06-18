@@ -16,15 +16,20 @@ licensed / lnurld   ──►  phoenixd 127.0.0.1:9740  (Lightning, user `phoeni
 - **`licensed.py`** : `GET /buy` (page), `POST /buy/create` {email} → facture
   Lightning à prix fixe **39 € → sats** (taux **mempool.space**, repli CoinGecko)
   expirant en **15 min** ; `GET /buy/status?h=` → à paiement (re-vérifié via l'API
-  phoenixd) **signe le jeton `SOUF-…`** lié à l'email et l'affiche. Page = countdown
-  + « Régénérer ». Livraison = page de succès (pas d'e-mail).
+  phoenixd) **signe le jeton `SOUF-…`** lié à l'email, l'affiche **et l'envoie par
+  e-mail** (reçu). Page = countdown + « Régénérer ».
+- **E-mail** : via **Resend** (HTTPS, `From: contact@souffleuse.app`, domaine
+  vérifié DKIM/SPF). Clé d'envoi dans `/opt/licensed/resend.key` (600). User-Agent
+  custom obligatoire (Cloudflare bloque urllib sinon). Best-effort : la page de
+  succès affiche la clé même si l'e-mail échoue.
 - **`licensed.service`** : unit systemd (user `phoenix`).
 - **`Caddyfile`** : routage `/buy*` → licences, reste → dons.
 
 ## Fichiers sur le VPS (NON versionnés)
 
 - `/opt/licensed/licensed.py` (= ce dossier), `/opt/licensed/licenses.db` (SQLite),
-  `/opt/licensed/signing_key.b64` (**clé PRIVÉE Ed25519, 600, à SAUVEGARDER hors-ligne**).
+  `/opt/licensed/signing_key.b64` (**clé PRIVÉE Ed25519, 600, à SAUVEGARDER hors-ligne**),
+  `/opt/licensed/resend.key` (**clé d'envoi Resend, 600**).
 - `/home/phoenix/.phoenix/` (**seed phoenixd, à SAUVEGARDER hors-ligne**).
 
 La **clé PUBLIQUE** correspondante est embarquée dans l'app
