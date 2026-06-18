@@ -111,7 +111,10 @@ RESEND_FROM = "Souffleuse <contact@souffleuse.app>"
 # Checkout Lemon Squeezy (carte / Apple Pay / PayPal) — cible du bouton « Payer
 # par carte » de la page de choix /buy/studio. L'app (LicenseGate.purchaseURL)
 # pointe sur /buy/studio, pas directement ici.
-LEMON_URL = "https://souffleuse.lemonsqueezy.com/checkout/buy/a798a4d6-841e-4900-a21e-c1ca679c384d"
+# ?desc=0 : masque la description produit LS (statique, mono-langue, vite perimee).
+# Inutile ici : l'acheteur a deja vu le marketing localise sur /buy/studio. Le
+# formulaire LS, lui, reste auto-traduit FR/EN selon la langue du navigateur.
+LEMON_URL = "https://souffleuse.lemonsqueezy.com/checkout/buy/a798a4d6-841e-4900-a21e-c1ca679c384d?desc=0"
 
 # Chaines localisees du recu (FR / EN). Detection via Accept-Language au checkout.
 EMAIL_STR = {
@@ -485,6 +488,7 @@ CHOOSE_STR = {
         "h1": "Souffleuse Studio",
         "sub": "Licence complète, à vie, sur ce Mac.",
         "priceLine": 'Achat unique, à vie — dès <b>29 &euro;</b>.',
+        "choose": "Choisissez votre paiement",
         "card": "Payer par carte",
         "cardPrice": "39 €",
         "cardNote": "Carte bancaire, Apple Pay, PayPal — via Lemon Squeezy.",
@@ -501,6 +505,7 @@ CHOOSE_STR = {
         "h1": "Souffleuse Studio",
         "sub": "Full licence, lifetime, on this Mac.",
         "priceLine": 'One-time, for life — from <b>&euro;29</b>.',
+        "choose": "Choose how to pay",
         "card": "Pay by card",
         "cardPrice": "€39",
         "cardNote": "Credit card, Apple Pay, PayPal — via Lemon Squeezy.",
@@ -519,10 +524,20 @@ CHOOSE_TEMPLATE = r"""<!doctype html><html lang="{{lang}}"><head><meta charset="
 :root{--ox:#8c2b21}
 *{box-sizing:border-box}body{font-family:Georgia,'Times New Roman',serif;background:#f3efe7;color:#1a1613;
 margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
-.card{background:#fbf8f2;border:1px solid #e2d8c6;border-radius:14px;max-width:420px;width:100%;
-padding:32px;box-shadow:0 6px 30px rgba(140,43,33,.07)}
-h1{font-size:24px;margin:0 0 4px}.sub{font-style:italic;color:#6b6052;margin:0 0 6px;font-size:14px}
-.price{font-size:15px;margin:0 0 8px}.price b{color:var(--ox)}
+.wrap{display:flex;gap:34px;align-items:flex-start;max-width:920px;width:100%}
+.mkt{flex:1 1 0;min-width:0;padding:8px 2px}
+.mkt-h{font-size:22px;font-weight:700;color:var(--ox);line-height:1.25;margin:0 0 12px}
+.mkt-intro{font-size:15px;line-height:1.55;color:#3a342c;margin:0 0 20px}
+.feat{margin:14px 0;padding-left:18px;position:relative}
+.feat::before{content:"";position:absolute;left:0;top:7px;width:7px;height:7px;border-radius:50%;background:var(--ox)}
+.feat .ft{font-weight:700;font-size:15px}
+.feat .fd{color:#6b6052;font-size:13.5px;line-height:1.45;margin-top:2px}
+.mkt-once{font-weight:700;font-size:15px;margin:22px 0 4px}
+.mkt-req{color:#8a7f70;font-style:italic;font-size:13px;margin:0}
+.card{flex:0 0 400px;background:#fbf8f2;border:1px solid #e2d8c6;border-radius:14px;
+padding:28px;box-shadow:0 6px 30px rgba(140,43,33,.07)}
+.choose{font-size:17px;font-weight:700;margin:0 0 4px}
+.price{font-size:14px;margin:0 0 6px}.price b{color:var(--ox)}
 a.opt{display:block;text-decoration:none;margin-top:14px;padding:14px 16px;border-radius:10px;
 border:1px solid #d8ccb8;background:#fff;color:#1a1613}
 a.opt.primary{background:var(--ox);border-color:var(--ox);color:#fff}
@@ -530,25 +545,45 @@ a.opt.primary{background:var(--ox);border-color:var(--ox);color:#fff}
 .opt .pr{font-weight:700;margin-left:4px}
 .opt .save{display:inline-block;font-size:12px;font-weight:700;background:#dad45e;color:#1a1613;
 border-radius:6px;padding:1px 7px;margin-left:6px;vertical-align:1px}
-small{color:#8a7f70;display:block;margin-top:20px;text-align:center}
-</style></head><body><div class="card">
-<h1>{{h1}}</h1><p class="sub">{{sub}}</p>
+.guarantee{color:#346524;font-size:13px;font-weight:600;margin:16px 0 0;text-align:center}
+small{color:#8a7f70;display:block;margin-top:18px;text-align:center}
+@media(max-width:780px){.wrap{flex-direction:column;align-items:stretch;max-width:440px;gap:22px}
+.card{flex:1 1 auto}.mkt{padding:0}}
+</style></head><body><div class="wrap">
+<section class="mkt">
+<h2 class="mkt-h">{{mktTitle}}</h2>
+<p class="mkt-intro">{{mktIntro}}</p>
+{{featsHtml}}
+<p class="mkt-once">{{mktOnce}}</p>
+<p class="mkt-req">{{mktReq}}</p>
+</section>
+<div class="card">
+<p class="choose">{{choose}}</p>
 <p class="price">{{priceLine}}</p>
 <a class="opt primary" href="/buy"><div class="t">{{btc}}<span class="pr">{{btcPrice}}</span><span class="save">{{save}}</span> &rarr;</div><div class="n">{{btcNote}}</div></a>
 <a class="opt" href="{{lemon}}"><div class="t">{{card}}<span class="pr">{{cardPrice}}</span> &rarr;</div><div class="n">{{cardNote}}</div></a>
-<p style="color:#346524;font-size:13px;font-weight:600;margin:16px 0 0;text-align:center">&#10003; {{refund}}</p>
+<p class="guarantee">&#10003; {{refund}}</p>
 <small>{{foot}}</small>
+</div>
 </div></body></html>"""
 
 def build_choose(lang: str) -> str:
     s = CHOOSE_STR.get(lang, CHOOSE_STR["fr"])
+    p = PAGE_STR.get(lang, PAGE_STR["fr"])   # marketing = source unique (cf. /buy)
+    feats_html = "".join(
+        f'<div class="feat"><div class="ft">{t}</div><div class="fd">{d}</div></div>'
+        for t, d in p["feats"]
+    )
     html = CHOOSE_TEMPLATE
     repl = {
-        "{{lang}}": s["locale"], "{{title}}": s["title"], "{{h1}}": s["h1"],
-        "{{sub}}": s["sub"], "{{priceLine}}": s["priceLine"], "{{card}}": s["card"],
-        "{{cardNote}}": s["cardNote"], "{{btc}}": s["btc"], "{{btcNote}}": s["btcNote"],
-        "{{cardPrice}}": s["cardPrice"], "{{btcPrice}}": s["btcPrice"], "{{save}}": s["save"],
-        "{{foot}}": s["foot"], "{{lemon}}": LEMON_URL, "{{refund}}": s["refund"],
+        "{{lang}}": s["locale"], "{{title}}": s["title"],
+        "{{mktTitle}}": p["mktTitle"], "{{mktIntro}}": p["mktIntro"], "{{featsHtml}}": feats_html,
+        "{{mktOnce}}": p["mktOnce"], "{{mktReq}}": p["mktReq"],
+        "{{choose}}": s["choose"], "{{priceLine}}": s["priceLine"],
+        "{{card}}": s["card"], "{{cardNote}}": s["cardNote"], "{{cardPrice}}": s["cardPrice"],
+        "{{btc}}": s["btc"], "{{btcNote}}": s["btcNote"], "{{btcPrice}}": s["btcPrice"],
+        "{{save}}": s["save"], "{{refund}}": s["refund"],
+        "{{foot}}": s["foot"], "{{lemon}}": LEMON_URL,
     }
     for k, v in repl.items():
         html = html.replace(k, v)
