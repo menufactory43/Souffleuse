@@ -90,6 +90,9 @@ final class PreferencesWindow {
         w.title = tr(fr: "Préférences", en: "Settings")
         w.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         w.setContentSize(NSSize(width: 800, height: 560))
+        // Plancher de redimensionnement : sous ça la sidebar (200) écraserait le
+        // détail. Au-dessus, libre (la fenêtre s'agrandit autant que voulu).
+        w.minSize = NSSize(width: 720, height: 480)
         w.isReleasedWhenClosed = false
         w.center()
         w.makeKeyAndOrderFront(nil)
@@ -278,7 +281,11 @@ private struct PreferencesRoot: View {
                     locked: (nav.selection ?? .souffle).isStudio && !store.license.isPro,
                     onUnlock: { nav.selection = .studio }))
         }
-        .frame(width: 800, height: 560)
+        // Taille MIN + extensible (au lieu d'une taille fixe qui annulait le
+        // `.resizable` du styleMask) : l'utilisateur peut agrandir la fenêtre, le
+        // panneau de détail prend l'espace (la sidebar reste à 200). 800×560 = idéal.
+        .frame(minWidth: 720, idealWidth: 800, maxWidth: .infinity,
+               minHeight: 480, idealHeight: 560, maxHeight: .infinity)
         // La voix unique : un seul accent sang-de-bœuf irrigue toggles, sliders,
         // radios et boutons de toute la fenêtre, à la place du bleu système.
         .tint(.sangDeBoeuf)
