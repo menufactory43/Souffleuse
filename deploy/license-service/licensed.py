@@ -68,15 +68,26 @@ def _db():
     c = sqlite3.connect(DB)
     c.execute("""CREATE TABLE IF NOT EXISTS orders(
         hash TEXT PRIMARY KEY, email TEXT, sats INTEGER, token TEXT, created INTEGER)""")
+    if "lang" not in [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]:
+        c.execute("ALTER TABLE orders ADD COLUMN lang TEXT DEFAULT 'fr'")   # migration
+    c.commit()
     return c
 
-def order_create(h, email, sats):
-    c = _db(); c.execute("INSERT OR REPLACE INTO orders(hash,email,sats,token,created) VALUES(?,?,?,NULL,?)",
-                         (h, email, sats, int(time.time()))); c.commit(); c.close()
+def order_create(h, email, sats, lang):
+    c = _db(); c.execute("INSERT OR REPLACE INTO orders(hash,email,sats,token,created,lang) VALUES(?,?,?,NULL,?,?)",
+                         (h, email, sats, int(time.time()), lang)); c.commit(); c.close()
 
 def order_get(h):
-    c = _db(); row = c.execute("SELECT email,sats,token FROM orders WHERE hash=?", (h,)).fetchone(); c.close()
+    c = _db(); row = c.execute("SELECT email,sats,token,lang FROM orders WHERE hash=?", (h,)).fetchone(); c.close()
     return row
+
+def detect_lang(accept_language: str) -> str:
+    # Signal le plus fiable : Accept-Language du navigateur au checkout. FR-first
+    # par defaut (marque), EN pour toute langue explicitement non francaise.
+    al = (accept_language or "").strip().lower()
+    if not al:
+        return "fr"
+    return "fr" if al.split(",")[0].strip().startswith("fr") else "en"
 
 def order_set_token(h, token):
     c = _db(); c.execute("UPDATE orders SET token=? WHERE hash=?", (token, h)); c.commit(); c.close()
@@ -87,6 +98,34 @@ def order_set_token(h, token):
 # cle ou echec, la page de succes affiche la cle quand meme.
 RESEND_FROM = "Souffleuse <contact@souffleuse.app>"
 
+# Chaines localisees du recu (FR / EN). Detection via Accept-Language au checkout.
+EMAIL_STR = {
+    "fr": {
+        "subject": "Votre licence Souffleuse",
+        "tagline": "Le mot juste, soufflé au creux du curseur.",
+        "hi": "Merci pour votre achat !",
+        "intro": "Voici votre clé de licence Souffleuse :",
+        "steps": "Activation",
+        "s1": "Ouvrez Souffleuse (barre de menus, en haut à droite)",
+        "s2": "Réglages → Studio",
+        "s3": "Collez la clé ci-dessus",
+        "keep": "Conservez cet e-mail : la clé est rattachée à votre adresse.",
+        "foot": "100% sur votre Mac",
+    },
+    "en": {
+        "subject": "Your Souffleuse licence",
+        "tagline": "The right word, whispered at your caret.",
+        "hi": "Thank you for your purchase!",
+        "intro": "Here is your Souffleuse licence key:",
+        "steps": "Activation",
+        "s1": "Open Souffleuse (menu bar, top right)",
+        "s2": "Settings → Studio",
+        "s3": "Paste the key above",
+        "keep": "Keep this email: the key is tied to your address.",
+        "foot": "100% on your Mac",
+    },
+}
+
 def _resend_key():
     try:
         k = open("/opt/licensed/resend.key").read().strip()
@@ -94,22 +133,50 @@ def _resend_key():
     except FileNotFoundError:
         return None
 
-def send_license_email(to_email: str, token: str) -> bool:
+def _email_html(token: str, s: dict) -> str:
+    # HTML email-safe : tables + styles inline, police web-safe (Georgia/serif),
+    # accent sang-de-boeuf #8c2b21. Rendu fiable Gmail/Apple Mail.
+    return (
+        '<table width="100%" cellpadding="0" cellspacing="0" role="presentation" '
+        'style="background:#f3efe7;padding:28px 12px;font-family:Georgia,serif;">'
+        '<tr><td align="center">'
+        '<table width="480" cellpadding="0" cellspacing="0" role="presentation" '
+        'style="max-width:480px;background:#fbf8f2;border:1px solid #e2d8c6;border-radius:14px;">'
+        '<tr><td style="padding:32px;">'
+        '<div style="font-size:26px;font-weight:bold;color:#8c2b21;letter-spacing:.01em;">Souffleuse</div>'
+        f'<div style="font-style:italic;color:#6b6052;font-size:14px;margin-top:4px;">{s["tagline"]}</div>'
+        f'<p style="color:#1a1613;font-size:15px;margin:24px 0 6px;">{s["hi"]}</p>'
+        f'<p style="color:#1a1613;font-size:15px;margin:0 0 14px;">{s["intro"]}</p>'
+        '<div style="font-family:Menlo,Consolas,monospace;font-size:13px;word-break:break-all;'
+        f'background:#ffffff;border:2px solid #8c2b21;border-radius:8px;padding:14px;color:#1a1613;">{token}</div>'
+        '<p style="color:#8c2b21;font-weight:bold;font-size:12px;text-transform:uppercase;'
+        f'letter-spacing:.06em;margin:24px 0 8px;">{s["steps"]}</p>'
+        '<ol style="color:#1a1613;font-size:14px;margin:0;padding-left:20px;">'
+        f'<li style="margin:4px 0;">{s["s1"]}</li>'
+        f'<li style="margin:4px 0;">{s["s2"]}</li>'
+        f'<li style="margin:4px 0;">{s["s3"]}</li></ol>'
+        f'<p style="color:#6b6052;font-size:13px;margin:22px 0 0;">{s["keep"]}</p>'
+        '<hr style="border:none;border-top:1px solid #e2d8c6;margin:24px 0 12px;">'
+        f'<div style="color:#8a7f70;font-size:12px;">souffleuse.app &middot; {s["foot"]}</div>'
+        '</td></tr></table></td></tr></table>'
+    )
+
+def _email_text(token: str, s: dict) -> str:
+    return (f'{s["hi"]}\n\n{s["intro"]}\n\n{token}\n\n'
+            f'{s["steps"]} :\n1. {s["s1"]}\n2. {s["s2"]}\n3. {s["s3"]}\n\n'
+            f'{s["keep"]}\n\n— Souffleuse\nhttps://souffleuse.app')
+
+def send_license_email(to_email: str, token: str, lang: str = "fr") -> bool:
     key = _resend_key()
     if not key:
         return False
+    s = EMAIL_STR.get(lang, EMAIL_STR["fr"])
     payload = json.dumps({
         "from": RESEND_FROM,
         "to": [to_email],
-        "subject": "Votre licence Souffleuse",
-        "text": (
-            "Merci pour votre achat !\n\n"
-            "Voici votre cle de licence Souffleuse :\n\n"
-            f"{token}\n\n"
-            "Pour l'activer : ouvrez Souffleuse, menu Reglages -> Studio, puis collez la cle.\n\n"
-            "Gardez ce message : la cle est rattachee a votre e-mail.\n\n"
-            "— Souffleuse\nhttps://souffleuse.app"
-        ),
+        "subject": s["subject"],
+        "html": _email_html(token, s),
+        "text": _email_text(token, s),
     }).encode()
     req = urllib.request.Request("https://api.resend.com/emails", data=payload, method="POST")
     req.add_header("Authorization", "Bearer " + key)
@@ -241,7 +308,7 @@ class H(BaseHTTPRequestHandler):
             row = order_get(h)
             if not row:
                 self._json({"paid": False}); return
-            email, sats, token = row
+            email, sats, token, lang = row
             if token:
                 self._json({"paid": True, "token": token}); return
             try:
@@ -250,8 +317,8 @@ class H(BaseHTTPRequestHandler):
                 self._json({"paid": False}); return
             if pay.get("isPaid") and int(pay.get("receivedSat", 0)) >= int(sats):
                 token = sign_license(email)
-                order_set_token(h, token)            # une seule fois (NULL -> set)
-                send_license_email(email, token)     # best-effort : reçu par e-mail
+                order_set_token(h, token)                  # une seule fois (NULL -> set)
+                send_license_email(email, token, lang)     # best-effort : reçu e-mail (langue détectée)
                 self._json({"paid": True, "token": token})
             elif pay.get("isExpired"):
                 self._json({"paid": False, "expired": True})
@@ -270,11 +337,12 @@ class H(BaseHTTPRequestHandler):
             email = str(body.get("email", "")).strip()
             if not EMAIL_RE.match(email):
                 self._json({"error": "email invalide"}, 400); return
+            lang = detect_lang(self.headers.get("Accept-Language"))
             sats = eur_to_sat(PRICE_EUR)
             inv = phx("/createinvoice", {"amountSat": sats, "description": "Souffleuse - licence",
                                          "expirySeconds": EXPIRY_S})
             h, bolt11 = inv["paymentHash"], inv["serialized"]
-            order_create(h, email, sats)
+            order_create(h, email, sats, lang)
             self._json({"hash": h, "bolt11": bolt11, "sats": sats, "expires_in": EXPIRY_S,
                         "qr": qr_svg("lightning:" + bolt11)})
         except Exception:
@@ -283,4 +351,5 @@ class H(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
-ThreadingHTTPServer(LISTEN, H).serve_forever()
+if __name__ == "__main__":          # importable (tests) sans démarrer le serveur
+    ThreadingHTTPServer(LISTEN, H).serve_forever()
