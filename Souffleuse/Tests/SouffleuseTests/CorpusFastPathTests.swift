@@ -47,13 +47,24 @@ struct CorpusFastPathTests {
         #expect(m == nil)
     }
 
-    @Test func afterSpaceOpenerMatchesAt12NotAt16() {
+    @Test func afterSpaceOpenerMatchesAt6NotAt16() {
         let snap = [Self.entry("", "Bonjour, je vous remercie de votre message")]
-        // Contexte after-space court (~12 chars) typique d'un opener : recall
-        // attendu à 12, refusé à 16 (l'ancien seuil ratait les openers courts).
+        // Contexte after-space court typique d'un opener : recall attendu dès
+        // 6 chars, refusé à 16 (l'ancien seuil ratait les openers courts).
         let tail = "Bonjour, je "   // 12 chars verbatim
+        #expect(SuggestionPolicy.strongCorpusMatch(userTail: tail, snapshot: snap, minChars: 6) != nil)
         #expect(SuggestionPolicy.strongCorpusMatch(userTail: tail, snapshot: snap, minChars: 12) != nil)
         #expect(SuggestionPolicy.strongCorpusMatch(userTail: tail, snapshot: snap, minChars: 16) == nil)
+    }
+
+    @Test func shortMerciAfterSpaceRecallsAtDefaultThreshold() {
+        let snap = [Self.entry("", "Merci pour votre retour")]
+        let m = SuggestionPolicy.strongCorpusMatch(
+            userTail: "Merci ",
+            snapshot: snap
+        )
+        #expect(m?.continuation == "pour votre retour")
+        #expect(m?.matchedChars == SuggestionPolicy.Tuning.strongCorpusMatchMinChars)
     }
 
     @Test func noOverlapReturnsNil() {
@@ -152,9 +163,14 @@ struct CorpusFastPathTests {
             minChars: SuggestionPolicy.Tuning.midWordCorpusMatchMinChars
         )
         #expect(m?.continuation == "mment allez-vous ?")
-        // The same call at the stricter after-space threshold would NOT fire
-        // (11-char needle < 16) — that's why mid-word needs its own bar.
-        #expect(SuggestionPolicy.strongCorpusMatch(userTail: "Bonjour, co", snapshot: snap) == nil)
+        // The same call at the old strict after-space threshold would NOT fire
+        // (11-char needle < 16); the default after-space threshold is now lower
+        // for Cotypist-like opener latency.
+        #expect(SuggestionPolicy.strongCorpusMatch(
+            userTail: "Bonjour, co",
+            snapshot: snap,
+            minChars: 16
+        ) == nil)
     }
 
     /// routeInstant on a mid-word tail recalls the learned phrase DIRECTLY as a
