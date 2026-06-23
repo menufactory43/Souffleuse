@@ -179,6 +179,9 @@ final class PreferencesStore {
         static let midLineGhostEnabled = "midLineGhostEnabled"
         static let ghostOpacity = "ghostOpacity"
         static let ghostColorStyle = "ghostColorStyle"
+        static let batterySaverShorter = "batterySaverShorter"
+        static let batterySaverLighterModel = "batterySaverLighterModel"
+        static let batterySaverPause = "batterySaverPause"
     }
 
     var enabled: Bool {
@@ -355,6 +358,22 @@ final class PreferencesStore {
     var ghostColorStyle: GhostColorStyle {
         didSet { UserDefaults.standard.set(ghostColorStyle.rawValue, forKey: K.ghostColorStyle) }
     }
+    /// Économie batterie — complétions plus courtes sur batterie. Effet UNIQUEMENT
+    /// débranché ; défaut OFF (aucun changement pour qui n'y touche pas).
+    var batterySaverShorter: Bool {
+        didSet { UserDefaults.standard.set(batterySaverShorter, forKey: K.batterySaverShorter) }
+    }
+    /// Économie batterie — bascule sur la voix la plus légère sur batterie (si elle
+    /// est téléchargée). Le choix de modèle de l'utilisateur n'est PAS écrasé : seul
+    /// le moteur live bascule, et revient au choix au rebranchement. Défaut OFF.
+    var batterySaverLighterModel: Bool {
+        didSet { UserDefaults.standard.set(batterySaverLighterModel, forKey: K.batterySaverLighterModel) }
+    }
+    /// Économie batterie — suspend la génération du souffle sur batterie (la
+    /// traduction et la relecture de ton restent actives). Défaut OFF.
+    var batterySaverPause: Bool {
+        didSet { UserDefaults.standard.set(batterySaverPause, forKey: K.batterySaverPause) }
+    }
 
     let allowlist = AllowlistStore()
     /// Licence Studio (achat unique) — `license.isPro` gate les features payantes.
@@ -424,6 +443,9 @@ final class PreferencesStore {
         // pour qui n'ouvre jamais l'onglet Apparence.
         self.ghostOpacity = (d.object(forKey: K.ghostOpacity) as? Double) ?? 1.0
         self.ghostColorStyle = GhostColorStyle(rawValue: d.string(forKey: K.ghostColorStyle) ?? "") ?? .gris
+        self.batterySaverShorter = (d.object(forKey: K.batterySaverShorter) as? Bool) ?? false
+        self.batterySaverLighterModel = (d.object(forKey: K.batterySaverLighterModel) as? Bool) ?? false
+        self.batterySaverPause = (d.object(forKey: K.batterySaverPause) as? Bool) ?? false
     }
 
     /// Vision language codes derived from the toggles. Always non-empty (falls

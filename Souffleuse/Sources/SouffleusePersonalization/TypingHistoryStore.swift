@@ -358,13 +358,40 @@ public actor TypingHistoryStore {
         return nil
     }
 
+    /// Caviardage PARTAGÉ disque↔mémoire : renvoie une copie de l'entrée admise
+    /// dont `accepted` ET `contextBefore` ont leurs secrets embarqués masqués
+    /// (`SecretHeuristic.redact`). Appelé par `append` (avant `deleteDuplicate`
+    /// + `insert`) ET par `PredictorViewModel.ingestAccepted` (avant l'insertion
+    /// dans `historySnapshot` + le `setCorpus` n-gram) — miroir exact de
+    /// `admissionRejection` pour que rien de non-redacté n'atteigne NI le disque
+    /// NI le corpus de session (fuite intra-session sinon). Idempotent.
+    /// `changed` permet au caller de logguer une seule fois sans champ user.
+    public nonisolated static func redacted(_ entry: TypingHistoryEntry)
+        -> (entry: TypingHistoryEntry, changed: Bool) {
+        let redactedAccepted = SecretHeuristic.redact(entry.accepted)
+        let redactedContext = SecretHeuristic.redact(entry.contextBefore)
+        let changed = redactedAccepted != entry.accepted || redactedContext != entry.contextBefore
+        guard changed else { return (entry, false) }
+        return (TypingHistoryEntry(
+            timestamp: entry.timestamp,
+            contextBefore: redactedContext,
+            accepted: redactedAccepted,
+            bundleID: entry.bundleID,
+            midWordContinuation: entry.midWordContinuation,
+            source: entry.source
+        ), true)
+    }
+
     /// Appends one entry, applying the shared admission gate and FIFO purge.
-    public func append(_ entry: TypingHistoryEntry) {
+    public func append(_ rawEntry: TypingHistoryEntry) {
         load()
         guard db != nil else { return }
+        // Invariant d'ordre : l'admission (qui peut DROP) tourne sur le texte BRUT,
+        // AVANT toute redaction — une entrée mono-token secret reste rejetée
+        // `.secretLike` (jamais réécrite en placeholder admissible).
         if let reason = Self.admissionRejection(
-            contextBefore: entry.contextBefore,
-            accepted: entry.accepted,
+            contextBefore: rawEntry.contextBefore,
+            accepted: rawEntry.accepted,
             typoDetector: typoDetector
         ) {
             switch reason {
@@ -376,6 +403,11 @@ public actor TypingHistoryStore {
             }
             return
         }
+        // Redaction des secrets embarqués AVANT dédup+insert (dédup compare donc
+        // redacté↔redacté — pas de divergence brut/redacté qui empilerait des rows
+        // « «caviardé» » et chasserait du vrai contenu hors du ring FIFO).
+        let (entry, redacted) = Self.redacted(rawEntry)
+        if redacted { Log.info(.context, "history_redacted_secret") }
         // Dedup: collapse exact repeats of the same accepted text (same source)
         // so typing a phrase N times doesn't consume N slots and skew the recent
         // window toward one string. Deleting the old row before inserting also
