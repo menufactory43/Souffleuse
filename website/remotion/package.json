@@ -1,0 +1,21 @@
+{
+  "name": "souffleuse-remotion",
+  "version": "1.0.0",
+  "description": "Rendus vidéo verticaux (YouTube Shorts 9:16) pour Souffleuse — motion-design aux couleurs de la marque.",
+  "private": true,
+  "scripts": {
+    "studio": "remotion studio src/index.ts",
+    "still": "remotion still src/index.ts MagicMoment out/magic-moment.png --frame=200",
+    "render": "remotion render src/index.ts MagicMoment out/magic-moment.mp4"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "remotion": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "typescript": "^5.6.3"
+  }
+}
