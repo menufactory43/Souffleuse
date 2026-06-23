@@ -1245,7 +1245,7 @@ final class PredictorViewModel {
     }
 
     /// Folds a single newly-accepted entry into the personalization corpus.
-    func ingestAccepted(_ entry: TypingHistoryEntry) async {
+    func ingestAccepted(_ rawEntry: TypingHistoryEntry) async {
         // Garde d'admission UNIQUE (partagée avec `TypingHistoryStore.append`).
         // Avant, seul le secret était filtré ici (P1.5) ; les 3 autres gardes du
         // disque (longueur <3, fragment "s de", mot tronqué mid-glue) ne l'étaient
@@ -1254,13 +1254,20 @@ final class PredictorViewModel {
         // divergence mémoire↔disque. On consulte désormais la même décision : la
         // mémoire applique exactement les 4 mêmes gardes que le disque.
         if let reason = TypingHistoryStore.admissionRejection(
-            contextBefore: entry.contextBefore,
-            accepted: entry.accepted,
+            contextBefore: rawEntry.contextBefore,
+            accepted: rawEntry.accepted,
             typoDetector: typoDetector
         ) {
             Log.info(.context, reason == .secretLike ? "ingest_skipped_secretlike" : "ingest_skipped_inadmissible")
             return
         }
+        // Redaction PARTAGÉE avec le disque (`TypingHistoryStore.append`) : on plie
+        // au snapshot mémoire + n-gram l'entrée CAVIARDÉE, jamais la brute — sinon
+        // un secret embarqué resterait en clair dans `historySnapshot`/`learnedLexicon`
+        // (lus en synchrone par `routeInstant`/`SuggestionPolicy`) et pourrait
+        // ressortir en suggestion intra-session, le trou exact que F1 ferme.
+        let (entry, redacted) = TypingHistoryStore.redacted(rawEntry)
+        if redacted { Log.info(.context, "ingest_redacted_secret") }
         // Layer 1 snapshot append — keep most-recent-first ordering so the
         // linear scan in SuggestionPolicy's exact-substring helper hits
         // fresh entries first. Cap mirrors TypingHistoryStore.maxEntries (200).

@@ -295,6 +295,13 @@ struct GGUFModelOption: Identifiable, Sendable, Hashable {
     /// conseillée selon la RAM est calculée à part par `recommendedID`).
     static var defaultID: String { catalogue[0].id }
 
+    /// La voix la plus légère du catalogue (empreinte mémoire minimale) — cible du
+    /// mode « économie batterie › modèle plus léger ». Calculée, pas figée, pour
+    /// suivre le catalogue.
+    static var lightestID: String {
+        catalogue.min(by: { $0.approxRAMMB < $1.approxRAMMB })?.id ?? defaultID
+    }
+
     /// Looks up an entry by id, falling back to the default.
     static func option(forID id: String) -> GGUFModelOption {
         catalogue.first(where: { $0.id == id }) ?? catalogue[0]
