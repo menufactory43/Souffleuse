@@ -39,6 +39,7 @@ import SouffleuseTyping
 // Env :
 //   SOUFFLEUSE_GGUF      chemin GGUF (sinon résolu Souffleuse dir → Cotypist dir).
 //   PARITY_ENGINE        both | beam | cascade (défaut both).
+//   PARITY_PHRASE        phrase unique à rejouer au lieu du corpus intégré.
 //   PARITY_STEP          pas de frappe en chars (défaut 1).
 //   PARITY_SENTENCES     nombre de phrases (défaut toutes).
 //   PARITY_VERBOSE=1     trace par préfixe (défaut résumé seul).
@@ -100,7 +101,12 @@ let allScenarios: [String] = [
 ]
 
 let sentenceCap = Int(env["PARITY_SENTENCES"] ?? "") ?? allScenarios.count
-let scenarios = Array(allScenarios.prefix(max(1, sentenceCap)))
+let scenarios: [String]
+if let customPhrase = env["PARITY_PHRASE"], !customPhrase.isEmpty {
+    scenarios = [customPhrase]
+} else {
+    scenarios = Array(allScenarios.prefix(max(1, sentenceCap)))
+}
 let stepChars = max(1, Int(env["PARITY_STEP"] ?? "") ?? 1)
 let verbose = (env["PARITY_VERBOSE"] ?? "0") == "1"
 let engineChoice = (env["PARITY_ENGINE"] ?? "both").lowercased()
@@ -678,7 +684,9 @@ if let path = env["PARITY_JSONL"], !path.isEmpty {
     struct Line: Codable {
         let engine: String
         let sentence: Int
+        let target: String
         let i: Int
+        let prefix: String
         let ghost: String
         let ms: Int
         let g2: Bool
@@ -690,7 +698,8 @@ if let path = env["PARITY_JSONL"], !path.isEmpty {
         for (si, run) in runs.enumerated() {
             for i in run.steps.keys.sorted() {
                 let st = run.steps[i]!
-                let line = Line(engine: name, sentence: si, i: i, ghost: st.ghost,
+                let line = Line(engine: name, sentence: si, target: run.sentence,
+                                i: i, prefix: String(run.chars.prefix(i)), ghost: st.ghost,
                                 ms: st.ms, g2: st.g2, boundary: st.boundary)
                 if let d = try? enc.encode(line), let s = String(data: d, encoding: .utf8) {
                     out += s + "\n"
