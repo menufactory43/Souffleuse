@@ -16,7 +16,9 @@
 // l'élément TextEdit focalisé ne rend donc que ce QU'ON a tapé. Pour capturer le
 // ghost il faut walker l'arbre AX PROPRE de Cotypist via
 // AXUIElementCreateApplication(cotypistPID). C'est ce que fait le mode `scan`,
-// et c'est la lecture AX-read-first du mode `observe`.
+// et c'est la lecture AX-read-first du mode `observe`. Le mode `accept` évite
+// l'OCR : il appuie sur Tab après un délai contrôlé et lit le delta inséré dans
+// TextEdit, ce qui mesure exactement le ghost accepté.
 
 import AppKit
 import ApplicationServices
@@ -30,10 +32,11 @@ setbuf(stdout, nil)
 // MARK: - Constantes
 
 let cotypistBundleID = "app.cotypist.Cotypist"
+let souffleuseBundleID = "app.cocotypist.Souffleuse"
 let textEditBundleID = "com.apple.TextEdit"
 
-// Phrase de test fixe pilotée dans TextEdit, char par char, en mode observe.
-let testPhrase = "Bonjour, je voulais te dire que "
+// Phrase de test par défaut pilotée dans TextEdit, char par char, en mode observe.
+let defaultTestPhrase = "Bonjour, je voulais te dire que "
 
 // Bornes de sécurité du walk AX (évite une explosion sur un arbre cyclique/profond).
 let defaultMaxDepth = 12
@@ -52,11 +55,17 @@ func printUsage() {
       SouffleuseCotypistObserve scan      Dump l'arbre AX de Cotypist (rôle/subrole/value/rect).
       SouffleuseCotypistObserve observe   Pilote TextEdit char-par-char, lit le ghost de Cotypist
                                           (AX-read-first) et émet du JSONL (1 ligne/frappe).
+      SouffleuseCotypistObserve accept    Tape chaque préfixe dans TextEdit, attend, presse Tab,
+                                          puis lit exactement le delta inséré.
       SouffleuseCotypistObserve --help    Cette aide.
 
-    FLAGS (mode observe) :
+    FLAGS (modes observe/accept) :
       --delay <ms>   Délai/budget de polling inter-frappe (défaut 300).
+      --delays <csv> Délais testés en mode accept (défaut: valeur de --delay).
+      --phrase <txt> Phrase vérité-terrain à taper (défaut phrase courte FR).
       --out <path>   Chemin du fichier JSONL (défaut /tmp/cotypist-observe.jsonl).
+      --target <name> Cible du mode accept: cotypist | souffleuse (défaut cotypist).
+      --typing-delay <ms> Délai entre caractères en mode accept (défaut 12).
 
     PRÉREQUIS :
       scan     : Cotypist lancé (idéalement avec un ghost affiché).
@@ -85,14 +94,40 @@ func stringFlag(_ name: String, default def: String) -> String {
     return args[i + 1]
 }
 
+func intListFlag(_ name: String, default def: [Int]) -> [Int] {
+    guard let i = args.firstIndex(of: name), i + 1 < args.count else { return def }
+    let values = args[i + 1].split(separator: ",").compactMap {
+        Int($0.trimmingCharacters(in: .whitespaces))
+    }
+    return values.isEmpty ? def : values
+}
+
+struct ProbeTarget {
+    let engine: String
+    let displayName: String
+    let bundleID: String
+}
+
+func acceptTarget() -> ProbeTarget {
+    switch stringFlag("--target", default: "cotypist").lowercased() {
+    case "souffleuse", "ours", "us":
+        return ProbeTarget(engine: "souffleuse", displayName: "Souffleuse", bundleID: souffleuseBundleID)
+    case "cotypist":
+        return ProbeTarget(engine: "cotypist", displayName: "Cotypist", bundleID: cotypistBundleID)
+    default:
+        warn("Target inconnu. Attendu: cotypist | souffleuse.")
+        exit(2)
+    }
+}
+
 // L'aide ne touche pas l'AX : ce chemin doit toujours réussir, sans TCC.
 if args.contains("--help") || args.contains("-h") || mode == nil {
     printUsage()
     exit(0)
 }
 
-guard mode == "scan" || mode == "observe" else {
-    warn("Mode inconnu : \(mode ?? "?"). Attendu : scan | observe. Voir --help.")
+guard mode == "scan" || mode == "observe" || mode == "accept" else {
+    warn("Mode inconnu : \(mode ?? "?"). Attendu : scan | observe | accept. Voir --help.")
     exit(2)
 }
 
@@ -103,6 +138,12 @@ guard mode == "scan" || mode == "observe" else {
 func cotypistPID() -> pid_t? {
     NSWorkspace.shared.runningApplications
         .first { $0.bundleIdentifier == cotypistBundleID }?
+        .processIdentifier
+}
+
+func runningPID(bundleID: String) -> pid_t? {
+    NSWorkspace.shared.runningApplications
+        .first { $0.bundleIdentifier == bundleID }?
         .processIdentifier
 }
 
@@ -172,31 +213,31 @@ func walk(
     }
 }
 
-/// Collecte les strings non vides (value / AXStaticText) de l'arbre Cotypist.
-/// Heuristique : le ghost vit dans une fenêtre overlay distincte ; en l'absence
-/// de certitude on retourne TOUS les AXStaticText / value non vides — le mode
-/// `scan` aura déjà révélé la vraie structure pour affiner si besoin.
+/// Collecte les strings non vides (value / AXStaticText) des fenêtres Cotypist.
+/// On exclut volontairement l'app root et les menus : ils exposent "Cotypist" et
+/// polluent les mesures sans correspondre au ghost affiché au caret.
 func ghostCandidates(in appEl: AXUIElement) -> [String] {
+    guard let windows = copyAttr(appEl, kAXWindowsAttribute) as? [AXUIElement] else { return [] }
     var out: [String] = []
     var nodeCount = 0
     func collect(_ el: AXUIElement, depth: Int) {
         guard nodeCount < maxNodes, depth < defaultMaxDepth else { return }
         nodeCount += 1
         let role = axString(el, kAXRoleAttribute)
+        if role == kAXMenuBarRole || role == kAXMenuRole || role == kAXMenuItemRole {
+            return
+        }
         if let v = (axString(el, kAXValueAttribute) ?? axString(el, kAXTitleAttribute)),
            !v.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            // On garde surtout les AXStaticText (typique d'un label overlay), mais
-            // on collecte aussi les autres value non vides : le ghost peut être
-            // exposé sous un rôle inattendu.
-            if role == kAXStaticTextRole || role == "AXStaticText" {
-                out.append(v)
-            } else {
+            if role == kAXStaticTextRole || role == "AXStaticText" || role == kAXUnknownRole {
                 out.append(v)
             }
         }
         for child in axChildren(el) { collect(child, depth: depth + 1) }
     }
-    collect(appEl, depth: 0)
+    for window in windows {
+        collect(window, depth: 0)
+    }
     return out
 }
 
@@ -214,6 +255,29 @@ func postCharacter(_ ch: Character) {
     }
     down?.post(tap: .cghidEventTap)
     up?.post(tap: .cghidEventTap)
+}
+
+func postVirtualKey(_ keyCode: CGKeyCode) {
+    let source = CGEventSource(stateID: .hidSystemState)
+    let down = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true)
+    let up = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false)
+    down?.post(tap: .cghidEventTap)
+    up?.post(tap: .cghidEventTap)
+}
+
+func clearTextEditDocument() {
+    let script = """
+    tell application "TextEdit"
+        activate
+        if not (exists document 1) then make new document
+        set text of front document to ""
+    end tell
+    """
+    var error: NSDictionary?
+    NSAppleScript(source: script)?.executeAndReturnError(&error)
+    if let error {
+        warn("AppleScript TextEdit clear failed: \(error)")
+    }
 }
 
 // MARK: - Garde TCC (APRÈS le chemin d'aide — scan/observe en ont besoin)
@@ -255,17 +319,22 @@ func runScan() {
 
 /// Une ligne JSONL par frappe. JSONEncoder garantit l'échappement correct.
 struct Observation: Codable {
+    let engine: String
+    let sentence: Int
+    let target: String
     let k: Int
+    let prefix_len: Int
     let prefix: String
     let ghost: String
     let source: String   // "ax" | "ocr" | "none"
     let ts_ms: Int64
     let latency_ms: Int?
+    let timeout_ms: Int
 }
 
 func nowMs() -> Int64 { Int64(Date().timeIntervalSince1970 * 1000) }
 
-func runObserve() {
+func runObserve() async {
     guard let pid = cotypistPID() else {
         warn("Cotypist introuvable. Lancer Cotypist puis relancer (observe).")
         exit(1)
@@ -275,6 +344,7 @@ func runObserve() {
 
     let delayMs = intFlag("--delay", default: 300)
     let outPath = stringFlag("--out", default: "/tmp/cotypist-observe.jsonl")
+    let phrase = stringFlag("--phrase", default: defaultTestPhrase)
 
     // Activer TextEdit au premier plan (best-effort — ne bloque pas si échec).
     if let te = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == textEditBundleID }) {
@@ -298,10 +368,10 @@ func runObserve() {
     encoder.outputFormatting = [.sortedKeys]
 
     print("=== OBSERVE : pilotage de TextEdit, lecture ghost AX-read-first ===")
-    print("phrase=\"\(testPhrase)\" delay=\(delayMs)ms out=\(outPath)")
+    print("phrase=\"\(phrase)\" delay=\(delayMs)ms out=\(outPath)")
 
     let pollStepMs: UInt32 = 20
-    let chars = Array(testPhrase)
+    let chars = Array(phrase)
 
     for (index, ch) in chars.enumerated() {
         postCharacter(ch)
@@ -331,9 +401,13 @@ func runObserve() {
             elapsed += Int(pollStepMs)
         }
 
-        // Fallback OCR — best-effort, voir intent ci-dessous.
+        // Lire le préfixe réel + caret du champ TextEdit focalisé.
+        let snap = client.snapshot()
+        let prefix = snap.text ?? typedSoFar
+
+        // Fallback OCR ciblé — best-effort à droite du caret TextEdit.
         if source == "none" {
-            if let ocr = bestEffortOCR() {
+            if let ocr = await bestEffortOCR(caretRect: snap.caretRect, typedSoFar: prefix) {
                 ghost = ocr
                 source = "ocr"
                 latency = Int(nowMs() - tPost)
@@ -341,17 +415,18 @@ func runObserve() {
             // sinon : source reste "none" (l'AX n'a rien rendu, OCR non exploitable).
         }
 
-        // Lire le préfixe réel + caret du champ TextEdit focalisé.
-        let snap = client.snapshot()
-        let prefix = snap.text ?? typedSoFar
-
         let obs = Observation(
+            engine: "cotypist",
+            sentence: 0,
+            target: phrase,
             k: index,
+            prefix_len: index + 1,
             prefix: prefix,
             ghost: ghost,
             source: source,
             ts_ms: nowMs(),
-            latency_ms: latency
+            latency_ms: latency,
+            timeout_ms: delayMs
         )
         if let data = try? encoder.encode(obs), let line = String(data: data, encoding: .utf8) {
             print(line)
@@ -362,25 +437,141 @@ func runObserve() {
     print("=== fin OBSERVE — JSONL écrit dans \(outPath) ===")
 }
 
-// OCR fallback: best-effort — voir task intent.
-// Les APIs réelles (ScreenCapturer.capture(bundleID:) + VisionOCR.extract, toutes
-// async et taillées pour clusteriser des bulles de chat) ne capturent pas
-// trivialement une région ghost overlay ponctuelle. Le chemin AX-read-first
-// au-dessus est le vrai livrable ; cet OCR reste un stub honnête qui retourne nil
-// (→ source="none") plutôt que de prétendre lire un ghost qu'il ne peut pas
-// localiser de façon fiable. Câbler un capture+OCR ciblé sur le rect de l'overlay
-// Cotypist est une amélioration future une fois que `scan` aura confirmé le rect.
-func bestEffortOCR() -> String? {
+// MARK: - Mode ACCEPT
+
+/// Une ligne JSONL par essai prefixe x délai. `inserted` est le delta exact
+/// apparu dans TextEdit après Tab ; pas d'OCR, pas de lecture d'overlay.
+struct AcceptanceObservation: Codable {
+    let engine: String
+    let sentence: Int
+    let target: String
+    let k: Int
+    let prefix_len: Int
+    let prefix: String
+    let inserted: String
+    let ghost: String
+    let accepted: Bool
+    let wait_ms: Int
+    let typing_delay_ms: Int
+    let ts_ms: Int64
+}
+
+func runAccept() {
+    let target = acceptTarget()
+    guard runningPID(bundleID: target.bundleID) != nil else {
+        warn("\(target.displayName) introuvable. Lancer \(target.displayName) puis relancer (accept).")
+        exit(1)
+    }
+    let client = AXClient()
+    let delayMs = intFlag("--delay", default: 120)
+    let delays = intListFlag("--delays", default: [delayMs]).sorted()
+    let typingDelayMs = intFlag("--typing-delay", default: 12)
+    let outPath = stringFlag("--out", default: "/tmp/\(target.engine)-accept.jsonl")
+    let phrase = stringFlag("--phrase", default: defaultTestPhrase)
+    let chars = Array(phrase)
+
+    FileManager.default.createFile(atPath: outPath, contents: nil)
+    guard let handle = FileHandle(forWritingAtPath: outPath) else {
+        warn("Impossible d'ouvrir le fichier de sortie : \(outPath)")
+        exit(1)
+    }
+    defer { try? handle.close() }
+
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+
+    print("=== ACCEPT : TextEdit prefix -> wait -> Tab -> delta ===")
+    print("target=\(target.engine) phrase=\"\(phrase)\" delays=\(delays) typingDelay=\(typingDelayMs)ms out=\(outPath)")
+    if target.engine == "cotypist" {
+        warn("Conseil mesure: quitter Souffleuse pendant ce mode pour que Cotypist soit seul a gerer Tab.")
+    } else {
+        warn("Conseil mesure: quitter Cotypist pendant ce mode pour que Souffleuse soit seule a gerer Tab.")
+    }
+
+    for wait in delays {
+        for i in 1..<chars.count {
+            let prefix = String(chars.prefix(i))
+            clearTextEditDocument()
+            usleep(180_000)
+            for ch in prefix {
+                postCharacter(ch)
+                usleep(useconds_t(max(0, typingDelayMs) * 1000))
+            }
+            usleep(useconds_t(max(0, wait) * 1000))
+            postVirtualKey(48) // Tab
+            usleep(120_000)
+
+            let textAfter = client.snapshot().text ?? ""
+            let inserted: String
+            if textAfter.hasPrefix(prefix) {
+                inserted = String(textAfter.dropFirst(prefix.count))
+            } else {
+                inserted = ""
+            }
+            let ghost = inserted == "\t" ? "" : inserted
+            let obs = AcceptanceObservation(
+                engine: target.engine,
+                sentence: 0,
+                target: phrase,
+                k: i - 1,
+                prefix_len: i,
+                prefix: prefix,
+                inserted: ghost,
+                ghost: ghost,
+                accepted: !ghost.isEmpty,
+                wait_ms: wait,
+                typing_delay_ms: typingDelayMs,
+                ts_ms: nowMs()
+            )
+            if let data = try? encoder.encode(obs), let line = String(data: data, encoding: .utf8) {
+                print(line)
+                handle.write(Data((line + "\n").utf8))
+            }
+        }
+    }
+
+    print("=== fin ACCEPT — JSONL écrit dans \(outPath) ===")
+}
+
+// OCR fallback: best-effort. Cotypist peut ne pas exposer son overlay ghost en AX ;
+// on capture donc une petite bande à droite du caret TextEdit et on laisse Vision
+// lire uniquement ce qui est peint visuellement dans cette zone.
+func bestEffortOCR(caretRect: CGRect?, typedSoFar: String) async -> String? {
     guard ScreenCapturer.hasPermission() else { return nil }
-    // Pas de localisation fiable de la région ghost → ne pas deviner. nil = "none".
-    return nil
+    guard let caretRect else { return nil }
+    let region = CGRect(
+        x: max(0, caretRect.maxX - 2),
+        y: max(0, caretRect.minY - 10),
+        width: 640,
+        height: max(44, caretRect.height + 24)
+    )
+    guard let image = CGWindowListCreateImage(
+        region,
+        .optionOnScreenOnly,
+        CGWindowID(0),
+        [.bestResolution, .boundsIgnoreFraming]
+    ) else { return nil }
+
+    do {
+        let raw = try await VisionOCR(languages: ["fr-FR", "en-US"]).extract(from: image)
+        let cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty,
+              cleaned != "Cotypist",
+              !typedSoFar.hasSuffix(cleaned) else {
+            return nil
+        }
+        return cleaned
+    } catch {
+        return nil
+    }
 }
 
 // MARK: - Dispatch
 
 switch mode {
 case "scan": runScan()
-case "observe": runObserve()
+case "observe": await runObserve()
+case "accept": runAccept()
 default:
     printUsage()
     exit(2)
