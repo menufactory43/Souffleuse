@@ -508,7 +508,10 @@ public final class OverlayWindow {
         // TOP-anchored sur la ligne du caret : le haut du panneau correspond à
         // `caret.origin.y` en Quartz (le bas de la ligne en AppKit coordonnées).
         // En AppKit (origine bottom-left) : appKitY = primaryHeight - caret.origin.y - height.
-        let appKitY = primaryHeight - caret.origin.y - height
+        // Dev seam `SOUFFLEUSE_GHOST_LINE_OFFSET` : remonte d'une ligne (chemin wrap,
+        // le chemin RÉEL en usage — `appKitFrame` n'est qu'un repli sans fieldRect).
+        let lineOffset = ghostLineOffsetEnabled ? caret.height : 0
+        let appKitY = primaryHeight - caret.origin.y - height + lineOffset
         let appKitX = fieldRect.minX
 
         return (CGRect(x: appKitX, y: appKitY, width: width, height: height), firstLineIndent)
@@ -611,10 +614,18 @@ public final class OverlayWindow {
         return .systemFont(ofSize: clamped)
     }
 
-    // (Le dev seam « ghost une ligne au-dessus » — `SOUFFLEUSE_GHOST_LINE_OFFSET`,
-    // sessions de comparaison côte à côte avec Cotypist — a été SUPPRIMÉ
-    // définitivement le 2026-06-11 : laissé actif par accident, il décalait le
-    // ghost en usage réel. Les comparaisons se font désormais par enregistrement.)
+    /// Dev seam : remonte le ghost d'une ligne au-dessus du caret. Cotypist (notre
+    /// concurrent) peint pile sur le caret ; en libérant la ligne du curseur on peut
+    /// faire tourner les deux assistants côte à côte dans la *même* app, sur le *même*
+    /// préfixe, et comparer la cohérence à l'œil — ce qu'aucun bench TTFT ne donne.
+    /// Off par défaut, activé par `SOUFFLEUSE_GHOST_LINE_OFFSET=1`. Lu une fois : un
+    /// test de cohérence est une session ponctuelle, pas un réglage utilisateur — donc
+    /// pas de surface UI ni de pref persistée. NE PAS laisser activé en prod (le ghost
+    /// recouvrirait la ligne du dessus dans un champ multi-ligne) — il avait été retiré
+    /// le 2026-06-11 pour cette raison ; restauré comme seam strictement env-gated.
+    static let ghostLineOffsetEnabled: Bool = {
+        ProcessInfo.processInfo.environment["SOUFFLEUSE_GHOST_LINE_OFFSET"] == "1"
+    }()
 
     static func appKitFrame(forGhostAfterCaret caret: CGRect, text: String, font: NSFont) -> CGRect {
         let textSize = (text as NSString).size(withAttributes: [.font: font])
@@ -622,8 +633,11 @@ public final class OverlayWindow {
         let height = max(caret.height, ceil(textSize.height))
 
         let primaryHeight = NSScreen.screens.first?.frame.height ?? NSScreen.main?.frame.height ?? 0
-        // +Y = vers le haut en AppKit.
-        let appKitY = primaryHeight - caret.maxY
+        // +Y = vers le haut en AppKit. `caret.height` est la hauteur de ligne (les apps
+        // qui renvoient un line rect l'exposent directement), donc remonter d'exactement
+        // une ligne laisse le caret libre pour le ghost de Cotypist juste en dessous.
+        let lineOffset = ghostLineOffsetEnabled ? caret.height : 0
+        let appKitY = primaryHeight - caret.maxY + lineOffset
         // Anchor flush against the caret X — Cotypist paints right on the
         // cursor with no horizontal padding, and a 1 px gap reads as "the
         // ghost is offset" in dense text fields.
