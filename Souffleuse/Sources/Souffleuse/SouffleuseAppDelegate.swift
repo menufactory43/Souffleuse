@@ -240,6 +240,29 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// Le Carnet — apparition livret convoquée au clic sur l'icône (sparkline + stats).
     private let carnet = CarnetWindow()
     private var pollTimer: Timer?
+    /// Détecteur « saisie sécurisée macOS verrouillée par une autre app » : quand
+    /// elle est ON, notre tap ne reçoit plus Tab/Échap (accepts morts). Évalué à
+    /// chaque tick ; prévient une fois par épisode tant qu'un souffle est visible.
+    private var secureInputWatcher = SecureInputWatcher()
+    /// Garde anti-empilement de l'alerte saisie sécurisée (présentation async,
+    /// jamais en boucle — voir `presentSecureInputNotice`).
+    private var secureInputAlertShowing = false
+    /// Vrai quand une surface dont Tab/Échap/⏎ dépendent est visible : le souffle,
+    /// le picker emoji, ou le picker/preview « // ». Sert au détecteur de saisie
+    /// sécurisée — ces raccourcis sont tous avalés de la même façon quand macOS est
+    /// verrouillé, pas seulement ceux du ghost overlay.
+    private var shortcutSurfaceVisible: Bool {
+        overlay.isVisible || emojiPicker.isVisible || transformPicker.isVisible || pendingTransformation != nil
+    }
+    /// Moniteur d'alimentation (secteur ↔ batterie) du mode économie batterie.
+    private var powerMonitor: PowerSourceMonitor?
+    /// SEULE source de vérité du modèle GGUF actuellement CHARGÉ dans le moteur.
+    /// Tout swap (pref utilisateur OU bascule batterie) passe par
+    /// `applyEffectiveGGUFModel`, qui ne recharge que si l'effectif diffère de cette
+    /// valeur — évite double-swap/flicker entre les deux chemins.
+    private var lastAppliedGGUFID = GGUFModelOption.defaultID
+    /// True quand la génération du souffle est suspendue par le mode batterie.
+    private var batterySuppressesGeneration = false
     private var onboarding: OnboardingWindow?
     private var customInstructions = CustomInstructionsWindow()
     private var preferences: PreferencesWindow?
@@ -555,8 +578,20 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
         Task { await self.translationRuntime.setModel(self.store.translationModel) }
 
-        predictor.maxTokens = store.completionLength.maxTokens
-        predictor.maxWords = store.completionLength.maxWords
+        // Mode économie batterie : on lit l'alim AVANT de fixer longueur/modèle, et
+        // on souscrit aux bascules ensuite (M9). Au lancement on NE swap PAS le
+        // moteur (ce serait un chargement forcé qui casse le lazy-load) : on résout
+        // l'id effectif une fois et on le passe à `configureInitialGGUF` (lazy),
+        // en amorçant `lastAppliedGGUFID` pour que le 1ᵉʳ `applyEffectiveGGUFModel`
+        // early-return.
+        powerMonitor = PowerSourceMonitor()
+        powerMonitor?.onChange = { [weak self] in self?.applyBatterySaverState() }
+        powerMonitor?.start()
+        let launchPolicy = currentBatteryPolicy()
+        let launchLength = launchPolicy.effectiveLength(base: store.completionLength)
+        batterySuppressesGeneration = launchPolicy.suppressGeneration
+        predictor.maxTokens = launchLength.maxTokens
+        predictor.maxWords = launchLength.maxWords
         predictor.personalizationStrength = store.effectivePersonalizationStrength
         // Few-shot perso = Studio aussi (la force n-gram l'est déjà via
         // `effectivePersonalizationStrength`) → coupé tant que la licence est inactive.
@@ -579,8 +614,16 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 defaultTone: self.store.tones.defaultTone
             )
         }
-        // Load the persisted GGUF selection on launch (the real ghost engine).
-        predictor.configureInitialGGUF(store.ggufModelID)
+        // Load the persisted GGUF selection on launch (the real ghost engine) —
+        // ou la voix légère si on démarre sur batterie avec l'option active et
+        // qu'elle est téléchargée. `configureInitialGGUF` reste lazy (rien en RAM).
+        let lightestAtLaunch = GGUFModelOption.option(forID: GGUFModelOption.lightestID)
+        let effectiveLaunchID = launchPolicy.effectiveModelID(
+            base: store.ggufModelID,
+            lightestID: lightestAtLaunch.id,
+            lightestResolvable: lightestAtLaunch.isResolvable)
+        lastAppliedGGUFID = effectiveLaunchID
+        predictor.configureInitialGGUF(effectiveLaunchID)
         Task { [weak self] in
             // Démarrage à froid : on NE charge PAS le moteur ghost ici. Il se
             // charge paresseusement à la première vraie frappe dans un champ
@@ -924,6 +967,9 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             _ = store.translateHotKey
             _ = store.ghostOpacity
             _ = store.ghostColorStyle
+            _ = store.batterySaverShorter
+            _ = store.batterySaverLighterModel
+            _ = store.batterySaverPause
         } onChange: { [weak self] in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
@@ -938,13 +984,14 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         if store.modelID != previous.modelID {
             Task { await predictor.swapModel(to: store.modelID) }
         }
-        if store.ggufModelID != previous.ggufModelID {
-            Task { await predictor.swapGGUF(to: store.ggufModelID) }
-        }
-        if store.completionLength != previous.completionLength {
-            predictor.maxTokens = store.completionLength.maxTokens
-        predictor.maxWords = store.completionLength.maxWords
-        }
+        // Modèle GGUF ET longueur : routés par l'état batterie (chokepoint unique).
+        // `applyBatterySaverState` recalcule longueur effective + modèle effectif +
+        // suppression, et est idempotent (swap seulement si l'effectif change) — on
+        // l'appelle donc inconditionnellement ici, ce qui couvre aussi un changement
+        // de `ggufModelID`, de `completionLength` OU d'une des 3 prefs batterie. On
+        // NE swap PLUS jamais `swapGGUF(store.ggufModelID)` en direct (il chargerait
+        // le modèle lourd en pleine session batterie).
+        applyBatterySaverState()
         // Propagate personalization knob. Strength = 0 when the toggle is off
         // — the predictor fast-paths and skips the n-gram bias entirely.
         let effectiveStrength = store.effectivePersonalizationStrength
@@ -988,6 +1035,86 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         }
         applyGhostAppearance()
         refreshStatusItem()
+    }
+
+    // MARK: - Mode économie batterie
+
+    /// Politique batterie courante = prefs + état d'alim live.
+    private func currentBatteryPolicy() -> BatterySaverPolicy {
+        BatterySaverPolicy(
+            isOnBattery: powerMonitor?.isOnBattery ?? false,
+            shorter: store.batterySaverShorter,
+            lighterModel: store.batterySaverLighterModel,
+            pause: store.batterySaverPause
+        )
+    }
+
+    /// Recalcule et applique TOUS les effets batterie : longueur effective du
+    /// souffle, modèle effectif, et suppression de génération. Appelé au
+    /// branchement/débranchement (callback `powerMonitor`) et à tout changement de
+    /// préférence (idempotent). Quand la suppression s'ENCLENCHE, on coupe net le
+    /// souffle en cours (sinon un ghost « gelé » resterait avec Tab/Échap actifs
+    /// sans pouvoir se rafraîchir).
+    private func applyBatterySaverState() {
+        let policy = currentBatteryPolicy()
+        let length = policy.effectiveLength(base: store.completionLength)
+        predictor.maxTokens = length.maxTokens
+        predictor.maxWords = length.maxWords
+        applyEffectiveGGUFModel()
+        let suppress = policy.suppressGeneration
+        if suppress != batterySuppressesGeneration {
+            batterySuppressesGeneration = suppress
+            if suppress {
+                predictor.cancel()
+                predictor.clearPredictCache()
+                overlay.hide()
+                interceptor.setActive(false)
+                clearGhostAnchor()
+                Log.info(.predictor, "battery_pause_on")
+            } else {
+                // Sortie de pause (rebranchement) : on remet `lastPredictedPrefix` à
+                // vide pour que `schedulePredictIfNeeded` ne court-circuite pas sur un
+                // préfixe inchangé — sinon le souffle resterait muet jusqu'à la frappe
+                // suivante. Le prochain tick relance une prédiction immédiatement.
+                lastPredictedPrefix = nil
+                Log.info(.predictor, "battery_pause_off")
+            }
+        }
+    }
+
+    /// Chokepoint UNIQUE du swap moteur GGUF (pref utilisateur ET bascule batterie).
+    /// Calcule l'id effectif depuis (choix utilisateur, alim, option « léger »,
+    /// résolution du léger) et ne recharge QUE s'il diffère du dernier appliqué
+    /// (`lastAppliedGGUFID`) — réconcilie les deux chemins, pas de double-swap.
+    /// `swapGGUF` ne persiste pas la préférence : le choix utilisateur est préservé
+    /// et restauré au rebranchement.
+    private func applyEffectiveGGUFModel() {
+        let lightest = GGUFModelOption.option(forID: GGUFModelOption.lightestID)
+        let effective = currentBatteryPolicy().effectiveModelID(
+            base: store.ggufModelID,
+            lightestID: lightest.id,
+            lightestResolvable: lightest.isResolvable)
+        guard effective != lastAppliedGGUFID else { return }
+        if predictor.isModelReady {
+            // Moteur chaud : swap live.
+            lastAppliedGGUFID = effective
+            Task { await predictor.swapGGUF(to: effective) }
+        } else if ghostLoadTask != nil {
+            // Un chargement à froid est EN VOL : il charge déjà le modèle que
+            // `lastAppliedGGUFID` désigne (chemin GGUF résolu avant l'await). On NE
+            // touche À RIEN ici — appeler `configureInitialGGUF` corromprait
+            // `runtime.ggufModelID` en plein chargement (le moteur finirait chargé
+            // sur l'ancien modèle mais l'état dirait le nouveau). `loadGhostIfNeeded`
+            // rappelle `applyEffectiveGGUFModel()` une fois le moteur prêt :
+            // `lastAppliedGGUFID` reflète encore le modèle chargé, donc la
+            // reconciliation déclenchera un vrai swap si l'effectif a changé entre-temps.
+        } else {
+            // Moteur froid, aucun chargement en vol : re-route paresseux (no-op si
+            // déjà chargé) — le 1ᵉʳ load prendra l'id effectif. Pas de chargement forcé
+            // (sinon une bascule secteur/batterie au repos chargerait ~1 Go en RAM).
+            lastAppliedGGUFID = effective
+            predictor.configureInitialGGUF(effective)
+        }
     }
 
     /// Pousse couleur + opacité du souffle (Préférences › Apparence) vers
@@ -1693,6 +1820,45 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// problème guidé. Émise une seule fois par épisode (le détecteur garde `noticed`
     /// jusqu'au retour de l'AX). Le bouton « Relancer » est clé : un grant ré-accordé
     /// ne s'applique JAMAIS au processus déjà lancé.
+    /// Prévient l'utilisateur que la « saisie sécurisée » macOS d'une autre app
+    /// bloque les raccourcis (Tab/Échap). Appelée depuis `tick()` (chemin chaud) :
+    /// la présentation est donc DÉTACHÉE en async pour que le tick courant retourne
+    /// immédiatement (un `runModal` synchrone dans `tick()` gèlerait le pollTimer).
+    /// `secureInputAlertShowing` empêche tout empilement ; le watcher garantit déjà
+    /// une seule alerte par épisode. On ACTIVE l'app (comme les autres alertes de ce
+    /// fichier) pour qu'elle soit visible — sans quoi l'alerte d'une app accessory
+    /// (LSUIElement) naît derrière l'app active. L'auto-pause `NSApp.isActive` du tick
+    /// est sans conséquence ici : la modale gèle le pipeline de toute façon, et le
+    /// tap est déjà sourd tant que la saisie sécurisée est ON.
+    /// On NE NOMME PAS d'app responsable : la saisie sécurisée oubliée est presque
+    /// toujours tenue par une app D'ARRIÈRE-PLAN (gestionnaire de mots de passe,
+    /// terminal, fenêtre de login), pas par l'app au premier plan où l'on tape —
+    /// l'accuser nommément enverrait l'utilisateur quitter la mauvaise app (et nommer
+    /// la vraie exigerait une API privée fragile).
+    private func presentSecureInputNotice() {
+        guard !secureInputAlertShowing else { return }
+        secureInputAlertShowing = true
+        Log.warn(.input, "secure_input_locked")
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            defer { self.secureInputAlertShowing = false }
+            let alert = NSAlert()
+            alert.messageText = tr(
+                fr: "Les raccourcis de Souffleuse sont bloqués",
+                en: "Souffleuse's shortcuts are blocked"
+            )
+            alert.informativeText = tr(
+                fr: "Une autre app — souvent un gestionnaire de mots de passe, un terminal ou une fenêtre de connexion — garde la « saisie sécurisée » de macOS active. Tant qu'elle l'est, Tab et Échap ne peuvent ni accepter ni écarter le souffle. Quittez cette app (ou redémarrez le Mac) pour rétablir les raccourcis.",
+                en: "Another app — often a password manager, a terminal or a login window — is keeping macOS “Secure Input” active. While it is, Tab and Esc can neither accept nor dismiss the whisper. Quit that app (or restart your Mac) to restore the shortcuts."
+            )
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: tr(fr: "Compris", en: "Got it"))
+            NSApp.activate(ignoringOtherApps: true)
+            NSSound.beep()
+            alert.runModal()
+        }
+    }
+
     private func presentAXBlindNotice() {
         let alert = NSAlert()
         alert.messageText = tr(
@@ -2539,6 +2705,19 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
 
     private func tick() {
         guard store.enabled else { return }
+        // Saisie sécurisée macOS : évaluée À CHAQUE tick (et pas seulement au peint)
+        // pour capter aussi la transition ON→OFF qui réarme l'épisode. `ghostActive`
+        // = une surface dont Tab/Échap/⏎ DÉPENDENT est à l'écran (ghost OU picker emoji
+        // OU picker/preview « // ») — sinon le blocage n'a aucun effet visible, inutile
+        // d'alerter. On exclut aussi le cas où NOTRE propre UI est au premier plan
+        // (`NSApp.isActive`) : le tick va de toute façon masquer le souffle juste après,
+        // et la rampe de réarmement ON→OFF reste, elle, inconditionnelle dans `evaluate`.
+        // Lecture main-thread only (contrat Carbon).
+        if secureInputWatcher.evaluate(
+            secureInputOn: SecureInput.isEnabled(),
+            ghostActive: shortcutSurfaceVisible && !NSApp.isActive) {
+            presentSecureInputNotice()
+        }
         // Icône vivante : par défaut « pas de champ actif » ; repassé à vrai plus
         // bas une fois un champ texte éligible confirmé.
         iconTextFieldFocused = false
@@ -2863,6 +3042,11 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// pause de `predictDebounceNanos` ; quand la réserve beam paraît chaude, le debounce
     /// est sauté (l'avancée servira en ~1 ms). Extrait de `tick()`.
     private func schedulePredictIfNeeded(prefix: String, snap: AXSnapshot) {
+        // Mode économie batterie › suspendre : on ne lance aucune génération LLM
+        // (la partie coûteuse) tant qu'on est sur batterie avec l'option active.
+        // Le souffle déjà à l'écran a été coupé au moment où la suppression s'est
+        // enclenchée (`applyBatterySaverState`).
+        guard !batterySuppressesGeneration else { return }
         guard prefix != lastPredictedPrefix else { return }
         // Debounce: every prefix change cancels the pending task and
         // schedules a new one. The LLM only fires once the user has
@@ -4229,6 +4413,11 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                 await self.predictor.rebuildPersonalization(from: entries)
             }
             self.ghostLoadTask = nil
+            // Reconciliation : si l'alimentation a basculé PENDANT ce chargement à
+            // froid, `applyEffectiveGGUFModel` a laissé l'état tel quel (branche
+            // « load en vol »). Maintenant que le moteur est prêt, on ré-applique
+            // pour swapper vers le modèle effectif si besoin (sinon no-op).
+            self.applyEffectiveGGUFModel()
         }
     }
 

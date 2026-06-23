@@ -333,3 +333,132 @@ struct AdmissionRejectionTests {
         #expect(reject("", "x AbCdEf0123456789Ghij") == .secretLike)
     }
 }
+
+// MARK: - SecretHeuristic.redact (caviardage des secrets embarqués)
+
+@Suite("SecretHeuristic.redact")
+struct SecretRedactionTests {
+    private let mask = SecretHeuristic.redactionPlaceholder
+
+    @Test("paires credential clé=valeur / clé: valeur — valeur masquée, clé gardée")
+    func redactsCredentialPairs() {
+        let r1 = SecretHeuristic.redact("export API_KEY=sk-abcDEF1234567890xyz")
+        #expect(r1.contains("API_KEY="))
+        #expect(r1.contains(mask))
+        #expect(!r1.contains("sk-abcDEF1234567890xyz"))
+
+        let r2 = SecretHeuristic.redact("password: hunter2supersecret")
+        #expect(r2.contains("password:"))
+        #expect(r2.contains(mask))
+        #expect(!r2.contains("hunter2supersecret"))
+
+        // .env multi-lignes : chaque valeur sensible masquée, les clés survivent.
+        let env = SecretHeuristic.redact("DB_PASSWORD=p@ssW0rd!\nCLIENT_SECRET=qwertyuiopASDF1234")
+        #expect(env.contains("DB_PASSWORD="))
+        #expect(env.contains("CLIENT_SECRET="))
+        #expect(!env.contains("p@ssW0rd!"))
+        #expect(!env.contains("qwertyuiopASDF1234"))
+    }
+
+    @Test("tokens secrets isolés — préfixes fournisseurs et runs ≥16 alnum")
+    func redactsStandaloneTokens() {
+        // Préfixes connus, même courts.
+        #expect(SecretHeuristic.redact("voici ma clé ghp_1234567890abcdefXYZ merci").contains(mask))
+        #expect(!SecretHeuristic.redact("voici ma clé ghp_1234567890abcdefXYZ merci").contains("ghp_"))
+        // JWT.
+        #expect(SecretHeuristic.redact("Authorization Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9").contains(mask))
+        // Run ≥16 alnum (UUID sans tirets / SHA).
+        #expect(SecretHeuristic.redact("token aXz9Kpq7vBnM2Lqw4Rt6 fin").contains(mask))
+    }
+
+    @Test("identité sur de la prose normale (FR/EN, identifiants courts)")
+    func leavesNormalProseIntact() {
+        let inputs = [
+            "Bonjour Gabriel, comment ça va aujourd'hui ?",
+            "For me it's a good solution.",
+            "Le rapport fiscal est prêt, merci de le valider.",
+            "On se voit à 14h30 pour le point d'équipe.",
+            "Mon numéro de bureau est le A-204.",
+        ]
+        for input in inputs {
+            #expect(SecretHeuristic.redact(input) == input)
+        }
+    }
+
+    @Test("mot purement alphabétique très long : conservé (pas un secret)")
+    func keepsLongAlphabeticWords() {
+        // Régression : le run ≥16 doit MÊLER lettres ET chiffres pour être masqué ;
+        // un mot français/allemand interminable n'est pas un secret.
+        #expect(SecretHeuristic.redact("anticonstitutionnellement") == "anticonstitutionnellement")
+        #expect(SecretHeuristic.redact("Donaudampfschifffahrtsgesellschaft") == "Donaudampfschifffahrtsgesellschaft")
+        // Mais un run alphanumérique mixte ≥16 reste masqué.
+        #expect(SecretHeuristic.redact("aXz9Kpq7vBnM2Lqw4Rt6").contains(mask))
+    }
+
+    @Test("valeur credential avec guillemet interne ou entre guillemets : masquée en entier")
+    func redactsQuotedAndEmbeddedQuoteValues() {
+        // Guillemet interne dans une valeur nue : pas de fuite du fragment après le guillemet.
+        let r1 = SecretHeuristic.redact("password=ab\"cd")
+        #expect(!r1.contains("cd"))
+        #expect(r1.contains(mask))
+        // Valeur entre guillemets avec espaces : masquée d'un bloc.
+        let r2 = SecretHeuristic.redact("password=\"correct horse battery\"")
+        #expect(!r2.contains("horse"))
+        #expect(r2.contains(mask))
+    }
+
+    @Test("idempotence : redact(redact(x)) == redact(x)")
+    func isIdempotent() {
+        let inputs = [
+            "API_KEY=sk-abcDEF1234567890xyz",
+            "password: hunter2supersecret rest of sentence",
+            "ghp_1234567890abcdefXYZ standalone",
+            "token aXz9Kpq7vBnM2Lqw4Rt6",
+            // Régression : valeur entre guillemets COLLÉE à du texte (token="a"more)
+            // — la valeur doit être consommée d'un bloc, donc stable au 2e tour.
+            "token=\"a\"more",
+            "secret=\"x\"yztail",
+        ]
+        for input in inputs {
+            let once = SecretHeuristic.redact(input)
+            #expect(SecretHeuristic.redact(once) == once)
+        }
+    }
+
+    @Test("préfixe Slack resserré : « xoxo » (affection) n'est PAS caviardé")
+    func keepsXoxoAffection() {
+        #expect(SecretHeuristic.redact("À demain, xoxo") == "À demain, xoxo")
+        #expect(SecretHeuristic.redact("bisous xoxox") == "bisous xoxox")
+        // Mais un vrai token Slack (avec tiret) reste masqué.
+        #expect(SecretHeuristic.redact("token xoxb-12345-abcde").contains(mask))
+    }
+
+    @Test("placeholder ne re-déclenche ni .secretLike ni .artifact")
+    func placeholderIsAdmissionSafe() {
+        let td = TypoDetector()
+        let redacted = SecretHeuristic.redact("ma clé est API_KEY=sk-abcDEF1234567890xyz voilà")
+        #expect(TypingHistoryStore.admissionRejection(
+            contextBefore: "", accepted: redacted, typoDetector: td) == nil)
+    }
+
+    @Test("store : une entrée à secret embarqué est persistée caviardée")
+    func storeRedactsOnAppend() async {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SecretRedactionTests-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = TypingHistoryStore(fileURL: dir.appendingPathComponent("history.db"),
+                                       testKey: SymmetricKey(size: .bits256))
+        await store.append(TypingHistoryEntry(
+            timestamp: Date(),
+            contextBefore: "mon fichier de config",
+            accepted: "le secret est API_KEY=sk-abcDEF1234567890xyz à garder",
+            bundleID: nil))
+        let entries = await store.allEntries()
+        #expect(entries.count == 1)
+        if let stored = entries.first {
+            #expect(stored.accepted.contains(SecretHeuristic.redactionPlaceholder))
+            #expect(!stored.accepted.contains("sk-abcDEF1234567890xyz"))
+        }
+    }
+}

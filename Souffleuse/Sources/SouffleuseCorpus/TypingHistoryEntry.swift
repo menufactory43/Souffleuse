@@ -101,6 +101,117 @@ public enum SecretHeuristic {
         return false
     }
 
+    /// Placeholder substituted for an embedded secret. Chosen so re-redacting is
+    /// a no-op : it carries no credential separator (`=`/`:`) and no ≥16 alnum
+    /// run, so neither `redact` pass matches it a second time (idempotence —
+    /// `redact(redact(x)) == redact(x)`), and it never re-triggers `.secretLike`
+    /// nor `.artifact` admission (the guillemets keep letter-density high).
+    public static let redactionPlaceholder = "«caviardé»"
+
+    /// Caviarde les secrets EMBARQUÉS dans un texte par ailleurs admissible, AVANT
+    /// qu'il ne soit persisté (store chiffré) ou plié au corpus de session
+    /// (`historySnapshot`/n-gram). Complète — ne remplace pas — le drop
+    /// `.secretLike` de `admissionRejection` : ce dernier rejette une entrée qui
+    /// EST un seul gros token ; `redact` masque une clé API / mot de passe noyé
+    /// dans de la prose multi-mots (un `.env` collé, `export API_KEY=sk-…`) que
+    /// l'admission laisse passer. Pur, on-device, langue-agnostique.
+    ///
+    /// Invariant d'ordre (figé) : `admissionRejection` (qui peut DROP) tourne
+    /// EN PREMIER ; `redact` ne s'applique qu'aux entrées déjà admises. Identité
+    /// sur de la prose normale (aucune clé sensible, aucun token long/préfixé).
+    public static func redact(_ s: String) -> String {
+        guard !s.isEmpty else { return s }
+        return redactSecretTokens(redactCredentialPairs(s))
+    }
+
+    /// Noms de clé « sensibles » dont la VALEUR (`clé=valeur` / `clé: valeur`) est
+    /// caviardée. `bearer`/`authorization` en sont exclus (leur secret est un token
+    /// séparé, capté par `redactSecretTokens` via son préfixe/longueur — sinon on
+    /// caviarderait le littéral « Bearer »).
+    /// La valeur est captée comme : une chaîne ENTRE GUILLEMETS (`"…"`, espaces
+    /// internes compris → un mot de passe « entre guillemets » est masqué en entier)
+    /// OU, à défaut, un run NON-BLANC unique (`[^\s]+`, guillemet interne compris →
+    /// `ab"cd` masqué d'un bloc). Limite assumée : une valeur NUE multi-mots
+    /// (`password: correct horse`) n'est masquée qu'au premier mot — rare dans un
+    /// champ texte surveillé, et le gate d'admission `.secretLike` couvre déjà les
+    /// secrets mono-token ; `redactSecretTokens` rattrape les tokens à préfixe/longs.
+    private static let credentialKeyPattern =
+        #"(?i)((?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|secret[_-]?key|client[_-]?secret|api[_-]?secret|private[_-]?key)\s*[:=]\s*)"#
+        + #"("[^"]*"[^\s]*|[^\s]+)"#
+
+    private static let credentialRegex = try? NSRegularExpression(pattern: credentialKeyPattern)
+
+    /// Remplace la valeur d'une paire credential par le placeholder, en gardant la
+    /// clé et le séparateur (`api_key=«caviardé»`). Groupe 1 = clé+séparateur (gardé),
+    /// groupe 2 = valeur (jetée). Idempotent : `clé=«caviardé»` re-match → re-remplace
+    /// par le même placeholder.
+    private static func redactCredentialPairs(_ s: String) -> String {
+        guard let regex = credentialRegex else { return s }
+        let range = NSRange(s.startIndex..<s.endIndex, in: s)
+        return regex.stringByReplacingMatches(
+            in: s, range: range, withTemplate: "$1" + redactionPlaceholder)
+    }
+
+    /// Préfixes de tokens secrets reconnus (clés de fournisseurs / JWT) — un token
+    /// qui en commence un est caviardé même s'il est court (< 16 car). Les préfixes
+    /// Slack incluent le TIRET réel des tokens (`xoxb-`, jamais « xoxo ») pour ne pas
+    /// caviarder un sign-off d'affection (« xoxo », fréquent en messagerie).
+    private static let secretTokenPrefixes = [
+        "sk-", "pk-", "rk_", "ghp_", "gho_", "ghu_", "ghs_", "github_pat_",
+        "xoxb-", "xoxp-", "xoxa-", "xoxr-", "xoxs-", "AKIA", "ASIA", "AIza", "ya29.", "eyJ",
+    ]
+
+    /// Caviarde chaque TOKEN (run non-blanc) qui ressemble à un secret isolé :
+    /// préfixe fournisseur connu, ou run ≥16 caractères alphanumériques (même
+    /// seuil que `looksLikeSecret`). Énumère les matches en ordre INVERSE pour que
+    /// le remplacement ne décale pas les ranges suivants ; ne touche que les runs
+    /// non-blancs → l'espacement exact est préservé.
+    private static func redactSecretTokens(_ s: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: #"\S+"#) else { return s }
+        var out = s
+        let range = NSRange(s.startIndex..<s.endIndex, in: s)
+        let matches = regex.matches(in: s, range: range)
+        for m in matches.reversed() {
+            guard let r = Range(m.range, in: out) else { continue }
+            let token = String(out[r])
+            if tokenIsSecret(token) {
+                out.replaceSubrange(r, with: redactionPlaceholder)
+            }
+        }
+        return out
+    }
+
+    /// True quand un token isolé est secret-like : commence par un préfixe connu,
+    /// OU contient un run ≥16 caractères alphanumériques qui MÊLE lettres ET chiffres
+    /// (UUID sans tirets, SHA, clé opaque). L'exigence « lettres + chiffres » évite
+    /// de détruire un mot purement alphabétique très long (« anticonstitutionnellement »,
+    /// un composé allemand) — de la vraie prose que la personnalisation doit garder ;
+    /// un secret structuré, lui, mêle quasi toujours les deux. Les ponctuations/
+    /// guillemets de bord sont ignorés pour le test de préfixe.
+    private static func tokenIsSecret(_ token: String) -> Bool {
+        let core = token.trimmingCharacters(in: CharacterSet(charactersIn: "\"'`(){}[]<>,;"))
+        guard core.count >= 3 else { return false }
+        if secretTokenPrefixes.contains(where: { core.hasPrefix($0) }) { return true }
+        // Plus long run alphanumérique mêlant lettres ET chiffres : un secret opaque
+        // dépasse 16 et n'est jamais purement alphabétique (contrairement à un mot).
+        var runLength = 0
+        var runHasLetter = false
+        var runHasDigit = false
+        for scalar in core.unicodeScalars {
+            if CharacterSet.alphanumerics.contains(scalar) {
+                runLength += 1
+                if CharacterSet.decimalDigits.contains(scalar) { runHasDigit = true }
+                else if CharacterSet.letters.contains(scalar) { runHasLetter = true }
+                if runLength >= 16, runHasLetter, runHasDigit { return true }
+            } else {
+                runLength = 0
+                runHasLetter = false
+                runHasDigit = false
+            }
+        }
+        return false
+    }
+
     /// Trims the prefix to the tail of the last sentence and caps to `maxChars`.
     public static func contextTail(prefix: String, maxChars: Int = 80) -> String {
         let terminators: Set<Character> = [".", "!", "?", "\n"]
