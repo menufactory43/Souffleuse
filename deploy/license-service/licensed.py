@@ -114,7 +114,7 @@ RESEND_FROM = "Souffleuse <contact@souffleuse.app>"
 # ?desc=0 : masque la description produit LS (statique, mono-langue, vite perimee).
 # Inutile ici : l'acheteur a deja vu le marketing localise sur /buy/studio. Le
 # formulaire LS, lui, reste auto-traduit FR/EN selon la langue du navigateur.
-LEMON_URL = "https://souffleuse.lemonsqueezy.com/checkout/buy/a798a4d6-841e-4900-a21e-c1ca679c384d?desc=0"
+LEMON_URL = "https://souffleuse.lemonsqueezy.com/checkout/buy/6b5bb69d-8662-4752-af4e-8292ae1c1967?desc=0"
 
 # Chaines localisees du recu (FR / EN). Detection via Accept-Language au checkout.
 EMAIL_STR = {
