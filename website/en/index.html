@@ -308,6 +308,14 @@
   .version-badge::before { content: "·"; margin-right: 0.45rem; color: var(--rouge); }
   .version-badge:empty { display: none; } /* nothing until the JS fills it */
 
+  /* Topbar CTA: button + version STACKED vertically. Inline, the "· v0.3.0"
+     badge added one more flex item to the right of the button and overflowed the
+     bar on mobile (topnav collapsed < 820px). Stacked under the button it adds no
+     width. The separator dot and left margin make no sense stacked: neutralised. */
+  .topbar__cta { display: flex; flex-direction: column; align-items: center; gap: 0.18rem; }
+  .version-badge--stacked { margin-left: 0; font-size: 0.72rem; line-height: 1; }
+  .version-badge--stacked::before { content: none; margin-right: 0; }
+
   /* Trust line under the button: size, Apple signature, privacy reminder,
      right where download anxiety happens. Quieter than the free-beta note. */
   .cta-trust {
@@ -1685,7 +1693,10 @@
         <span class="langswitch__sep" aria-hidden="true">·</span>
         <a href="/en/" hreflang="en" aria-current="true">EN</a>
       </div>
-      <a href="/Souffleuse.dmg" download class="btn btn--small">Download</a><span class="version-badge" data-version></span>
+      <div class="topbar__cta">
+        <a href="/Souffleuse.dmg" download class="btn btn--small">Download</a>
+        <span class="version-badge version-badge--stacked" data-version></span>
+      </div>
     </div>
   </div>
 </header>
@@ -2210,6 +2221,8 @@
   </div>
   <nav class="shell foot__links" aria-label="Useful links">
     <a href="/en/privacy.html">Privacy &amp; security</a>
+    <a href="/en/license.html">Licence (EULA)</a>
+    <a href="/en/legal-notice.html">Legal notice</a>
     <a href="#faq">Questions</a>
     <a href="#soutenir" data-don-open>Pass the hat (donate)</a>
     <a href="mailto:contact@souffleuse.app">Write to the prompter</a>
