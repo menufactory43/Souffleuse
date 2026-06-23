@@ -170,7 +170,7 @@ private enum PrefSection: String, CaseIterable, Identifiable {
     var searchTerms: String {
         switch self {
         case .souffle:
-            return "souffle ghost whisper longueur length modèle model accepter accept mot word tab milieu ligne mid-line corriger préfixe"
+            return "souffle ghost whisper longueur length modèle model accepter accept mot word tab milieu ligne mid-line corriger préfixe batterie battery économie energy énergie alimentation secteur ac power suspendre voix légère"
         case .apparence:
             return "apparence appearance couleur color opacité opacity police font taille gris"
         case .traduction:
@@ -277,6 +277,7 @@ private struct PreferencesRoot: View {
 
             detail(for: nav.selection ?? .souffle)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .modifier(ScrollToSearchedSection(section: nav.selection ?? .souffle, query: query))
                 .modifier(StudioGate(
                     locked: (nav.selection ?? .souffle).isStudio && !store.license.isPro,
                     onUnlock: { nav.selection = .studio }))
@@ -407,6 +408,7 @@ private struct AppearanceTab: View {
                 Text(tr(fr: "Pour voir l'effet : ouvrez un champ de texte, tapez quelques mots, et le souffle change en direct.", en: "To see the effect: open a text field, type a few words, and the whisper changes live."))
                     .font(.callout).foregroundStyle(.secondary)
             }
+            .id(PrefAnchors.id(.apparence, "whisper"))
         }
         .formStyle(.grouped)
     }
@@ -444,6 +446,7 @@ private struct PersonalizationTab: View {
             } header: {
                 Text(tr(fr: "Apprendre de vous", en: "Learn from you")).font(.headline)
             }
+            .id(PrefAnchors.id(.personnalisation, "learn"))
 
             Section {
                 VStack(alignment: .leading) {
@@ -491,6 +494,7 @@ private struct PersonalizationTab: View {
             } header: {
                 Text(tr(fr: "Mes données", en: "My data")).font(.headline)
             }
+            .id(PrefAnchors.id(.personnalisation, "history"))
         }
         .formStyle(.grouped)
         .task(id: store.personalizationEnabled) { await refresh() }
@@ -542,6 +546,7 @@ private struct SouffleTab: View {
     var body: some View {
         Form {
             GhostModelSection(store: store)
+                .id(PrefAnchors.id(.souffle, "model"))
 
             Section {
                 Picker(tr(fr: "Longueur du souffle", en: "Whisper length"), selection: $store.completionLength) {
@@ -555,6 +560,7 @@ private struct SouffleTab: View {
                 Text(tr(fr: "Plus c'est long, plus ça peut s'éloigner de votre intention. Tab accepte ; Esc écarte.", en: "The longer it is, the more it can drift from what you meant. Tab accepts; Esc dismisses."))
                     .font(.callout).foregroundStyle(.secondary)
             }
+            .id(PrefAnchors.id(.souffle, "length"))
 
             Section {
                 Toggle(tr(fr: "Souffler au milieu d'une ligne", en: "Whisper mid-line"), isOn: $store.midLineGhostEnabled)
@@ -563,6 +569,7 @@ private struct SouffleTab: View {
             } header: {
                 Text(tr(fr: "Au milieu d'une ligne", en: "Mid-line")).font(.headline)
             }
+            .id(PrefAnchors.id(.souffle, "midline"))
 
             Section {
                 Toggle(tr(fr: "Accepter mot à mot", en: "Accept word by word"), isOn: $store.partialAcceptEnabled)
@@ -582,6 +589,7 @@ private struct SouffleTab: View {
             } header: {
                 Text(tr(fr: "Accepter le souffle", en: "Accepting the whisper")).font(.headline)
             }
+            .id(PrefAnchors.id(.souffle, "accept"))
 
             Section {
                 Toggle(tr(fr: "Corriger le texte avant de souffler", en: "Fix the text before whispering"), isOn: $store.prefixCorrectionEnabled)
@@ -590,8 +598,68 @@ private struct SouffleTab: View {
             } header: {
                 Text(tr(fr: "Avant de souffler", en: "Before whispering")).font(.headline)
             }
+            .id(PrefAnchors.id(.souffle, "prefix"))
+
+            BatterySaverSection(store: store)
+                .id(PrefAnchors.id(.souffle, "battery"))
         }
         .formStyle(.grouped)
+    }
+}
+
+/// Section « Batterie » — économie d'énergie quand le Mac est débranché. Chaque
+/// option est OFF par défaut et ne s'applique QUE sur batterie (Cotypist 2026.2).
+private struct BatterySaverSection: View {
+    @Bindable var store: PreferencesStore
+
+    /// État d'alimentation LIVE (secteur ↔ batterie), rafraîchi pendant que la pane
+    /// est ouverte. Lecture pure `nonisolated` ; le timer 2 s suffit pour un réglage
+    /// (on ne veut pas d'un moniteur IOKit dédié rien que pour l'affichage).
+    @State private var onBattery = PowerSourceMonitor.currentIsOnBattery()
+    private let powerTick = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
+
+    /// La voix la plus légère est-elle téléchargée ? Sinon l'option « modèle plus
+    /// léger » resterait sans effet, on l'annonce.
+    private var lightestResolvable: Bool {
+        GGUFModelOption.option(forID: GGUFModelOption.lightestID).isResolvable
+    }
+
+    /// Le modèle actif EST-il déjà le plus léger ? Alors la bascule serait un no-op.
+    private var alreadyLightest: Bool {
+        store.ggufModelID == GGUFModelOption.lightestID
+    }
+
+    var body: some View {
+        Section {
+            HStack(spacing: 6) {
+                Image(systemName: onBattery ? "battery.50" : "powerplug")
+                    .foregroundStyle(onBattery ? .orange : .green)
+                Text(onBattery
+                    ? tr(fr: "Actuellement sur batterie — ces réglages s'appliquent.",
+                         en: "Currently on battery — these settings apply.")
+                    : tr(fr: "Actuellement sur secteur — réglages normaux.",
+                         en: "Currently on AC power — normal settings."))
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            .onReceive(powerTick) { _ in onBattery = PowerSourceMonitor.currentIsOnBattery() }
+            Toggle(tr(fr: "Complétions plus courtes", en: "Shorter completions"), isOn: $store.batterySaverShorter)
+            Toggle(tr(fr: "Voix plus légère", en: "Lighter voice"), isOn: $store.batterySaverLighterModel)
+            if store.batterySaverLighterModel, !lightestResolvable {
+                Text(tr(fr: "La voix la plus légère n'est pas encore téléchargée — l'option restera sans effet jusque-là.", en: "The lightest voice isn't downloaded yet — this option stays inactive until it is."))
+                    .font(.callout).foregroundStyle(.secondary)
+            } else if store.batterySaverLighterModel, alreadyLightest {
+                Text(tr(fr: "Votre voix actuelle est déjà la plus légère — rien à alléger.", en: "Your current voice is already the lightest — nothing to lighten."))
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            Toggle(tr(fr: "Suspendre le souffle", en: "Pause the whisper"), isOn: $store.batterySaverPause)
+            Text(tr(fr: "Le souffle ne se déclenche plus sur batterie ; la traduction et la relecture de ton restent disponibles.", en: "The whisper no longer triggers on battery; translation and tone rephrasing stay available."))
+                .font(.callout).foregroundStyle(.secondary)
+        } header: {
+            Text(tr(fr: "Batterie", en: "Battery")).font(.headline)
+        } footer: {
+            Text(tr(fr: "Ces réglages ne s'appliquent que lorsque le Mac fonctionne sur batterie. Sur secteur, le souffle reprend ses réglages normaux.", en: "These settings only apply while your Mac runs on battery. On AC power, the whisper returns to its normal settings."))
+                .font(.callout).foregroundStyle(.secondary)
+        }
     }
 }
 
@@ -612,12 +680,14 @@ private struct TypingAidsTab: View {
             } header: {
                 Text(tr(fr: "Coquilles", en: "Typos")).font(.headline)
             }
+            .id(PrefAnchors.id(.aides, "typos"))
 
             Section {
                 Toggle(tr(fr: "Emoji — panneau dès « \u{003A} » et expansion (\u{003A}smile\u{003A} → 😄)", en: "Emoji — panel on “\u{003A}” and expansion (\u{003A}smile\u{003A} → 😄)"), isOn: $store.emojiEnabled)
             } header: {
                 Text(tr(fr: "Emoji", en: "Emoji")).font(.headline)
             }
+            .id(PrefAnchors.id(.aides, "emoji"))
 
             Section {
                 Toggle(tr(fr: "Transformations « // » au clavier", en: "“//” keyboard transforms"), isOn: $store.slashTransformEnabled)
@@ -641,8 +711,88 @@ private struct TypingAidsTab: View {
                 Text(tr(fr: "Mis en sommeil dans Xcode, VS Code, JetBrains et les terminaux. La correction ne change que ce que voit Souffleuse — votre texte reste tel que tapé.", en: "Put to sleep in Xcode, VS Code, JetBrains and terminals. Correction only changes what Souffleuse sees — your text stays exactly as typed."))
                     .font(.callout).foregroundStyle(.secondary)
             }
+            .id(PrefAnchors.id(.aides, "slash"))
         }
         .formStyle(.grouped)
+    }
+}
+
+/// Registre des SOUS-sections repérables par la recherche. La recherche ne se
+/// contente plus de filtrer la sidebar jusqu'au bon ONGLET : une fois l'onglet
+/// affiché, on défile jusqu'à la sous-section dont les termes matchent la requête.
+/// Chaque sous-section porte un `.id(PrefAnchors.id(section, key))` dans son Form ;
+/// le modifier `ScrollToSearchedSection` (appliqué une seule fois autour du détail)
+/// résout l'ancre cible et défile. Index volontairement non-exhaustif — les mots
+/// qu'un utilisateur taperait, en FR + EN.
+private enum PrefAnchors {
+    /// Ancre stable d'une sous-section : `"<section>.<key>"`.
+    static func id(_ section: PrefSection, _ key: String) -> String {
+        "\(section.rawValue).\(key)"
+    }
+
+    /// (section, key, termes) — l'ordre compte : la 1ʳᵉ entrée matchante de l'onglet
+    /// l'emporte (donc la plus haute dans le Form en cas d'ambiguïté).
+    private static let table: [(section: PrefSection, key: String, terms: String)] = [
+        (.souffle, "model", "modèle model voix gguf gemma qwen télécharger download"),
+        (.souffle, "length", "longueur length court moyen long"),
+        (.souffle, "midline", "milieu ligne mid-line bulle"),
+        (.souffle, "accept", "accepter accept mot à mot word espace trailing tout accepter tab flèche"),
+        (.souffle, "prefix", "corriger préfixe avant de souffler coquille fix"),
+        (.souffle, "battery", "batterie battery économie energy énergie secteur alimentation suspendre voix légère ac power"),
+        (.apparence, "whisper", "couleur color gris sang-de-bœuf voix teinte opacité opacity transparence intensité"),
+        (.traduction, "model", "modèle traduction translation model"),
+        (.traduction, "keys", "valider commit langue cible target raccourci traduire touche hotkey cycle"),
+        (.aides, "typos", "coquille typo faute orthographe fix"),
+        (.aides, "emoji", "emoji panneau expansion"),
+        (.aides, "slash", "transformation slash // raccourcir reformuler rédiger fix shorten rephrase compose"),
+        (.personnalisation, "learn", "apprendre learn plume style perso personnalisation"),
+        (.personnalisation, "history", "historique history mémoire viewer effacer"),
+        (.contexte, "around", "contexte context enrichissement tenir compte capture écran screen ocr lire presse-papier clipboard"),
+        (.contexte, "ocrlangs", "langue langues écran on-screen français anglais espagnol"),
+        (.reglages, "language", "langue interface system système"),
+        (.reglages, "activation", "activation écoute raccourci hotkey touche couper contexte"),
+        (.reglages, "permissions", "autorisation permission accessibilité accès trust"),
+        (.reglages, "startup", "démarrage launch login ouverture session lancer"),
+    ]
+
+    private static func fold(_ s: String) -> String {
+        s.folding(options: [.diacriticInsensitive, .caseInsensitive],
+                  locale: Locale(identifier: "fr_FR"))
+    }
+
+    /// Ancre vers laquelle défiler pour `section` selon `query` : la 1ʳᵉ sous-section
+    /// de l'onglet dont les termes (ou le libellé folde) contiennent la requête.
+    /// `nil` si rien (requête vide/trop courte, ou onglet sans ancre dédiée).
+    static func target(for section: PrefSection, query: String) -> String? {
+        let q = fold(query).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard q.count >= 2 else { return nil }
+        guard let hit = table.first(where: { $0.section == section && fold($0.terms).contains(q) })
+        else { return nil }
+        return id(section, hit.key)
+    }
+}
+
+/// Modifier appliqué UNE fois autour du détail : enrobe l'onglet d'un
+/// `ScrollViewReader` et défile jusqu'à la sous-section dont les termes matchent la
+/// recherche (à l'apparition de l'onglet ET à chaque changement de requête). Le hop
+/// async laisse le Form se poser avant le scroll.
+private struct ScrollToSearchedSection: ViewModifier {
+    let section: PrefSection
+    let query: String
+
+    func body(content: Content) -> some View {
+        ScrollViewReader { proxy in
+            content
+                .onAppear { scroll(proxy) }
+                .onChange(of: query) { _, _ in scroll(proxy) }
+        }
+    }
+
+    private func scroll(_ proxy: ScrollViewProxy) {
+        guard let anchor = PrefAnchors.target(for: section, query: query) else { return }
+        DispatchQueue.main.async {
+            withAnimation { proxy.scrollTo(anchor, anchor: .top) }
+        }
     }
 }
 
@@ -843,6 +993,7 @@ private struct TranslationTab: View {
             } header: {
                 Text(tr(fr: "Le moteur", en: "The engine")).font(.headline)
             }
+            .id(PrefAnchors.id(.traduction, "model"))
 
             Section {
                 Picker(tr(fr: "Traduire à tout moment avec", en: "Translate anytime with"), selection: $store.translateHotKey) {
@@ -872,6 +1023,7 @@ private struct TranslationTab: View {
                 Text(tr(fr: "La traduction est en cours de construction.", en: "Translation is still being built."))
                     .font(.callout).foregroundStyle(.tertiary)
             }
+            .id(PrefAnchors.id(.traduction, "keys"))
         }
         .formStyle(.grouped)
     }
@@ -1131,6 +1283,7 @@ private struct ReglagesTab: View {
             } header: {
                 Text(tr(fr: "Langue", en: "Language")).font(.headline)
             }
+            .id(PrefAnchors.id(.reglages, "language"))
 
             Section {
                 Toggle(tr(fr: "Souffleuse à l'écoute", en: "Souffleuse listening"), isOn: $store.enabled)
@@ -1143,6 +1296,7 @@ private struct ReglagesTab: View {
             } header: {
                 Text(tr(fr: "Activation", en: "Activation")).font(.headline)
             }
+            .id(PrefAnchors.id(.reglages, "activation"))
 
             Section {
                 accessibilityBadge
@@ -1152,6 +1306,7 @@ private struct ReglagesTab: View {
                 Text(tr(fr: "Sans cet accès, Souffleuse ne peut ni lire le champ où vous écrivez ni y poser le mot juste. Après une mise à jour, si Souffleuse apparaît cochée dans les Réglages mais se dit « absente », retirez l'entrée puis re-glissez l'app. L'accès à l'écran se règle dans l'onglet Contexte.", en: "Without this access, Souffleuse can neither read the field you’re writing in nor place the right word there. After an update, if Souffleuse shows as checked in Settings but reports itself “missing,” remove the entry and drag the app back in. Screen access is set in the Context tab."))
                     .font(.callout).foregroundStyle(.secondary)
             }
+            .id(PrefAnchors.id(.reglages, "permissions"))
 
             Section {
                 Toggle(tr(fr: "Lancer au démarrage du Mac", en: "Launch at Mac startup"), isOn: $launchAtLogin)
@@ -1171,6 +1326,7 @@ private struct ReglagesTab: View {
             } header: {
                 Text(tr(fr: "Au démarrage", en: "At startup")).font(.headline)
             }
+            .id(PrefAnchors.id(.reglages, "startup"))
 
             Section {
                 HStack {
@@ -1258,6 +1414,7 @@ private struct EnrichmentTab: View {
                 }
                 .font(.callout).foregroundStyle(.secondary)
             }
+            .id(PrefAnchors.id(.contexte, "around"))
             Section {
                 Toggle(tr(fr: "Français", en: "French"), isOn: $store.ocrLangFR)
                 Toggle(tr(fr: "Anglais", en: "English"), isOn: $store.ocrLangEN)
@@ -1268,6 +1425,7 @@ private struct EnrichmentTab: View {
                 Text(tr(fr: "Au moins une langue. Si aucune n'est cochée, le français est utilisé par défaut.", en: "At least one language. If none is checked, French is used by default."))
                     .font(.callout).foregroundStyle(.secondary)
             }
+            .id(PrefAnchors.id(.contexte, "ocrlangs"))
         }
         .formStyle(.grouped)
         .onAppear { hasScreenRecordingPermission = ScreenCapturer.hasPermission() }
