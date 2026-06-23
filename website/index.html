@@ -308,6 +308,15 @@
   .version-badge::before { content: "·"; margin-right: 0.45rem; color: var(--rouge); }
   .version-badge:empty { display: none; } /* rien tant que le JS n'a pas rempli */
 
+  /* CTA de la topbar : bouton + version EMPILÉS verticalement. Inline, le badge
+     « · v0.3.0 » ajoutait un item flex de plus à droite du bouton et débordait la
+     barre sur mobile (topnav repliée < 820 px). Sous le bouton, il n'ajoute plus
+     aucune largeur. Le point séparateur et la marge gauche n'ont plus de sens en
+     pile : on les neutralise. */
+  .topbar__cta { display: flex; flex-direction: column; align-items: center; gap: 0.18rem; }
+  .version-badge--stacked { margin-left: 0; font-size: 0.72rem; line-height: 1; }
+  .version-badge--stacked::before { content: none; margin-right: 0; }
+
   /* La ligne de confiance, juste sous le bouton : taille, signature Apple et
      rappel de confidentialité, là où l'anxiété du téléchargement se joue.
      Plus discrète que la note de gratuité — on rassure, on ne crie pas. */
@@ -1716,7 +1725,10 @@
         <span class="langswitch__sep" aria-hidden="true">·</span>
         <a href="/en/" hreflang="en">EN</a>
       </div>
-      <a href="./Souffleuse.dmg" download class="btn btn--small">Télécharger</a><span class="version-badge" data-version></span>
+      <div class="topbar__cta">
+        <a href="./Souffleuse.dmg" download class="btn btn--small">Télécharger</a>
+        <span class="version-badge version-badge--stacked" data-version></span>
+      </div>
     </div>
   </div>
 </header>
@@ -2286,6 +2298,8 @@
   </div>
   <nav class="shell foot__links" aria-label="Liens utiles">
     <a href="/confidentialite.html">Confidentialité &amp; sécurité</a>
+    <a href="/licence.html">Licence (EULA)</a>
+    <a href="/mentions-legales.html">Mentions légales</a>
     <a href="#faq">Questions</a>
     <a href="#soutenir" data-don-open>Au chapeau (don)</a>
     <a href="mailto:contact@souffleuse.app">Écrire à la souffleuse</a>
