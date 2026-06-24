@@ -416,6 +416,22 @@ public actor BeamGhostEngine {
         cachedPromptTokens = []   // KV neuf → pas de préfixe réutilisable
         corpusNgram.clear()       // ids de l'ancien vocab → setCorpus rejoué
         corpusSuffixArray.clear() // par les callers après chaque load
+
+        // ── Warmup Metal du contexte BEAM. Le souffle de production passe par le
+        // beam (generateGhostBeam) : son contexte multi-séquences compile SES
+        // propres pipelines Metal au 1er decode (~1 s). On les force ici, hors
+        // chemin clavier, pour que le 1er souffle réel soit chaud. Sortie jetée,
+        // KV remis à zéro. Kill-switch mesure : SOUFFLEUSE_NO_WARMUP.
+        if ProcessInfo.processInfo.environment["SOUFFLEUSE_NO_WARMUP"] == nil {
+            // Prompt dimensionné comme un vrai contexte (~250 tokens) pour
+            // compiler le pipeline de prefill, pas seulement le decode 1-token.
+            let warm = String(repeating: "Le contexte de travail est prêt et le moteur se réchauffe. ", count: 18)
+            _ = generateBeam(prompt: warm)
+            if let mem = llama_get_memory(context) { llama_memory_seq_rm(mem, -1, -1, -1) }
+            cachedPromptTokens = []
+            Log.info(.predictor, "beam_warmup_done")
+        }
+
         Log.info(.predictor, "beam_loaded")
         return true
     }
