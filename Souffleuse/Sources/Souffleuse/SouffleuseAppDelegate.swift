@@ -3041,6 +3041,24 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
     /// en vol et en reprogramme une (cancel-on-keystroke). Le LLM ne tire qu'après une
     /// pause de `predictDebounceNanos` ; quand la réserve beam paraît chaude, le debounce
     /// est sauté (l'avancée servira en ~1 ms). Extrait de `tick()`.
+    /// Niveau de charge courant pour le gouverneur. `.nominal` (transparent) si
+    /// le gouverneur est désactivé (kill-switch). Un override DEV
+    /// `SOUFFLEUSE_FORCE_LOAD_LEVEL` court-circuite la lecture thermique réelle
+    /// (A/B et evals : mesurer chaque palier sans chauffer la machine). Sinon on
+    /// lit `ProcessInfo.thermalState` — propriété bon marché, lue à la volée.
+    private func currentLoadLevel() -> LoadLevel {
+        // Préférence utilisateur (onglet Performance, défaut ON) ET kill-switch
+        // dev (`SOUFFLEUSE_LOAD_GOVERNOR_OFF`). L'un OU l'autre désactivé ⇒ le
+        // gouverneur est transparent (profondeur pleine, comportement d'origine).
+        guard store.loadGovernorEnabled, SuggestionPolicy.Tuning.loadGovernorEnabled else { return .nominal }
+        if let forced = LoadGovernor.forcedLevel(
+            from: ProcessInfo.processInfo.environment["SOUFFLEUSE_FORCE_LOAD_LEVEL"]
+        ) {
+            return forced
+        }
+        return LoadGovernor.level(from: ProcessInfo.processInfo.thermalState)
+    }
+
     private func schedulePredictIfNeeded(prefix: String, snap: AXSnapshot) {
         // Mode économie batterie › suspendre : on ne lance aucune génération LLM
         // (la partie coûteuse) tant qu'on est sur batterie avec l'option active.
@@ -3062,14 +3080,22 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         let capturedContext = cachedEnrichmentPrefix
         let capturedCustom = CustomInstructionsWindow.current()
         let capturedSnap = snap                                    // Phase 2: forward live AX snapshot
+        // Gouverneur de charge : sous pression on COALESCE (debounce allongé) et
+        // on ne saute plus le debounce sur réserve chaude. À `.nominal` le
+        // multiplicateur vaut 1.0 et le skip reste autorisé → byte-identique.
+        let loadLevel = currentLoadLevel()
         let skipDebounce = SuggestionPolicy.Tuning.debounceSkipWarmReserveEnabled
+            && LoadGovernor.allowsWarmDebounceSkip(for: loadLevel)
             && predictor.reserveLooksWarm(forPrefix: prefix)
         if skipDebounce {
             LatencyTrace.mark("debounce_skip", key: LatencyTrace.key(prefix))
         }
+        let debounceNanos = UInt64(
+            Double(Self.predictDebounceNanos) * LoadGovernor.debounceMultiplier(for: loadLevel)
+        )
         predictDebounceTask = Task { @MainActor [weak self] in
             if !skipDebounce {
-                try? await Task.sleep(nanoseconds: Self.predictDebounceNanos)
+                try? await Task.sleep(nanoseconds: debounceNanos)
             }
             guard !Task.isCancelled, let self else { return }
             // Re-check freshness — another tick may have advanced
@@ -4583,8 +4609,13 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
         // Override DEV MW_ROLL_DEPTH optionnel (défaut = la préférence utilisateur).
         let isLong = predictor.maxWords >= BeamGhostShaper.longGhostTriggerWords
         let prefTarget = isLong ? BeamGhostShaper.longGhostMaxWords : predictor.maxWords
+        // Gouverneur de charge : sous pression on RABOTE la profondeur de look-ahead
+        // (mesuré : 8→3 coupe ~46 % du décodage GPU). Plancher ≥ 3 → la fenêtre
+        // vivante reste affichée, jamais vidée. À nominal/fair : `prefTarget`
+        // inchangé (byte-identique). L'override DEV MW_ROLL_DEPTH a priorité.
+        let governedTarget = LoadGovernor.lookaheadWords(base: prefTarget, for: currentLoadLevel())
         let targetWords = ProcessInfo.processInfo.environment["MW_ROLL_DEPTH"]
-            .flatMap { Int($0) }.map { max(1, $0) } ?? prefTarget
+            .flatMap { Int($0) }.map { max(1, $0) } ?? governedTarget
         // Recharge INCRÉMENTALE (Long) : on regénère par petits pas (`stepCap` mots)
         // dès qu'on descend d'un pas sous la cible, au lieu d'un gros chunk rare
         // (8 mots ⇒ ~530 ms de decode). Le prefill étant réutilisé (LCP), des

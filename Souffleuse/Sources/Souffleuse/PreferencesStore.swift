@@ -182,6 +182,7 @@ final class PreferencesStore {
         static let batterySaverShorter = "batterySaverShorter"
         static let batterySaverLighterModel = "batterySaverLighterModel"
         static let batterySaverPause = "batterySaverPause"
+        static let loadGovernorEnabled = "loadGovernorEnabled"
     }
 
     var enabled: Bool {
@@ -374,6 +375,13 @@ final class PreferencesStore {
     var batterySaverPause: Bool {
         didSet { UserDefaults.standard.set(batterySaverPause, forKey: K.batterySaverPause) }
     }
+    /// Performance — adapte le souffle à la charge : quand le Mac chauffe, on
+    /// raccourcit la profondeur de look-ahead (et on coalesce un peu) pour
+    /// réduire le décodage GPU/CPU, sans jamais masquer le ghost. **Défaut ON.**
+    /// OFF ⇒ profondeur pleine en permanence (comportement d'avant le gouverneur).
+    var loadGovernorEnabled: Bool {
+        didSet { UserDefaults.standard.set(loadGovernorEnabled, forKey: K.loadGovernorEnabled) }
+    }
 
     let allowlist = AllowlistStore()
     /// Licence Studio (achat unique) — `license.isPro` gate les features payantes.
@@ -446,6 +454,7 @@ final class PreferencesStore {
         self.batterySaverShorter = (d.object(forKey: K.batterySaverShorter) as? Bool) ?? false
         self.batterySaverLighterModel = (d.object(forKey: K.batterySaverLighterModel) as? Bool) ?? false
         self.batterySaverPause = (d.object(forKey: K.batterySaverPause) as? Bool) ?? false
+        self.loadGovernorEnabled = (d.object(forKey: K.loadGovernorEnabled) as? Bool) ?? true
     }
 
     /// Vision language codes derived from the toggles. Always non-empty (falls
