@@ -691,6 +691,27 @@ public actor LlamaEngine {
         digitBannedTokens = nil
         emojiBannedTokens = nil
         healPieceCache = nil
+
+        // ── Warmup Metal (mesuré : ~1,2 s de compilation des kernels GPU au tout
+        // premier decode). Sans lui, ce coût retombe sur le PREMIER souffle que
+        // voit l'utilisateur — et se REPAIE à chaque rechargement après idle
+        // (l'app décharge le moteur au repos). Une micro-génération jetable ici
+        // force la compilation des pipelines pendant le chargement (hors chemin
+        // clavier) : le 1er souffle réel tombe de ~1200 ms à ~165 ms (seed à KV
+        // froid, Metal chaud). Aucun impact qualité (sortie jetée, KV remis à
+        // zéro). Kill-switch mesure : SOUFFLEUSE_NO_WARMUP.
+        if ProcessInfo.processInfo.environment["SOUFFLEUSE_NO_WARMUP"] == nil {
+            // Prompt de warmup DIMENSIONNÉ comme un vrai contexte (~250 tokens) :
+            // le decode de prefill compile des kernels Metal DISTINCTS selon la
+            // taille de batch ; un warmup de 2 tokens en raterait la moitié. ~1000
+            // chars ≈ la fenêtre réelle → compile le bon pipeline de prefill.
+            let warm = String(repeating: "Le contexte de travail est prêt et le moteur se réchauffe. ", count: 18)
+            _ = generate(prompt: warm, maxTokens: 4) { _ in true }
+            if let mem = llama_get_memory(context) { llama_memory_seq_rm(mem, 0, -1, -1) }
+            kvTokens = []
+            Log.info(.predictor, "llama_warmup_done")
+        }
+
         Log.info(.predictor, "llama_loaded")
         return true
     }
