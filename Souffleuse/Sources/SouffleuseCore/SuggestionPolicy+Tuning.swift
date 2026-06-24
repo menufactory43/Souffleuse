@@ -828,5 +828,21 @@ extension SuggestionPolicy {
         /// légitime de champ vide. ~16 ≈ 3 mots verbatim — un vrai dump, pas une
         /// coïncidence.
         public static let contextEchoDumpMinChars: Int = 16
+
+        // MARK: - Load governor (steadier under heavy load) — parité Cotypist
+        //
+        // Sous pression thermique/CPU, on coalesce les générations (debounce
+        // allongé) et on coupe le refill spéculatif : moins de décodes llama
+        // démarrés-puis-annulés = moins de churn GPU/CPU quand le Mac peine.
+        // Le ghost *seed* n'est jamais dégradé (même contenu) — voir LoadGovernor.
+
+        /// Master switch du gouverneur de charge. **ON par défaut** : devient
+        /// `false` (comportement historique, aucun throttling adaptatif) UNIQUEMENT
+        /// si l'env `SOUFFLEUSE_LOAD_GOVERNOR_OFF` est présente. À `.nominal` le
+        /// gouverneur est de toute façon transparent (multiplicateur 1.0, aucun
+        /// gate) ; le kill-switch sert l'A/B et la mesure de régression.
+        public static var loadGovernorEnabled: Bool {
+            ProcessInfo.processInfo.environment["SOUFFLEUSE_LOAD_GOVERNOR_OFF"] == nil
+        }
     }
 }
