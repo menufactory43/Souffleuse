@@ -940,6 +940,65 @@
     border: 1px solid rgba(26,22,19,0.2);
   }
 
+  /* ---------- Distribution : les neuf rôles, une scène (interactif) ---------- */
+  /* Même décor que la grille : filet d'encre, papier crème, démos vue-*.
+     La liste appelle un rôle ; un seul entre en scène à la fois. */
+  .cast { margin-top: clamp(1.6rem, 3vw, 2.2rem); display: grid; gap: 1.4rem; }
+  @media (min-width: 820px) {
+    .cast { grid-template-columns: 17.5rem 1fr; gap: 1.8rem; align-items: start; }
+  }
+  .cast__list {
+    list-style: none; margin: 0; padding: 0;
+    display: flex; flex-direction: column;
+    border: var(--filet); background: #fbf5ea;
+    box-shadow: 5px 6px 0 rgba(26,22,19,0.1);
+  }
+  .cast__role {
+    display: flex; align-items: baseline; gap: 0.7rem; width: 100%;
+    text-align: left; background: transparent; border: 0;
+    border-bottom: 1px solid rgba(26,22,19,0.22);
+    padding: 0.72rem 0.95rem; cursor: pointer;
+    font-family: var(--body); font-size: 1rem; line-height: 1.3; color: var(--ink-soft);
+    transition: background .15s ease, color .15s ease;
+  }
+  .cast__role:last-child { border-bottom: 0; }
+  .cast__role:hover { background: var(--paper-deep); color: var(--ink); }
+  .cast__role:focus-visible { outline: 2px solid var(--rouge); outline-offset: -2px; }
+  .cast__role[aria-selected="true"] { background: var(--ink); color: var(--paper); }
+  .cast__role[aria-selected="true"] .cast__num { color: var(--paper-edge); }
+  .cast__num {
+    font-family: var(--display); font-style: italic; font-size: 0.82rem;
+    letter-spacing: 0.1em; color: var(--rouge); flex: 0 0 1.9rem;
+  }
+  .cast__title { flex: 1; }
+  .cast__stages {
+    border: var(--filet); background: #fbf5ea; border-radius: 2px;
+    box-shadow: 5px 6px 0 rgba(26,22,19,0.1);
+    padding: clamp(1.5rem, 3vw, 2.1rem); min-height: 18rem;
+  }
+  .cast__panel[hidden] { display: none; }
+  .cast__panel { display: none; }
+  .cast__panel.is-active { display: block; animation: cast-in 0.32s ease both; }
+  @keyframes cast-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+  .cast__cue {
+    font-family: var(--display); font-style: italic; font-size: 0.82rem;
+    letter-spacing: 0.1em; color: var(--rouge); margin: 0;
+  }
+  .cast__stages h3 { font-size: clamp(1.55rem, 3.2vw, 2.05rem); margin: 0.3rem 0 0; line-height: 1.08; }
+  .cast__lede { font-style: italic; color: var(--ink-soft); margin: 0.5rem 0 0.75rem; }
+  .cast__body { margin: 0; color: var(--ink-soft); }
+  .cast__body:last-child { margin-bottom: 0; }
+  .cast__stages .shortcode {
+    font-family: var(--display); font-weight: 500; font-style: normal;
+    background: var(--paper-deep); padding: 0 0.3em; border-radius: 2px;
+    border: 1px solid rgba(26,22,19,0.2);
+  }
+  .vue-keys { color: var(--ink); }
+  .vue-keys .vue-fleche { color: var(--rouge); }
+  @media (prefers-reduced-motion: reduce) {
+    .cast__panel.is-active { animation: none; }
+  }
+
   /* ---------- Coulisses / confidentialité ---------- */
 
   .coulisses { background: var(--ink); color: var(--paper); border-block: 1px solid #000; }
@@ -1207,7 +1266,7 @@
     .mascotte { display: block; }
   }
   .mascotte__fig {
-    height: clamp(300px, 36vh, 440px);
+    height: clamp(210px, 26vh, 320px);
     width: auto;
     display: block;
     opacity: 0.9;   /* encre, pas noir pur */
@@ -1676,17 +1735,17 @@
       </svg>
       <span>
         <span class="brand__name">Souffleuse</span>
-        <span class="brand__sub">The Playbill</span>
+        <span class="brand__sub">for Mac</span>
       </span>
     </a>
     <div class="topbar__right">
       <nav class="topnav" aria-label="Sections">
         <a href="#souffle">The demo</a>
-        <a href="#manifeste">The craft</a>
+        <a href="#manifeste">Why</a>
         <a href="#fonctions">What she does</a>
-        <a href="#coulisses">Backstage</a>
+        <a href="#coulisses">Privacy</a>
         <a href="#faq">Questions</a>
-        <a href="#soutenir" data-don-open>Pass the hat (donate)</a>
+        <a href="#soutenir" data-don-open>Support</a>
       </nav>
       <div class="langswitch" role="group" aria-label="Langue / Language">
         <a href="/" hreflang="fr">FR</a>
@@ -1719,7 +1778,7 @@
           <span class="coup"></span><span class="coup"></span><span class="coup"></span>
         </div>
         <div class="playbill__cesoir ink-rise k1">
-          <span class="smallcaps">Tonight, on stage</span>
+          <span class="smallcaps">Free during the beta</span>
         </div>
         <p class="playbill__eyebrow ink-rise k2">A writing aid that never leaves your Mac</p>
         <h1 class="hero__title ink-rise k2" id="titre-principal">
@@ -1738,7 +1797,7 @@
             </svg>
             Download for Mac
           </a>
-          <a href="#souffle" class="btn btn--ghost">See how she whispers →</a>
+          <a href="#souffle" class="btn btn--ghost">Watch the demo →</a>
         </div>
         <p class="cta-note ink-rise k5"><b>Free during the beta.</b> For Apple Silicon Macs.<span class="version-badge" data-version hidden></span></p>
         <p class="cta-trust ink-rise k5">~6.5 MB · notarized by Apple · your text never leaves your Mac.</p>
@@ -1747,7 +1806,7 @@
       <!-- ===== ÉLÉMENT SIGNATURE : le trou du souffleur ===== -->
       <figure class="souffleur ink-rise k5" id="souffle" aria-labelledby="demo-titre">
         <figcaption id="demo-titre" class="souffleur__caption stage-dir" style="margin-top:0; margin-bottom:1rem;">
-          The prompter's box: the line, slipped in right at the moment of hesitation
+          The continuation appears right when you hesitate — Tab to take it
         </figcaption>
         <div class="souffleur__frame">
           <div class="souffleur__bar">
@@ -1835,9 +1894,8 @@
   <section class="manifeste reveal" id="manifeste" aria-labelledby="manifeste-titre">
     <div class="shell shell--narrow">
       <div class="section-head">
-        <span class="smallcaps">The forgotten craft</span>
-        <h2 id="manifeste-titre">Crouched at the edge of the stage</h2>
-        <p class="stage-dir">Stage direction</p>
+        <span class="smallcaps">Why “Souffleuse”</span>
+        <h2 id="manifeste-titre">Like a theatre prompter</h2>
       </div>
       <div class="manifeste__body">
         <p>
@@ -1858,8 +1916,8 @@
     <div class="shell">
       <div class="heroine">
         <div class="heroine__text">
-          <span class="smallcaps">The title role</span>
-          <h2 id="heroine-titre">A whisper at the hesitation</h2>
+          <span class="smallcaps">At the right moment</span>
+          <h2 id="heroine-titre">It only appears when you hesitate</h2>
           <p>
             Souffleuse doesn't blanket your screen in grey text. It follows the rhythm of your
             typing and only offers a suggestion the moment you slow down — the way a real prompter
@@ -1907,92 +1965,85 @@
   <section id="fonctions" class="reveal" aria-labelledby="fonctions-titre">
     <div class="shell">
       <div class="section-head">
-        <span class="smallcaps">The cast</span>
+        <span class="smallcaps">In detail</span>
         <h2 id="fonctions-titre">What she does</h2>
-        <p class="stage-dir">Nine roles, played in silence</p>
+        <p class="stage-dir">Nine uses, one tool</p>
       </div>
-      <ul class="features">
-        <li class="feature">
-          <span class="feature__num">i.</span>
-          <h3>A whisper at the cursor</h3>
-          <p class="feature__lede">A grey suggestion, right where you write.</p>
-          <p>In Mail, Notes, Messages, your web browser (almost anywhere you write on your Mac), the suggestion appears in grey, just under your cursor, without disturbing anything around it.</p>
-        </li>
-        <li class="feature">
-          <span class="feature__num">ii.</span>
-          <h3>Tab to take, Esc to leave</h3>
-          <p class="feature__lede">You stay in control, always.</p>
-          <p>Tab accepts the rest, word by word — or in chunks, if you'd rather take it piece by piece; Esc clears it without a trace.</p>
-        </li>
-        <!-- Carte pleine largeur : le cœur du contre-positionnement -->
-        <li class="feature feature--wide">
-          <div class="feature__head">
-            <span class="feature__num">iii.</span>
-            <h3>Everything happens on your Mac</h3>
-            <p class="feature__lede">No server, no round trip.</p>
+      <div class="cast">
+        <div class="cast__list" role="tablist" aria-label="The nine roles of Souffleuse">
+          <button class="cast__role" role="tab" id="role-tab-0" aria-controls="role-panel-0" aria-selected="true" tabindex="0"><span class="cast__num">i.</span><span class="cast__title">The suggestion under your cursor</span></button>
+          <button class="cast__role" role="tab" id="role-tab-1" aria-controls="role-panel-1" aria-selected="false" tabindex="-1"><span class="cast__num">ii.</span><span class="cast__title">Tab to take, Esc to leave</span></button>
+          <button class="cast__role" role="tab" id="role-tab-2" aria-controls="role-panel-2" aria-selected="false" tabindex="-1"><span class="cast__num">iii.</span><span class="cast__title">Everything happens on your Mac</span></button>
+          <button class="cast__role" role="tab" id="role-tab-3" aria-controls="role-panel-3" aria-selected="false" tabindex="-1"><span class="cast__num">iv.</span><span class="cast__title">It learns your style</span></button>
+          <button class="cast__role" role="tab" id="role-tab-4" aria-controls="role-panel-4" aria-selected="false" tabindex="-1"><span class="cast__num">v.</span><span class="cast__title">Rephrase in the right tone</span></button>
+          <button class="cast__role" role="tab" id="role-tab-5" aria-controls="role-panel-5" aria-selected="false" tabindex="-1"><span class="cast__num">vi.</span><span class="cast__title">Translate as you write</span></button>
+          <button class="cast__role" role="tab" id="role-tab-6" aria-controls="role-panel-6" aria-selected="false" tabindex="-1"><span class="cast__num">vii.</span><span class="cast__title">Typos fixed automatically</span></button>
+          <button class="cast__role" role="tab" id="role-tab-7" aria-controls="role-panel-7" aria-selected="false" tabindex="-1"><span class="cast__num">viii.</span><span class="cast__title">The right emoji, instantly</span></button>
+          <button class="cast__role" role="tab" id="role-tab-8" aria-controls="role-panel-8" aria-selected="false" tabindex="-1"><span class="cast__num">ix.</span><span class="cast__title">The time you save</span></button>
+        </div>
+        <div class="cast__stages">
+          <div class="cast__panel is-active" role="tabpanel" id="role-panel-0" aria-labelledby="role-tab-0">
+            <p class="cast__cue">i. — on stage</p>
+            <h3>The suggestion under your cursor</h3>
+            <p class="cast__lede">A grey suggestion, right where you write.</p>
+            <p class="cast__body">In Mail, Notes, Messages, your web browser — almost anywhere you write on your Mac — the suggestion appears in grey, just under your cursor, without disturbing anything around it.</p>
           </div>
-          <p>Souffleuse thinks right on your Mac, never going through the internet. After a one-time setup, it works even offline. What you write goes nowhere, for the simple reason that there's nowhere to send it.</p>
-        </li>
-        <li class="feature">
-          <span class="feature__num">iv.</span>
-          <h3>It learns your voice, under lock and key</h3>
-          <p class="feature__lede">The more you use it, the more it sounds like you.</p>
-          <p>Over time, it remembers the turns of phrase you keep and tunes itself to the way you write. What it learns stays locked on your Mac, readable by you alone.</p>
-        </li>
-        <li class="feature">
-          <span class="feature__num">v.</span>
-          <h3>A second reading, in the right tone</h3>
-          <p class="feature__lede">Your sentence, reread for the room.</p>
-          <p>The same words don't land the same way in Mail and in Messages. Type <span class="shortcode">//</span>: it rereads your sentence and rephrases it in the tone of the room (measured for a client, light for a friend), or tightens it when it runs long. Still your words, better placed.</p>
-          <p class="feature__vue" aria-hidden="true">
-            <span class="vue-scene"><span class="shortcode">//</span>: reread for Mail, to a client</span>
-            <span class="vue-avant">“can we hop on a call tmrw about the quote?”</span><span class="vue-fleche">→</span><span class="vue-apres">“Could we speak tomorrow about the quote?”</span>
-          </p>
-        </li>
-        <li class="feature">
-          <span class="feature__num">vi.</span>
-          <h3>Translation, whispered too</h3>
-          <p class="feature__lede">Each conversation's language, remembered.</p>
-          <p>One conversation in French, another in Spanish? Pick a conversation's language once: it then translates as the exchange unfolds, in a small, quiet panel, without anything going anywhere. A <span class="shortcode">//</span> also calls it up, on demand.</p>
-          <p class="feature__vue" aria-hidden="true">
-            <span class="vue-scene">Conversation set to: French</span>
-            <span class="vue-avant">“Are we still on for Thursday?”</span><span class="vue-fleche">→</span><span class="vue-apres">« On se voit toujours jeudi ? »</span>
-          </p>
-        </li>
-        <li class="feature">
-          <span class="feature__num">vii.</span>
-          <h3>Typos, caught mid-flight</h3>
-          <p class="feature__lede">The slip of the finger, mended in passing.</p>
-          <p>A word typed too fast, two letters swapped? It recognises the slip, whispers the continuation with the right word, and Tab mends it all in passing, without pointing it out.</p>
-          <p class="feature__vue" aria-hidden="true">
-            <span class="vue-scene">Typed too fast</span>
-            <span class="vue-typed">Here is our <span class="vue-typo">porposal</span></span><span class="caret" aria-hidden="true"></span><span class="vue-souffle">&nbsp;for the June pricing.</span>
-            <span class="vue-note"><kbd>Tab</kbd> takes the line and restores “proposal”.</span>
-          </p>
-        </li>
-        <li class="feature">
-          <span class="feature__num">viii.</span>
-          <h3>The emoji, on cue</h3>
-          <p class="feature__lede">The right emoji, hands on the keyboard.</p>
-          <p>Type a colon: the picker opens right where you write, your favourites first. One key, 1 to 5, and the emoji lands. It keeps up whether you write in English, in French, or both in the same sentence.</p>
-          <p class="feature__vue" aria-hidden="true">
-            <span class="vue-scene">Messages, between friends</span>
-            <span class="vue-typed">We signed <span class="shortcode">:</span></span><span class="caret" aria-hidden="true"></span>
-            <span class="vue-picker"><span class="vue-pick"><kbd>1</kbd>🎉</span><span class="vue-pick"><kbd>2</kbd>❤️</span><span class="vue-pick"><kbd>3</kbd>👍</span><span class="vue-pick"><kbd>4</kbd>😅</span><span class="vue-pick"><kbd>5</kbd>🙏</span></span>
-            <span class="vue-note">One key, and it lands.</span>
-          </p>
-        </li>
-        <li class="feature">
-          <span class="feature__num">ix.</span>
-          <h3>The usage ledger</h3>
-          <p class="feature__lede">Keystrokes spared, time saved.</p>
-          <p>At the end of the day, a small ledger tells you, and you alone, what it spared you: so many keystrokes, so many minutes. It never leaves your Mac either.</p>
-          <p class="feature__vue" aria-hidden="true">
-            <span class="vue-scene">Tonight, in the ledger</span>
-            <span class="vue-typed"><span class="vue-num">1,248</span> keystrokes spared · <span class="vue-num">11</span> minutes back</span>
-          </p>
-        </li>
-      </ul>
+          <div class="cast__panel" role="tabpanel" id="role-panel-1" aria-labelledby="role-tab-1" hidden>
+            <p class="cast__cue">ii. — on stage</p>
+            <h3>Tab to take, Esc to leave</h3>
+            <p class="cast__lede">You stay in control, always.</p>
+            <p class="cast__body">Tab accepts the rest, word by word — or in chunks, if you'd rather take it piece by piece; Esc clears it without a trace.</p>
+            <p class="feature__vue" aria-hidden="true"><span class="vue-scene">The gesture, by hand</span><span class="vue-keys"><kbd>Tab</kbd> takes the line<span class="vue-fleche">·</span><kbd>Esc</kbd> lets it go</span></p>
+          </div>
+          <div class="cast__panel" role="tabpanel" id="role-panel-2" aria-labelledby="role-tab-2" hidden>
+            <p class="cast__cue">iii. — on stage</p>
+            <h3>Everything happens on your Mac</h3>
+            <p class="cast__lede">No server, no round trip.</p>
+            <p class="cast__body">Souffleuse thinks right on your Mac, never going through the internet. After a one-time setup, it works even offline. What you write goes nowhere, for the simple reason that there's nowhere to send it.</p>
+          </div>
+          <div class="cast__panel" role="tabpanel" id="role-panel-3" aria-labelledby="role-tab-3" hidden>
+            <p class="cast__cue">iv. — on stage</p>
+            <h3>It learns your style</h3>
+            <p class="cast__lede">The more you use it, the more it sounds like you.</p>
+            <p class="cast__body">Over time, it remembers the turns of phrase you keep and tunes itself to the way you write. What it learns stays locked on your Mac, readable by you alone.</p>
+          </div>
+          <div class="cast__panel" role="tabpanel" id="role-panel-4" aria-labelledby="role-tab-4" hidden>
+            <p class="cast__cue">v. — on stage</p>
+            <h3>Rephrase in the right tone</h3>
+            <p class="cast__lede">Your sentence, reread for the room.</p>
+            <p class="cast__body">The same words don't land the same way in Mail and in Messages. Type <span class="shortcode">//</span>: it rereads your sentence and rephrases it in the tone of the room (measured for a client, light for a friend), or tightens it when it runs long. Still your words, better placed.</p>
+            <p class="feature__vue" aria-hidden="true"><span class="vue-scene"><span class="shortcode">//</span>: reread for Mail, to a client</span><span class="vue-avant">“can we hop on a call tmrw about the quote?”</span><span class="vue-fleche">→</span><span class="vue-apres">“Could we speak tomorrow about the quote?”</span></p>
+          </div>
+          <div class="cast__panel" role="tabpanel" id="role-panel-5" aria-labelledby="role-tab-5" hidden>
+            <p class="cast__cue">vi. — on stage</p>
+            <h3>Translate as you write</h3>
+            <p class="cast__lede">Each conversation's language, remembered.</p>
+            <p class="cast__body">One conversation in French, another in Spanish? Pick a conversation's language once: it then translates as the exchange unfolds, in a small, quiet panel, without anything going anywhere. A <span class="shortcode">//</span> also calls it up, on demand.</p>
+            <p class="feature__vue" aria-hidden="true"><span class="vue-scene">Conversation set to: French</span><span class="vue-avant">“Are we still on for Thursday?”</span><span class="vue-fleche">→</span><span class="vue-apres">« On se voit toujours jeudi ? »</span></p>
+          </div>
+          <div class="cast__panel" role="tabpanel" id="role-panel-6" aria-labelledby="role-tab-6" hidden>
+            <p class="cast__cue">vii. — on stage</p>
+            <h3>Typos fixed automatically</h3>
+            <p class="cast__lede">The slip of the finger, mended in passing.</p>
+            <p class="cast__body">A word typed too fast, two letters swapped? It recognises the slip, whispers the continuation with the right word, and Tab mends it all in passing, without pointing it out.</p>
+            <p class="feature__vue" aria-hidden="true"><span class="vue-scene">Typed too fast</span><span class="vue-typed">Here is our <span class="vue-typo">porposal</span></span><span class="caret" aria-hidden="true"></span><span class="vue-souffle">&nbsp;for the June pricing.</span><span class="vue-note"><kbd>Tab</kbd> takes the line and restores “proposal”.</span></p>
+          </div>
+          <div class="cast__panel" role="tabpanel" id="role-panel-7" aria-labelledby="role-tab-7" hidden>
+            <p class="cast__cue">viii. — on stage</p>
+            <h3>The right emoji, instantly</h3>
+            <p class="cast__lede">The right emoji, hands on the keyboard.</p>
+            <p class="cast__body">Type a colon: the picker opens right where you write, your favourites first. One key, 1 to 5, and the emoji lands. It keeps up whether you write in English, in French, or both in the same sentence.</p>
+            <p class="feature__vue" aria-hidden="true"><span class="vue-scene">Messages, between friends</span><span class="vue-typed">We signed <span class="shortcode">:</span></span><span class="caret" aria-hidden="true"></span><span class="vue-picker"><span class="vue-pick"><kbd>1</kbd>🎉</span><span class="vue-pick"><kbd>2</kbd>❤️</span><span class="vue-pick"><kbd>3</kbd>👍</span><span class="vue-pick"><kbd>4</kbd>😅</span><span class="vue-pick"><kbd>5</kbd>🙏</span></span><span class="vue-note">One key, and it lands.</span></p>
+          </div>
+          <div class="cast__panel" role="tabpanel" id="role-panel-8" aria-labelledby="role-tab-8" hidden>
+            <p class="cast__cue">ix. — on stage</p>
+            <h3>The time you save</h3>
+            <p class="cast__lede">Keystrokes spared, time saved.</p>
+            <p class="cast__body">At the end of the day, a small ledger tells you, and you alone, what it spared you: so many keystrokes, so many minutes. It never leaves your Mac either.</p>
+            <p class="feature__vue" aria-hidden="true"><span class="vue-scene">Tonight, in the ledger</span><span class="vue-typed"><span class="vue-num">1,248</span> keystrokes spared · <span class="vue-num">11</span> minutes back</span></p>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -2000,9 +2051,9 @@
   <section class="coulisses reveal" id="coulisses" aria-labelledby="coulisses-titre">
     <div class="shell">
       <div class="section-head">
-        <span class="smallcaps">Stage left, stage right</span>
-        <h2 id="coulisses-titre">What's said backstage stays backstage</h2>
-        <p class="stage-dir">In plain terms: privacy, by construction.</p>
+        <span class="smallcaps">Privacy</span>
+        <h2 id="coulisses-titre">What you write never leaves</h2>
+        <p class="stage-dir">Private by design.</p>
       </div>
       <p class="coulisses__lede">
         Souffleuse only works because it reads what you write. So we made sure it has
@@ -2062,26 +2113,26 @@
   <section id="marche" class="reveal" aria-labelledby="marche-titre">
     <div class="shell">
       <div class="section-head">
-        <span class="smallcaps">The running order</span>
-        <h2 id="marche-titre">In three acts</h2>
+        <span class="smallcaps">How it works</span>
+        <h2 id="marche-titre">In three steps</h2>
       </div>
       <ol class="steps">
         <li class="step">
-          <p class="step__acte">Act I</p>
+          <p class="step__acte">Step 1</p>
           <span class="step__num">1</span>
           <h3>Install</h3>
           <p>Drag Souffleuse into your Applications, grant it the permission it asks for, and it settles quietly into the menu bar at the top of your screen.</p>
         </li>
         <li class="step">
-          <p class="step__acte">Act II</p>
+          <p class="step__acte">Step 2</p>
           <span class="step__num">2</span>
           <h3>Write</h3>
           <p>Type as you normally would, in whatever app you like. When you hesitate, a grey suggestion appears under the cursor.</p>
         </li>
         <li class="step">
-          <p class="step__acte">Act III</p>
+          <p class="step__acte">Step 3</p>
           <span class="step__num">3</span>
-          <h3>Take the cue</h3>
+          <h3>Confirm</h3>
           <p>Like it? <kbd>Tab</kbd>. In your way? <kbd>Esc</kbd>, or just keep typing: it disappears.</p>
         </li>
       </ol>
@@ -2094,7 +2145,7 @@
   <section id="faq" class="reveal" aria-labelledby="faq-titre">
     <div class="shell">
       <div class="section-head">
-        <span class="smallcaps">Before the curtain rises</span>
+        <span class="smallcaps">Good to know</span>
         <h2 id="faq-titre">A few questions</h2>
       </div>
       <div class="faq">
@@ -2224,7 +2275,7 @@
     <a href="/en/license.html">Licence (EULA)</a>
     <a href="/en/legal-notice.html">Legal notice</a>
     <a href="#faq">Questions</a>
-    <a href="#soutenir" data-don-open>Pass the hat (donate)</a>
+    <a href="#soutenir" data-don-open>Support</a>
     <a href="mailto:contact@souffleuse.app">Write to the prompter</a>
   </nav>
   <div class="shell colophon">
@@ -3071,5 +3122,48 @@
   });
 })();
 </script>
+<script>
+// Distribution interactive : un rôle appelé entre en scène, les autres se taisent.
+// Repli sans JS : tous les panneaux sont révélés (voir <noscript> plus bas).
+(function () {
+  "use strict";
+  var root = document.getElementById("fonctions");
+  if (!root) return;
+  var tabs   = Array.prototype.slice.call(root.querySelectorAll(".cast__role"));
+  var panels = Array.prototype.slice.call(root.querySelectorAll(".cast__panel"));
+  if (!tabs.length || tabs.length !== panels.length) return;
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function select(i, focus) {
+    tabs.forEach(function (t, j) {
+      var on = j === i;
+      t.setAttribute("aria-selected", on ? "true" : "false");
+      t.tabIndex = on ? 0 : -1;
+    });
+    panels.forEach(function (p, j) {
+      var on = j === i;
+      p.hidden = !on;
+      p.classList.toggle("is-active", on);
+      if (on && !reduce) { p.style.animation = "none"; void p.offsetWidth; p.style.animation = ""; }
+    });
+    if (focus && tabs[i]) tabs[i].focus();
+  }
+
+  tabs.forEach(function (t, i) {
+    t.addEventListener("click", function () { select(i, false); });
+    t.addEventListener("keydown", function (e) {
+      var n;
+      if (e.key === "ArrowDown" || e.key === "ArrowRight") n = (i + 1) % tabs.length;
+      else if (e.key === "ArrowUp" || e.key === "ArrowLeft") n = (i - 1 + tabs.length) % tabs.length;
+      else if (e.key === "Home") n = 0;
+      else if (e.key === "End") n = tabs.length - 1;
+      else return;
+      e.preventDefault();
+      select(n, true);
+    });
+  });
+})();
+</script>
+<noscript><style>#fonctions .cast__panel { display: block !important; border-top: 1px solid rgba(26,22,19,0.22); padding-top: 1.1rem; margin-top: 1.1rem; }</style></noscript>
 </body>
 </html>

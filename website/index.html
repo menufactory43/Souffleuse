@@ -942,6 +942,65 @@
     border: 1px solid rgba(26,22,19,0.2);
   }
 
+  /* ---------- Distribution : les neuf rôles, une scène (interactif) ---------- */
+  /* Même décor que la grille : filet d'encre, papier crème, démos vue-*.
+     La liste appelle un rôle ; un seul entre en scène à la fois. */
+  .cast { margin-top: clamp(1.6rem, 3vw, 2.2rem); display: grid; gap: 1.4rem; }
+  @media (min-width: 820px) {
+    .cast { grid-template-columns: 17.5rem 1fr; gap: 1.8rem; align-items: start; }
+  }
+  .cast__list {
+    list-style: none; margin: 0; padding: 0;
+    display: flex; flex-direction: column;
+    border: var(--filet); background: #fbf5ea;
+    box-shadow: 5px 6px 0 rgba(26,22,19,0.1);
+  }
+  .cast__role {
+    display: flex; align-items: baseline; gap: 0.7rem; width: 100%;
+    text-align: left; background: transparent; border: 0;
+    border-bottom: 1px solid rgba(26,22,19,0.22);
+    padding: 0.72rem 0.95rem; cursor: pointer;
+    font-family: var(--body); font-size: 1rem; line-height: 1.3; color: var(--ink-soft);
+    transition: background .15s ease, color .15s ease;
+  }
+  .cast__role:last-child { border-bottom: 0; }
+  .cast__role:hover { background: var(--paper-deep); color: var(--ink); }
+  .cast__role:focus-visible { outline: 2px solid var(--rouge); outline-offset: -2px; }
+  .cast__role[aria-selected="true"] { background: var(--ink); color: var(--paper); }
+  .cast__role[aria-selected="true"] .cast__num { color: var(--paper-edge); }
+  .cast__num {
+    font-family: var(--display); font-style: italic; font-size: 0.82rem;
+    letter-spacing: 0.1em; color: var(--rouge); flex: 0 0 1.9rem;
+  }
+  .cast__title { flex: 1; }
+  .cast__stages {
+    border: var(--filet); background: #fbf5ea; border-radius: 2px;
+    box-shadow: 5px 6px 0 rgba(26,22,19,0.1);
+    padding: clamp(1.5rem, 3vw, 2.1rem); min-height: 18rem;
+  }
+  .cast__panel[hidden] { display: none; }
+  .cast__panel { display: none; }
+  .cast__panel.is-active { display: block; animation: cast-in 0.32s ease both; }
+  @keyframes cast-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+  .cast__cue {
+    font-family: var(--display); font-style: italic; font-size: 0.82rem;
+    letter-spacing: 0.1em; color: var(--rouge); margin: 0;
+  }
+  .cast__stages h3 { font-size: clamp(1.55rem, 3.2vw, 2.05rem); margin: 0.3rem 0 0; line-height: 1.08; }
+  .cast__lede { font-style: italic; color: var(--ink-soft); margin: 0.5rem 0 0.75rem; }
+  .cast__body { margin: 0; color: var(--ink-soft); }
+  .cast__body:last-child { margin-bottom: 0; }
+  .cast__stages .shortcode {
+    font-family: var(--display); font-weight: 500; font-style: normal;
+    background: var(--paper-deep); padding: 0 0.3em; border-radius: 2px;
+    border: 1px solid rgba(26,22,19,0.2);
+  }
+  .vue-keys { color: var(--ink); }
+  .vue-keys .vue-fleche { color: var(--rouge); }
+  @media (prefers-reduced-motion: reduce) {
+    .cast__panel.is-active { animation: none; }
+  }
+
   /* ---------- Coulisses / confidentialité ---------- */
 
   .coulisses { background: var(--ink); color: var(--paper); border-block: 1px solid #000; }
@@ -1209,7 +1268,7 @@
     .mascotte { display: block; }
   }
   .mascotte__fig {
-    height: clamp(300px, 36vh, 440px);
+    height: clamp(210px, 26vh, 320px);
     width: auto;
     display: block;
     opacity: 0.9;   /* encre, pas noir pur */
@@ -1708,17 +1767,17 @@
       </svg>
       <span>
         <span class="brand__name">Souffleuse</span>
-        <span class="brand__sub">Le Livret</span>
+        <span class="brand__sub">pour Mac</span>
       </span>
     </a>
     <div class="topbar__right">
       <nav class="topnav" aria-label="Sections">
         <a href="#souffle">La démo</a>
-        <a href="#manifeste">Le métier</a>
+        <a href="#manifeste">Pourquoi</a>
         <a href="#fonctions">Ce qu'elle fait</a>
-        <a href="#coulisses">Les coulisses</a>
+        <a href="#coulisses">Confidentialité</a>
         <a href="#faq">Questions</a>
-        <a href="#soutenir" data-don-open>Au chapeau (don)</a>
+        <a href="#soutenir" data-don-open>Soutenir</a>
       </nav>
       <div class="langswitch" role="group" aria-label="Langue / Language">
         <a href="/" hreflang="fr" aria-current="true">FR</a>
@@ -1751,7 +1810,7 @@
           <span class="coup"></span><span class="coup"></span><span class="coup"></span>
         </div>
         <div class="playbill__cesoir ink-rise k1">
-          <span class="smallcaps">Ce soir, en représentation</span>
+          <span class="smallcaps">Gratuit pendant la bêta</span>
         </div>
         <p class="playbill__eyebrow ink-rise k2">Une aide à l'écriture qui ne quitte jamais votre Mac</p>
         <h1 class="hero__title ink-rise k2" id="titre-principal">
@@ -1770,7 +1829,7 @@
             </svg>
             Télécharger pour Mac
           </a>
-          <a href="#souffle" class="btn btn--ghost">Voir comment elle souffle →</a>
+          <a href="#souffle" class="btn btn--ghost">Voir la démo →</a>
         </div>
         <p class="cta-note ink-rise k5"><b>Gratuit pendant la bêta.</b> Pour Mac à puce Apple Silicon.<span class="version-badge" data-version hidden></span></p>
         <p class="cta-trust ink-rise k5">~6,5 Mo · notarisée par Apple · vos textes ne quittent jamais votre Mac.</p>
@@ -1779,7 +1838,7 @@
       <!-- ===== ÉLÉMENT SIGNATURE : le trou du souffleur ===== -->
       <figure class="souffleur ink-rise k5" id="souffle" aria-labelledby="demo-titre">
         <figcaption id="demo-titre" class="souffleur__caption stage-dir" style="margin-top:0; margin-bottom:1rem;">
-          Le trou du souffleur : la réplique, glissée pile au moment de l'hésitation
+          La suite apparaît pile quand vous hésitez — Tab pour la prendre
         </figcaption>
         <div class="souffleur__frame">
           <div class="souffleur__bar">
@@ -1908,9 +1967,8 @@
   <section class="manifeste reveal" id="manifeste" aria-labelledby="manifeste-titre">
     <div class="shell shell--narrow">
       <div class="section-head">
-        <span class="smallcaps">Le métier oublié</span>
-        <h2 id="manifeste-titre">Tapie au bord de la scène</h2>
-        <p class="stage-dir">Didascalie</p>
+        <span class="smallcaps">Pourquoi « Souffleuse »</span>
+        <h2 id="manifeste-titre">Comme une souffleuse de théâtre</h2>
       </div>
       <div class="manifeste__body">
         <p>
@@ -1931,8 +1989,8 @@
     <div class="shell">
       <div class="heroine">
         <div class="heroine__text">
-          <span class="smallcaps">Le rôle-titre</span>
-          <h2 id="heroine-titre">Le souffle à l'hésitation</h2>
+          <span class="smallcaps">Au bon moment</span>
+          <h2 id="heroine-titre">Elle n'apparaît que quand vous hésitez</h2>
           <p>
             Souffleuse ne couvre pas votre écran de texte gris en permanence. Elle suit le
             rythme de votre frappe et n'avance une suggestion qu'au moment où vous ralentissez,
@@ -1981,92 +2039,85 @@
   <section id="fonctions" class="reveal" aria-labelledby="fonctions-titre">
     <div class="shell">
       <div class="section-head">
-        <span class="smallcaps">La distribution</span>
+        <span class="smallcaps">En détail</span>
         <h2 id="fonctions-titre">Ce qu'elle fait</h2>
-        <p class="stage-dir">Neuf rôles, tenus en silence</p>
+        <p class="stage-dir">Neuf usages, un seul outil</p>
       </div>
-      <ul class="features">
-        <li class="feature">
-          <span class="feature__num">i.</span>
-          <h3>Le souffle au curseur</h3>
-          <p class="feature__lede">Une suggestion grise, là où vous écrivez.</p>
-          <p>Dans Mail, Notes, Messages, votre navigateur web (presque partout où vous écrivez sur votre Mac), la suggestion apparaît en gris, juste sous votre curseur, sans rien déranger autour.</p>
-        </li>
-        <li class="feature">
-          <span class="feature__num">ii.</span>
-          <h3>Tab pour prendre, Esc pour laisser</h3>
-          <p class="feature__lede">Vous gardez la main, toujours.</p>
-          <p>Tab accepte la suite, mot par mot ou par bouts si vous préférez la prendre par morceaux ; Esc l'efface sans laisser de trace.</p>
-        </li>
-        <!-- Carte pleine largeur : le cœur du contre-positionnement -->
-        <li class="feature feature--wide">
-          <div class="feature__head">
-            <span class="feature__num">iii.</span>
-            <h3>Tout se passe sur votre Mac</h3>
-            <p class="feature__lede">Aucun serveur, aucun aller-retour.</p>
+      <div class="cast">
+        <div class="cast__list" role="tablist" aria-label="Les neuf rôles de Souffleuse">
+          <button class="cast__role" role="tab" id="role-tab-0" aria-controls="role-panel-0" aria-selected="true" tabindex="0"><span class="cast__num">i.</span><span class="cast__title">La suggestion sous le curseur</span></button>
+          <button class="cast__role" role="tab" id="role-tab-1" aria-controls="role-panel-1" aria-selected="false" tabindex="-1"><span class="cast__num">ii.</span><span class="cast__title">Tab pour prendre, Esc pour laisser</span></button>
+          <button class="cast__role" role="tab" id="role-tab-2" aria-controls="role-panel-2" aria-selected="false" tabindex="-1"><span class="cast__num">iii.</span><span class="cast__title">Tout se passe sur votre Mac</span></button>
+          <button class="cast__role" role="tab" id="role-tab-3" aria-controls="role-panel-3" aria-selected="false" tabindex="-1"><span class="cast__num">iv.</span><span class="cast__title">Elle apprend votre style</span></button>
+          <button class="cast__role" role="tab" id="role-tab-4" aria-controls="role-panel-4" aria-selected="false" tabindex="-1"><span class="cast__num">v.</span><span class="cast__title">Reformuler dans le bon ton</span></button>
+          <button class="cast__role" role="tab" id="role-tab-5" aria-controls="role-panel-5" aria-selected="false" tabindex="-1"><span class="cast__num">vi.</span><span class="cast__title">Traduire au fil de l'écriture</span></button>
+          <button class="cast__role" role="tab" id="role-tab-6" aria-controls="role-panel-6" aria-selected="false" tabindex="-1"><span class="cast__num">vii.</span><span class="cast__title">Les fautes de frappe corrigées</span></button>
+          <button class="cast__role" role="tab" id="role-tab-7" aria-controls="role-panel-7" aria-selected="false" tabindex="-1"><span class="cast__num">viii.</span><span class="cast__title">Le bon emoji, tout de suite</span></button>
+          <button class="cast__role" role="tab" id="role-tab-8" aria-controls="role-panel-8" aria-selected="false" tabindex="-1"><span class="cast__num">ix.</span><span class="cast__title">Le temps que vous gagnez</span></button>
+        </div>
+        <div class="cast__stages">
+          <div class="cast__panel is-active" role="tabpanel" id="role-panel-0" aria-labelledby="role-tab-0">
+            <p class="cast__cue">i. — en scène</p>
+            <h3>La suggestion sous le curseur</h3>
+            <p class="cast__lede">Une suggestion grise, là où vous écrivez.</p>
+            <p class="cast__body">Dans Mail, Notes, Messages, votre navigateur web (presque partout où vous écrivez sur votre Mac), la suggestion apparaît en gris, juste sous votre curseur, sans rien déranger autour.</p>
           </div>
-          <p>Souffleuse réfléchit directement sur votre Mac, sans jamais passer par internet. Après une première mise en place, elle fonctionne même sans connexion. Ce que vous écrivez ne part nulle part, pour la simple raison qu'il n'existe aucun endroit où l'envoyer.</p>
-        </li>
-        <li class="feature">
-          <span class="feature__num">iv.</span>
-          <h3>Elle apprend votre voix, sous clé</h3>
-          <p class="feature__lede">Plus vous l'utilisez, plus elle vous ressemble.</p>
-          <p>Au fil des jours, elle retient les tournures que vous gardez et s'accorde à votre manière d'écrire. Ce qu'elle apprend reste sous clé sur votre Mac, lisible par vous seul.</p>
-        </li>
-        <li class="feature">
-          <span class="feature__num">v.</span>
-          <h3>La relecture, dans le bon ton</h3>
-          <p class="feature__lede">Votre phrase, relue selon l'app.</p>
-          <p>Un même mot ne se dit pas pareil dans Mail et dans Messages. Tapez <span class="shortcode">//</span> : elle relit votre phrase et la reformule dans le ton du lieu (posé pour un client, léger pour un proche), ou la resserre si elle s'étire. Toujours vos mots, mieux placés.</p>
-          <p class="feature__vue" aria-hidden="true">
-            <span class="vue-scene"><span class="shortcode">//</span> : relu pour Mail, à un client</span>
-            <span class="vue-avant">« On se capte demain pour le devis ? »</span><span class="vue-fleche">→</span><span class="vue-apres">« Pourrions-nous échanger demain au sujet du devis ? »</span>
-          </p>
-        </li>
-        <li class="feature">
-          <span class="feature__num">vi.</span>
-          <h3>La traduction, soufflée aussi</h3>
-          <p class="feature__lede">La langue de chaque conversation, retenue.</p>
-          <p>Une conversation en anglais, une autre en espagnol ? Choisissez la langue d'une conversation, une seule fois : elle traduit ensuite au fil de l'échange, dans un petit panneau discret, sans que rien ne parte nulle part. Un <span class="shortcode">//</span> la convoque aussi, à la demande.</p>
-          <p class="feature__vue" aria-hidden="true">
-            <span class="vue-scene">Conversation réglée sur : anglais</span>
-            <span class="vue-avant">« On se voit toujours jeudi ? »</span><span class="vue-fleche">→</span><span class="vue-apres">“Are we still on for Thursday?”</span>
-          </p>
-        </li>
-        <li class="feature">
-          <span class="feature__num">vii.</span>
-          <h3>Les coquilles, rattrapées au vol</h3>
-          <p class="feature__lede">La faute de frappe, corrigée en passant.</p>
-          <p>Un mot tapé trop vite, deux lettres inversées ? Elle reconnaît la coquille, souffle la suite avec le mot juste, et Tab rétablit tout au passage, sans vous le faire remarquer.</p>
-          <p class="feature__vue" aria-hidden="true">
-            <span class="vue-scene">Tapé trop vite</span>
-            <span class="vue-typed">Voici notre <span class="vue-typo">porposition</span></span><span class="caret" aria-hidden="true"></span><span class="vue-souffle">&nbsp;tarifaire pour le mois de juin.</span>
-            <span class="vue-note"><kbd>Tab</kbd> prend la suite et rétablit « proposition ».</span>
-          </p>
-        </li>
-        <li class="feature">
-          <span class="feature__num">viii.</span>
-          <h3>L'emoji, au mot près</h3>
-          <p class="feature__lede">Le bon emoji, sans quitter le clavier.</p>
-          <p>Tapez deux-points : la palette s'ouvre là où vous écrivez, vos favoris en première ligne. Une touche, de 1 à 5, et l'emoji est posé. Et elle vous suit que vous écriviez en français, en anglais, ou les deux dans la même phrase.</p>
-          <p class="feature__vue" aria-hidden="true">
-            <span class="vue-scene">Messages, entre amis</span>
-            <span class="vue-typed">On a signé <span class="shortcode">:</span></span><span class="caret" aria-hidden="true"></span>
-            <span class="vue-picker"><span class="vue-pick"><kbd>1</kbd>🎉</span><span class="vue-pick"><kbd>2</kbd>❤️</span><span class="vue-pick"><kbd>3</kbd>👍</span><span class="vue-pick"><kbd>4</kbd>😅</span><span class="vue-pick"><kbd>5</kbd>🙏</span></span>
-            <span class="vue-note">Une touche, et c'est posé.</span>
-          </p>
-        </li>
-        <li class="feature">
-          <span class="feature__num">ix.</span>
-          <h3>Le carnet d'usage</h3>
-          <p class="feature__lede">Frappes épargnées, temps gagné.</p>
-          <p>En fin de journée, un petit carnet vous dit, à vous seul, ce qu'elle vous a épargné : tant de frappes, tant de minutes. Lui non plus ne quitte pas votre Mac.</p>
-          <p class="feature__vue" aria-hidden="true">
-            <span class="vue-scene">Ce soir, au carnet</span>
-            <span class="vue-typed"><span class="vue-num">1 248</span> frappes épargnées · <span class="vue-num">11</span> minutes rendues</span>
-          </p>
-        </li>
-      </ul>
+          <div class="cast__panel" role="tabpanel" id="role-panel-1" aria-labelledby="role-tab-1" hidden>
+            <p class="cast__cue">ii. — en scène</p>
+            <h3>Tab pour prendre, Esc pour laisser</h3>
+            <p class="cast__lede">Vous gardez la main, toujours.</p>
+            <p class="cast__body">Tab accepte la suite, mot par mot ou par bouts si vous préférez la prendre par morceaux ; Esc l'efface sans laisser de trace.</p>
+            <p class="feature__vue" aria-hidden="true"><span class="vue-scene">Le geste, à la main</span><span class="vue-keys"><kbd>Tab</kbd> prend la suite<span class="vue-fleche">·</span><kbd>Esc</kbd> la laisse filer</span></p>
+          </div>
+          <div class="cast__panel" role="tabpanel" id="role-panel-2" aria-labelledby="role-tab-2" hidden>
+            <p class="cast__cue">iii. — en scène</p>
+            <h3>Tout se passe sur votre Mac</h3>
+            <p class="cast__lede">Aucun serveur, aucun aller-retour.</p>
+            <p class="cast__body">Souffleuse réfléchit directement sur votre Mac, sans jamais passer par internet. Après une première mise en place, elle fonctionne même sans connexion. Ce que vous écrivez ne part nulle part, pour la simple raison qu'il n'existe aucun endroit où l'envoyer.</p>
+          </div>
+          <div class="cast__panel" role="tabpanel" id="role-panel-3" aria-labelledby="role-tab-3" hidden>
+            <p class="cast__cue">iv. — en scène</p>
+            <h3>Elle apprend votre style</h3>
+            <p class="cast__lede">Plus vous l'utilisez, plus elle vous ressemble.</p>
+            <p class="cast__body">Au fil des jours, elle retient les tournures que vous gardez et s'accorde à votre manière d'écrire. Ce qu'elle apprend reste sous clé sur votre Mac, lisible par vous seul.</p>
+          </div>
+          <div class="cast__panel" role="tabpanel" id="role-panel-4" aria-labelledby="role-tab-4" hidden>
+            <p class="cast__cue">v. — en scène</p>
+            <h3>Reformuler dans le bon ton</h3>
+            <p class="cast__lede">Votre phrase, relue selon l'app.</p>
+            <p class="cast__body">Un même mot ne se dit pas pareil dans Mail et dans Messages. Tapez <span class="shortcode">//</span> : elle relit votre phrase et la reformule dans le ton du lieu (posé pour un client, léger pour un proche), ou la resserre si elle s'étire. Toujours vos mots, mieux placés.</p>
+            <p class="feature__vue" aria-hidden="true"><span class="vue-scene"><span class="shortcode">//</span> : relu pour Mail, à un client</span><span class="vue-avant">« On se capte demain pour le devis ? »</span><span class="vue-fleche">→</span><span class="vue-apres">« Pourrions-nous échanger demain au sujet du devis ? »</span></p>
+          </div>
+          <div class="cast__panel" role="tabpanel" id="role-panel-5" aria-labelledby="role-tab-5" hidden>
+            <p class="cast__cue">vi. — en scène</p>
+            <h3>Traduire au fil de l'écriture</h3>
+            <p class="cast__lede">La langue de chaque conversation, retenue.</p>
+            <p class="cast__body">Une conversation en anglais, une autre en espagnol ? Choisissez la langue d'une conversation, une seule fois : elle traduit ensuite au fil de l'échange, dans un petit panneau discret, sans que rien ne parte nulle part. Un <span class="shortcode">//</span> la convoque aussi, à la demande.</p>
+            <p class="feature__vue" aria-hidden="true"><span class="vue-scene">Conversation réglée sur : anglais</span><span class="vue-avant">« On se voit toujours jeudi ? »</span><span class="vue-fleche">→</span><span class="vue-apres">“Are we still on for Thursday?”</span></p>
+          </div>
+          <div class="cast__panel" role="tabpanel" id="role-panel-6" aria-labelledby="role-tab-6" hidden>
+            <p class="cast__cue">vii. — en scène</p>
+            <h3>Les fautes de frappe corrigées</h3>
+            <p class="cast__lede">La faute de frappe, corrigée en passant.</p>
+            <p class="cast__body">Un mot tapé trop vite, deux lettres inversées ? Elle reconnaît la coquille, souffle la suite avec le mot juste, et Tab rétablit tout au passage, sans vous le faire remarquer.</p>
+            <p class="feature__vue" aria-hidden="true"><span class="vue-scene">Tapé trop vite</span><span class="vue-typed">Voici notre <span class="vue-typo">porposition</span></span><span class="caret" aria-hidden="true"></span><span class="vue-souffle">&nbsp;tarifaire pour le mois de juin.</span><span class="vue-note"><kbd>Tab</kbd> prend la suite et rétablit « proposition ».</span></p>
+          </div>
+          <div class="cast__panel" role="tabpanel" id="role-panel-7" aria-labelledby="role-tab-7" hidden>
+            <p class="cast__cue">viii. — en scène</p>
+            <h3>Le bon emoji, tout de suite</h3>
+            <p class="cast__lede">Le bon emoji, sans quitter le clavier.</p>
+            <p class="cast__body">Tapez deux-points : la palette s'ouvre là où vous écrivez, vos favoris en première ligne. Une touche, de 1 à 5, et l'emoji est posé. Et elle vous suit que vous écriviez en français, en anglais, ou les deux dans la même phrase.</p>
+            <p class="feature__vue" aria-hidden="true"><span class="vue-scene">Messages, entre amis</span><span class="vue-typed">On a signé <span class="shortcode">:</span></span><span class="caret" aria-hidden="true"></span><span class="vue-picker"><span class="vue-pick"><kbd>1</kbd>🎉</span><span class="vue-pick"><kbd>2</kbd>❤️</span><span class="vue-pick"><kbd>3</kbd>👍</span><span class="vue-pick"><kbd>4</kbd>😅</span><span class="vue-pick"><kbd>5</kbd>🙏</span></span><span class="vue-note">Une touche, et c'est posé.</span></p>
+          </div>
+          <div class="cast__panel" role="tabpanel" id="role-panel-8" aria-labelledby="role-tab-8" hidden>
+            <p class="cast__cue">ix. — en scène</p>
+            <h3>Le temps que vous gagnez</h3>
+            <p class="cast__lede">Frappes épargnées, temps gagné.</p>
+            <p class="cast__body">En fin de journée, un petit carnet vous dit, à vous seul, ce qu'elle vous a épargné : tant de frappes, tant de minutes. Lui non plus ne quitte pas votre Mac.</p>
+            <p class="feature__vue" aria-hidden="true"><span class="vue-scene">Ce soir, au carnet</span><span class="vue-typed"><span class="vue-num">1 248</span> frappes épargnées · <span class="vue-num">11</span> minutes rendues</span></p>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -2074,9 +2125,9 @@
   <section class="coulisses reveal" id="coulisses" aria-labelledby="coulisses-titre">
     <div class="shell">
       <div class="section-head">
-        <span class="smallcaps">Côté jardin, côté cour</span>
-        <h2 id="coulisses-titre">Ce qui se dit en coulisse reste en coulisse</h2>
-        <p class="stage-dir">En clair : la confidentialité, par construction.</p>
+        <span class="smallcaps">Confidentialité</span>
+        <h2 id="coulisses-titre">Ce que vous écrivez ne sort jamais</h2>
+        <p class="stage-dir">Privé par conception.</p>
       </div>
       <p class="coulisses__lede">
         Souffleuse ne fonctionne que parce qu'elle lit ce que vous écrivez. Alors on a fait
@@ -2136,26 +2187,26 @@
   <section id="marche" class="reveal" aria-labelledby="marche-titre">
     <div class="shell">
       <div class="section-head">
-        <span class="smallcaps">Le déroulé</span>
-        <h2 id="marche-titre">En trois actes</h2>
+        <span class="smallcaps">En pratique</span>
+        <h2 id="marche-titre">En trois étapes</h2>
       </div>
       <ol class="steps">
         <li class="step">
-          <p class="step__acte">Acte I</p>
+          <p class="step__acte">Étape 1</p>
           <span class="step__num">1</span>
           <h3>Installez</h3>
           <p>Glissez Souffleuse dans vos applications, donnez-lui l'autorisation qu'elle demande, et elle vient se loger discrètement dans la barre de menus, en haut de l'écran.</p>
         </li>
         <li class="step">
-          <p class="step__acte">Acte II</p>
+          <p class="step__acte">Étape 2</p>
           <span class="step__num">2</span>
           <h3>Écrivez</h3>
           <p>Tapez normalement, dans l'app que vous voulez. Quand vous hésitez, une suggestion grise apparaît sous le curseur.</p>
         </li>
         <li class="step">
-          <p class="step__acte">Acte III</p>
+          <p class="step__acte">Étape 3</p>
           <span class="step__num">3</span>
-          <h3>Soufflez</h3>
+          <h3>Validez</h3>
           <p>Elle vous va ? <kbd>Tab</kbd>. Elle vous gêne ? <kbd>Esc</kbd>, ou continuez à taper : elle s'efface.</p>
         </li>
       </ol>
@@ -2168,7 +2219,7 @@
   <section id="faq" class="reveal" aria-labelledby="faq-titre">
     <div class="shell">
       <div class="section-head">
-        <span class="smallcaps">Avant le lever de rideau</span>
+        <span class="smallcaps">Bon à savoir</span>
         <h2 id="faq-titre">Quelques questions</h2>
       </div>
       <div class="faq">
@@ -2301,7 +2352,7 @@
     <a href="/licence.html">Licence (EULA)</a>
     <a href="/mentions-legales.html">Mentions légales</a>
     <a href="#faq">Questions</a>
-    <a href="#soutenir" data-don-open>Au chapeau (don)</a>
+    <a href="#soutenir" data-don-open>Soutenir</a>
     <a href="mailto:contact@souffleuse.app">Écrire à la souffleuse</a>
   </nav>
   <div class="shell colophon">
@@ -3147,5 +3198,48 @@
   });
 })();
 </script>
+<script>
+// Distribution interactive : un rôle appelé entre en scène, les autres se taisent.
+// Repli sans JS : tous les panneaux sont révélés (voir <noscript> plus bas).
+(function () {
+  "use strict";
+  var root = document.getElementById("fonctions");
+  if (!root) return;
+  var tabs   = Array.prototype.slice.call(root.querySelectorAll(".cast__role"));
+  var panels = Array.prototype.slice.call(root.querySelectorAll(".cast__panel"));
+  if (!tabs.length || tabs.length !== panels.length) return;
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function select(i, focus) {
+    tabs.forEach(function (t, j) {
+      var on = j === i;
+      t.setAttribute("aria-selected", on ? "true" : "false");
+      t.tabIndex = on ? 0 : -1;
+    });
+    panels.forEach(function (p, j) {
+      var on = j === i;
+      p.hidden = !on;
+      p.classList.toggle("is-active", on);
+      if (on && !reduce) { p.style.animation = "none"; void p.offsetWidth; p.style.animation = ""; }
+    });
+    if (focus && tabs[i]) tabs[i].focus();
+  }
+
+  tabs.forEach(function (t, i) {
+    t.addEventListener("click", function () { select(i, false); });
+    t.addEventListener("keydown", function (e) {
+      var n;
+      if (e.key === "ArrowDown" || e.key === "ArrowRight") n = (i + 1) % tabs.length;
+      else if (e.key === "ArrowUp" || e.key === "ArrowLeft") n = (i - 1 + tabs.length) % tabs.length;
+      else if (e.key === "Home") n = 0;
+      else if (e.key === "End") n = tabs.length - 1;
+      else return;
+      e.preventDefault();
+      select(n, true);
+    });
+  });
+})();
+</script>
+<noscript><style>#fonctions .cast__panel { display: block !important; border-top: 1px solid rgba(26,22,19,0.22); padding-top: 1.1rem; margin-top: 1.1rem; }</style></noscript>
 </body>
 </html>
