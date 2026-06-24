@@ -170,7 +170,7 @@ private enum PrefSection: String, CaseIterable, Identifiable {
     var searchTerms: String {
         switch self {
         case .souffle:
-            return "souffle ghost whisper longueur length modèle model accepter accept mot word tab milieu ligne mid-line corriger préfixe batterie battery économie energy énergie alimentation secteur ac power suspendre voix légère"
+            return "souffle ghost whisper longueur length modèle model accepter accept mot word tab milieu ligne mid-line corriger préfixe batterie battery économie energy énergie alimentation secteur ac power suspendre voix légère performance charge load thermique thermal chaleur heat gpu cpu profondeur look-ahead adapter"
         case .apparence:
             return "apparence appearance couleur color opacité opacity police font taille gris"
         case .traduction:
@@ -602,6 +602,9 @@ private struct SouffleTab: View {
 
             BatterySaverSection(store: store)
                 .id(PrefAnchors.id(.souffle, "battery"))
+
+            PerformanceSection(store: store)
+                .id(PrefAnchors.id(.souffle, "performance"))
         }
         .formStyle(.grouped)
     }
@@ -658,6 +661,48 @@ private struct BatterySaverSection: View {
             Text(tr(fr: "Batterie", en: "Battery")).font(.headline)
         } footer: {
             Text(tr(fr: "Ces réglages ne s'appliquent que lorsque le Mac fonctionne sur batterie. Sur secteur, le souffle reprend ses réglages normaux.", en: "These settings only apply while your Mac runs on battery. On AC power, the whisper returns to its normal settings."))
+                .font(.callout).foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// Section « Performance » — adaptation à la charge (jumelle de Batterie). Quand
+/// le Mac chauffe, le souffle raccourcit sa profondeur de look-ahead pour réduire
+/// le décodage GPU/CPU, sans jamais masquer le ghost. ON par défaut ; transparent
+/// tant que la machine est au frais (`thermalState == nominal`).
+private struct PerformanceSection: View {
+    @Bindable var store: PreferencesStore
+
+    /// État thermique LIVE, rafraîchi tant que la pane est ouverte (mêmes
+    /// modalités que l'indicateur batterie : lecture pure + timer 2 s).
+    @State private var thermal = ProcessInfo.processInfo.thermalState
+    private let thermalTick = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
+
+    private var thermalLabel: String {
+        switch thermal {
+        case .nominal:  return tr(fr: "Mac au frais — souffle à pleine profondeur.", en: "Mac is cool — whisper at full depth.")
+        case .fair:     return tr(fr: "Légère chauffe — souffle inchangé.", en: "Slightly warm — whisper unchanged.")
+        case .serious:  return tr(fr: "Mac sous pression — souffle raccourci pour soulager le GPU.", en: "Mac under pressure — whisper shortened to ease the GPU.")
+        case .critical: return tr(fr: "Forte pression thermique — souffle au plus court.", en: "High thermal pressure — whisper at its shortest.")
+        @unknown default: return ""
+        }
+    }
+    private var hot: Bool { thermal == .serious || thermal == .critical }
+
+    var body: some View {
+        Section {
+            HStack(spacing: 6) {
+                Image(systemName: hot ? "thermometer.high" : "thermometer.low")
+                    .foregroundStyle(hot ? .orange : .green)
+                Text(thermalLabel).font(.callout).foregroundStyle(.secondary)
+            }
+            .onReceive(thermalTick) { _ in thermal = ProcessInfo.processInfo.thermalState }
+            Toggle(tr(fr: "Adapter le souffle à la charge", en: "Adapt the whisper to system load"),
+                   isOn: $store.loadGovernorEnabled)
+        } header: {
+            Text(tr(fr: "Performance", en: "Performance")).font(.headline)
+        } footer: {
+            Text(tr(fr: "Quand votre Mac chauffe, le souffle génère un peu moins loin d'avance pour réduire la charge GPU/CPU — il reste toujours affiché, simplement plus court. Au frais, aucun changement.", en: "When your Mac heats up, the whisper looks a little less far ahead to cut GPU/CPU load — it stays visible, just shorter. When cool, nothing changes."))
                 .font(.callout).foregroundStyle(.secondary)
         }
     }
@@ -739,6 +784,7 @@ private enum PrefAnchors {
         (.souffle, "accept", "accepter accept mot à mot word espace trailing tout accepter tab flèche"),
         (.souffle, "prefix", "corriger préfixe avant de souffler coquille fix"),
         (.souffle, "battery", "batterie battery économie energy énergie secteur alimentation suspendre voix légère ac power"),
+        (.souffle, "performance", "performance charge load thermique thermal chaleur heat gpu cpu profondeur look-ahead adapter ralentissement throttle"),
         (.apparence, "whisper", "couleur color gris sang-de-bœuf voix teinte opacité opacity transparence intensité"),
         (.traduction, "model", "modèle traduction translation model"),
         (.traduction, "keys", "valider commit langue cible target raccourci traduire touche hotkey cycle"),

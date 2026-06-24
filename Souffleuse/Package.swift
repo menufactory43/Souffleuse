@@ -23,6 +23,8 @@ let package = Package(
         .executable(name: "SouffleuseBoundaryAblation", targets: ["SouffleuseBoundaryAblation"]),
         .executable(name: "SouffleuseCorpusSeed", targets: ["SouffleuseCorpusSeed"]),
         .executable(name: "SouffleuseTranslateBench", targets: ["SouffleuseTranslateBench"]),
+        .executable(name: "SouffleuseLoadGovernorEval", targets: ["SouffleuseLoadGovernorEval"]),
+        .executable(name: "SouffleuseLoadProfile", targets: ["SouffleuseLoadProfile"]),
         .library(name: "SouffleuseAX", targets: ["SouffleuseAX"]),
         .library(name: "SouffleuseCore", targets: ["SouffleuseCore"]),
         .library(name: "SouffleuseOverlay", targets: ["SouffleuseOverlay"]),
@@ -145,6 +147,14 @@ let package = Package(
         .executableTarget(
             name: "SouffleuseLlamaProbe",
             dependencies: ["SouffleuseLlama", "SouffleuseTyping"]
+        ),
+        .executableTarget(
+            name: "SouffleuseLoadGovernorEval",
+            dependencies: ["SouffleuseLlama", "SouffleuseCore"]
+        ),
+        .executableTarget(
+            name: "SouffleuseLoadProfile",
+            dependencies: ["SouffleuseLlama", "SouffleuseCore"]
         ),
         .executableTarget(
             name: "SouffleuseLicenseGen",
