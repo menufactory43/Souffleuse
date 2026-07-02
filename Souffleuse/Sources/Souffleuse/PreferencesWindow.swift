@@ -1281,15 +1281,19 @@ private struct ModelDownloadBadge: View {
             HStack(spacing: 6) {
                 ProgressView(value: p).frame(width: 90)
                 Text("\(Int(p * 100)) %").font(.caption).monospacedDigit()
+                Button(tr(fr: "Annuler", en: "Cancel")) { manager.cancel(model) }
+                    .controlSize(.small)
             }
         case .absent:
             Button(tr(fr: "Télécharger (\(formatSize(model.approxSizeMB)))", en: "Download (\(formatSize(model.approxSizeMB)))")) { manager.download(model) }
                 .controlSize(.small)
+                .disabled(manager.isDownloadingAny)
         case .failed:
             HStack(spacing: 6) {
                 Text(tr(fr: "échec", en: "failed")).foregroundStyle(Color.sangDeBoeuf).font(.caption)
                 Button(tr(fr: "Réessayer", en: "Retry")) { manager.download(model) }
                     .controlSize(.small)
+                    .disabled(manager.isDownloadingAny)
             }
         }
     }
