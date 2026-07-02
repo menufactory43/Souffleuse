@@ -20,28 +20,25 @@
     <language>fr</language>
 
     <item>
-      <title>Version 0.12.0</title>
-      <pubDate>Thu, 18 Jun 2026 12:00:00 +0000</pubDate>
-      <sparkle:version>0.12.0</sparkle:version>
-      <sparkle:shortVersionString>0.12.0</sparkle:shortVersionString>
+      <title>Version 0.12.1</title>
+      <pubDate>Thu, 02 Jul 2026 14:25:47 +0000</pubDate>
+      <sparkle:version>0.12.1</sparkle:version>
+      <sparkle:shortVersionString>0.12.1</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
       <description><![CDATA[
-        <h2>Souffleuse 0.12.0</h2>
+        <h2>Souffleuse 0.12.1</h2>
         <ul>
-          <li><b>Mise en route plus douce :</b> onboarding peaufiné, avec une confirmation que Souffleuse vit bien dans la barre de menus.</li>
-          <li><b>Accès accessibilité fiabilisé :</b> si macOS révoque l'autorisation (souvent après une mise à jour), Souffleuse le détecte et vous guide pour la réactiver.</li>
-          <li><b>Rapport de plantage local et opt-in :</b> pour aider à corriger les soucis — toujours zéro réseau, rien ne quitte votre Mac.</li>
-          <li><b>Menu enrichi :</b> « À propos » et « Aide / Signaler un bug ».</li>
-          <li><b>Fenêtre Préférences redimensionnable.</b></li>
+          <li><b>Téléchargement de modèle annulable :</b> un bouton « Annuler » apparaît pendant le téléchargement d'un modèle dans les réglages.</li>
+          <li><b>Plus de doubles téléchargements :</b> impossible de lancer un second modèle tant qu'un premier télécharge encore.</li>
         </ul>
         <p>macOS 14+ · Apple Silicon · 100 % on-device.</p>
       ]]></description>
-      <!-- Signé le 2026-06-18 (build Developer ID, NOTARISÉ + staplé). -->
+      <!-- Signé le 2026-07-02 (build Developer ID, NOTARISÉ + staplé). -->
       <!-- Régénérer à chaque release : deploy/make-appcast-entry.sh website/dl/Souffleuse.dmg -->
       <enclosure
         url="https://souffleuse.app/Souffleuse.dmg"
-        sparkle:edSignature="ybhyJdyeeQyiPldBMap9Yx81yFdLP8xrcBG6BoEicRG+s9+m6Wab7pYn7sHBhbBOC8IjfA9PFmX/f90+lFSjDA=="
-        length="7720664"
+        sparkle:edSignature="+ikxsOniMsrqYqhV7rb6bvJX/6TMkld0i4UO410Bmrcp6OndZvMwcGl6uv4F2YHT5Byb+TYPbn6Z6VIY9/FBDQ=="
+        length="7801032"
         type="application/octet-stream" />
     </item>
 
