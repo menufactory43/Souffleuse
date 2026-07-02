@@ -438,11 +438,17 @@ final class ModelRuntime {
                 advanced = await beamEngine.advance(typedChar: ch,
                                                     requiredPrefixForMiss: c.requiredPrefix,
                                                     missWidth: c.width)
+                // `advance` est DESTRUCTIF (consumed++, seq_rm, reserveTypedSoFar) :
+                // la réserve a déjà consommé `ch`, il faut synchroniser la session
+                // AVANT le break d'annulation. Sinon une frappe qui annule mi-boucle
+                // laisse `beamSessionTail` en retard et le prochain predict REJOUE
+                // des chars déjà consommés (reserveTypedSoFar dupliqué → re-beams
+                // froids sur un contexte corrompu jusqu'à la prochaine rupture).
+                beamSessionTail = tail
                 if Task.isCancelled { break }
             }
             GpuGate.shared.ghostEnded()
             if Task.isCancelled { return nil }
-            beamSessionTail = userTail
             if let a = advanced {
                 Log.info(.predictor, "ghost_beam_advance_ms", count: a.elapsedMillis)
                 // Trace de latence : chemin servi (1 hit / 2 refill / 3 miss).
@@ -455,11 +461,13 @@ final class ModelRuntime {
                 // Coupe anti-recopie mid-line : la réserve ne livre qu'UNE branche
                 // (pas d'alternatives à itérer) — si elle recopie le texte après
                 // caret, on la coupe/abstient ; le prochain seed re-proposera.
-                let ghost = BeamGhostShaper.afterCaretEchoCut(
-                    ghost: BeamGhostShaper.beamPostFilter(
-                        rawGhost: a.ghost, isBoundary: isBoundary, caretAfterSpace: caretAfterSpace,
-                        userTail: userTail, maxWords: request.maxWords, trimDanglingTail: isLong),
-                    afterCaret: request.axTextAfterCaret)
+                let ghost = Self.dropContextEcho(
+                    ghost: BeamGhostShaper.afterCaretEchoCut(
+                        ghost: BeamGhostShaper.beamPostFilter(
+                            rawGhost: a.ghost, isBoundary: isBoundary, caretAfterSpace: caretAfterSpace,
+                            userTail: userTail, maxWords: request.maxWords, trimDanglingTail: isLong),
+                        afterCaret: request.axTextAfterCaret),
+                    ctxPrefix: request.ctxPrefix, userTail: userTail)
                 let reason: String
                 switch a.kind {
                 case .hit: reason = "beam-hit"
@@ -512,14 +520,34 @@ final class ModelRuntime {
         let rawCandidates = result.candidates.isEmpty
             ? [result.best?.ghost ?? ""]
             : result.candidates.map(\.ghost)
-        let ghost = BeamGhostShaper.selectGhost(
-            rawCandidates: rawCandidates, isBoundary: isBoundary, caretAfterSpace: caretAfterSpace,
-            userTail: userTail, maxWords: request.maxWords, afterCaret: request.axTextAfterCaret,
-            trimDanglingTail: isLong)
+        let ghost = Self.dropContextEcho(
+            ghost: BeamGhostShaper.selectGhost(
+                rawCandidates: rawCandidates, isBoundary: isBoundary, caretAfterSpace: caretAfterSpace,
+                userTail: userTail, maxWords: request.maxWords, afterCaret: request.axTextAfterCaret,
+                trimDanglingTail: isLong),
+            ctxPrefix: request.ctxPrefix, userTail: userTail)
         Log.info(.predictor, "ghost_beam_words",
                  count: ghost.split(whereSeparator: { $0.isWhitespace }).count)
         return MidWordEscalationResult(show: !ghost.isEmpty, word: ghost,
                                        reason: ghost.isEmpty ? "beam-gated" : "beam")
+    }
+
+    /// Garde anti-écho du chemin BEAM — parité avec le chemin streaming
+    /// (`ChunkFilter.filterChunk`), qui était le SEUL call-site de ces gardes
+    /// alors que le beam-core est devenu le défaut. Sur champ (quasi) vide le
+    /// base PT recrache le cadre injecté (« App Signal, window … ») ou le
+    /// contenu clipboard/OCR passé dans `ctxPrefix` : méta-texte générique ET
+    /// fuite à l'écran → on masque le ghost. Un `ctxPrefix` vide rend le garde
+    /// de préambule no-op (même contrat que `echoesContextPreamble`).
+    private static func dropContextEcho(ghost: String, ctxPrefix: String, userTail: String) -> String {
+        guard !ghost.isEmpty else { return ghost }
+        if OutputFilter.echoesInstruction(ghost)
+            || OutputFilter.echoesContextPreamble(
+                ghost: ghost, contextPreamble: ctxPrefix, userTail: userTail) {
+            Log.info(.predictor, "ghost_beam_context_echo_drop", count: ghost.count)
+            return ""
+        }
+        return ghost
     }
 
     // La logique de mise en forme PURE du cœur beam (seuil de phrase G2,
