@@ -3346,6 +3346,19 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             let preCaret = preSnap.caretIndex ?? 0
             let prePrefix = preSnap.text.map { String($0.prefix(preCaret)) } ?? ""
             let bundleID = preSnap.bundleID
+            // Accept-time freshness gate — miroir de `shouldRenderSuggestion`
+            // côté injection : taper un char puis Tab avant le tick suivant
+            // (< 50 ms) injectait la suggestion de l'ANCIEN préfixe au nouveau
+            // caret (« Bon »+ghost « jour », frappe « s », Tab → « Bonsjour »).
+            // On laisse passer le Tab à l'hôte (même issue que si le tick avait
+            // déjà désarmé l'interceptor).
+            if !Self.shouldAcceptSuggestion(
+                isPartialContinuation: isPartialContinuation,
+                predictedForPrefix: MainActor.assumeIsolated { predictor.predictedForPrefix },
+                livePrefix: (preSnap.text == nil || preSnap.caretIndex == nil) ? nil : prePrefix) {
+                Log.info(.input, "ghost_accept_stale_refused")
+                return false
+            }
 
             // Partial accept enabled → split the suggestion, inject just the
             // next chunk, and keep the rest as a ghost remainder. Mid-line walks
@@ -3565,6 +3578,15 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
             let preCaret = preSnap.caretIndex ?? 0
             let prePrefix = preSnap.text.map { String($0.prefix(preCaret)) } ?? ""
             let bundleID = preSnap.bundleID
+            // Même garde de fraîcheur que le Tab (voir commentaire là-bas) —
+            // AVANT le reset du partial state, pour ne pas le perdre sur refus.
+            if !Self.shouldAcceptSuggestion(
+                isPartialContinuation: pending.isPartial,
+                predictedForPrefix: MainActor.assumeIsolated { predictor.predictedForPrefix },
+                livePrefix: (preSnap.text == nil || preSnap.caretIndex == nil) ? nil : prePrefix) {
+                Log.info(.input, "ghost_accept_stale_refused")
+                return false
+            }
             // Consuming the whole ghost — clear any in-flight partial state.
             MainActor.assumeIsolated {
                 self.partialRemainder = ""
@@ -4912,6 +4934,27 @@ final class SouffleuseAppDelegate: NSObject, NSApplicationDelegate {
                                        predictedForPrefix: String,
                                        currentPrefix: String) -> Bool {
         !suggestion.isEmpty && predictedForPrefix == currentPrefix
+    }
+
+    /// Accept-time freshness gate — le pendant de `shouldRenderSuggestion` à
+    /// l'INJECTION. Le rendu garantit qu'un ghost visible a été peint pour le
+    /// préfixe exact du dernier tick ; mais entre deux ticks une frappe part
+    /// directement à l'hôte, et un Tab qui la suit de < 50 ms lisait encore la
+    /// suggestion de l'ancien préfixe (« Bonsjour »). Refuser quand le stamp ne
+    /// matche plus le préfixe LIVE ne peut donc bloquer qu'un accept périmé,
+    /// jamais un accept légitime.
+    ///
+    /// Fail-open (`livePrefix == nil`) quand l'AX ne livre ni texte ni caret —
+    /// on préserve le comportement historique dans les apps à AX capricieux.
+    /// Le walk partial-accept (Tab Tab Tab) est exempté : le predictor y est
+    /// annulé (stamp figé) et sa cohérence est tenue par la machinerie
+    /// `partialRemainder`/`lastPredictedPrefix`.
+    nonisolated static func shouldAcceptSuggestion(isPartialContinuation: Bool,
+                                                   predictedForPrefix: String,
+                                                   livePrefix: String?) -> Bool {
+        if isPartialContinuation { return true }
+        guard let livePrefix else { return true }
+        return predictedForPrefix == livePrefix
     }
 
     /// Mid-line ghost (opt-in, `midLineGhostEnabled`): the caret sits inside a
