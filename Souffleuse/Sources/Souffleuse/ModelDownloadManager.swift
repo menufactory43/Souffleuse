@@ -59,15 +59,34 @@ final class ModelDownloadManager: NSObject {
         }
     }
 
-    /// Démarre (ou redémarre) le téléchargement d'un modèle absent.
+    /// `true` si un modèle est déjà en cours de téléchargement (tous confondus).
+    /// Un seul GGUF à la fois : lu par l'UI Préférences pour désactiver les
+    /// autres boutons « Télécharger » — évite deux downloads réseau en parallèle.
+    var isDownloadingAny: Bool {
+        status.values.contains { if case .downloading = $0 { true } else { false } }
+    }
+
+    /// Démarre (ou redémarre) le téléchargement d'un modèle absent. No-op si un
+    /// autre téléchargement est déjà en cours (un seul à la fois — annuler
+    /// d'abord via `cancel(_:)` pour en lancer un autre).
     func download(_ m: DownloadableModel) {
-        guard tasks[m.filename] == nil, !isReady(m) else { return }
+        guard tasks[m.filename] == nil, !isReady(m), !isDownloadingAny else { return }
         status[m.filename] = .downloading(0)
         let task = session.downloadTask(with: m.url)
         task.taskDescription = m.filename
         tasks[m.filename] = task
         Log.info(.predictor, "model_download_start")
         task.resume()
+    }
+
+    /// Annule le téléchargement en cours d'un modèle et remet son état à
+    /// `absent`. No-op si ce modèle n'est pas en cours de téléchargement.
+    func cancel(_ m: DownloadableModel) {
+        guard let task = tasks[m.filename] else { return }
+        tasks[m.filename] = nil
+        status[m.filename] = .absent
+        task.cancel()
+        Log.info(.predictor, "model_download_cancel")
     }
 }
 
@@ -115,9 +134,13 @@ extension ModelDownloadManager: URLSessionDownloadDelegate {
     ) {
         // Succès → `error == nil` (déjà traité dans didFinishDownloadingTo). On ne
         // gère ici QUE l'échec réseau (le fichier n'est jamais arrivé).
-        guard error != nil, let filename = task.taskDescription else { return }
+        guard let error, let filename = task.taskDescription else { return }
+        // Annulation volontaire (`cancel(_:)`) : l'état `.absent` a déjà été posé
+        // synchrone côté MainActor — ne pas l'écraser en `.failed` ici.
+        let userCancelled = (error as NSError).code == NSURLErrorCancelled
         Task { @MainActor in
             self.tasks[filename] = nil
+            guard !userCancelled else { return }
             if self.status[filename] != .ready { self.status[filename] = .failed }
             Log.error(.predictor, "model_download_failed")
         }
