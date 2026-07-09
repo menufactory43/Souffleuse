@@ -115,6 +115,7 @@ Aucun.
 | 260612-ij2 | Onboarding complété : rappel permission perdue (Input Monitoring), essai RÉEL du souffle (exception R1 scopée + inject self-process), toggle login item, réassurance mots de passe, logo | 2026-06-12 | f82422e | Vérifié live (souffle réel + Tab dans le wizard) | [260612-ij2-compl-ter-l-onboarding-rappel-permission](./quick/260612-ij2-compl-ter-l-onboarding-rappel-permission/) |
 | 260614-fib | Supprimer 8 cibles dev mortes/superseded (CorpusEval, TTFTBench, BeamEval, PersonalizationEval, MaxWordsEval) + 3 benches MLX + dépendance mlx-swift-examples du package | 2026-06-14 | 6535438 | swift build OK + 938 @Test verts | [260614-fib-supprimer-8-cibles-dev-mortes-superseded](./quick/260614-fib-supprimer-8-cibles-dev-mortes-superseded/) |
 | 260616-eoy | Fix ghost inline déborde la zone de texte → wrap multi-ligne (1re ligne au caret, lignes suivantes au bord gauche du champ), fallback single-line bottom-anchored préservé | 2026-06-16 | b414507 | swift build OK + 972 @Test verts + audit.sh PASS | [260616-eoy-fix-ghost-inline-d-borde-la-zone-de-text](./quick/260616-eoy-fix-ghost-inline-d-borde-la-zone-de-text/) |
+| 260709-rl5 | SEO overhaul site : recherche mots-clés + accueil FR (galerie, guides, FAQ, schémas) + 5 guides FR + 8 pages EN (dont hub Cotypist alternatives) + sitemap | 2026-07-09 | 1379957, 19e78b0, fdefe69 | JSON-LD/liens/canonicals vérifiés ; déploiement Vercel restant | [260709-rl5-seo-landing-guides-seo-overhaul-of-websi](./quick/260709-rl5-seo-landing-guides-seo-overhaul-of-websi/) |
 
 ### Notes
 
