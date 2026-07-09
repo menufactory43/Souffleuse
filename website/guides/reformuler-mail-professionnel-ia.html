@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Reformuler un mail professionnel avec l'IA — sans le cloud | Souffleuse</title>
+<meta name="description" content="Comment reformuler un mail professionnel avec l'IA, gratuitement et sans coller votre texte dans ChatGPT : la méthode en place, directement dans Mail sur Mac, avec une IA 100 % locale." />
+<link rel="canonical" href="https://souffleuse.app/guides/reformuler-mail-professionnel-ia.html" />
+<meta name="theme-color" content="#f3ead9" />
+<link rel="icon" href="/favicon.ico" sizes="any" />
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="Souffleuse" />
+<meta property="og:locale" content="fr_FR" />
+<meta property="og:url" content="https://souffleuse.app/guides/reformuler-mail-professionnel-ia.html" />
+<meta property="og:title" content="Reformuler un mail professionnel avec l'IA — sans le cloud" />
+<meta property="og:description" content="La méthode pour rendre un mail plus professionnel avec l'IA, en place dans Mail, sans que le texte quitte votre Mac." />
+<meta property="og:image" content="https://souffleuse.app/promo/souffleuse-en-action/05-relecture-par-ton.jpg" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="preload" href="/assets/fonts/bodoni-moda-700-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="preload" href="/assets/fonts/spectral-400-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="stylesheet" href="/assets/fonts.css" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Article",
+  "headline": "Reformuler un mail professionnel avec l'IA — sans envoyer votre texte dans le cloud",
+  "inLanguage": "fr",
+  "author": { "@type": "Organization", "name": "Souffleuse", "url": "https://souffleuse.app/" },
+  "publisher": { "@type": "Organization", "name": "Souffleuse", "url": "https://souffleuse.app/" },
+  "image": "https://souffleuse.app/promo/souffleuse-en-action/05-relecture-par-ton.jpg",
+  "mainEntityOfPage": "https://souffleuse.app/guides/reformuler-mail-professionnel-ia.html",
+  "about": { "@type": "SoftwareApplication", "name": "Souffleuse", "operatingSystem": "macOS", "url": "https://souffleuse.app/" }
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    { "@type": "ListItem", "position": 1, "name": "Souffleuse", "item": "https://souffleuse.app/" },
+    { "@type": "ListItem", "position": 2, "name": "Guides", "item": "https://souffleuse.app/#guides" },
+    { "@type": "ListItem", "position": 3, "name": "Reformuler un mail professionnel avec l'IA" }
+  ]
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Peut-on reformuler un mail avec l'IA sans abonnement ?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Oui. Souffleuse est gratuite pendant la bêta, sans compte ni carte bancaire, et la reformulation par ton fonctionne sans limite quotidienne, directement dans Mail sur Mac." }
+    },
+    {
+      "@type": "Question",
+      "name": "Est-ce risqué de coller un mail professionnel dans ChatGPT ?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Un mail professionnel contient souvent des noms, des chiffres et des informations confidentielles. Collé dans un outil web, ce contenu part sur les serveurs d'un tiers. Une IA locale comme Souffleuse reformule sur votre Mac : rien n'est envoyé, rien n'est conservé ailleurs." }
+    },
+    {
+      "@type": "Question",
+      "name": "La reformulation fonctionne-t-elle ailleurs que dans Mail ?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Oui : Outlook, Slack, Messages, votre navigateur… Souffleuse adapte même le ton au lieu : posé pour un client dans Mail, plus léger dans Messages." }
+    }
+  ]
+}
+</script>
+<style>
+  :root {
+    --paper: #f3ead9; --paper-deep: #ece0c9; --ink: #1a1613; --ink-soft: #463d33;
+    --ink-faint: #5e5446; --rouge: #8c2b21; --rouge-deep: #6f2018;
+    --display: "Bodoni Moda", Georgia, serif; --body: "Spectral", Georgia, serif;
+    --filet: 1px solid var(--ink);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--body); font-size: 1.05rem; line-height: 1.65; }
+  a { color: var(--rouge); }
+  .shell { max-width: 46rem; margin: 0 auto; padding: 0 1.4rem; }
+  header.topbar { border-bottom: var(--filet); padding: 0.9rem 0; }
+  .topbar__inner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+  .brand { display: flex; align-items: center; gap: 0.55rem; text-decoration: none; color: var(--ink); }
+  .brand__name { font-family: var(--display); font-weight: 700; font-size: 1.15rem; }
+  .brand__sub { display: block; font-size: 0.72rem; color: var(--ink-faint); letter-spacing: 0.08em; }
+  .btn { display: inline-flex; align-items: center; gap: 0.5rem; background: var(--rouge); color: var(--paper); font-family: var(--display); font-weight: 700; text-decoration: none; padding: 0.7rem 1.3rem; border: 1px solid var(--rouge-deep); }
+  .btn:hover { background: var(--rouge-deep); }
+  .btn--small { padding: 0.45rem 0.9rem; font-size: 0.9rem; }
+  .crumbs { font-size: 0.82rem; color: var(--ink-faint); margin: 1.6rem 0 0; }
+  .crumbs a { color: var(--ink-faint); }
+  article { padding: 0 0 3rem; }
+  h1 { font-family: var(--display); font-weight: 900; font-size: clamp(1.9rem, 5vw, 2.7rem); line-height: 1.08; margin: 1.2rem 0 0.8rem; }
+  h2 { font-family: var(--display); font-weight: 700; font-size: 1.45rem; line-height: 1.15; margin: 2.4rem 0 0.7rem; }
+  h3 { font-family: var(--display); font-weight: 700; font-size: 1.12rem; margin: 1.6rem 0 0.5rem; }
+  .lede { font-size: 1.15rem; font-style: italic; color: var(--ink-soft); }
+  figure.illu { margin: 2rem 0; }
+  figure.illu img { display: block; width: 100%; max-width: 480px; height: auto; margin: 0 auto; border: 1px solid rgba(26,22,19,0.28); box-shadow: 3px 4px 0 rgba(26,22,19,0.10); }
+  figure.illu figcaption { text-align: center; font-size: 0.82rem; font-style: italic; color: var(--ink-faint); margin-top: 0.5rem; }
+  kbd { font-family: var(--body); background: var(--ink); color: var(--paper); border-radius: 3px; padding: 0.05em 0.45em; font-size: 0.85em; }
+  .shortcode { font-weight: 700; color: var(--rouge); }
+  .exemple { border: 1px solid rgba(26,22,19,0.3); background: var(--paper-deep); padding: 1rem 1.2rem; margin: 1.2rem 0; }
+  .exemple p { margin: 0.3rem 0; }
+  .exemple .avant { color: var(--ink-faint); }
+  .exemple .apres { font-style: italic; }
+  ol.pas li, ul li { margin-bottom: 0.5rem; }
+  .cta-box { border: var(--filet); background: var(--paper-deep); text-align: center; padding: 2rem 1.4rem; margin: 2.6rem 0 0; }
+  .cta-box h2 { margin-top: 0; }
+  .cta-note { font-size: 0.85rem; color: var(--ink-faint); margin-top: 0.8rem; }
+  footer { border-top: var(--filet); padding: 1.6rem 0 2.2rem; font-size: 0.85rem; color: var(--ink-faint); }
+  footer nav { display: flex; flex-wrap: wrap; gap: 0.4rem 1.4rem; margin-top: 0.6rem; }
+  footer a { color: var(--ink-faint); }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="shell topbar__inner">
+    <a href="/" class="brand" aria-label="Souffleuse, accueil">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
+        <path d="M2 22 Q13 2 24 22" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <path d="M6 22 Q13 9 20 22" fill="none" stroke="currentColor" stroke-width="1"/>
+        <circle cx="13" cy="22" r="1.4" fill="currentColor"/>
+      </svg>
+      <span><span class="brand__name">Souffleuse</span><span class="brand__sub">pour Mac</span></span>
+    </a>
+    <a href="/Souffleuse.dmg" download class="btn btn--small">Télécharger</a>
+  </div>
+</header>
+
+<main class="shell">
+  <p class="crumbs"><a href="/">Souffleuse</a> · <a href="/#guides">Guides</a> · Reformuler un mail professionnel avec l'IA</p>
+
+  <article>
+    <h1>Reformuler un mail professionnel avec l'IA — sans envoyer votre texte dans le cloud</h1>
+    <p class="lede">« On se capte demain pour le devis ? » est très bien entre collègues, moins face à un client. Voici comment reformuler un mail dans un ton professionnel avec l'IA, gratuitement, sans copier-coller — et sans que le contenu du mail ne quitte votre Mac.</p>
+
+    <h2>Le problème du copier-coller vers ChatGPT</h2>
+    <p>Le réflexe habituel : écrire le mail, le copier, ouvrir ChatGPT ou un outil web de reformulation, coller, attendre, recopier le résultat, le rapatrier dans Mail. Quatre allers-retours pour une phrase — et surtout, un détail qu'on oublie vite : <b>un mail professionnel part alors sur les serveurs d'un tiers</b>. Noms de clients, montants de devis, clauses en négociation, informations RH… tout ce que contient votre brouillon est envoyé à l'extérieur, parfois conservé, parfois réutilisé pour entraîner des modèles. Dans beaucoup d'entreprises, c'est précisément ce que les chartes internes et le RGPD demandent d'éviter.</p>
+
+    <h2>La reformulation en place : la méthode</h2>
+    <p><a href="/">Souffleuse</a> prend le problème à l'envers : plutôt que d'apporter votre texte à l'IA, elle installe une petite IA <b>sur votre Mac</b>, qui relit votre phrase là où vous l'écrivez. Concrètement :</p>
+    <ol class="pas">
+      <li><a href="/Souffleuse.dmg" download>Téléchargez Souffleuse</a> (gratuite pendant la bêta, ~7,5 Mo, notarisée par Apple) et glissez-la dans vos Applications. Elle s'installe dans la barre de menus et télécharge une fois son modèle de langage — c'est la seule connexion qu'elle fera jamais.</li>
+      <li>Écrivez votre mail comme il vous vient, dans Mail, Outlook ou votre webmail. Le premier jet a le droit d'être familier.</li>
+      <li>Tapez <span class="shortcode">//</span> à la fin de votre phrase : Souffleuse la relit et la reformule dans le ton du lieu — posé et courtois pour un client dans Mail.</li>
+      <li>La proposition vous va ? <kbd>Tab</kbd> et elle remplace votre phrase. Elle ne vous va pas ? <kbd>Esc</kbd>, votre texte reste tel quel.</li>
+    </ol>
+    <div class="exemple">
+      <p class="avant">Avant — « On se capte demain pour le devis ? »</p>
+      <p class="apres">Après <span class="shortcode">//</span> — « Pourrions-nous échanger demain au sujet du devis ? »</p>
+    </div>
+    <p>Ce sont toujours vos mots et votre intention : la reformulation resserre, adoucit ou formalise, elle n'invente pas un mail à votre place.</p>
+
+    <figure class="illu">
+      <img src="/promo/souffleuse-en-action/web/05-relecture-par-ton-720.jpg" width="720" height="900" loading="lazy" decoding="async"
+           alt="Reformulation d'un message avec l'IA sur Mac : la même phrase relue dans un ton professionnel, directement dans Mail." />
+      <figcaption>La relecture par ton : la même phrase, relue pour le bon destinataire.</figcaption>
+    </figure>
+
+    <h2>Le ton s'adapte à l'app, pas l'inverse</h2>
+    <p>Un même mot ne se dit pas pareil dans Mail et dans Messages. Souffleuse tient compte de l'app où vous écrivez : la reformulation d'un mail client tire vers le formel, celle d'un message Slack reste naturelle, celle d'un texto à un proche garde sa légèreté. Vous pouvez aussi choisir explicitement le ton — plus court, plus chaleureux, plus neutre — quand la situation le demande.</p>
+
+    <h2>Pourquoi le « 100 % local » compte pour un mail pro</h2>
+    <ul>
+      <li><b>Confidentialité par construction :</b> la reformulation est calculée par un modèle qui tourne sur la puce Apple Silicon de votre Mac. Il n'existe aucun serveur où envoyer votre brouillon — donc aucune fuite possible, aucune conservation, aucune réutilisation.</li>
+      <li><b>Conformité :</b> pas de sous-traitant, pas de transfert de données : les exigences RGPD et les chartes internes sont respectées d'office.</li>
+      <li><b>Hors ligne :</b> dans le train, en avion, derrière un VPN strict — la reformulation fonctionne pareil, sans réseau.</li>
+      <li><b>Gratuit pendant la bêta :</b> pas de compte, pas de carte, pas de quota journalier.</li>
+    </ul>
+
+    <h2>Et pendant que vous écrivez le reste du mail…</h2>
+    <p>La reformulation n'est qu'un des rôles de Souffleuse : pendant la frappe, elle propose aussi la <a href="/guides/autocompletion-mac-comme-iphone.html">suite de vos phrases en gris sous le curseur</a> (Tab pour accepter), corrige les fautes de frappe au passage, et peut <a href="/guides/traduire-en-ecrivant-mac.html">traduire au fil de l'écriture</a> si la conversation se tient dans une autre langue. Le mail entier s'écrit plus vite, pas seulement sa relecture.</p>
+
+    <div class="cta-box">
+      <h2>Essayez sur votre prochain mail</h2>
+      <p>Écrivez comme il vous vient, tapez <span class="shortcode">//</span>, jugez sur pièce.</p>
+      <a href="/Souffleuse.dmg" download class="btn">Télécharger Souffleuse pour Mac</a>
+      <p class="cta-note"><b>Gratuit pendant la bêta.</b> macOS Sonoma (14) ou plus récent · puce Apple Silicon · ~7,5 Mo · vos textes ne quittent jamais votre Mac.</p>
+    </div>
+  </article>
+</main>
+
+<footer>
+  <div class="shell">
+    <p>Souffleuse — le mot juste, soufflé à voix basse. Fait sur Mac, reste sur votre Mac.</p>
+    <nav aria-label="Liens utiles">
+      <a href="/">Accueil</a>
+      <a href="/guides/autocompletion-mac-comme-iphone.html">Autocomplétion sur Mac</a>
+      <a href="/guides/traduire-en-ecrivant-mac.html">Traduire en écrivant</a>
+      <a href="/guides/ia-locale-mac.html">IA locale sur Mac</a>
+      <a href="/guides/alternative-cotypist-gratuite.html">Alternative à Cotypist</a>
+      <a href="/confidentialite.html">Confidentialité</a>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>

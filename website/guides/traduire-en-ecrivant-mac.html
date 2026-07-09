@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Traduire en écrivant sur Mac, sans copier-coller | Souffleuse</title>
+<meta name="description" content="Comment traduire un message automatiquement sur Mac : les limites du sélectionner-puis-traduire (Traduction Apple, DeepL) et la méthode qui traduit au fil de la frappe, hors ligne." />
+<link rel="canonical" href="https://souffleuse.app/guides/traduire-en-ecrivant-mac.html" />
+<meta name="theme-color" content="#f3ead9" />
+<link rel="icon" href="/favicon.ico" sizes="any" />
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="Souffleuse" />
+<meta property="og:locale" content="fr_FR" />
+<meta property="og:url" content="https://souffleuse.app/guides/traduire-en-ecrivant-mac.html" />
+<meta property="og:title" content="Traduire en écrivant sur Mac — sans casser le fil de la conversation" />
+<meta property="og:description" content="Choisissez la langue une fois par conversation : votre message se traduit au fil de la frappe, hors ligne, sans copier-coller." />
+<meta property="og:image" content="https://souffleuse.app/promo/souffleuse-en-action/04-traduction.jpg" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="preload" href="/assets/fonts/bodoni-moda-700-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="preload" href="/assets/fonts/spectral-400-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="stylesheet" href="/assets/fonts.css" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Article",
+  "headline": "Traduire en écrivant sur Mac — sans casser le fil de la conversation",
+  "inLanguage": "fr",
+  "author": { "@type": "Organization", "name": "Souffleuse", "url": "https://souffleuse.app/" },
+  "publisher": { "@type": "Organization", "name": "Souffleuse", "url": "https://souffleuse.app/" },
+  "image": "https://souffleuse.app/promo/souffleuse-en-action/04-traduction.jpg",
+  "mainEntityOfPage": "https://souffleuse.app/guides/traduire-en-ecrivant-mac.html",
+  "about": { "@type": "SoftwareApplication", "name": "Souffleuse", "operatingSystem": "macOS", "url": "https://souffleuse.app/" }
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    { "@type": "ListItem", "position": 1, "name": "Souffleuse", "item": "https://souffleuse.app/" },
+    { "@type": "ListItem", "position": 2, "name": "Guides", "item": "https://souffleuse.app/#guides" },
+    { "@type": "ListItem", "position": 3, "name": "Traduire en écrivant sur Mac" }
+  ]
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Peut-on traduire un message automatiquement sur Mac sans copier-coller ?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Oui. Avec Souffleuse, vous choisissez une fois la langue cible d'une conversation ; elle est mémorisée, et vos messages se traduisent ensuite au fil de la frappe, directement dans l'app où vous écrivez, sans sélection ni copier-coller." }
+    },
+    {
+      "@type": "Question",
+      "name": "La traduction fonctionne-t-elle hors ligne ?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Oui. Le modèle de langage de Souffleuse tourne sur la puce Apple Silicon de votre Mac : après le téléchargement initial du modèle, la traduction fonctionne sans connexion internet, et aucun texte n'est envoyé sur un serveur." }
+    },
+    {
+      "@type": "Question",
+      "name": "Faut-il rechoisir la langue à chaque message ?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Non. La langue cible se choisit une fois par conversation et Souffleuse s'en souvient : votre fil Slack avec l'équipe de Berlin reste en anglais, votre discussion familiale reste en espagnol, sans rien re-régler." }
+    }
+  ]
+}
+</script>
+<style>
+  :root {
+    --paper: #f3ead9; --paper-deep: #ece0c9; --ink: #1a1613; --ink-soft: #463d33;
+    --ink-faint: #5e5446; --rouge: #8c2b21; --rouge-deep: #6f2018;
+    --display: "Bodoni Moda", Georgia, serif; --body: "Spectral", Georgia, serif;
+    --filet: 1px solid var(--ink);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--body); font-size: 1.05rem; line-height: 1.65; }
+  a { color: var(--rouge); }
+  .shell { max-width: 46rem; margin: 0 auto; padding: 0 1.4rem; }
+  header.topbar { border-bottom: var(--filet); padding: 0.9rem 0; }
+  .topbar__inner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+  .brand { display: flex; align-items: center; gap: 0.55rem; text-decoration: none; color: var(--ink); }
+  .brand__name { font-family: var(--display); font-weight: 700; font-size: 1.15rem; }
+  .brand__sub { display: block; font-size: 0.72rem; color: var(--ink-faint); letter-spacing: 0.08em; }
+  .btn { display: inline-flex; align-items: center; gap: 0.5rem; background: var(--rouge); color: var(--paper); font-family: var(--display); font-weight: 700; text-decoration: none; padding: 0.7rem 1.3rem; border: 1px solid var(--rouge-deep); }
+  .btn:hover { background: var(--rouge-deep); }
+  .btn--small { padding: 0.45rem 0.9rem; font-size: 0.9rem; }
+  .crumbs { font-size: 0.82rem; color: var(--ink-faint); margin: 1.6rem 0 0; }
+  .crumbs a { color: var(--ink-faint); }
+  article { padding: 0 0 3rem; }
+  h1 { font-family: var(--display); font-weight: 900; font-size: clamp(1.9rem, 5vw, 2.7rem); line-height: 1.08; margin: 1.2rem 0 0.8rem; }
+  h2 { font-family: var(--display); font-weight: 700; font-size: 1.45rem; line-height: 1.15; margin: 2.4rem 0 0.7rem; }
+  h3 { font-family: var(--display); font-weight: 700; font-size: 1.12rem; margin: 1.6rem 0 0.5rem; }
+  .lede { font-size: 1.15rem; font-style: italic; color: var(--ink-soft); }
+  figure.illu { margin: 2rem 0; }
+  figure.illu img { display: block; width: 100%; max-width: 480px; height: auto; margin: 0 auto; border: 1px solid rgba(26,22,19,0.28); box-shadow: 3px 4px 0 rgba(26,22,19,0.10); }
+  figure.illu figcaption { text-align: center; font-size: 0.82rem; font-style: italic; color: var(--ink-faint); margin-top: 0.5rem; }
+  kbd { font-family: var(--body); background: var(--ink); color: var(--paper); border-radius: 3px; padding: 0.05em 0.45em; font-size: 0.85em; }
+  .shortcode { font-weight: 700; color: var(--rouge); }
+  .exemple { border: 1px solid rgba(26,22,19,0.3); background: var(--paper-deep); padding: 1rem 1.2rem; margin: 1.2rem 0; }
+  .exemple p { margin: 0.3rem 0; }
+  .exemple .avant { color: var(--ink-faint); }
+  .exemple .apres { font-style: italic; }
+  ol.pas li, ul li { margin-bottom: 0.5rem; }
+  .cta-box { border: var(--filet); background: var(--paper-deep); text-align: center; padding: 2rem 1.4rem; margin: 2.6rem 0 0; }
+  .cta-box h2 { margin-top: 0; }
+  .cta-note { font-size: 0.85rem; color: var(--ink-faint); margin-top: 0.8rem; }
+  footer { border-top: var(--filet); padding: 1.6rem 0 2.2rem; font-size: 0.85rem; color: var(--ink-faint); }
+  footer nav { display: flex; flex-wrap: wrap; gap: 0.4rem 1.4rem; margin-top: 0.6rem; }
+  footer a { color: var(--ink-faint); }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="shell topbar__inner">
+    <a href="/" class="brand" aria-label="Souffleuse, accueil">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
+        <path d="M2 22 Q13 2 24 22" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <path d="M6 22 Q13 9 20 22" fill="none" stroke="currentColor" stroke-width="1"/>
+        <circle cx="13" cy="22" r="1.4" fill="currentColor"/>
+      </svg>
+      <span><span class="brand__name">Souffleuse</span><span class="brand__sub">pour Mac</span></span>
+    </a>
+    <a href="/Souffleuse.dmg" download class="btn btn--small">Télécharger</a>
+  </div>
+</header>
+
+<main class="shell">
+  <p class="crumbs"><a href="/">Souffleuse</a> · <a href="/#guides">Guides</a> · Traduire en écrivant sur Mac</p>
+
+  <article>
+    <h1>Traduire en écrivant sur Mac — sans casser le fil de la conversation</h1>
+    <p class="lede">Vous pensez en français, la conversation se tient en anglais. À chaque message, il faut écrire, sélectionner, traduire, recoller — et le fil de la discussion se casse. Voici comment traduire un message automatiquement sur Mac, au fil de la frappe, sans quitter la fenêtre.</p>
+
+    <h2>Les méthodes existantes : sélectionner, puis traduire</h2>
+    <p>Le Mac n'est pas démuni pour traduire, mais tous les outils classiques suivent la même chorégraphie en deux temps :</p>
+    <ul>
+      <li><b>La Traduction Apple :</b> sélectionnez votre texte, clic droit → « Traduire », lisez le résultat dans la bulle, puis remplacez. Bien pour comprendre un paragraphe reçu ; laborieux pour écrire, message après message.</li>
+      <li><b>DeepL et son raccourci ⌘C ⌘C :</b> excellente qualité de traduction, mais le principe reste le même — copier le texte, basculer vers la fenêtre DeepL, récupérer la traduction, revenir la coller. Quatre gestes par message, et votre texte transite par un service en ligne.</li>
+    </ul>
+    <p>Pour une conversation vivante — un client qui attend sur le chat, un fil Slack qui défile — ce ping-pong entre fenêtres coûte cher : on perd le rythme, on perd le fil, et parfois on renonce à répondre dans la langue de l'autre.</p>
+
+    <h2>La méthode langue-par-conversation : traduire pendant que vous tapez</h2>
+    <p><a href="/">Souffleuse</a> prend le problème autrement : plutôt que de traduire <i>après</i>, elle traduit <b>pendant</b>. Vous choisissez la langue cible <b>une fois par conversation</b> ; elle est mémorisée, et vos messages suivants se traduisent au fil de la frappe, dans un panneau discret, sans que vous quittiez la fenêtre. Concrètement :</p>
+    <ol class="pas">
+      <li><a href="/Souffleuse.dmg" download>Téléchargez Souffleuse</a> (~7,5 Mo, notarisée par Apple, gratuite pendant la bêta) et glissez-la dans vos Applications. Elle vit dans la barre de menus et télécharge une fois son modèle de langage — ensuite, tout fonctionne hors ligne.</li>
+      <li>Dans la conversation concernée (Messages, Slack, un chat web…), choisissez la langue cible — par exemple l'anglais. Vous pouvez aussi convoquer la traduction en tapant <span class="shortcode">//</span>.</li>
+      <li>Écrivez en français, comme d'habitude. La version traduite vous est proposée au fil de la frappe ; <kbd>Tab</kbd> pour l'adopter, <kbd>Esc</kbd> pour la refuser.</li>
+      <li>Le lendemain, la même conversation se souvient de sa langue : rien à re-régler. Chaque conversation garde la sienne.</li>
+    </ol>
+    <div class="exemple">
+      <p class="avant">Vous tapez — « Tu es dispo demain ? »</p>
+      <p class="apres">Souffleuse propose — « Are you free tomorrow? »</p>
+    </div>
+
+    <figure class="illu">
+      <img src="/promo/souffleuse-en-action/web/04-traduction-720.jpg" width="720" height="900" loading="lazy" decoding="async"
+           alt="Traduire en écrivant sur Mac : « Tu es dispo demain ? » traduit automatiquement en « Are you free tomorrow? » au fil de la frappe." />
+      <figcaption>La langue se choisit une fois par conversation ; la traduction suit la frappe.</figcaption>
+    </figure>
+
+    <p>Détail qui compte : la traduction est calculée par un modèle qui tourne sur la puce Apple Silicon de votre Mac. <b>Aucun texte n'est envoyé sur internet, jamais</b> — ni à DeepL, ni à Google, ni à personne. C'est le principe de l'<a href="/guides/ia-locale-mac.html">IA locale sur Mac</a> : dans le train sans réseau ou derrière le VPN strict du bureau, la traduction fonctionne pareil.</p>
+
+    <h2>Trois situations où ça change tout</h2>
+    <h3>Le support client bilingue</h3>
+    <p>Vous répondez en anglais à des clients toute la journée, mais vos réponses vous viennent en français. Avec la langue mémorisée sur le fil du chat, vous tapez dans votre langue et envoyez dans la leur — au rythme d'une conversation normale, sans fenêtre DeepL ouverte en permanence, et sans que les messages de vos clients transitent par un service tiers.</p>
+    <h3>La famille à l'étranger</h3>
+    <p>Une belle-famille hispanophone, des cousins installés à Berlin : chaque fil Messages ou WhatsApp garde sa langue. Vous écrivez naturellement, la traduction suit, et l'échange reste chaleureux au lieu de ressembler à un exercice de version.</p>
+    <h3>L'équipe internationale</h3>
+    <p>Le canal Slack de l'équipe est en anglais, le fil avec le prestataire est en français, la discussion avec le bureau de Milan en anglais aussi. Chaque conversation ayant sa langue mémorisée, vous passez de l'une à l'autre sans réfléchir — et Souffleuse continue par ailleurs de vous <a href="/guides/autocompletion-mac-comme-iphone.html">souffler la suite de vos phrases</a> et de <a href="/guides/reformuler-mail-professionnel-ia.html">reformuler dans le bon ton</a> quand il le faut.</p>
+
+    <h2>Questions fréquentes</h2>
+    <h3>Peut-on traduire un message automatiquement sur Mac sans copier-coller ?</h3>
+    <p>Oui. Avec Souffleuse, vous choisissez une fois la langue cible d'une conversation ; elle est mémorisée, et vos messages se traduisent ensuite au fil de la frappe, directement dans l'app où vous écrivez, sans sélection ni copier-coller.</p>
+    <h3>La traduction fonctionne-t-elle hors ligne ?</h3>
+    <p>Oui. Le modèle de langage de Souffleuse tourne sur la puce Apple Silicon de votre Mac : après le téléchargement initial du modèle, la traduction fonctionne sans connexion internet, et aucun texte n'est envoyé sur un serveur.</p>
+    <h3>Faut-il rechoisir la langue à chaque message ?</h3>
+    <p>Non. La langue cible se choisit une fois par conversation et Souffleuse s'en souvient : votre fil Slack avec l'équipe de Berlin reste en anglais, votre discussion familiale reste en espagnol, sans rien re-régler.</p>
+
+    <div class="cta-box">
+      <h2>Essayez sur votre prochaine conversation</h2>
+      <p>Choisissez la langue une fois, écrivez dans la vôtre, envoyez dans la leur.</p>
+      <a href="/Souffleuse.dmg" download class="btn">Télécharger Souffleuse pour Mac</a>
+      <p class="cta-note"><b>Gratuit pendant la bêta.</b> macOS Sonoma (14) ou plus récent · puce Apple Silicon · ~7,5 Mo · vos textes ne quittent jamais votre Mac.</p>
+    </div>
+  </article>
+</main>
+
+<footer>
+  <div class="shell">
+    <p>Souffleuse — le mot juste, soufflé à voix basse. Fait sur Mac, reste sur votre Mac.</p>
+    <nav aria-label="Liens utiles">
+      <a href="/">Accueil</a>
+      <a href="/guides/autocompletion-mac-comme-iphone.html">Autocomplétion sur Mac</a>
+      <a href="/guides/traduire-en-ecrivant-mac.html">Traduire en écrivant</a>
+      <a href="/guides/ia-locale-mac.html">IA locale sur Mac</a>
+      <a href="/guides/alternative-cotypist-gratuite.html">Alternative à Cotypist</a>
+      <a href="/guides/reformuler-mail-professionnel-ia.html">Reformuler un mail pro</a>
+      <a href="/confidentialite.html">Confidentialité</a>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>
