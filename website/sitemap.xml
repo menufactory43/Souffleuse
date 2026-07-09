@@ -6,7 +6,7 @@
     <xhtml:link rel="alternate" hreflang="fr" href="https://souffleuse.app/" />
     <xhtml:link rel="alternate" hreflang="en" href="https://souffleuse.app/en/" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://souffleuse.app/" />
-    <lastmod>2026-06-14</lastmod>
+    <lastmod>2026-07-09</lastmod>
     <priority>1.0</priority>
   </url>
   <url>
@@ -64,5 +64,72 @@
     <xhtml:link rel="alternate" hreflang="x-default" href="https://souffleuse.app/mentions-legales.html" />
     <lastmod>2026-06-23</lastmod>
     <priority>0.4</priority>
+  </url>
+  <!-- Guides FR -->
+  <url>
+    <loc>https://souffleuse.app/guides/autocompletion-mac-comme-iphone.html</loc>
+    <lastmod>2026-07-09</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://souffleuse.app/guides/reformuler-mail-professionnel-ia.html</loc>
+    <lastmod>2026-07-09</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://souffleuse.app/guides/traduire-en-ecrivant-mac.html</loc>
+    <lastmod>2026-07-09</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://souffleuse.app/guides/ia-locale-mac.html</loc>
+    <lastmod>2026-07-09</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://souffleuse.app/guides/alternative-cotypist-gratuite.html</loc>
+    <lastmod>2026-07-09</lastmod>
+    <priority>0.8</priority>
+  </url>
+  <!-- Guides EN -->
+  <url>
+    <loc>https://souffleuse.app/en/guides/autocomplete-every-mac-app.html</loc>
+    <lastmod>2026-07-09</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://souffleuse.app/en/guides/mac-predictive-text-like-iphone.html</loc>
+    <lastmod>2026-07-09</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://souffleuse.app/en/guides/copilot-for-writing.html</loc>
+    <lastmod>2026-07-09</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://souffleuse.app/en/guides/offline-ai-writing-mac.html</loc>
+    <lastmod>2026-07-09</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://souffleuse.app/en/guides/translate-while-typing-mac.html</loc>
+    <lastmod>2026-07-09</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://souffleuse.app/en/guides/professional-email-tone-mac.html</loc>
+    <lastmod>2026-07-09</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://souffleuse.app/en/guides/local-llm-writing-assistant.html</loc>
+    <lastmod>2026-07-09</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://souffleuse.app/en/compare/cotypist-alternatives.html</loc>
+    <lastmod>2026-07-09</lastmod>
+    <priority>0.8</priority>
   </url>
 </urlset>

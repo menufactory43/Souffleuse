@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Local LLM Writing Assistant for Mac — Zero Config | Souffleuse</title>
+<meta name="description" content="You can run a local LLM with Ollama in minutes — but a local llm writing assistant that helps where you actually type is another story. Here is llama.cpp wired into the macOS caret." />
+<link rel="canonical" href="https://souffleuse.app/en/guides/local-llm-writing-assistant.html" />
+<meta name="theme-color" content="#f3ead9" />
+<link rel="icon" href="/favicon.ico" sizes="any" />
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="Souffleuse" />
+<meta property="og:locale" content="en_US" />
+<meta property="og:url" content="https://souffleuse.app/en/guides/local-llm-writing-assistant.html" />
+<meta property="og:title" content="Local LLM Writing Assistant for Mac — Zero Config" />
+<meta property="og:description" content="llama.cpp on Metal, wired into the caret of every Mac app via the Accessibility API. Autocomplete, translation and tone from a local model — no server, no config." />
+<meta property="og:image" content="https://souffleuse.app/promo/souffleuse-en-action/06-confidentialite.jpg" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="preload" href="/assets/fonts/bodoni-moda-700-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="preload" href="/assets/fonts/spectral-400-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="stylesheet" href="/assets/fonts.css" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Article",
+  "headline": "A local LLM writing assistant that lives where you type — not in a chat window",
+  "inLanguage": "en",
+  "author": { "@type": "Organization", "name": "Souffleuse", "url": "https://souffleuse.app/en/" },
+  "publisher": { "@type": "Organization", "name": "Souffleuse", "url": "https://souffleuse.app/en/" },
+  "image": "https://souffleuse.app/promo/souffleuse-en-action/06-confidentialite.jpg",
+  "mainEntityOfPage": "https://souffleuse.app/en/guides/local-llm-writing-assistant.html",
+  "about": { "@type": "SoftwareApplication", "name": "Souffleuse", "operatingSystem": "macOS", "url": "https://souffleuse.app/en/" }
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    { "@type": "ListItem", "position": 1, "name": "Souffleuse", "item": "https://souffleuse.app/en/" },
+    { "@type": "ListItem", "position": 2, "name": "Guides", "item": "https://souffleuse.app/en/#guides" },
+    { "@type": "ListItem", "position": 3, "name": "Local LLM writing assistant" }
+  ]
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Do I need Ollama or llama.cpp installed to use Souffleuse?",
+      "acceptedAnswer": { "@type": "Answer", "text": "No. Souffleuse ships llama.cpp with Metal support inside the app. You download the app (~7.5 MB), it fetches a GGUF model once (0.4–1.5 GB depending on the model), and that's it — no server to run, no terminal, no config files." }
+    },
+    {
+      "@type": "Question",
+      "name": "Is a 1B-class model good enough for writing help?",
+      "acceptedAnswer": { "@type": "Answer", "text": "For the right jobs, yes. A small model is genuinely good at continuing your own sentence, translating a message, and adjusting tone — tasks where your text supplies most of the context. It is not the tool for generating essays from scratch, and Souffleuse doesn't pretend otherwise." }
+    },
+    {
+      "@type": "Question",
+      "name": "Does it eat RAM and battery all day?",
+      "acceptedAnswer": { "@type": "Answer", "text": "The engine stays warm while you're writing and unloads when idle, so it doesn't hold memory hostage all day. Between keystrokes the KV cache is reused instead of recomputing the prompt, which is what makes suggestions feel instant." }
+    }
+  ]
+}
+</script>
+<style>
+  :root {
+    --paper: #f3ead9; --paper-deep: #ece0c9; --ink: #1a1613; --ink-soft: #463d33;
+    --ink-faint: #5e5446; --rouge: #8c2b21; --rouge-deep: #6f2018;
+    --display: "Bodoni Moda", Georgia, serif; --body: "Spectral", Georgia, serif;
+    --filet: 1px solid var(--ink);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--body); font-size: 1.05rem; line-height: 1.65; }
+  a { color: var(--rouge); }
+  .shell { max-width: 46rem; margin: 0 auto; padding: 0 1.4rem; }
+  header.topbar { border-bottom: var(--filet); padding: 0.9rem 0; }
+  .topbar__inner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+  .brand { display: flex; align-items: center; gap: 0.55rem; text-decoration: none; color: var(--ink); }
+  .brand__name { font-family: var(--display); font-weight: 700; font-size: 1.15rem; }
+  .brand__sub { display: block; font-size: 0.72rem; color: var(--ink-faint); letter-spacing: 0.08em; }
+  .btn { display: inline-flex; align-items: center; gap: 0.5rem; background: var(--rouge); color: var(--paper); font-family: var(--display); font-weight: 700; text-decoration: none; padding: 0.7rem 1.3rem; border: 1px solid var(--rouge-deep); }
+  .btn:hover { background: var(--rouge-deep); }
+  .btn--small { padding: 0.45rem 0.9rem; font-size: 0.9rem; }
+  .crumbs { font-size: 0.82rem; color: var(--ink-faint); margin: 1.6rem 0 0; }
+  .crumbs a { color: var(--ink-faint); }
+  article { padding: 0 0 3rem; }
+  h1 { font-family: var(--display); font-weight: 900; font-size: clamp(1.9rem, 5vw, 2.7rem); line-height: 1.08; margin: 1.2rem 0 0.8rem; }
+  h2 { font-family: var(--display); font-weight: 700; font-size: 1.45rem; line-height: 1.15; margin: 2.4rem 0 0.7rem; }
+  h3 { font-family: var(--display); font-weight: 700; font-size: 1.12rem; margin: 1.6rem 0 0.5rem; }
+  .lede { font-size: 1.15rem; font-style: italic; color: var(--ink-soft); }
+  figure.illu { margin: 2rem 0; }
+  figure.illu img { display: block; width: 100%; max-width: 480px; height: auto; margin: 0 auto; border: 1px solid rgba(26,22,19,0.28); box-shadow: 3px 4px 0 rgba(26,22,19,0.10); }
+  figure.illu figcaption { text-align: center; font-size: 0.82rem; font-style: italic; color: var(--ink-faint); margin-top: 0.5rem; }
+  kbd { font-family: var(--body); background: var(--ink); color: var(--paper); border-radius: 3px; padding: 0.05em 0.45em; font-size: 0.85em; }
+  .shortcode { font-weight: 700; color: var(--rouge); }
+  .exemple { border: 1px solid rgba(26,22,19,0.3); background: var(--paper-deep); padding: 1rem 1.2rem; margin: 1.2rem 0; }
+  .exemple p { margin: 0.3rem 0; }
+  .exemple .avant { color: var(--ink-faint); }
+  .exemple .apres { font-style: italic; }
+  ol.pas li, ul li { margin-bottom: 0.5rem; }
+  .cta-box { border: var(--filet); background: var(--paper-deep); text-align: center; padding: 2rem 1.4rem; margin: 2.6rem 0 0; }
+  .cta-box h2 { margin-top: 0; }
+  .cta-note { font-size: 0.85rem; color: var(--ink-faint); margin-top: 0.8rem; }
+  footer { border-top: var(--filet); padding: 1.6rem 0 2.2rem; font-size: 0.85rem; color: var(--ink-faint); }
+  footer nav { display: flex; flex-wrap: wrap; gap: 0.4rem 1.4rem; margin-top: 0.6rem; }
+  footer a { color: var(--ink-faint); }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="shell topbar__inner">
+    <a href="/en/" class="brand" aria-label="Souffleuse, home">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
+        <path d="M2 22 Q13 2 24 22" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <path d="M6 22 Q13 9 20 22" fill="none" stroke="currentColor" stroke-width="1"/>
+        <circle cx="13" cy="22" r="1.4" fill="currentColor"/>
+      </svg>
+      <span><span class="brand__name">Souffleuse</span><span class="brand__sub">for Mac</span></span>
+    </a>
+    <a href="/Souffleuse.dmg" download class="btn btn--small">Download</a>
+  </div>
+</header>
+
+<main class="shell">
+  <p class="crumbs"><a href="/en/">Souffleuse</a> · <a href="/en/#guides">Guides</a> · Local LLM writing assistant</p>
+
+  <article>
+    <h1>A local LLM writing assistant that lives where you type — not in a chat window</h1>
+    <p class="lede">You've run Ollama. You know what a GGUF is. And yet when you write an email, the local model you so carefully set up is sitting in a terminal or a chat window, three ⌘Tabs away from your cursor. This guide is about closing that last gap: getting local-LLM writing help at the caret, in every Mac app.</p>
+
+    <h2>The gap every “run an LLM locally” guide stops at</h2>
+    <p>The tutorials all end at the same place: model downloaded, server running, chat interface open. That's genuinely useful for coding — editors already know how to talk to a completion backend. For <b>writing</b>, though, the story stops short. Your email lives in Mail, your messages in Slack, your notes in Obsidian; the model lives in a chat box. So you copy text out, paste answers back, and the “assistant” is really a destination you commute to. What's missing isn't the model — it's the plumbing between the model and the text field you're actually typing in.</p>
+
+    <h2>What a small model is honestly good at</h2>
+    <p>Second honest point: for writing help at the caret, you don't want a 70B model, and you shouldn't expect 70B behavior from a small one. A Gemma-1B-class model is genuinely good at three things:</p>
+    <ul>
+      <li><b>Continuation.</b> Given your last sentences as prefix, predicting the next few words is exactly what a base model does natively. That's autocomplete — the ghost text that appears in grey and that you accept with <kbd>Tab</kbd>.</li>
+      <li><b>Translation.</b> Short conversational messages translate well at this size, especially when the target language is fixed per conversation.</li>
+      <li><b>Tone.</b> Rewriting one sentence more formally or more lightly is a small, well-bounded transformation.</li>
+    </ul>
+    <p>What it is <em>not</em> good at is drafting an essay from a one-line prompt. Souffleuse doesn't ask it to. The design bet is that a small model doing the right small jobs, instantly, beats a big model in a window you have to visit.</p>
+
+    <h2>How Souffleuse wires llama.cpp into the caret</h2>
+    <p><a href="/en/">Souffleuse</a> is that plumbing, packaged: <b>llama.cpp running on Metal</b>, embedded in a menu-bar app, connected to whatever text field has focus through the <b>macOS Accessibility API</b>. That API is how the app reads your prefix (the text before the cursor) and knows where the caret is, in Mail, Notes, Slack, Safari, Chrome, Pages, Bear, Obsidian… The suggestion is drawn as grey ghost text at the cursor; <kbd>Tab</kbd> accepts (word by word or in chunks), <kbd>Esc</kbd> dismisses, and just typing on makes it vanish.</p>
+    <p>A few engineering details that matter to the feel, since you'll ask:</p>
+    <ul>
+      <li><b>KV-cache reuse between keystrokes.</b> The prompt isn't re-evaluated from scratch at every character; the cache carries over, which is why suggestions feel instant instead of “fast for an LLM”.</li>
+      <li><b>Cancel-on-keystroke.</b> Every keystroke cancels the in-flight generation, so stale suggestions never flash on screen.</li>
+      <li><b>Engine unloads at idle.</b> The model stays warm while you write and is released when you stop — the RAM-and-battery reality of keeping an LLM resident is handled for you.</li>
+      <li><b>Zero config.</b> No server process, no port, no Modelfile. Fields macOS marks as secure (passwords, card numbers) are ignored by construction.</li>
+    </ul>
+
+    <h3>Setup, all of it</h3>
+    <ol class="pas">
+      <li><a href="/Souffleuse.dmg" download>Download the DMG</a> (~7.5 MB, notarized by Apple, free during the beta) and drag it into Applications.</li>
+      <li>Grant the Accessibility permission it asks for — that's the API doing the caret work.</li>
+      <li>Let it download a GGUF model once (0.4–1.5 GB depending on the model). This is the only network connection the app ever makes.</li>
+      <li>Type anywhere. Grey text appears; <kbd>Tab</kbd> takes it, <kbd>Esc</kbd> clears it. <span class="shortcode">//</span> summons <a href="/en/guides/translate-while-typing-mac.html">translation</a> or a <a href="/en/guides/professional-email-tone-mac.html">tone rewrite</a>.</li>
+    </ol>
+
+    <figure class="illu">
+      <img src="/promo/souffleuse-en-action/web/06-confidentialite-720.jpg" width="720" height="900" loading="lazy" decoding="async"
+           alt="Local LLM writing assistant on Mac: everything runs on-device and offline, no text is ever sent to a server." />
+      <figcaption>Local by architecture: the model runs on the Apple Silicon chip, offline. (Screenshot text is in French — the app is French-made; suggestions follow the language you type.)</figcaption>
+    </figure>
+
+    <h2>Privacy by architecture, not by promise</h2>
+    <p>You already know why local matters — it's probably why you installed Ollama in the first place. Souffleuse takes the same stance to its logical end: <b>there is no server in the design at all</b>. Not “we don't log” — there is nothing to send to, no account to create, no telemetry. It even learns your style from an encrypted history that stays on your Mac, readable by you alone. The privacy guarantee is structural, which is the only kind that survives a change of ownership or terms of service. More on that in the <a href="/en/guides/offline-ai-writing-mac.html">offline AI writing guide</a>.</p>
+    <p>Full disclosure: the app is made in France and its interface is currently in French. The model's output follows whatever language you type — English in, English out — and if you can configure a llama.cpp sampler, you can survive a French Preferences window.</p>
+
+    <h2>Frequently asked questions</h2>
+    <h3>Do I need Ollama or llama.cpp installed to use Souffleuse?</h3>
+    <p>No. Souffleuse ships llama.cpp with Metal support inside the app. You download the app (~7.5 MB), it fetches a GGUF model once (0.4–1.5 GB depending on the model), and that's it — no server to run, no terminal, no config files.</p>
+    <h3>Is a 1B-class model good enough for writing help?</h3>
+    <p>For the right jobs, yes. A small model is genuinely good at continuing your own sentence, translating a message, and adjusting tone — tasks where your text supplies most of the context. It is not the tool for generating essays from scratch, and Souffleuse doesn't pretend otherwise.</p>
+    <h3>Does it eat RAM and battery all day?</h3>
+    <p>The engine stays warm while you're writing and unloads when idle, so it doesn't hold memory hostage all day. Between keystrokes the KV cache is reused instead of recomputing the prompt, which is what makes suggestions feel instant.</p>
+
+    <div class="cta-box">
+      <h2>Skip the plumbing, keep the local model</h2>
+      <p>One DMG, one model download, and the LLM is at your caret in every app.</p>
+      <a href="/Souffleuse.dmg" download class="btn">Download Souffleuse for Mac</a>
+      <p class="cta-note"><b>Free during the beta.</b> macOS Sonoma (14) or later · Apple Silicon · ~7.5 MB · your text never leaves your Mac.</p>
+    </div>
+  </article>
+</main>
+
+<footer>
+  <div class="shell">
+    <p>Souffleuse — the right word, whispered from the wings. Made on a Mac, stays on your Mac.</p>
+    <nav aria-label="Useful links">
+      <a href="/en/">Home</a>
+      <a href="/en/guides/autocomplete-every-mac-app.html">Autocomplete in every Mac app</a>
+      <a href="/en/guides/copilot-for-writing.html">Copilot for writing</a>
+      <a href="/en/guides/translate-while-typing-mac.html">Translate while typing</a>
+      <a href="/en/guides/professional-email-tone-mac.html">Professional email tone</a>
+      <a href="/en/guides/offline-ai-writing-mac.html">Offline AI writing</a>
+      <a href="/en/compare/cotypist-alternatives.html">Cotypist alternatives</a>
+      <a href="/en/privacy.html">Privacy</a>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>

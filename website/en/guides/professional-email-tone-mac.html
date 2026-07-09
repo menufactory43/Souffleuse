@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Make an Email Sound Professional with AI — on Mac | Souffleuse</title>
+<meta name="description" content="How to make an email sound professional with AI without pasting it into ChatGPT: rewrite the tone in place, right inside Mail on your Mac, with a 100% local AI. Free during beta." />
+<link rel="canonical" href="https://souffleuse.app/en/guides/professional-email-tone-mac.html" />
+<meta name="theme-color" content="#f3ead9" />
+<link rel="icon" href="/favicon.ico" sizes="any" />
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="Souffleuse" />
+<meta property="og:locale" content="en_US" />
+<meta property="og:url" content="https://souffleuse.app/en/guides/professional-email-tone-mac.html" />
+<meta property="og:title" content="Make an Email Sound Professional with AI — Without the Cloud" />
+<meta property="og:description" content="Rewrite the tone of an email in place, inside Mail on your Mac, without your draft ever leaving the machine." />
+<meta property="og:image" content="https://souffleuse.app/promo/souffleuse-en-action/05-relecture-par-ton.jpg" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="preload" href="/assets/fonts/bodoni-moda-700-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="preload" href="/assets/fonts/spectral-400-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="stylesheet" href="/assets/fonts.css" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Article",
+  "headline": "Make an email sound professional with AI — without sending your draft to the cloud",
+  "inLanguage": "en",
+  "author": { "@type": "Organization", "name": "Souffleuse", "url": "https://souffleuse.app/en/" },
+  "publisher": { "@type": "Organization", "name": "Souffleuse", "url": "https://souffleuse.app/en/" },
+  "image": "https://souffleuse.app/promo/souffleuse-en-action/05-relecture-par-ton.jpg",
+  "mainEntityOfPage": "https://souffleuse.app/en/guides/professional-email-tone-mac.html",
+  "about": { "@type": "SoftwareApplication", "name": "Souffleuse", "operatingSystem": "macOS", "url": "https://souffleuse.app/en/" }
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    { "@type": "ListItem", "position": 1, "name": "Souffleuse", "item": "https://souffleuse.app/en/" },
+    { "@type": "ListItem", "position": 2, "name": "Guides", "item": "https://souffleuse.app/en/#guides" },
+    { "@type": "ListItem", "position": 3, "name": "Make an email sound professional with AI" }
+  ]
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Can I rewrite an email with AI without a subscription?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Yes. Souffleuse is free during the beta — no account, no credit card, no daily limit — and the tone rewrite works right inside Mail on your Mac. If it ever becomes paid, it will be a one-time purchase, never a hidden subscription." }
+    },
+    {
+      "@type": "Question",
+      "name": "Is it risky to paste a work email into ChatGPT?",
+      "acceptedAnswer": { "@type": "Answer", "text": "A work email usually contains names, figures and confidential details. Pasted into a web tool, that content travels to a third party's servers, where it may be stored or reused. A local AI like Souffleuse rewrites on your Mac: nothing is sent, nothing is kept anywhere else." }
+    },
+    {
+      "@type": "Question",
+      "name": "Does the tone rewrite work outside of Mail?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Yes: Outlook, Slack, Messages, your browser… Souffleuse even adapts the tone to the place — measured for a client in Mail, natural in Slack, light in Messages." }
+    }
+  ]
+}
+</script>
+<style>
+  :root {
+    --paper: #f3ead9; --paper-deep: #ece0c9; --ink: #1a1613; --ink-soft: #463d33;
+    --ink-faint: #5e5446; --rouge: #8c2b21; --rouge-deep: #6f2018;
+    --display: "Bodoni Moda", Georgia, serif; --body: "Spectral", Georgia, serif;
+    --filet: 1px solid var(--ink);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--body); font-size: 1.05rem; line-height: 1.65; }
+  a { color: var(--rouge); }
+  .shell { max-width: 46rem; margin: 0 auto; padding: 0 1.4rem; }
+  header.topbar { border-bottom: var(--filet); padding: 0.9rem 0; }
+  .topbar__inner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+  .brand { display: flex; align-items: center; gap: 0.55rem; text-decoration: none; color: var(--ink); }
+  .brand__name { font-family: var(--display); font-weight: 700; font-size: 1.15rem; }
+  .brand__sub { display: block; font-size: 0.72rem; color: var(--ink-faint); letter-spacing: 0.08em; }
+  .btn { display: inline-flex; align-items: center; gap: 0.5rem; background: var(--rouge); color: var(--paper); font-family: var(--display); font-weight: 700; text-decoration: none; padding: 0.7rem 1.3rem; border: 1px solid var(--rouge-deep); }
+  .btn:hover { background: var(--rouge-deep); }
+  .btn--small { padding: 0.45rem 0.9rem; font-size: 0.9rem; }
+  .crumbs { font-size: 0.82rem; color: var(--ink-faint); margin: 1.6rem 0 0; }
+  .crumbs a { color: var(--ink-faint); }
+  article { padding: 0 0 3rem; }
+  h1 { font-family: var(--display); font-weight: 900; font-size: clamp(1.9rem, 5vw, 2.7rem); line-height: 1.08; margin: 1.2rem 0 0.8rem; }
+  h2 { font-family: var(--display); font-weight: 700; font-size: 1.45rem; line-height: 1.15; margin: 2.4rem 0 0.7rem; }
+  h3 { font-family: var(--display); font-weight: 700; font-size: 1.12rem; margin: 1.6rem 0 0.5rem; }
+  .lede { font-size: 1.15rem; font-style: italic; color: var(--ink-soft); }
+  figure.illu { margin: 2rem 0; }
+  figure.illu img { display: block; width: 100%; max-width: 480px; height: auto; margin: 0 auto; border: 1px solid rgba(26,22,19,0.28); box-shadow: 3px 4px 0 rgba(26,22,19,0.10); }
+  figure.illu figcaption { text-align: center; font-size: 0.82rem; font-style: italic; color: var(--ink-faint); margin-top: 0.5rem; }
+  kbd { font-family: var(--body); background: var(--ink); color: var(--paper); border-radius: 3px; padding: 0.05em 0.45em; font-size: 0.85em; }
+  .shortcode { font-weight: 700; color: var(--rouge); }
+  .exemple { border: 1px solid rgba(26,22,19,0.3); background: var(--paper-deep); padding: 1rem 1.2rem; margin: 1.2rem 0; }
+  .exemple p { margin: 0.3rem 0; }
+  .exemple .avant { color: var(--ink-faint); }
+  .exemple .apres { font-style: italic; }
+  ol.pas li, ul li { margin-bottom: 0.5rem; }
+  .cta-box { border: var(--filet); background: var(--paper-deep); text-align: center; padding: 2rem 1.4rem; margin: 2.6rem 0 0; }
+  .cta-box h2 { margin-top: 0; }
+  .cta-note { font-size: 0.85rem; color: var(--ink-faint); margin-top: 0.8rem; }
+  footer { border-top: var(--filet); padding: 1.6rem 0 2.2rem; font-size: 0.85rem; color: var(--ink-faint); }
+  footer nav { display: flex; flex-wrap: wrap; gap: 0.4rem 1.4rem; margin-top: 0.6rem; }
+  footer a { color: var(--ink-faint); }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="shell topbar__inner">
+    <a href="/en/" class="brand" aria-label="Souffleuse, home">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
+        <path d="M2 22 Q13 2 24 22" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <path d="M6 22 Q13 9 20 22" fill="none" stroke="currentColor" stroke-width="1"/>
+        <circle cx="13" cy="22" r="1.4" fill="currentColor"/>
+      </svg>
+      <span><span class="brand__name">Souffleuse</span><span class="brand__sub">for Mac</span></span>
+    </a>
+    <a href="/Souffleuse.dmg" download class="btn btn--small">Download</a>
+  </div>
+</header>
+
+<main class="shell">
+  <p class="crumbs"><a href="/en/">Souffleuse</a> · <a href="/en/#guides">Guides</a> · Make an email sound professional with AI</p>
+
+  <article>
+    <h1>Make an email sound professional with AI — without sending your draft to the cloud</h1>
+    <p class="lede">“can we sync tmrw about the quote?” is fine between teammates, less fine in front of a client. Here is how to rewrite an email in a professional tone with AI, in place, right inside Mail on your Mac — without your draft ever leaving the machine.</p>
+
+    <h2>The problem with pasting your email into ChatGPT</h2>
+    <p>The usual reflex: write the email, copy it, open ChatGPT or a “rewrite my email” web tool, paste, wait, copy the result, bring it back into Mail. Four round-trips for one paragraph — and one detail that is easy to forget: <b>your work email just left for a third party's servers</b>. Client names, quote amounts, clauses still under negotiation, HR matters… whatever your draft contains is sent outside, sometimes stored, sometimes reused to train models. In many companies, that is exactly what internal policies — and, in Europe, the GDPR — ask you to avoid. The web tone tools have the same shape: your text goes to them, not the other way around.</p>
+
+    <h2>The in-place method: rewrite the tone where you write</h2>
+    <p><a href="/en/">Souffleuse</a> flips the workflow. Instead of taking your text to the AI, it installs a small AI <b>on your Mac</b> that rereads your sentence right where you wrote it. Concretely:</p>
+    <ol class="pas">
+      <li><a href="/Souffleuse.dmg" download>Download Souffleuse</a> (free during the beta, ~7.5 MB, notarized by Apple) and drag it into Applications. It sits in your menu bar and downloads its language model once — the only network connection it will ever make.</li>
+      <li>Write the email the way it comes to you, in Mail, Outlook or your webmail. The first draft is allowed to be casual.</li>
+      <li>Type <span class="shortcode">//</span> at the end of your sentence: Souffleuse rereads it and rewrites it in the tone that fits the place — measured and courteous for a client in Mail.</li>
+      <li>Like the proposal? <kbd>Tab</kbd> and it replaces your sentence. Don't? <kbd>Esc</kbd>, and your text stays exactly as it was.</li>
+    </ol>
+    <div class="exemple">
+      <p class="avant">Before — “can we sync tmrw about the quote?”</p>
+      <p class="apres">After <span class="shortcode">//</span> — “Would you be available tomorrow to discuss the quote?”</p>
+    </div>
+    <p>These remain your words and your intent: the rewrite tightens, softens or formalizes — it does not invent an email on your behalf.</p>
+
+    <figure class="illu">
+      <img src="/promo/souffleuse-en-action/web/05-relecture-par-ton-720.jpg" width="720" height="900" loading="lazy" decoding="async"
+           alt="Rewrite email tone with AI on Mac: the same sentence reread in a professional tone, directly inside Mail." />
+      <figcaption>The tone rewrite: the same sentence, reread for the right recipient. (Screenshot text is in French — the app is French-made; the rewrite follows whatever language you type.)</figcaption>
+    </figure>
+
+    <h2>The tone follows the app, not the other way around</h2>
+    <p>The same words don't land the same way in Mail and in Messages. Souffleuse takes into account the app you are writing in: a client email leans formal, a Slack message stays natural, a text to a friend keeps its lightness. You can also pick the tone explicitly — shorter, warmer, more neutral — when the situation calls for it. One shortcut, <span class="shortcode">//</span>, everywhere you type.</p>
+
+    <h2>Why “100% local” matters for a work email</h2>
+    <ul>
+      <li><b>Confidentiality by construction:</b> the rewrite is computed by a model running on your Mac's Apple Silicon chip. There is no server to send your draft to — so no possible leak, no retention, no reuse.</li>
+      <li><b>Compliance:</b> no subprocessor, no data transfer: GDPR requirements and internal policies are respected by default.</li>
+      <li><b>Offline:</b> on a train, on a plane, behind a strict VPN — the rewrite works the same, with no network.</li>
+      <li><b>Free during the beta:</b> no account, no card, no daily quota.</li>
+    </ul>
+    <p>One honest note: Souffleuse is made in France and its interface is currently in French. The rewriting itself follows <b>the language you type</b> — English drafts get English rewrites — and the few menus are easy to find your way around.</p>
+
+    <h2>Frequently asked questions</h2>
+    <h3>Can I rewrite an email with AI without a subscription?</h3>
+    <p>Yes. Souffleuse is free during the beta — no account, no credit card, no daily limit — and the tone rewrite works right inside Mail on your Mac. If it ever becomes paid, it will be a one-time purchase, never a hidden subscription.</p>
+    <h3>Is it risky to paste a work email into ChatGPT?</h3>
+    <p>A work email usually contains names, figures and confidential details. Pasted into a web tool, that content travels to a third party's servers, where it may be stored or reused. A local AI like Souffleuse rewrites on your Mac: nothing is sent, nothing is kept anywhere else.</p>
+    <h3>Does the tone rewrite work outside of Mail?</h3>
+    <p>Yes: Outlook, Slack, Messages, your browser… Souffleuse even adapts the tone to the place — measured for a client in Mail, natural in Slack, light in Messages.</p>
+
+    <h2>And while you write the rest of the email…</h2>
+    <p>The tone rewrite is only one of Souffleuse's roles. As you type, it also suggests <a href="/en/guides/autocomplete-every-mac-app.html">the rest of your sentence in grey under the cursor</a> (Tab to accept), fixes typos along the way, and can <a href="/en/guides/translate-while-typing-mac.html">translate as you write</a> when the thread is in another language. All of it runs on a <a href="/en/guides/local-llm-writing-assistant.html">local language model</a> — the whole email gets written faster, not just its proofread.</p>
+
+    <div class="cta-box">
+      <h2>Try it on your next email</h2>
+      <p>Write it the way it comes, type <span class="shortcode">//</span>, judge for yourself.</p>
+      <a href="/Souffleuse.dmg" download class="btn">Download Souffleuse for Mac</a>
+      <p class="cta-note"><b>Free during the beta.</b> macOS Sonoma (14) or later · Apple Silicon · ~7.5 MB · your text never leaves your Mac.</p>
+    </div>
+  </article>
+</main>
+
+<footer>
+  <div class="shell">
+    <p>Souffleuse — the right word, whispered from the wings. Made on a Mac, stays on your Mac.</p>
+    <nav aria-label="Useful links">
+      <a href="/en/">Home</a>
+      <a href="/en/guides/autocomplete-every-mac-app.html">Autocomplete in every Mac app</a>
+      <a href="/en/guides/mac-predictive-text-like-iphone.html">Predictive text like iPhone</a>
+      <a href="/en/guides/translate-while-typing-mac.html">Translate while typing</a>
+      <a href="/en/guides/local-llm-writing-assistant.html">Local LLM writing assistant</a>
+      <a href="/en/guides/offline-ai-writing-mac.html">Offline AI writing</a>
+      <a href="/en/compare/cotypist-alternatives.html">Cotypist alternatives</a>
+      <a href="/en/privacy.html">Privacy</a>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>
