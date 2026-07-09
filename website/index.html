@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Souffleuse : le mot juste, soufflé à voix basse</title>
-<meta name="description" content="Une aide à l'écriture pour Mac, entièrement privée. Souffleuse glisse le mot juste sous votre curseur quand vous hésitez, puis s'efface. Vos textes ne quittent jamais votre Mac." />
+<title>Souffleuse — autocomplétion IA 100 % locale pour Mac, dans toutes vos apps</title>
+<meta name="description" content="L'autocomplétion IA pour Mac : Souffleuse souffle la suite de vos phrases sous le curseur, dans Mail, Slack, Notes et presque toutes vos apps. Tab pour accepter. 100 % locale, hors ligne, gratuite pendant la bêta — avec traduction en écrivant et reformulation de mails." />
 
 <link rel="canonical" href="https://souffleuse.app/" />
 <link rel="alternate" hreflang="fr" href="https://souffleuse.app/" />
@@ -23,15 +23,15 @@
 <meta property="og:locale" content="fr_FR" />
 <meta property="og:locale:alternate" content="en_US" />
 <meta property="og:url" content="https://souffleuse.app/" />
-<meta property="og:title" content="Souffleuse : le mot juste, soufflé à voix basse" />
-<meta property="og:description" content="Une aide à l'écriture pour Mac, entièrement privée. Le mot juste sous votre curseur quand vous hésitez, puis ça s'efface. Vos textes ne quittent jamais votre Mac." />
+<meta property="og:title" content="Souffleuse — autocomplétion IA 100 % locale pour Mac" />
+<meta property="og:description" content="La suite de vos phrases, soufflée sous le curseur dans toutes vos apps Mac. Tab pour accepter. 100 % local, hors ligne, gratuit pendant la bêta." />
 <meta property="og:image" content="https://souffleuse.app/og.png" />
 <meta property="og:image:width" content="1200" />
 <meta property="og:image:height" content="630" />
 <meta property="og:image:alt" content="Souffleuse : le mot juste, soufflé à voix basse." />
 <meta name="twitter:card" content="summary_large_image" />
-<meta name="twitter:title" content="Souffleuse : le mot juste, soufflé à voix basse" />
-<meta name="twitter:description" content="Une aide à l'écriture pour Mac, entièrement privée. Vos textes ne quittent jamais votre Mac." />
+<meta name="twitter:title" content="Souffleuse — autocomplétion IA 100 % locale pour Mac" />
+<meta name="twitter:description" content="L'autocomplétion IA dans toutes vos apps Mac. Tab pour accepter. 100 % local, hors ligne, gratuit pendant la bêta." />
 <meta name="twitter:image" content="https://souffleuse.app/og.png" />
 
 <!-- Fonts self-hébergées : aucune requête tierce au runtime (promesse 100% local). -->
@@ -46,14 +46,79 @@
   "@type": "SoftwareApplication",
   "name": "Souffleuse",
   "applicationCategory": "ProductivityApplication",
+  "applicationSubCategory": "Autocomplétion IA locale",
   "operatingSystem": "macOS 14 (Sonoma) or later, Apple Silicon",
-  "softwareVersion": "0.11.0",
+  "softwareVersion": "0.12.1",
+  "fileSize": "7.5MB",
   "url": "https://souffleuse.app/",
   "downloadUrl": "https://souffleuse.app/Souffleuse.dmg",
   "inLanguage": "fr",
   "image": "https://souffleuse.app/og.png",
-  "description": "Une aide à l'écriture pour Mac, entièrement privée. Souffleuse glisse le mot juste sous votre curseur quand vous hésitez, puis s'efface. Vos textes ne quittent jamais votre Mac.",
+  "screenshot": [
+    "https://souffleuse.app/promo/souffleuse-en-action/02-toutes-les-salles.jpg",
+    "https://souffleuse.app/promo/souffleuse-en-action/04-traduction.jpg",
+    "https://souffleuse.app/promo/souffleuse-en-action/05-relecture-par-ton.jpg",
+    "https://souffleuse.app/promo/souffleuse-en-action/03-le-carnet.jpg",
+    "https://souffleuse.app/promo/souffleuse-en-action/06-confidentialite.jpg"
+  ],
+  "featureList": [
+    "Autocomplétion IA dans toutes les apps du Mac (ghost text, Tab pour accepter)",
+    "100 % local : aucun texte n'est envoyé sur internet, fonctionne hors ligne",
+    "Traduction au fil de l'écriture, langue mémorisée par conversation",
+    "Reformulation de mails et messages selon le ton de l'app",
+    "Correction des fautes de frappe en passant",
+    "Carnet d'usage : frappes épargnées, temps gagné"
+  ],
+  "description": "Autocomplétion IA 100 % locale pour Mac : Souffleuse souffle la suite de vos phrases sous le curseur, dans presque toutes vos apps. Tab pour accepter. Vos textes ne quittent jamais votre Mac.",
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" }
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Comment avoir l'autocomplétion sur Mac, comme sur iPhone ?",
+      "acceptedAnswer": { "@type": "Answer", "text": "macOS Sonoma propose une prédiction intégrée, limitée à un ou deux mots et à certaines apps. Pour compléter des phrases entières dans toutes vos apps (Mail, Slack, Notes, navigateur), il faut une app d'autocomplétion système comme Souffleuse : la suite s'affiche en gris sous le curseur, Tab l'accepte." }
+    },
+    {
+      "@type": "Question",
+      "name": "Existe-t-il une IA qui fonctionne sans internet sur Mac ?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Oui. Souffleuse embarque un modèle de langage qui tourne directement sur la puce Apple Silicon de votre Mac. Après l'installation, tout fonctionne hors ligne : autocomplétion, traduction et reformulation, sans qu'aucun texte ne parte sur un serveur." }
+    },
+    {
+      "@type": "Question",
+      "name": "Existe-t-il une alternative gratuite à Cotypist ?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Souffleuse est gratuite pendant la bêta, sans limite de complétions par jour et sans abonnement. Comme Cotypist, elle propose la suite de vos phrases dans toutes les apps du Mac — et elle ajoute la traduction au fil de l'écriture et la reformulation par ton, en restant 100 % locale." }
+    },
+    {
+      "@type": "Question",
+      "name": "Comment reformuler un mail professionnel avec l'IA gratuitement ?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Avec Souffleuse, tapez // dans Mail : votre phrase est relue et reformulée dans un ton professionnel, directement là où vous écrivez, sans copier-coller vers ChatGPT et sans que le contenu du mail ne quitte votre Mac. Gratuit pendant la bêta." }
+    },
+    {
+      "@type": "Question",
+      "name": "Comment traduire un message pendant qu'on l'écrit sur Mac ?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Choisissez une fois la langue cible d'une conversation : Souffleuse s'en souvient et traduit ensuite au fil de la frappe, dans un panneau discret, dans n'importe quelle app. La traduction se fait sur votre Mac, hors ligne, sans copier-coller." }
+    },
+    {
+      "@type": "Question",
+      "name": "Qu'est-ce qui part de mon Mac quand j'utilise Souffleuse ?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Au quotidien, rien. Souffleuse ne se connecte qu'une fois, à l'installation, pour télécharger son modèle. Ensuite vos textes et tout ce qu'elle apprend de votre style restent sur votre Mac, et elle fonctionne même sans connexion." }
+    },
+    {
+      "@type": "Question",
+      "name": "Quels Mac sont compatibles avec Souffleuse ?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Les Mac à puce Apple Silicon (M1, M2, M3 et suivantes) sous macOS Sonoma (14) ou plus récent. Les Mac Intel ne sont pas compatibles." }
+    },
+    {
+      "@type": "Question",
+      "name": "Souffleuse voit-elle mes mots de passe ?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Non. Les champs sécurisés (mots de passe, codes, cartes bancaires) sont marqués comme tels par macOS et Souffleuse s'en détourne : pas de lecture, pas de suggestion, pas de trace." }
+    }
+  ]
 }
 </script>
 
@@ -1728,6 +1793,70 @@
   .don-modal__qr { display: inline-block; line-height: 0; padding: 0.6rem; border: var(--filet); background: #fff; }
   .don-modal__qr img { width: 168px; height: 168px; display: block; }
   .don-modal__note { font-size: 0.8rem; color: var(--ink-faint); margin: 1.4rem 0 0; }
+
+  /* =================== GALERIE (Souffleuse en action) =================== */
+  /* Les affichettes du programme : les visuels promo, posés comme des cartes. */
+  .galerie__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1.4rem;
+    margin-top: 2.4rem;
+  }
+  .galerie__item { margin: 0; }
+  .galerie__item img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border: 1px solid rgba(26,22,19,0.28);
+    box-shadow: 3px 4px 0 rgba(26,22,19,0.10);
+    background: var(--paper-deep);
+  }
+  .galerie__item figcaption {
+    margin-top: 0.55rem;
+    font-size: 0.82rem;
+    font-style: italic;
+    color: var(--ink-faint);
+    text-align: center;
+  }
+
+  /* =================== GUIDES =================== */
+  .guides__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1.3rem;
+    margin-top: 2.4rem;
+  }
+  .guide-card {
+    display: block;
+    border: 1px solid rgba(26,22,19,0.3);
+    background: var(--paper-deep);
+    padding: 1.3rem 1.4rem 1.4rem;
+    text-decoration: none;
+    color: var(--ink);
+    box-shadow: 3px 4px 0 rgba(26,22,19,0.08);
+    transition: transform 120ms ease, box-shadow 120ms ease;
+  }
+  .guide-card:hover { transform: translate(-1px,-1px); box-shadow: 5px 6px 0 rgba(26,22,19,0.12); }
+  .guide-card__kicker {
+    display: block;
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--rouge);
+    margin-bottom: 0.5rem;
+  }
+  .guide-card h3 {
+    font-family: var(--display);
+    font-size: 1.12rem;
+    line-height: 1.2;
+    margin: 0 0 0.5rem;
+  }
+  .guide-card p { margin: 0; font-size: 0.9rem; color: var(--ink-soft); line-height: 1.5; }
+  .guide-card__go { display: inline-block; margin-top: 0.7rem; font-size: 0.85rem; color: var(--rouge); font-style: italic; }
+
+  /* Le renvoi « En savoir plus » au pied d'une réponse de FAQ. */
+  .qa__more { margin-top: 0.5rem; font-size: 0.9rem; }
+  .qa__more a { color: var(--rouge); }
 </style>
 <script>
 // Le rideau ne se lève qu'une fois par session : au retour, la page est déjà
@@ -1776,6 +1905,7 @@
         <a href="#manifeste">Pourquoi</a>
         <a href="#fonctions">Ce qu'elle fait</a>
         <a href="#coulisses">Confidentialité</a>
+        <a href="#guides">Guides</a>
         <a href="#faq">Questions</a>
         <a href="#soutenir" data-don-open>Soutenir</a>
       </nav>
@@ -1812,7 +1942,7 @@
         <div class="playbill__cesoir ink-rise k1">
           <span class="smallcaps">Gratuit pendant la bêta</span>
         </div>
-        <p class="playbill__eyebrow ink-rise k2">Une aide à l'écriture qui ne quitte jamais votre Mac</p>
+        <p class="playbill__eyebrow ink-rise k2">L'autocomplétion IA 100&nbsp;% locale, dans toutes les apps de votre Mac</p>
         <h1 class="hero__title ink-rise k2" id="titre-principal">
           Le mot juste,
           <span class="light">soufflé à voix basse</span>
@@ -1832,7 +1962,7 @@
           <a href="#souffle" class="btn btn--ghost">Voir la démo →</a>
         </div>
         <p class="cta-note ink-rise k5"><b>Gratuit pendant la bêta.</b> Pour Mac à puce Apple Silicon.<span class="version-badge" data-version hidden></span></p>
-        <p class="cta-trust ink-rise k5">~6,5 Mo · notarisée par Apple · vos textes ne quittent jamais votre Mac.</p>
+        <p class="cta-trust ink-rise k5">~7,5 Mo · notarisée par Apple · vos textes ne quittent jamais votre Mac.</p>
       </div>
 
       <!-- ===== ÉLÉMENT SIGNATURE : le trou du souffleur ===== -->
@@ -1962,6 +2092,57 @@
       f.addEventListener('click', function () { v.muted ? on() : off(); });
     })();
   </script>
+
+  <!-- =================== GALERIE / SOUFFLEUSE EN ACTION =================== -->
+  <!-- Les affichettes du programme : ce que fait l'app, en cinq cartes.
+       Visuels servis en 720 px (promo/…/web/) ; les pleines tailles restent
+       disponibles au clic pour qui veut regarder de près. -->
+  <section class="galerie reveal" id="captures" aria-labelledby="galerie-titre">
+    <div class="shell">
+      <div class="section-head">
+        <span class="smallcaps">Souffleuse en action</span>
+        <h2 id="galerie-titre">Cinq scènes, un aperçu</h2>
+        <p class="stage-dir">L'autocomplétion, la traduction, le ton, le carnet — et la promesse.</p>
+      </div>
+      <div class="galerie__grid">
+        <figure class="galerie__item">
+          <a href="/promo/souffleuse-en-action/02-toutes-les-salles.jpg">
+            <img src="/promo/souffleuse-en-action/web/02-toutes-les-salles-720.jpg" width="720" height="900" loading="lazy" decoding="async"
+                 alt="Autocomplétion IA sur Mac : « Je reviens vers toi » complété par « dès que possible » avec la touche Tab, dans Mail, Notes, Slack et le navigateur." />
+          </a>
+          <figcaption>Elle joue dans toutes les salles : la suite, dans chaque app.</figcaption>
+        </figure>
+        <figure class="galerie__item">
+          <a href="/promo/souffleuse-en-action/04-traduction.jpg">
+            <img src="/promo/souffleuse-en-action/web/04-traduction-720.jpg" width="720" height="900" loading="lazy" decoding="async"
+                 alt="Traduction en écrivant sur Mac : « Tu es dispo demain ? » traduit en « Are you free tomorrow? », langue mémorisée par conversation." />
+          </a>
+          <figcaption>Elle change de langue, pas de scène : traduire en écrivant.</figcaption>
+        </figure>
+        <figure class="galerie__item">
+          <a href="/promo/souffleuse-en-action/05-relecture-par-ton.jpg">
+            <img src="/promo/souffleuse-en-action/web/05-relecture-par-ton-720.jpg" width="720" height="900" loading="lazy" decoding="async"
+                 alt="Reformuler un message avec l'IA sur Mac : la même phrase relue dans le ton juste selon l'app, professionnel dans Mail, léger dans Messages." />
+          </a>
+          <figcaption>La relecture par ton : vos mots, mieux placés.</figcaption>
+        </figure>
+        <figure class="galerie__item">
+          <a href="/promo/souffleuse-en-action/03-le-carnet.jpg">
+            <img src="/promo/souffleuse-en-action/web/03-le-carnet-720.jpg" width="720" height="900" loading="lazy" decoding="async"
+                 alt="Carnet d'usage de Souffleuse : frappes épargnées et minutes gagnées grâce à l'autocomplétion, visibles par vous seul." />
+          </a>
+          <figcaption>Le carnet : frappes épargnées, temps rendu.</figcaption>
+        </figure>
+        <figure class="galerie__item">
+          <a href="/promo/souffleuse-en-action/06-confidentialite.jpg">
+            <img src="/promo/souffleuse-en-action/web/06-confidentialite-720.jpg" width="720" height="900" loading="lazy" decoding="async"
+                 alt="IA locale sur Mac : Souffleuse fonctionne hors ligne, aucun texte n'est envoyé sur internet, tout reste sur la machine." />
+          </a>
+          <figcaption>La promesse : tout se joue sur votre Mac, rien ne sort.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
 
   <!-- =================== MANIFESTE =================== -->
   <section class="manifeste reveal" id="manifeste" aria-labelledby="manifeste-titre">
@@ -2213,6 +2394,55 @@
     </div>
   </section>
 
+  <!-- =================== GUIDES =================== -->
+  <section class="guides reveal" id="guides" aria-labelledby="guides-titre">
+    <div class="shell">
+      <div class="section-head">
+        <span class="smallcaps">Les cahiers de la souffleuse</span>
+        <h2 id="guides-titre">Guides pratiques</h2>
+        <p class="stage-dir">Une question précise, une réponse complète — et la manière de s'y prendre.</p>
+      </div>
+      <nav class="guides__grid" aria-label="Guides pratiques">
+        <a class="guide-card" href="/guides/autocompletion-mac-comme-iphone.html">
+          <span class="guide-card__kicker">Autocomplétion</span>
+          <h3>L'autocomplétion sur Mac, comme sur iPhone</h3>
+          <p>La prédiction intégrée de macOS s'arrête à un mot ou deux. Comment obtenir des phrases entières, dans toutes vos apps.</p>
+          <span class="guide-card__go">Lire le guide →</span>
+        </a>
+        <a class="guide-card" href="/guides/reformuler-mail-professionnel-ia.html">
+          <span class="guide-card__kicker">Relecture par ton</span>
+          <h3>Reformuler un mail professionnel avec l'IA</h3>
+          <p>Rendre un mail plus pro sans le coller dans ChatGPT — la reformulation en place, sans que le texte quitte votre Mac.</p>
+          <span class="guide-card__go">Lire le guide →</span>
+        </a>
+        <a class="guide-card" href="/guides/traduire-en-ecrivant-mac.html">
+          <span class="guide-card__kicker">Traduction</span>
+          <h3>Traduire pendant que vous écrivez sur Mac</h3>
+          <p>La méthode sans copier-coller : une langue par conversation, retenue une fois, traduite au fil de la frappe.</p>
+          <span class="guide-card__go">Lire le guide →</span>
+        </a>
+        <a class="guide-card" href="/guides/ia-locale-mac.html">
+          <span class="guide-card__kicker">IA locale</span>
+          <h3>Une IA 100 % locale sur votre Mac</h3>
+          <p>Au-delà du chatbot : ce qu'une IA qui tourne sur la puce Apple Silicon peut faire pour votre écriture, hors ligne.</p>
+          <span class="guide-card__go">Lire le guide →</span>
+        </a>
+        <a class="guide-card" href="/guides/alternative-cotypist-gratuite.html">
+          <span class="guide-card__kicker">Comparatif</span>
+          <h3>Une alternative gratuite à Cotypist</h3>
+          <p>Cotypist est passée à l'abonnement. Ce que Souffleuse fait de pareil, de différent — et ce qu'elle ajoute.</p>
+          <span class="guide-card__go">Lire le guide →</span>
+        </a>
+        <a class="guide-card" href="/en/guides/autocomplete-every-mac-app.html" hreflang="en" lang="en">
+          <span class="guide-card__kicker">In English</span>
+          <h3>Guides in English</h3>
+          <p>AI autocomplete in every Mac app, translate while typing, offline AI writing, Cotypist alternatives compared…</p>
+          <span class="guide-card__go">Read the guides →</span>
+        </a>
+      </nav>
+    </div>
+  </section>
+
   <hr class="rule-double shell reveal-rule" aria-hidden="true" />
 
   <!-- =================== FAQ =================== -->
@@ -2223,6 +2453,41 @@
         <h2 id="faq-titre">Quelques questions</h2>
       </div>
       <div class="faq">
+        <details class="qa">
+          <summary>Comment avoir l'autocomplétion sur Mac, comme sur iPhone ?</summary>
+          <div class="qa__body">
+            <p>macOS Sonoma propose bien une prédiction intégrée, mais elle s'arrête à un ou deux mots et ne fonctionne pas partout. Souffleuse va plus loin : elle complète des phrases entières, en gris sous votre curseur, dans presque toutes les apps du Mac — Mail, Slack, Notes, votre navigateur. <kbd>Tab</kbd> accepte, <kbd>Esc</kbd> efface.</p>
+            <p class="qa__more"><a href="/guides/autocompletion-mac-comme-iphone.html">En savoir plus : l'autocomplétion sur Mac, comme sur iPhone →</a></p>
+          </div>
+        </details>
+        <details class="qa">
+          <summary>Existe-t-il une IA qui fonctionne sans internet sur Mac ?</summary>
+          <div class="qa__body">
+            <p>Oui. Souffleuse embarque un modèle de langage qui tourne directement sur la puce Apple Silicon de votre Mac. Après l'installation, tout fonctionne hors ligne : autocomplétion, traduction, reformulation. Dans l'avion comme derrière un VPN d'entreprise, elle souffle pareil.</p>
+            <p class="qa__more"><a href="/guides/ia-locale-mac.html">En savoir plus : une IA 100 % locale sur votre Mac →</a></p>
+          </div>
+        </details>
+        <details class="qa">
+          <summary>Existe-t-il une alternative gratuite à Cotypist ?</summary>
+          <div class="qa__body">
+            <p>Souffleuse est gratuite pendant la bêta, sans limite de complétions par jour et sans abonnement. Comme Cotypist, elle souffle la suite de vos phrases dans toutes les apps du Mac — et elle ajoute la traduction au fil de l'écriture, la reformulation par ton et un carnet d'usage, en restant 100 % locale.</p>
+            <p class="qa__more"><a href="/guides/alternative-cotypist-gratuite.html">En savoir plus : Souffleuse et Cotypist, comparées →</a></p>
+          </div>
+        </details>
+        <details class="qa">
+          <summary>Comment reformuler un mail professionnel avec l'IA, gratuitement ?</summary>
+          <div class="qa__body">
+            <p>Tapez <span class="shortcode">//</span> dans Mail : Souffleuse relit votre phrase et la reformule dans un ton professionnel, directement là où vous écrivez. Pas de copier-coller vers ChatGPT, pas de texte envoyé dans le cloud : le mail reste sur votre Mac, du brouillon à l'envoi.</p>
+            <p class="qa__more"><a href="/guides/reformuler-mail-professionnel-ia.html">En savoir plus : reformuler un mail professionnel avec l'IA →</a></p>
+          </div>
+        </details>
+        <details class="qa">
+          <summary>Comment traduire un message pendant qu'on l'écrit sur Mac ?</summary>
+          <div class="qa__body">
+            <p>Choisissez la langue d'une conversation, une seule fois : Souffleuse s'en souvient et traduit ensuite au fil de la frappe, dans un panneau discret, dans n'importe quelle app. La traduction se fait sur votre Mac, hors ligne — vos messages ne partent pas se faire traduire ailleurs.</p>
+            <p class="qa__more"><a href="/guides/traduire-en-ecrivant-mac.html">En savoir plus : traduire pendant que vous écrivez →</a></p>
+          </div>
+        </details>
         <details class="qa">
           <summary>Quels Mac sont compatibles ?</summary>
           <div class="qa__body">
@@ -2266,12 +2531,6 @@
           </div>
         </details>
         <details class="qa">
-          <summary>Comment marche la traduction ?</summary>
-          <div class="qa__body">
-            <p>Vous choisissez la langue d'une conversation, une seule fois ; elle s'en souvient et traduit ensuite au fil de l'échange, dans un petit panneau discret. Comme tout le reste, la traduction se fait sur votre Mac : vos messages ne partent pas se faire traduire ailleurs.</p>
-          </div>
-        </details>
-        <details class="qa">
           <summary>Comment la désinstaller ?</summary>
           <div class="qa__body">
             <p>Comme n'importe quelle app Mac : glissez-la des Applications à la corbeille. Ce qu'elle avait appris de votre style tient dans un seul dossier, chiffré, sur votre Mac ; supprimez-le aussi et il ne reste rien. Il n'existe aucune copie ailleurs, par construction.</p>
@@ -2303,7 +2562,7 @@
         Télécharger pour Mac
       </a>
       <p class="cta-note"><b>Gratuit pendant la bêta.</b> macOS Sonoma (14) ou plus récent · puce Apple Silicon.<span class="version-badge" data-version hidden></span></p>
-      <p class="cta-trust">~6,5 Mo · notarisée par Apple · vos textes ne quittent jamais votre Mac.</p>
+      <p class="cta-trust">~7,5 Mo · notarisée par Apple · vos textes ne quittent jamais votre Mac.</p>
       <p class="tally" id="tally" hidden aria-live="polite">
         Déjà <b id="tally-n"></b> Mac l'ont accueillie pendant la bêta.
       </p>
@@ -2354,6 +2613,14 @@
     <a href="#faq">Questions</a>
     <a href="#soutenir" data-don-open>Soutenir</a>
     <a href="mailto:contact@souffleuse.app">Écrire à la souffleuse</a>
+  </nav>
+  <nav class="shell foot__links" aria-label="Guides pratiques">
+    <a href="/guides/autocompletion-mac-comme-iphone.html">Autocomplétion sur Mac</a>
+    <a href="/guides/reformuler-mail-professionnel-ia.html">Reformuler un mail avec l'IA</a>
+    <a href="/guides/traduire-en-ecrivant-mac.html">Traduire en écrivant</a>
+    <a href="/guides/ia-locale-mac.html">IA locale sur Mac</a>
+    <a href="/guides/alternative-cotypist-gratuite.html">Alternative à Cotypist</a>
+    <a href="/en/compare/cotypist-alternatives.html" hreflang="en" lang="en">Cotypist alternatives (EN)</a>
   </nav>
   <div class="shell colophon">
     <p>
