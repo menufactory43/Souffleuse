@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Copilot for Writing: Tab-Complete Outside the IDE | Souffleuse</title>
+<meta name="description" content="You love GitHub Copilot's ghost text and Tab-complete — then you open your email. Here's a copilot for writing: the same UX in Mail, Slack and notes, powered by a local model on your Mac." />
+<link rel="canonical" href="https://souffleuse.app/en/guides/copilot-for-writing.html" />
+<meta name="theme-color" content="#f3ead9" />
+<link rel="icon" href="/favicon.ico" sizes="any" />
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="Souffleuse" />
+<meta property="og:locale" content="en_US" />
+<meta property="og:url" content="https://souffleuse.app/en/guides/copilot-for-writing.html" />
+<meta property="og:title" content="Copilot for Writing: Ghost Text and Tab-Complete Outside the IDE" />
+<meta property="og:description" content="The Copilot UX — grey ghost text, Tab to accept — for email, Slack and notes on macOS, with a small local model and no API key." />
+<meta property="og:image" content="https://souffleuse.app/promo/souffleuse-en-action/02-toutes-les-salles.jpg" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="preload" href="/assets/fonts/bodoni-moda-700-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="preload" href="/assets/fonts/spectral-400-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="stylesheet" href="/assets/fonts.css" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Article",
+  "headline": "A copilot for writing: ghost text and Tab-complete outside the IDE",
+  "inLanguage": "en",
+  "author": { "@type": "Organization", "name": "Souffleuse", "url": "https://souffleuse.app/" },
+  "publisher": { "@type": "Organization", "name": "Souffleuse", "url": "https://souffleuse.app/" },
+  "image": "https://souffleuse.app/promo/souffleuse-en-action/02-toutes-les-salles.jpg",
+  "mainEntityOfPage": "https://souffleuse.app/en/guides/copilot-for-writing.html",
+  "about": { "@type": "SoftwareApplication", "name": "Souffleuse", "operatingSystem": "macOS", "url": "https://souffleuse.app/" }
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    { "@type": "ListItem", "position": 1, "name": "Souffleuse", "item": "https://souffleuse.app/en/" },
+    { "@type": "ListItem", "position": 2, "name": "Guides", "item": "https://souffleuse.app/en/#guides" },
+    { "@type": "ListItem", "position": 3, "name": "Copilot for writing" }
+  ]
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Is there a GitHub Copilot for email and everyday writing?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Not from GitHub — Copilot lives in editors and IDEs. But the same UX exists system-wide on macOS: tools like Souffleuse draw grey ghost text at your caret in Mail, Slack, Notes and the browser, and Tab accepts it. Souffleuse runs a small local model on Apple Silicon, so there is no API key and no cloud." }
+    },
+    {
+      "@type": "Question",
+      "name": "Does a writing copilot need an API key or a subscription?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Souffleuse doesn't. The model (Gemma 1B class, GGUF) runs on-device via llama.cpp with Metal, so there is no key, no account and no per-token cost. It's free during the beta with no daily limit; if it ever becomes paid it will be a one-time purchase, not a subscription." }
+    },
+    {
+      "@type": "Question",
+      "name": "Does it work offline?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Yes. After the one-time model download at setup, Souffleuse never touches the network. Autocomplete, translation and tone rewriting all work in airplane mode." }
+    }
+  ]
+}
+</script>
+<style>
+  :root {
+    --paper: #f3ead9; --paper-deep: #ece0c9; --ink: #1a1613; --ink-soft: #463d33;
+    --ink-faint: #5e5446; --rouge: #8c2b21; --rouge-deep: #6f2018;
+    --display: "Bodoni Moda", Georgia, serif; --body: "Spectral", Georgia, serif;
+    --filet: 1px solid var(--ink);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--body); font-size: 1.05rem; line-height: 1.65; }
+  a { color: var(--rouge); }
+  .shell { max-width: 46rem; margin: 0 auto; padding: 0 1.4rem; }
+  header.topbar { border-bottom: var(--filet); padding: 0.9rem 0; }
+  .topbar__inner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+  .brand { display: flex; align-items: center; gap: 0.55rem; text-decoration: none; color: var(--ink); }
+  .brand__name { font-family: var(--display); font-weight: 700; font-size: 1.15rem; }
+  .brand__sub { display: block; font-size: 0.72rem; color: var(--ink-faint); letter-spacing: 0.08em; }
+  .btn { display: inline-flex; align-items: center; gap: 0.5rem; background: var(--rouge); color: var(--paper); font-family: var(--display); font-weight: 700; text-decoration: none; padding: 0.7rem 1.3rem; border: 1px solid var(--rouge-deep); }
+  .btn:hover { background: var(--rouge-deep); }
+  .btn--small { padding: 0.45rem 0.9rem; font-size: 0.9rem; }
+  .crumbs { font-size: 0.82rem; color: var(--ink-faint); margin: 1.6rem 0 0; }
+  .crumbs a { color: var(--ink-faint); }
+  article { padding: 0 0 3rem; }
+  h1 { font-family: var(--display); font-weight: 900; font-size: clamp(1.9rem, 5vw, 2.7rem); line-height: 1.08; margin: 1.2rem 0 0.8rem; }
+  h2 { font-family: var(--display); font-weight: 700; font-size: 1.45rem; line-height: 1.15; margin: 2.4rem 0 0.7rem; }
+  h3 { font-family: var(--display); font-weight: 700; font-size: 1.12rem; margin: 1.6rem 0 0.5rem; }
+  .lede { font-size: 1.15rem; font-style: italic; color: var(--ink-soft); }
+  figure.illu { margin: 2rem 0; }
+  figure.illu img { display: block; width: 100%; max-width: 480px; height: auto; margin: 0 auto; border: 1px solid rgba(26,22,19,0.28); box-shadow: 3px 4px 0 rgba(26,22,19,0.10); }
+  figure.illu figcaption { text-align: center; font-size: 0.82rem; font-style: italic; color: var(--ink-faint); margin-top: 0.5rem; }
+  kbd { font-family: var(--body); background: var(--ink); color: var(--paper); border-radius: 3px; padding: 0.05em 0.45em; font-size: 0.85em; }
+  .shortcode { font-weight: 700; color: var(--rouge); }
+  .exemple { border: 1px solid rgba(26,22,19,0.3); background: var(--paper-deep); padding: 1rem 1.2rem; margin: 1.2rem 0; }
+  .exemple p { margin: 0.3rem 0; }
+  .exemple .avant { color: var(--ink-faint); }
+  .exemple .apres { font-style: italic; }
+  ol.pas li, ul li { margin-bottom: 0.5rem; }
+  .cta-box { border: var(--filet); background: var(--paper-deep); text-align: center; padding: 2rem 1.4rem; margin: 2.6rem 0 0; }
+  .cta-box h2 { margin-top: 0; }
+  .cta-note { font-size: 0.85rem; color: var(--ink-faint); margin-top: 0.8rem; }
+  footer { border-top: var(--filet); padding: 1.6rem 0 2.2rem; font-size: 0.85rem; color: var(--ink-faint); }
+  footer nav { display: flex; flex-wrap: wrap; gap: 0.4rem 1.4rem; margin-top: 0.6rem; }
+  footer a { color: var(--ink-faint); }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="shell topbar__inner">
+    <a href="/en/" class="brand" aria-label="Souffleuse, home">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
+        <path d="M2 22 Q13 2 24 22" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <path d="M6 22 Q13 9 20 22" fill="none" stroke="currentColor" stroke-width="1"/>
+        <circle cx="13" cy="22" r="1.4" fill="currentColor"/>
+      </svg>
+      <span><span class="brand__name">Souffleuse</span><span class="brand__sub">for Mac</span></span>
+    </a>
+    <a href="/Souffleuse.dmg" download class="btn btn--small">Download</a>
+  </div>
+</header>
+
+<main class="shell">
+  <p class="crumbs"><a href="/en/">Souffleuse</a> · <a href="/en/#guides">Guides</a> · Copilot for writing</p>
+
+  <article>
+    <h1>A copilot for writing: ghost text and Tab-complete outside the IDE</h1>
+    <p class="lede">You know the move by heart: type half a line, the grey ghost text finishes it, <kbd>Tab</kbd>, next thought. Then you switch to Mail or Slack and suddenly you're typing every character again, like an animal. Here's how to get the Copilot UX for prose — with a small local model, no API key, no cloud.</p>
+
+    <h2>The mental model you already have</h2>
+    <p>GitHub Copilot rewired how a lot of developers type: you stop thinking in keystrokes and start thinking in <b>proposals</b>. You write the beginning, the model drafts the rest in grey, and you accept, reject, or keep typing to steer it. It's fast because it never interrupts you — no chat window, no prompt, no copy-paste. The suggestion lives at your caret, and rejection is free.</p>
+    <p>The frustrating part is where it stops. Copilot (and its cousins) are editor plugins: VS Code, JetBrains, Neovim. The moment you leave the IDE to answer an email, write a standup note, or reply to a customer in Slack, the ghost vanishes. Yet prose is <i>more</i> predictable than code — "Thanks for the heads-up, I'll take a look and" pretty much writes itself.</p>
+
+    <h2>The same UX, system-wide, from a local model</h2>
+    <p>On macOS, that gap can be closed without any cloud at all. <a href="/en/">Souffleuse</a> is a menu-bar app that uses the Accessibility API to read the text field you're typing in — any app with standard text fields: Mail, Slack, Notes, Messages, your browser, Obsidian — and a small on-device language model to propose the continuation as grey ghost text at your caret. <kbd>Tab</kbd> accepts, word by word or in chunks; <kbd>Esc</kbd> clears; keep typing and the stale suggestion is dropped, exactly the cancel-on-keystroke feel you expect from a good completion engine.</p>
+    <p>No API key, no account, no per-token billing: the model is downloaded once at setup and inference runs on your Apple Silicon GPU. Your drafts never leave the machine — which also means you can autocomplete the email about the thing you're under NDA for.</p>
+    <div class="exemple">
+      <p class="avant">You type — "Deployed the fix to staging, can you"</p>
+      <p class="apres">Ghost text — " give it a quick test before I promote it to prod?" <kbd>Tab</kbd></p>
+    </div>
+
+    <figure class="illu">
+      <img src="/promo/souffleuse-en-action/web/02-toutes-les-salles-720.jpg" width="720" height="900" loading="lazy" decoding="async"
+           alt="Copilot-style writing on Mac: grey ghost text with Tab to accept, shown in Mail, Notes, Slack and a browser." />
+      <figcaption>Copilot's ghost text, everywhere prose happens. (Screenshot text is in French — the app is French-made; suggestions follow the language you type, English included.)</figcaption>
+    </figure>
+
+    <h2>Setup in four steps</h2>
+    <ol class="pas">
+      <li><a href="/Souffleuse.dmg" download>Download the DMG</a> (~7.5 MB, notarized by Apple, free during the beta) and drag the app into Applications.</li>
+      <li>Grant the <b>Accessibility permission</b> — the equivalent of installing the editor plugin, except the "editor" is your whole Mac. The app then downloads its model once (0.4–1.5 GB depending on the model you pick).</li>
+      <li>Type anywhere. When the model has a confident continuation, it appears in grey under your cursor.</li>
+      <li><kbd>Tab</kbd> to accept, <kbd>Esc</kbd> to dismiss. There's also <span class="shortcode">//</span> to reread your sentence and <a href="/en/guides/professional-email-tone-mac.html">rewrite it in the tone of the app</a> — calmer in Mail, lighter in Messages — and <a href="/en/guides/translate-while-typing-mac.html">translation as you type</a>, one target language per conversation.</li>
+    </ol>
+
+    <h2>Nerd notes</h2>
+    <ul>
+      <li><b>Engine:</b> llama.cpp with the <b>Metal</b> backend, running a quantized GGUF model directly on the Apple Silicon GPU. That's why there's no key and no cost per token.</li>
+      <li><b>Model size:</b> Gemma 1B class — deliberately small. This is next-phrase prediction at typing speed, not essay generation; a 1B-class model keeps latency low enough that suggestions land between your keystrokes.</li>
+      <li><b>Cancellation:</b> every keystroke invalidates the in-flight generation, so you never see a suggestion computed against an outdated prefix.</li>
+      <li><b>Offline:</b> after the initial model download, zero network. <a href="/en/guides/offline-ai-writing-mac.html">Airplane mode changes nothing</a>. No telemetry either.</li>
+      <li><b>Personalization:</b> it learns your style from an encrypted history (stored locally, readable only by you). Secure fields — passwords, card numbers — are invisible to it by construction, because macOS marks them as secure.</li>
+      <li><b>Requirements:</b> macOS Sonoma (14)+, Apple Silicon (M1 or later). No Intel.</li>
+    </ul>
+    <p>One caveat, stated plainly: the interface of the app is currently in French (it's a French-made tool). The completions themselves follow whatever language you type, and English works well. If you want to dig deeper into the local-model angle, see <a href="/en/guides/local-llm-writing-assistant.html">our guide to local LLM writing assistants</a>.</p>
+
+    <h2>Frequently asked questions</h2>
+    <h3>Is there a GitHub Copilot for email and everyday writing?</h3>
+    <p>Not from GitHub — Copilot lives in editors and IDEs. But the same UX exists system-wide on macOS: tools like Souffleuse draw grey ghost text at your caret in Mail, Slack, Notes and the browser, and Tab accepts it. Souffleuse runs a small local model on Apple Silicon, so there is no API key and no cloud.</p>
+    <h3>Does a writing copilot need an API key or a subscription?</h3>
+    <p>Souffleuse doesn't. The model (Gemma 1B class, GGUF) runs on-device via llama.cpp with Metal, so there is no key, no account and no per-token cost. It's free during the beta with no daily limit; if it ever becomes paid it will be a one-time purchase, not a subscription.</p>
+    <h3>Does it work offline?</h3>
+    <p>Yes. After the one-time model download at setup, Souffleuse never touches the network. Autocomplete, translation and tone rewriting all work in airplane mode.</p>
+
+    <div class="cta-box">
+      <h2>Tab-complete your next email</h2>
+      <p>Install it, open Mail, and see how far the grey text gets you.</p>
+      <a href="/Souffleuse.dmg" download class="btn">Download Souffleuse for Mac</a>
+      <p class="cta-note"><b>Free during the beta.</b> macOS Sonoma (14) or later · Apple Silicon · ~7.5 MB · your text never leaves your Mac.</p>
+    </div>
+  </article>
+</main>
+
+<footer>
+  <div class="shell">
+    <p>Souffleuse — the right words, whispered from the wings. Made on a Mac, stays on your Mac.</p>
+    <nav aria-label="Useful links">
+      <a href="/en/">Home</a>
+      <a href="/en/guides/autocomplete-every-mac-app.html">Autocomplete in every app</a>
+      <a href="/en/guides/mac-predictive-text-like-iphone.html">Predictive text like iPhone</a>
+      <a href="/en/guides/offline-ai-writing-mac.html">Offline AI writing</a>
+      <a href="/en/guides/translate-while-typing-mac.html">Translate while typing</a>
+      <a href="/en/guides/professional-email-tone-mac.html">Professional email tone</a>
+      <a href="/en/guides/local-llm-writing-assistant.html">Local LLM writing assistant</a>
+      <a href="/en/compare/cotypist-alternatives.html">Cotypist alternatives</a>
+      <a href="/en/privacy.html">Privacy</a>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>

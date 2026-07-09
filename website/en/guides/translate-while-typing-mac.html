@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Translate While Typing on Mac — No Copy-Paste | Souffleuse</title>
+<meta name="description" content="How to translate while typing on Mac: skip the select-copy-translate-paste loop. Pick a target language once per conversation and see the translation as you write, fully on-device." />
+<link rel="canonical" href="https://souffleuse.app/en/guides/translate-while-typing-mac.html" />
+<meta name="theme-color" content="#f3ead9" />
+<link rel="icon" href="/favicon.ico" sizes="any" />
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="Souffleuse" />
+<meta property="og:locale" content="en_US" />
+<meta property="og:url" content="https://souffleuse.app/en/guides/translate-while-typing-mac.html" />
+<meta property="og:title" content="Translate While Typing on Mac — No Copy-Paste" />
+<meta property="og:description" content="Pick a target language once per conversation and see the translation appear as you write — fully on-device, works offline." />
+<meta property="og:image" content="https://souffleuse.app/promo/souffleuse-en-action/04-traduction.jpg" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="preload" href="/assets/fonts/bodoni-moda-700-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="preload" href="/assets/fonts/spectral-400-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="stylesheet" href="/assets/fonts.css" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Article",
+  "headline": "Translate while typing on Mac — without the copy-paste round-trip",
+  "inLanguage": "en",
+  "author": { "@type": "Organization", "name": "Souffleuse", "url": "https://souffleuse.app/en/" },
+  "publisher": { "@type": "Organization", "name": "Souffleuse", "url": "https://souffleuse.app/en/" },
+  "image": "https://souffleuse.app/promo/souffleuse-en-action/04-traduction.jpg",
+  "mainEntityOfPage": "https://souffleuse.app/en/guides/translate-while-typing-mac.html",
+  "about": { "@type": "SoftwareApplication", "name": "Souffleuse", "operatingSystem": "macOS", "url": "https://souffleuse.app/en/" }
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    { "@type": "ListItem", "position": 1, "name": "Souffleuse", "item": "https://souffleuse.app/en/" },
+    { "@type": "ListItem", "position": 2, "name": "Guides", "item": "https://souffleuse.app/en/#guides" },
+    { "@type": "ListItem", "position": 3, "name": "Translate while typing on Mac" }
+  ]
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Can I translate while typing on Mac without an internet connection?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Yes. Souffleuse runs a small language model directly on your Mac's Apple Silicon chip. The only download is the model itself, once, at setup. After that, translation while you type works entirely offline — on a plane, on a train, behind a strict VPN." }
+    },
+    {
+      "@type": "Question",
+      "name": "Do I have to pick the target language every time?",
+      "acceptedAnswer": { "@type": "Answer", "text": "No. You choose the target language once per conversation, and Souffleuse remembers it. Your chat with a Berlin colleague stays set to German while your family thread stays set to Spanish — each conversation keeps its own language." }
+    },
+    {
+      "@type": "Question",
+      "name": "Is Souffleuse available in English?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Souffleuse is made in France and its interface is currently in French, but the suggestions and translations follow whatever language you type — English included. The menus are few and easy to navigate." }
+    }
+  ]
+}
+</script>
+<style>
+  :root {
+    --paper: #f3ead9; --paper-deep: #ece0c9; --ink: #1a1613; --ink-soft: #463d33;
+    --ink-faint: #5e5446; --rouge: #8c2b21; --rouge-deep: #6f2018;
+    --display: "Bodoni Moda", Georgia, serif; --body: "Spectral", Georgia, serif;
+    --filet: 1px solid var(--ink);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--body); font-size: 1.05rem; line-height: 1.65; }
+  a { color: var(--rouge); }
+  .shell { max-width: 46rem; margin: 0 auto; padding: 0 1.4rem; }
+  header.topbar { border-bottom: var(--filet); padding: 0.9rem 0; }
+  .topbar__inner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+  .brand { display: flex; align-items: center; gap: 0.55rem; text-decoration: none; color: var(--ink); }
+  .brand__name { font-family: var(--display); font-weight: 700; font-size: 1.15rem; }
+  .brand__sub { display: block; font-size: 0.72rem; color: var(--ink-faint); letter-spacing: 0.08em; }
+  .btn { display: inline-flex; align-items: center; gap: 0.5rem; background: var(--rouge); color: var(--paper); font-family: var(--display); font-weight: 700; text-decoration: none; padding: 0.7rem 1.3rem; border: 1px solid var(--rouge-deep); }
+  .btn:hover { background: var(--rouge-deep); }
+  .btn--small { padding: 0.45rem 0.9rem; font-size: 0.9rem; }
+  .crumbs { font-size: 0.82rem; color: var(--ink-faint); margin: 1.6rem 0 0; }
+  .crumbs a { color: var(--ink-faint); }
+  article { padding: 0 0 3rem; }
+  h1 { font-family: var(--display); font-weight: 900; font-size: clamp(1.9rem, 5vw, 2.7rem); line-height: 1.08; margin: 1.2rem 0 0.8rem; }
+  h2 { font-family: var(--display); font-weight: 700; font-size: 1.45rem; line-height: 1.15; margin: 2.4rem 0 0.7rem; }
+  h3 { font-family: var(--display); font-weight: 700; font-size: 1.12rem; margin: 1.6rem 0 0.5rem; }
+  .lede { font-size: 1.15rem; font-style: italic; color: var(--ink-soft); }
+  figure.illu { margin: 2rem 0; }
+  figure.illu img { display: block; width: 100%; max-width: 480px; height: auto; margin: 0 auto; border: 1px solid rgba(26,22,19,0.28); box-shadow: 3px 4px 0 rgba(26,22,19,0.10); }
+  figure.illu figcaption { text-align: center; font-size: 0.82rem; font-style: italic; color: var(--ink-faint); margin-top: 0.5rem; }
+  kbd { font-family: var(--body); background: var(--ink); color: var(--paper); border-radius: 3px; padding: 0.05em 0.45em; font-size: 0.85em; }
+  .shortcode { font-weight: 700; color: var(--rouge); }
+  .exemple { border: 1px solid rgba(26,22,19,0.3); background: var(--paper-deep); padding: 1rem 1.2rem; margin: 1.2rem 0; }
+  .exemple p { margin: 0.3rem 0; }
+  .exemple .avant { color: var(--ink-faint); }
+  .exemple .apres { font-style: italic; }
+  ol.pas li, ul li { margin-bottom: 0.5rem; }
+  .cta-box { border: var(--filet); background: var(--paper-deep); text-align: center; padding: 2rem 1.4rem; margin: 2.6rem 0 0; }
+  .cta-box h2 { margin-top: 0; }
+  .cta-note { font-size: 0.85rem; color: var(--ink-faint); margin-top: 0.8rem; }
+  footer { border-top: var(--filet); padding: 1.6rem 0 2.2rem; font-size: 0.85rem; color: var(--ink-faint); }
+  footer nav { display: flex; flex-wrap: wrap; gap: 0.4rem 1.4rem; margin-top: 0.6rem; }
+  footer a { color: var(--ink-faint); }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="shell topbar__inner">
+    <a href="/en/" class="brand" aria-label="Souffleuse, home">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
+        <path d="M2 22 Q13 2 24 22" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <path d="M6 22 Q13 9 20 22" fill="none" stroke="currentColor" stroke-width="1"/>
+        <circle cx="13" cy="22" r="1.4" fill="currentColor"/>
+      </svg>
+      <span><span class="brand__name">Souffleuse</span><span class="brand__sub">for Mac</span></span>
+    </a>
+    <a href="/Souffleuse.dmg" download class="btn btn--small">Download</a>
+  </div>
+</header>
+
+<main class="shell">
+  <p class="crumbs"><a href="/en/">Souffleuse</a> · <a href="/en/#guides">Guides</a> · Translate while typing on Mac</p>
+
+  <article>
+    <h1>Translate while typing on Mac — without the copy-paste round-trip</h1>
+    <p class="lede">You write in one language, the person on the other end reads another. The usual tools make you stop, select, translate, paste — for every single message. Here is how to translate <em>while</em> you type on a Mac, with the target language remembered per conversation and nothing leaving your machine.</p>
+
+    <h2>Why Apple Translate and DeepL interrupt your flow</h2>
+    <p>macOS already ships translation: select a sentence, right-click, choose “Translate”, read the popover, then copy the result back into your message. DeepL's Mac app is faster — press <kbd>⌘C</kbd> twice on selected text and a window appears — but the shape of the workflow is the same: <b>select, translate, paste, repeat</b>. Both are select-then-translate tools. They were designed for reading foreign text, not for holding a conversation in one.</p>
+    <p>If you exchange thirty messages with a colleague abroad, that is thirty round-trips out of your chat window and back. Each one breaks the rhythm of the conversation — and with cloud tools, each one also sends your text to someone else's server.</p>
+
+    <h2>Translation that follows the conversation instead</h2>
+    <p><a href="/en/">Souffleuse</a> turns the workflow around. Instead of bringing your text to a translator, it puts a small translator next to your cursor: you pick a target language <b>once per conversation</b>, and from then on, whatever you type in that conversation is translated as you write, in a discreet panel by your text field. You keep typing in your own language; the translation is ready when the sentence is.</p>
+    <p>The per-conversation memory is the part that makes it livable. Your thread with a Berlin supplier stays set to German. The support inbox stays set to English. The family group chat stays set to Spanish. You never re-select a language, and you never translate the wrong message into the wrong tongue because a global setting was left on.</p>
+
+    <h3>How to set it up</h3>
+    <ol class="pas">
+      <li><a href="/Souffleuse.dmg" download>Download Souffleuse</a> (free during the beta, ~7.5 MB, notarized by Apple) and drag it into Applications. It lives in your menu bar and downloads its language model once — the only network connection it will ever make.</li>
+      <li>Open the conversation you want to write in — Messages, Slack, Mail, your browser, almost any Mac app works.</li>
+      <li>Choose the target language for that conversation (typing <span class="shortcode">//</span> also summons the panel). Souffleuse remembers your choice for this conversation.</li>
+      <li>Type normally, in your language. The translation appears in a small panel as you write; take it when the sentence reads right.</li>
+    </ol>
+    <div class="exemple">
+      <p class="avant">You type — « Tu es dispo demain ? »</p>
+      <p class="apres">The panel shows — “Are you free tomorrow?”</p>
+    </div>
+
+    <figure class="illu">
+      <img src="/promo/souffleuse-en-action/web/04-traduction-720.jpg" width="720" height="900" loading="lazy" decoding="async"
+           alt="Translate while typing on Mac: a French sentence being written in a chat, with its English translation shown live in a small panel." />
+      <figcaption>Translation while typing, French to English. (The app is made in France; its interface is in French, but it translates between the languages you actually use.)</figcaption>
+    </figure>
+
+    <h2>Fully on-device — so it also works offline</h2>
+    <p>The translation is computed by a small language model running on your Mac's Apple Silicon chip. <b>No text is ever sent over the internet.</b> There is no account, no telemetry, and no server that could log what you wrote — the only connection Souffleuse ever makes is downloading its model at setup (0.4–1.5 GB depending on the model). After that it works entirely offline: in a plane, on hotel Wi-Fi you don't trust, or behind a corporate VPN that blocks translation websites. That matters more than it sounds when the messages you translate are contracts, support tickets, or family news.</p>
+
+    <h2>Who actually uses this</h2>
+    <ul>
+      <li><b>Bilingual support agents</b> — you answer tickets in English all day but think faster in your first language. Write naturally; the English is ready beside the cursor, ticket after ticket, with the target language pinned to the inbox.</li>
+      <li><b>International teams</b> — the Slack channel with the Madrid office, the email thread with the Tokyo partner: each keeps its own language, and you stop juggling browser tabs of translators mid-standup.</li>
+      <li><b>Family abroad</b> — messaging in-laws or grandparents in a language you half-speak. You write what you mean, they receive it in theirs, and nobody's private family chat transits through a translation server.</li>
+    </ul>
+
+    <h2>One note on languages and the interface</h2>
+    <p>Souffleuse is made in France and its interface is currently in French. The work it does, however, follows <b>whatever language you type</b> — its <a href="/en/guides/autocomplete-every-mac-app.html">ghost-text autocomplete</a> continues your English sentence in English, and translation works between the languages of your actual conversations. The handful of menus are simple enough that the French UI has not stopped English-speaking users so far.</p>
+
+    <h2>Frequently asked questions</h2>
+    <h3>Can I translate while typing on Mac without an internet connection?</h3>
+    <p>Yes. Souffleuse runs a small language model directly on your Mac's Apple Silicon chip. The only download is the model itself, once, at setup. After that, translation while you type works entirely offline — on a plane, on a train, behind a strict VPN.</p>
+    <h3>Do I have to pick the target language every time?</h3>
+    <p>No. You choose the target language once per conversation, and Souffleuse remembers it. Your chat with a Berlin colleague stays set to German while your family thread stays set to Spanish — each conversation keeps its own language.</p>
+    <h3>Is Souffleuse available in English?</h3>
+    <p>Souffleuse is made in France and its interface is currently in French, but the suggestions and translations follow whatever language you type — English included. The menus are few and easy to navigate.</p>
+
+    <h2>While you're at it…</h2>
+    <p>Translation is one of Souffleuse's roles. As you type, it also suggests <a href="/en/guides/mac-predictive-text-like-iphone.html">the rest of your sentence in grey under the cursor</a> (Tab to accept), can <a href="/en/guides/professional-email-tone-mac.html">rewrite a sentence in the right tone</a> before you hit send, and does all of it with a <a href="/en/guides/local-llm-writing-assistant.html">local language model</a> — the same privacy story everywhere.</p>
+
+    <div class="cta-box">
+      <h2>Try it on your next bilingual conversation</h2>
+      <p>Pick the language once, type in yours, judge the result.</p>
+      <a href="/Souffleuse.dmg" download class="btn">Download Souffleuse for Mac</a>
+      <p class="cta-note"><b>Free during the beta.</b> macOS Sonoma (14) or later · Apple Silicon · ~7.5 MB · your text never leaves your Mac.</p>
+    </div>
+  </article>
+</main>
+
+<footer>
+  <div class="shell">
+    <p>Souffleuse — the right word, whispered from the wings. Made on a Mac, stays on your Mac.</p>
+    <nav aria-label="Useful links">
+      <a href="/en/">Home</a>
+      <a href="/en/guides/autocomplete-every-mac-app.html">Autocomplete in every Mac app</a>
+      <a href="/en/guides/mac-predictive-text-like-iphone.html">Predictive text like iPhone</a>
+      <a href="/en/guides/professional-email-tone-mac.html">Professional email tone</a>
+      <a href="/en/guides/local-llm-writing-assistant.html">Local LLM writing assistant</a>
+      <a href="/en/guides/offline-ai-writing-mac.html">Offline AI writing</a>
+      <a href="/en/compare/cotypist-alternatives.html">Cotypist alternatives</a>
+      <a href="/en/privacy.html">Privacy</a>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>

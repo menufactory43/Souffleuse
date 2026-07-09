@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AI Autocomplete in Every Mac App — How to Get It | Souffleuse</title>
+<meta name="description" content="How to get AI autocomplete in every Mac app — Mail, Slack, Notes, your browser. Why macOS inline prediction stops at 1–2 words, and how a local, on-device tool goes further." />
+<link rel="canonical" href="https://souffleuse.app/en/guides/autocomplete-every-mac-app.html" />
+<meta name="theme-color" content="#f3ead9" />
+<link rel="icon" href="/favicon.ico" sizes="any" />
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="Souffleuse" />
+<meta property="og:locale" content="en_US" />
+<meta property="og:url" content="https://souffleuse.app/en/guides/autocomplete-every-mac-app.html" />
+<meta property="og:title" content="AI Autocomplete in Every Mac App — How to Get It" />
+<meta property="og:description" content="System-wide ghost text on macOS: full-sentence AI autocomplete in Mail, Slack, Notes and your browser, running 100% on your Mac." />
+<meta property="og:image" content="https://souffleuse.app/promo/souffleuse-en-action/02-toutes-les-salles.jpg" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="preload" href="/assets/fonts/bodoni-moda-700-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="preload" href="/assets/fonts/spectral-400-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="stylesheet" href="/assets/fonts.css" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Article",
+  "headline": "AI autocomplete in every Mac app: how to get system-wide ghost text",
+  "inLanguage": "en",
+  "author": { "@type": "Organization", "name": "Souffleuse", "url": "https://souffleuse.app/" },
+  "publisher": { "@type": "Organization", "name": "Souffleuse", "url": "https://souffleuse.app/" },
+  "image": "https://souffleuse.app/promo/souffleuse-en-action/02-toutes-les-salles.jpg",
+  "mainEntityOfPage": "https://souffleuse.app/en/guides/autocomplete-every-mac-app.html",
+  "about": { "@type": "SoftwareApplication", "name": "Souffleuse", "operatingSystem": "macOS", "url": "https://souffleuse.app/" }
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    { "@type": "ListItem", "position": 1, "name": "Souffleuse", "item": "https://souffleuse.app/en/" },
+    { "@type": "ListItem", "position": 2, "name": "Guides", "item": "https://souffleuse.app/en/#guides" },
+    { "@type": "ListItem", "position": 3, "name": "AI autocomplete in every Mac app" }
+  ]
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Does AI autocomplete work in every Mac app?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Tools built on the macOS Accessibility API work in almost every app that uses standard text fields: Mail, Notes, Messages, Slack, Safari or Chrome, Pages, Bear, Obsidian and more. Password and credit-card fields are ignored by design, because macOS marks them as secure." }
+    },
+    {
+      "@type": "Question",
+      "name": "Is my text sent to a server for the suggestions?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Not with Souffleuse. The language model runs on your Mac's Apple Silicon chip. The only connection it ever makes is the one-time model download at setup; after that it works entirely offline. No account, no telemetry." }
+    },
+    {
+      "@type": "Question",
+      "name": "Does it suggest in English?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Yes. Souffleuse is made in France and its interface is in French, but the suggestions follow whatever language you type — English, French and others work naturally." }
+    }
+  ]
+}
+</script>
+<style>
+  :root {
+    --paper: #f3ead9; --paper-deep: #ece0c9; --ink: #1a1613; --ink-soft: #463d33;
+    --ink-faint: #5e5446; --rouge: #8c2b21; --rouge-deep: #6f2018;
+    --display: "Bodoni Moda", Georgia, serif; --body: "Spectral", Georgia, serif;
+    --filet: 1px solid var(--ink);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--body); font-size: 1.05rem; line-height: 1.65; }
+  a { color: var(--rouge); }
+  .shell { max-width: 46rem; margin: 0 auto; padding: 0 1.4rem; }
+  header.topbar { border-bottom: var(--filet); padding: 0.9rem 0; }
+  .topbar__inner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+  .brand { display: flex; align-items: center; gap: 0.55rem; text-decoration: none; color: var(--ink); }
+  .brand__name { font-family: var(--display); font-weight: 700; font-size: 1.15rem; }
+  .brand__sub { display: block; font-size: 0.72rem; color: var(--ink-faint); letter-spacing: 0.08em; }
+  .btn { display: inline-flex; align-items: center; gap: 0.5rem; background: var(--rouge); color: var(--paper); font-family: var(--display); font-weight: 700; text-decoration: none; padding: 0.7rem 1.3rem; border: 1px solid var(--rouge-deep); }
+  .btn:hover { background: var(--rouge-deep); }
+  .btn--small { padding: 0.45rem 0.9rem; font-size: 0.9rem; }
+  .crumbs { font-size: 0.82rem; color: var(--ink-faint); margin: 1.6rem 0 0; }
+  .crumbs a { color: var(--ink-faint); }
+  article { padding: 0 0 3rem; }
+  h1 { font-family: var(--display); font-weight: 900; font-size: clamp(1.9rem, 5vw, 2.7rem); line-height: 1.08; margin: 1.2rem 0 0.8rem; }
+  h2 { font-family: var(--display); font-weight: 700; font-size: 1.45rem; line-height: 1.15; margin: 2.4rem 0 0.7rem; }
+  h3 { font-family: var(--display); font-weight: 700; font-size: 1.12rem; margin: 1.6rem 0 0.5rem; }
+  .lede { font-size: 1.15rem; font-style: italic; color: var(--ink-soft); }
+  figure.illu { margin: 2rem 0; }
+  figure.illu img { display: block; width: 100%; max-width: 480px; height: auto; margin: 0 auto; border: 1px solid rgba(26,22,19,0.28); box-shadow: 3px 4px 0 rgba(26,22,19,0.10); }
+  figure.illu figcaption { text-align: center; font-size: 0.82rem; font-style: italic; color: var(--ink-faint); margin-top: 0.5rem; }
+  kbd { font-family: var(--body); background: var(--ink); color: var(--paper); border-radius: 3px; padding: 0.05em 0.45em; font-size: 0.85em; }
+  .shortcode { font-weight: 700; color: var(--rouge); }
+  .exemple { border: 1px solid rgba(26,22,19,0.3); background: var(--paper-deep); padding: 1rem 1.2rem; margin: 1.2rem 0; }
+  .exemple p { margin: 0.3rem 0; }
+  .exemple .avant { color: var(--ink-faint); }
+  .exemple .apres { font-style: italic; }
+  ol.pas li, ul li { margin-bottom: 0.5rem; }
+  .cta-box { border: var(--filet); background: var(--paper-deep); text-align: center; padding: 2rem 1.4rem; margin: 2.6rem 0 0; }
+  .cta-box h2 { margin-top: 0; }
+  .cta-note { font-size: 0.85rem; color: var(--ink-faint); margin-top: 0.8rem; }
+  footer { border-top: var(--filet); padding: 1.6rem 0 2.2rem; font-size: 0.85rem; color: var(--ink-faint); }
+  footer nav { display: flex; flex-wrap: wrap; gap: 0.4rem 1.4rem; margin-top: 0.6rem; }
+  footer a { color: var(--ink-faint); }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="shell topbar__inner">
+    <a href="/en/" class="brand" aria-label="Souffleuse, home">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
+        <path d="M2 22 Q13 2 24 22" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <path d="M6 22 Q13 9 20 22" fill="none" stroke="currentColor" stroke-width="1"/>
+        <circle cx="13" cy="22" r="1.4" fill="currentColor"/>
+      </svg>
+      <span><span class="brand__name">Souffleuse</span><span class="brand__sub">for Mac</span></span>
+    </a>
+    <a href="/Souffleuse.dmg" download class="btn btn--small">Download</a>
+  </div>
+</header>
+
+<main class="shell">
+  <p class="crumbs"><a href="/en/">Souffleuse</a> · <a href="/en/#guides">Guides</a> · AI autocomplete in every Mac app</p>
+
+  <article>
+    <h1>AI autocomplete in every Mac app: how to get system-wide ghost text</h1>
+    <p class="lede">Your Mac can already guess a word here and there. What you're probably looking for is something else: the rest of the sentence appearing in grey under your cursor — in Mail, in Slack, in your browser, everywhere — with one key to accept it. Here's why macOS doesn't do that out of the box, and how to add it.</p>
+
+    <h2>Why macOS autocomplete only gets you 1–2 words</h2>
+    <p>Since macOS Sonoma, Apple ships <b>inline predictive text</b>: as you type, the system proposes the next word or two in grey, and the space bar accepts them. It's genuinely useful — and genuinely limited. It predicts <b>one or two words at a time</b>, not sentences. It only appears in apps that use Apple's standard text system, so plenty of everyday writing surfaces — many Electron apps, some browsers, most web text areas — never show it. And its suggestions lean heavily toward English.</p>
+    <p>So the honest answer to "does my Mac have autocomplete?" is: yes, a small one, sometimes. If you write a lot — email, chat, notes, tickets — you quickly want the fuller version: whole phrases, in every app, in the language you actually type.</p>
+
+    <h2>How system-wide ghost text works</h2>
+    <p>A handful of Mac utilities solve this with the <b>macOS Accessibility API</b> — the same mechanism screen readers use to know what's on screen. The tool reads the text field you're typing in, asks a language model for a plausible continuation, and draws it in grey right at your caret. Because the Accessibility API works across applications, the same ghost text shows up in Mail, Notes, Messages, Slack, Safari or Chrome, Pages, Bear, Obsidian… anywhere there's a standard text field. Cotypist pioneered this category on the Mac; several tools now offer it, with different pricing and privacy models.</p>
+    <p>One nice consequence of this design: <b>secure fields are excluded by construction</b>. macOS marks password and credit-card fields as secure, and an Accessibility-based tool simply cannot read them — so nothing ever gets suggested there.</p>
+
+    <figure class="illu">
+      <img src="/promo/souffleuse-en-action/web/02-toutes-les-salles-720.jpg" width="720" height="900" loading="lazy" decoding="async"
+           alt="AI autocomplete on Mac: the same grey ghost-text suggestion appearing in Mail, Notes, Slack and a browser." />
+      <figcaption>The same suggestion, in every room: Mail, Notes, Slack, browser. (Screenshot text is in French — the app is French-made; suggestions follow the language you type.)</figcaption>
+    </figure>
+
+    <h2>Step by step: autocomplete everywhere with Souffleuse</h2>
+    <p><a href="/en/">Souffleuse</a> is one of these system-wide tools — a small menu-bar app whose language model runs entirely on your Mac. Setting it up takes a few minutes:</p>
+    <ol class="pas">
+      <li><a href="/Souffleuse.dmg" download>Download Souffleuse</a> (free during the beta, ~7.5 MB, notarized by Apple) and drag it into Applications. It lives in the menu bar.</li>
+      <li>Grant the <b>Accessibility permission</b> when macOS asks — that's how it can see the text field you're writing in and place the ghost text at your caret. On first launch it downloads its language model once (0.4–1.5 GB depending on the model); that is the only network connection it ever makes.</li>
+      <li>Open Mail, Slack, Notes — anything — and just type. When Souffleuse has a good guess at how your sentence continues, it appears in grey under your cursor.</li>
+      <li>Press <kbd>Tab</kbd> to accept (word by word or in chunks), <kbd>Esc</kbd> to dismiss — or simply keep typing and the suggestion fades on its own.</li>
+    </ol>
+    <div class="exemple">
+      <p class="avant">You type — "Thanks for the update, I'll get back to you"</p>
+      <p class="apres">Grey ghost text — " as soon as I've reviewed the numbers." <kbd>Tab</kbd></p>
+    </div>
+    <p>A note on language: Souffleuse is made in France and its interface is currently in French, but the suggestions follow <b>whatever language you type</b>. Write in English, it completes in English.</p>
+
+    <h2>What makes this approach different</h2>
+    <ul>
+      <li><b>100% on-device.</b> The model runs on your Apple Silicon chip. Your keystrokes never leave your Mac — there is no server to send them to. It even <a href="/en/guides/offline-ai-writing-mac.html">works fully offline</a>.</li>
+      <li><b>Free during the beta,</b> with no daily quota, no account, no card. If it ever becomes paid, it will be a one-time purchase, never a hidden subscription. (Cotypist, the category pioneer, moved to a subscription with a free daily allowance — a fair model too, just a different one.)</li>
+      <li><b>More than autocomplete.</b> The same app can <a href="/en/guides/translate-while-typing-mac.html">translate as you type</a> (pick a target language once per conversation) and <a href="/en/guides/professional-email-tone-mac.html">rewrite a sentence in the right tone</a> — type <span class="shortcode">//</span> and it rereads your phrase, calmer in Mail, lighter in Messages. It also fixes typos in passing: Tab restores the slip.</li>
+      <li><b>It learns your style</b> from an encrypted history stored on your Mac, readable by you alone.</li>
+    </ul>
+
+    <h2>Frequently asked questions</h2>
+    <h3>Does AI autocomplete work in every Mac app?</h3>
+    <p>Tools built on the macOS Accessibility API work in almost every app that uses standard text fields: Mail, Notes, Messages, Slack, Safari or Chrome, Pages, Bear, Obsidian and more. Password and credit-card fields are ignored by design, because macOS marks them as secure.</p>
+    <h3>Is my text sent to a server for the suggestions?</h3>
+    <p>Not with Souffleuse. The language model runs on your Mac's Apple Silicon chip. The only connection it ever makes is the one-time model download at setup; after that it works entirely offline. No account, no telemetry.</p>
+    <h3>Does it suggest in English?</h3>
+    <p>Yes. Souffleuse is made in France and its interface is in French, but the suggestions follow whatever language you type — English, French and others work naturally.</p>
+
+    <div class="cta-box">
+      <h2>Try it in your own apps</h2>
+      <p>Install it, type a sentence in Mail or Slack, and judge the grey text for yourself.</p>
+      <a href="/Souffleuse.dmg" download class="btn">Download Souffleuse for Mac</a>
+      <p class="cta-note"><b>Free during the beta.</b> macOS Sonoma (14) or later · Apple Silicon · ~7.5 MB · your text never leaves your Mac.</p>
+    </div>
+  </article>
+</main>
+
+<footer>
+  <div class="shell">
+    <p>Souffleuse — the right words, whispered from the wings. Made on a Mac, stays on your Mac.</p>
+    <nav aria-label="Useful links">
+      <a href="/en/">Home</a>
+      <a href="/en/guides/mac-predictive-text-like-iphone.html">Predictive text like iPhone</a>
+      <a href="/en/guides/copilot-for-writing.html">Copilot for writing</a>
+      <a href="/en/guides/offline-ai-writing-mac.html">Offline AI writing</a>
+      <a href="/en/guides/translate-while-typing-mac.html">Translate while typing</a>
+      <a href="/en/guides/professional-email-tone-mac.html">Professional email tone</a>
+      <a href="/en/guides/local-llm-writing-assistant.html">Local LLM writing assistant</a>
+      <a href="/en/compare/cotypist-alternatives.html">Cotypist alternatives</a>
+      <a href="/en/privacy.html">Privacy</a>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>
