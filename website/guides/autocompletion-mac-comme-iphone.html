@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Autocomplétion sur Mac comme sur iPhone : le guide | Souffleuse</title>
+<meta name="description" content="Comment avoir l'autocomplétion sur Mac comme sur iPhone : activer la prédiction de texte intégrée de macOS Sonoma, puis obtenir des phrases entières dans toutes vos apps." />
+<link rel="canonical" href="https://souffleuse.app/guides/autocompletion-mac-comme-iphone.html" />
+<meta name="theme-color" content="#f3ead9" />
+<link rel="icon" href="/favicon.ico" sizes="any" />
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="Souffleuse" />
+<meta property="og:locale" content="fr_FR" />
+<meta property="og:url" content="https://souffleuse.app/guides/autocompletion-mac-comme-iphone.html" />
+<meta property="og:title" content="L'autocomplétion sur Mac, comme sur iPhone — et en mieux" />
+<meta property="og:description" content="Activer la prédiction de texte de macOS, puis passer aux phrases entières dans toutes les apps, avec une IA 100 % locale." />
+<meta property="og:image" content="https://souffleuse.app/promo/souffleuse-en-action/02-toutes-les-salles.jpg" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="preload" href="/assets/fonts/bodoni-moda-700-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="preload" href="/assets/fonts/spectral-400-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="stylesheet" href="/assets/fonts.css" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Article",
+  "headline": "L'autocomplétion sur Mac, comme sur iPhone — et même en mieux",
+  "inLanguage": "fr",
+  "author": { "@type": "Organization", "name": "Souffleuse", "url": "https://souffleuse.app/" },
+  "publisher": { "@type": "Organization", "name": "Souffleuse", "url": "https://souffleuse.app/" },
+  "image": "https://souffleuse.app/promo/souffleuse-en-action/02-toutes-les-salles.jpg",
+  "mainEntityOfPage": "https://souffleuse.app/guides/autocompletion-mac-comme-iphone.html",
+  "about": { "@type": "SoftwareApplication", "name": "Souffleuse", "operatingSystem": "macOS", "url": "https://souffleuse.app/" }
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    { "@type": "ListItem", "position": 1, "name": "Souffleuse", "item": "https://souffleuse.app/" },
+    { "@type": "ListItem", "position": 2, "name": "Guides", "item": "https://souffleuse.app/#guides" },
+    { "@type": "ListItem", "position": 3, "name": "L'autocomplétion sur Mac comme sur iPhone" }
+  ]
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Comment activer la prédiction de texte intégrée de macOS ?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Sur macOS Sonoma ou plus récent : Réglages Système → Clavier, puis activez « Afficher les prédictions en ligne ». La suite probable du mot apparaît en gris ; la barre d'espace l'accepte. Elle propose un ou deux mots, dans les apps Apple principalement." }
+    },
+    {
+      "@type": "Question",
+      "name": "La prédiction de texte du Mac fonctionne-t-elle en français ?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Elle fonctionne en français mais reste sensiblement moins à l'aise qu'en anglais, la langue sur laquelle elle a été le plus travaillée. Une alternative comme Souffleuse suit simplement la langue que vous tapez, français compris." }
+    },
+    {
+      "@type": "Question",
+      "name": "Peut-on avoir des suggestions de phrases entières sur Mac, gratuitement ?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Oui. Souffleuse est gratuite pendant la bêta, sans compte ni limite quotidienne : elle affiche la suite de la phrase en gris sous le curseur dans presque toutes les apps du Mac, et Tab l'accepte. Le modèle tourne sur votre Mac, rien ne part sur internet." }
+    }
+  ]
+}
+</script>
+<style>
+  :root {
+    --paper: #f3ead9; --paper-deep: #ece0c9; --ink: #1a1613; --ink-soft: #463d33;
+    --ink-faint: #5e5446; --rouge: #8c2b21; --rouge-deep: #6f2018;
+    --display: "Bodoni Moda", Georgia, serif; --body: "Spectral", Georgia, serif;
+    --filet: 1px solid var(--ink);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--body); font-size: 1.05rem; line-height: 1.65; }
+  a { color: var(--rouge); }
+  .shell { max-width: 46rem; margin: 0 auto; padding: 0 1.4rem; }
+  header.topbar { border-bottom: var(--filet); padding: 0.9rem 0; }
+  .topbar__inner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+  .brand { display: flex; align-items: center; gap: 0.55rem; text-decoration: none; color: var(--ink); }
+  .brand__name { font-family: var(--display); font-weight: 700; font-size: 1.15rem; }
+  .brand__sub { display: block; font-size: 0.72rem; color: var(--ink-faint); letter-spacing: 0.08em; }
+  .btn { display: inline-flex; align-items: center; gap: 0.5rem; background: var(--rouge); color: var(--paper); font-family: var(--display); font-weight: 700; text-decoration: none; padding: 0.7rem 1.3rem; border: 1px solid var(--rouge-deep); }
+  .btn:hover { background: var(--rouge-deep); }
+  .btn--small { padding: 0.45rem 0.9rem; font-size: 0.9rem; }
+  .crumbs { font-size: 0.82rem; color: var(--ink-faint); margin: 1.6rem 0 0; }
+  .crumbs a { color: var(--ink-faint); }
+  article { padding: 0 0 3rem; }
+  h1 { font-family: var(--display); font-weight: 900; font-size: clamp(1.9rem, 5vw, 2.7rem); line-height: 1.08; margin: 1.2rem 0 0.8rem; }
+  h2 { font-family: var(--display); font-weight: 700; font-size: 1.45rem; line-height: 1.15; margin: 2.4rem 0 0.7rem; }
+  h3 { font-family: var(--display); font-weight: 700; font-size: 1.12rem; margin: 1.6rem 0 0.5rem; }
+  .lede { font-size: 1.15rem; font-style: italic; color: var(--ink-soft); }
+  figure.illu { margin: 2rem 0; }
+  figure.illu img { display: block; width: 100%; max-width: 480px; height: auto; margin: 0 auto; border: 1px solid rgba(26,22,19,0.28); box-shadow: 3px 4px 0 rgba(26,22,19,0.10); }
+  figure.illu figcaption { text-align: center; font-size: 0.82rem; font-style: italic; color: var(--ink-faint); margin-top: 0.5rem; }
+  kbd { font-family: var(--body); background: var(--ink); color: var(--paper); border-radius: 3px; padding: 0.05em 0.45em; font-size: 0.85em; }
+  .shortcode { font-weight: 700; color: var(--rouge); }
+  .exemple { border: 1px solid rgba(26,22,19,0.3); background: var(--paper-deep); padding: 1rem 1.2rem; margin: 1.2rem 0; }
+  .exemple p { margin: 0.3rem 0; }
+  .exemple .avant { color: var(--ink-faint); }
+  .exemple .apres { font-style: italic; }
+  ol.pas li, ul li { margin-bottom: 0.5rem; }
+  .cta-box { border: var(--filet); background: var(--paper-deep); text-align: center; padding: 2rem 1.4rem; margin: 2.6rem 0 0; }
+  .cta-box h2 { margin-top: 0; }
+  .cta-note { font-size: 0.85rem; color: var(--ink-faint); margin-top: 0.8rem; }
+  footer { border-top: var(--filet); padding: 1.6rem 0 2.2rem; font-size: 0.85rem; color: var(--ink-faint); }
+  footer nav { display: flex; flex-wrap: wrap; gap: 0.4rem 1.4rem; margin-top: 0.6rem; }
+  footer a { color: var(--ink-faint); }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="shell topbar__inner">
+    <a href="/" class="brand" aria-label="Souffleuse, accueil">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
+        <path d="M2 22 Q13 2 24 22" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <path d="M6 22 Q13 9 20 22" fill="none" stroke="currentColor" stroke-width="1"/>
+        <circle cx="13" cy="22" r="1.4" fill="currentColor"/>
+      </svg>
+      <span><span class="brand__name">Souffleuse</span><span class="brand__sub">pour Mac</span></span>
+    </a>
+    <a href="/Souffleuse.dmg" download class="btn btn--small">Télécharger</a>
+  </div>
+</header>
+
+<main class="shell">
+  <p class="crumbs"><a href="/">Souffleuse</a> · <a href="/#guides">Guides</a> · L'autocomplétion sur Mac comme sur iPhone</p>
+
+  <article>
+    <h1>L'autocomplétion sur Mac, comme sur l'iPhone — et même en mieux</h1>
+    <p class="lede">Sur l'iPhone, le clavier devine la suite et vous n'y pensez plus. De retour devant le Mac, chaque mot se tape en entier. Bonne nouvelle : la prédiction de texte existe aussi sur Mac — et on peut aller bien plus loin que celle d'Apple.</p>
+
+    <h2>Oui, macOS a une prédiction de texte intégrée — voici comment l'activer</h2>
+    <p>Depuis macOS Sonoma, le Mac sait afficher la fin probable du mot en gris pendant que vous tapez, exactement dans l'esprit du clavier de l'iPhone. Elle est parfois désactivée ; pour la mettre en route :</p>
+    <ol class="pas">
+      <li>Ouvrez <b>Réglages Système</b> depuis le menu Pomme.</li>
+      <li>Allez dans <b>Clavier</b>.</li>
+      <li>Activez <b>« Afficher les prédictions en ligne »</b>.</li>
+    </ol>
+    <p>Dès qu'une prédiction s'affiche en gris, la barre d'espace l'accepte. C'est gratuit, intégré, et c'est la première chose à essayer si vous cherchez la saisie prédictive de l'iPhone sur votre Mac.</p>
+
+    <h2>Ses limites, honnêtement</h2>
+    <p>La prédiction d'Apple rend service, mais elle joue petit. Trois limites reviennent vite à l'usage :</p>
+    <ul>
+      <li><b>Un ou deux mots, pas plus.</b> Elle termine le mot en cours, parfois le suivant. Elle ne vous soufflera jamais la fin de la phrase, encore moins la formule de politesse entière.</li>
+      <li><b>Pas partout.</b> Elle couvre surtout les apps Apple (Notes, Mail, Messages, Pages). Dans Slack, dans un champ de navigateur, dans beaucoup d'apps tierces, elle brille par son absence.</li>
+      <li><b>Un biais anglais.</b> Elle a été travaillée d'abord pour l'anglais ; en français, ses propositions sont plus rares et plus timides.</li>
+    </ul>
+    <p>Si vous tapez trois mails par jour dans Notes, cela peut suffire. Si vous écrivez toute la journée, dans dix apps différentes et en français, il vous faut autre chose.</p>
+
+    <h2>Des phrases entières, dans toutes les apps : la méthode Souffleuse</h2>
+    <p><a href="/">Souffleuse</a> est un assistant de frappe 100 % local pour Mac : une petite IA embarquée sur la puce Apple Silicon affiche <b>la suite de votre phrase</b> en gris sous le curseur — dans Mail, Notes, Messages, Safari, Chrome, Slack, Pages, Bear, Obsidian… presque toutes les apps du Mac. Pour l'installer :</p>
+    <ol class="pas">
+      <li><a href="/Souffleuse.dmg" download>Téléchargez Souffleuse</a> (~7,5 Mo, notarisée par Apple, gratuite pendant la bêta) et glissez-la dans vos Applications.</li>
+      <li>Au premier lancement, elle s'installe dans la barre de menus et télécharge une fois son modèle de langage (0,4 à 1,5 Go selon le modèle). C'est la seule connexion qu'elle fera jamais : ensuite, tout fonctionne hors ligne.</li>
+      <li>Écrivez normalement. Quand une suite s'affiche en gris, <kbd>Tab</kbd> l'accepte — mot par mot ou par morceaux, à vous de doser. <kbd>Esc</kbd> l'efface, et continuer à taper l'efface aussi.</li>
+    </ol>
+    <div class="exemple">
+      <p class="avant">Vous tapez — « Je reviens vers toi »</p>
+      <p class="apres">Souffleuse affiche en gris — « dès que possible. » <kbd>Tab</kbd> et c'est écrit.</p>
+    </div>
+
+    <figure class="illu">
+      <img src="/promo/souffleuse-en-action/web/02-toutes-les-salles-720.jpg" width="720" height="900" loading="lazy" decoding="async"
+           alt="Autocomplétion sur Mac comme sur iPhone : la suite de la phrase proposée en gris dans Mail, Notes, Slack et le navigateur." />
+      <figcaption>La même souffleuse dans toutes les salles : Mail, Notes, Slack, navigateur.</figcaption>
+    </figure>
+
+    <h2>Prédiction macOS ou Souffleuse : ce qui change, concrètement</h2>
+    <ul>
+      <li><b>Longueur des suggestions :</b> un à deux mots pour macOS ; des phrases entières pour Souffleuse, acceptées par morceaux avec <kbd>Tab</kbd>.</li>
+      <li><b>Couverture :</b> les apps Apple principalement pour macOS ; presque toutes les apps du Mac pour Souffleuse.</li>
+      <li><b>Français :</b> possible mais timide côté macOS ; Souffleuse suit simplement la langue que vous tapez, français compris.</li>
+      <li><b>Style :</b> la prédiction d'Apple est la même pour tout le monde ; Souffleuse apprend vos tournures au fil du temps (historique chiffré sur votre Mac, lisible par vous seul).</li>
+      <li><b>En prime :</b> Souffleuse corrige les fautes de frappe en passant, propose une palette emoji (tapez <span class="shortcode">:</span>), sait <a href="/guides/traduire-en-ecrivant-mac.html">traduire au fil de l'écriture</a> et <a href="/guides/reformuler-mail-professionnel-ia.html">reformuler une phrase dans le bon ton</a>.</li>
+      <li><b>Vie privée :</b> dans les deux cas, le texte reste sur le Mac. Souffleuse en fait une règle absolue : <a href="/guides/ia-locale-mac.html">aucun texte n'est envoyé sur internet, jamais</a>.</li>
+    </ul>
+    <p>Les deux cohabitent d'ailleurs sans se gêner : vous pouvez garder la prédiction d'Apple activée et laisser Souffleuse prendre le relais quand il faut plus qu'un mot.</p>
+
+    <h2>Questions fréquentes</h2>
+    <h3>Comment activer la prédiction de texte intégrée de macOS ?</h3>
+    <p>Sur macOS Sonoma ou plus récent : Réglages Système → Clavier, puis activez « Afficher les prédictions en ligne ». La suite probable du mot apparaît en gris ; la barre d'espace l'accepte. Elle propose un ou deux mots, dans les apps Apple principalement.</p>
+    <h3>La prédiction de texte du Mac fonctionne-t-elle en français ?</h3>
+    <p>Elle fonctionne en français mais reste sensiblement moins à l'aise qu'en anglais, la langue sur laquelle elle a été le plus travaillée. Une alternative comme Souffleuse suit simplement la langue que vous tapez, français compris.</p>
+    <h3>Peut-on avoir des suggestions de phrases entières sur Mac, gratuitement ?</h3>
+    <p>Oui. Souffleuse est gratuite pendant la bêta, sans compte ni limite quotidienne : elle affiche la suite de la phrase en gris sous le curseur dans presque toutes les apps du Mac, et <kbd>Tab</kbd> l'accepte. Le modèle tourne sur votre Mac, rien ne part sur internet.</p>
+
+    <div class="cta-box">
+      <h2>Essayez la vraie autocomplétion sur votre Mac</h2>
+      <p>Écrivez trois phrases, appuyez sur <kbd>Tab</kbd>, jugez sur pièce.</p>
+      <a href="/Souffleuse.dmg" download class="btn">Télécharger Souffleuse pour Mac</a>
+      <p class="cta-note"><b>Gratuit pendant la bêta.</b> macOS Sonoma (14) ou plus récent · puce Apple Silicon · ~7,5 Mo · vos textes ne quittent jamais votre Mac.</p>
+    </div>
+  </article>
+</main>
+
+<footer>
+  <div class="shell">
+    <p>Souffleuse — le mot juste, soufflé à voix basse. Fait sur Mac, reste sur votre Mac.</p>
+    <nav aria-label="Liens utiles">
+      <a href="/">Accueil</a>
+      <a href="/guides/autocompletion-mac-comme-iphone.html">Autocomplétion sur Mac</a>
+      <a href="/guides/traduire-en-ecrivant-mac.html">Traduire en écrivant</a>
+      <a href="/guides/ia-locale-mac.html">IA locale sur Mac</a>
+      <a href="/guides/alternative-cotypist-gratuite.html">Alternative à Cotypist</a>
+      <a href="/guides/reformuler-mail-professionnel-ia.html">Reformuler un mail pro</a>
+      <a href="/confidentialite.html">Confidentialité</a>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>
