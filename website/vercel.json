@@ -1,21 +1,43 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "redirects": [
+    {
+      "source": "/guides/alternative-cotypist-gratuite.html",
+      "destination": "/guides/alternative-cotypist-sans-abonnement.html",
+      "permanent": true
+    }
+  ],
   "rewrites": [
-    { "source": "/Souffleuse.dmg", "destination": "/api/download" }
+    {
+      "source": "/Souffleuse.dmg",
+      "destination": "/api/download"
+    }
   ],
   "headers": [
     {
       "source": "/appcast.xml",
       "headers": [
-        { "key": "Content-Type", "value": "application/xml; charset=utf-8" },
-        { "key": "Cache-Control", "value": "public, max-age=300, must-revalidate" }
+        {
+          "key": "Content-Type",
+          "value": "application/xml; charset=utf-8"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=300, must-revalidate"
+        }
       ]
     },
     {
       "source": "/dl/Souffleuse.dmg",
       "headers": [
-        { "key": "Content-Type", "value": "application/octet-stream" },
-        { "key": "Cache-Control", "value": "public, max-age=300, must-revalidate" }
+        {
+          "key": "Content-Type",
+          "value": "application/octet-stream"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=300, must-revalidate"
+        }
       ]
     }
   ]
