@@ -9,7 +9,7 @@ votre curseur à l'instant où vous cherchez vos mots, puis s'efface. **Tab** po
 accepter, **Esc** pour ignorer. Tout reste sur votre machine.
 
 [![Télécharger](https://img.shields.io/badge/Télécharger-souffleuse.app-8c2b21)](https://souffleuse.app)
-![Version](https://img.shields.io/badge/version-0.10.0-555)
+![Version](https://img.shields.io/badge/version-0.12.2-555)
 ![Plateforme](https://img.shields.io/badge/macOS-14%2B%20·%20Apple%20Silicon-000)
 ![On-device](https://img.shields.io/badge/100%25-on--device-346524)
 [![Jours actifs, vérifié par Not a Cent](https://notacent.app/api/badge/souffleuse.svg)](https://notacent.app/app/souffleuse)
@@ -60,7 +60,7 @@ glissez l'app dans Applications, lancez-la. Les mises à jour se font dans l'app
 (Sparkle, signature EdDSA vérifiée).
 
 > macOS Sonoma (14) ou plus récent · Mac à puce Apple Silicon (M1 et suivants).
-> Gratuit pendant la bêta.
+> Téléchargement gratuit. Souffleuse Studio est un achat unique : 29 € en Lightning, 39 € par carte.
 
 ## Stack technique
 
@@ -98,7 +98,7 @@ swift test     # ~960 tests (Swift Testing / XCTest)
 
 ## Statut
 
-Bêta publique — version **0.10.0**. Objectif : la parité subjective avec les
+Bêta publique — version **0.12.2**. Objectif : la parité subjective avec les
 meilleurs assistants de frappe, mais **entièrement local**. Le ghost doit *sembler*
 aussi instantané que pertinent ; la qualité contextuelle prime sur la vitesse brute.
 
