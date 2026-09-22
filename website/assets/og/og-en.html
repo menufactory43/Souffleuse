@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<!--
+  English Open Graph card (1200x630) — regenerable.
+
+  Regeneration command (from repo root):
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+      --headless --disable-gpu --force-device-scale-factor=1 --hide-scrollbars \
+      --window-size=1200,630 --allow-file-access-from-files --virtual-time-budget=3000 \
+      --screenshot="$PWD/website/og-en.png" \
+      "file://$PWD/website/assets/og/og-en.html"
+
+  Then optimize:
+    pngquant --quality=80-98 --skip-if-larger --force --output website/og-en.png website/og-en.png
+    oxipng -o 3 --strip safe website/og-en.png
+
+  Base layer: ../../og.png (French card) full-bleed at 1200x630. This guarantees an
+  identical frame + silhouette. A solid paper-colored rectangle covers the French
+  text block (right side), then the English copy is painted on top at the same
+  positions/sizes as the French original.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face {
+    font-family: 'Bodoni Moda';
+    font-style: italic;
+    font-weight: 500;
+    src: url(../fonts/bodoni-moda-500-italic-latin.woff2) format('woff2');
+    font-display: block;
+  }
+  @font-face {
+    font-family: 'Spectral';
+    font-style: italic;
+    font-weight: 400;
+    src: url(../fonts/spectral-400-italic-latin.woff2) format('woff2');
+    font-display: block;
+  }
+  @font-face {
+    font-family: 'Spectral';
+    font-style: normal;
+    font-weight: 400;
+    src: url(../fonts/spectral-400-normal-latin.woff2) format('woff2');
+    font-display: block;
+  }
+  @font-face {
+    font-family: 'Spectral';
+    font-style: normal;
+    font-weight: 500;
+    src: url(../fonts/spectral-500-normal-latin.woff2) format('woff2');
+    font-display: block;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1200px; height: 630px; overflow: hidden; }
+  body {
+    position: relative;
+    background: #f3ead9;
+  }
+  .base {
+    position: absolute;
+    top: 0; left: 0;
+    width: 1200px; height: 630px;
+    display: block;
+  }
+  /* Cover the French text block only — stays inside the inner frame
+     (x 30..1170 / y 30..600) and right of the silhouette (maxx ~459). */
+  .cover {
+    position: absolute;
+    left: 490px; top: 100px;
+    width: 675px; height: 498px;
+    background: #f3ead9;
+  }
+  .kicker {
+    position: absolute;
+    left: 541px; top: 158px;
+    font-family: 'Spectral', serif;
+    font-style: normal;
+    font-weight: 500;
+    font-size: 20px;
+    letter-spacing: 0.34em;
+    text-transform: uppercase;
+    color: #8c2b21;
+  }
+  .title {
+    position: absolute;
+    left: 536px; top: 215px;
+    font-family: 'Bodoni Moda', 'Georgia', serif;
+    font-style: italic;
+    font-weight: 500;
+    font-size: 128px;
+    line-height: 1;
+    color: #1a1613;
+  }
+  .rule {
+    position: absolute;
+    left: 545px; top: 378px;
+    width: 150px; height: 2px;
+    background: #8c2b21;
+  }
+  .tagline {
+    position: absolute;
+    left: 541px; top: 415px;
+    font-family: 'Spectral', serif;
+    font-style: italic;
+    font-weight: 400;
+    font-size: 36px;
+    line-height: 1.28;
+    color: #463d33;
+  }
+  .footer {
+    position: absolute;
+    left: 541px; top: 541px;
+    font-family: 'Spectral', serif;
+    font-style: italic;
+    font-weight: 400;
+    font-size: 30px;
+    color: #1a1613;
+  }
+</style>
+</head>
+<body>
+  <img class="base" src="../../og.png" alt="">
+  <div class="cover"></div>
+  <div class="kicker">WRITING AID FOR MAC</div>
+  <div class="title">Souffleuse</div>
+  <div class="rule"></div>
+  <div class="tagline">The right word,<br>whispered from the wings.</div>
+  <div class="footer">100% on your Mac. Nothing leaves.</div>
+</body>
+</html>
