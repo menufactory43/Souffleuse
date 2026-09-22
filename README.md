@@ -12,7 +12,7 @@ accepter, **Esc** pour ignorer. Tout reste sur votre machine.
 ![Version](https://img.shields.io/badge/version-0.12.2-555)
 ![Plateforme](https://img.shields.io/badge/macOS-14%2B%20·%20Apple%20Silicon-000)
 ![On-device](https://img.shields.io/badge/100%25-on--device-346524)
-[![Jours actifs, vérifié par Not a Cent](https://notacent.app/api/badge/souffleuse.svg)](https://notacent.app/app/souffleuse)
+[![33 active days, verified on Not a Cent](https://notacent.app/api/badge/souffleuse.svg?style=card&lang=en)](https://notacent.app/en/app/souffleuse)
 
 </div>
 
