@@ -61,7 +61,7 @@
     {
       "@type": "Question",
       "name": "Does a writing copilot need an API key or a subscription?",
-      "acceptedAnswer": { "@type": "Answer", "text": "Souffleuse doesn't. The model (Gemma 1B class, GGUF) runs on-device via llama.cpp with Metal, so there is no key, no account and no per-token cost. It's free during the beta with no daily limit; if it ever becomes paid it will be a one-time purchase, not a subscription." }
+      "acceptedAnswer": { "@type": "Answer", "text": "Souffleuse doesn't. The model (Gemma 1B class, GGUF) runs on-device via llama.cpp with Metal, so there is no key, no account and no per-token cost. It's requires a Studio license with no daily limit; if it ever becomes paid it will be a one-time purchase, not a subscription." }
     },
     {
       "@type": "Question",
@@ -114,6 +114,7 @@
   footer nav { display: flex; flex-wrap: wrap; gap: 0.4rem 1.4rem; margin-top: 0.6rem; }
   footer a { color: var(--ink-faint); }
 </style>
+<script defer src="/_vercel/insights/script.js"></script>
 </head>
 <body>
 
@@ -158,7 +159,7 @@
 
     <h2>Setup in four steps</h2>
     <ol class="pas">
-      <li><a href="/Souffleuse.dmg" download>Download the DMG</a> (~7.5 MB, notarized by Apple, free during the beta) and drag the app into Applications.</li>
+      <li><a href="/Souffleuse.dmg" download>Download the DMG</a> (~7.5 MB, notarized by Apple, requires a Studio license) and drag the app into Applications.</li>
       <li>Grant the <b>Accessibility permission</b> — the equivalent of installing the editor plugin, except the "editor" is your whole Mac. The app then downloads its model once (0.4–1.5 GB depending on the model you pick).</li>
       <li>Type anywhere. When the model has a confident continuation, it appears in grey under your cursor.</li>
       <li><kbd>Tab</kbd> to accept, <kbd>Esc</kbd> to dismiss. There's also <span class="shortcode">//</span> to reread your sentence and <a href="/en/guides/professional-email-tone-mac.html">rewrite it in the tone of the app</a> — calmer in Mail, lighter in Messages — and <a href="/en/guides/translate-while-typing-mac.html">translation as you type</a>, one target language per conversation.</li>
@@ -179,7 +180,7 @@
     <h3>Is there a GitHub Copilot for email and everyday writing?</h3>
     <p>Not from GitHub — Copilot lives in editors and IDEs. But the same UX exists system-wide on macOS: tools like Souffleuse draw grey ghost text at your caret in Mail, Slack, Notes and the browser, and Tab accepts it. Souffleuse runs a small local model on Apple Silicon, so there is no API key and no cloud.</p>
     <h3>Does a writing copilot need an API key or a subscription?</h3>
-    <p>Souffleuse doesn't. The model (Gemma 1B class, GGUF) runs on-device via llama.cpp with Metal, so there is no key, no account and no per-token cost. It's free during the beta with no daily limit; if it ever becomes paid it will be a one-time purchase, not a subscription.</p>
+    <p>Souffleuse doesn't. The model (Gemma 1B class, GGUF) runs on-device via llama.cpp with Metal, so there is no key, no account and no per-token cost. It's requires a Studio license with no daily limit; if it ever becomes paid it will be a one-time purchase, not a subscription.</p>
     <h3>Does it work offline?</h3>
     <p>Yes. After the one-time model download at setup, Souffleuse never touches the network. Autocomplete, translation and tone rewriting all work in airplane mode.</p>
 
@@ -187,7 +188,7 @@
       <h2>Tab-complete your next email</h2>
       <p>Install it, open Mail, and see how far the grey text gets you.</p>
       <a href="/Souffleuse.dmg" download class="btn">Download Souffleuse for Mac</a>
-      <p class="cta-note"><b>Free during the beta.</b> macOS Sonoma (14) or later · Apple Silicon · ~7.5 MB · your text never leaves your Mac.</p>
+      <p class="cta-note"><b>Free download, autocomplete included. Studio (translation, tone, the // bar): one-time purchase from €29.</b> macOS Sonoma (14) or later · Apple Silicon · ~7.5 MB · your text never leaves your Mac.</p>
     </div>
   </article>
 </main>
@@ -205,6 +206,7 @@
       <a href="/en/guides/local-llm-writing-assistant.html">Local LLM writing assistant</a>
       <a href="/en/compare/cotypist-alternatives.html">Cotypist alternatives</a>
       <a href="/en/privacy.html">Privacy</a>
+      <a href="/en/about.html">About</a>
     </nav>
   </div>
 </footer>

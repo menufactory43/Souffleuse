@@ -121,6 +121,7 @@
 
   @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
 </style>
+<script defer src="/_vercel/insights/script.js"></script>
 </head>
 <body>
 
@@ -222,7 +223,12 @@
       Le site (et non l'app) compte le nombre de fois où le fichier d'installation est
       téléchargé, pour afficher un total honnête. Ce compteur enregistre uniquement des
       <b>totaux agrégés</b> : <b>aucune adresse IP, aucun cookie, aucune donnée personnelle</b>
-      n'est conservée. Ça s'arrête là, et ça ne concerne que la page de téléchargement.
+      n'est conservée.
+    </p>
+    <p>
+      Les pages du site sont aussi comptées par <b>Vercel Web Analytics</b>, l'outil de
+      l'hébergeur : pages vues et provenance, en chiffres agrégés, <b>sans cookie</b> et sans
+      identifiant persistant. Rien de tout cela ne concerne l'app.
     </p>
 
     <h2>La désinstaller ne laisse rien</h2>
@@ -248,6 +254,7 @@
     <nav class="foot__links" aria-label="Liens utiles">
       <a href="/">Accueil</a>
       <a href="/#faq">Questions</a>
+      <a href="/a-propos.html">À propos</a>
       <a href="mailto:contact@souffleuse.app">Écrire à la souffleuse</a>
     </nav>
   </div>

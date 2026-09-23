@@ -65,6 +65,22 @@
     <lastmod>2026-06-23</lastmod>
     <priority>0.4</priority>
   </url>
+  <url>
+    <loc>https://souffleuse.app/a-propos.html</loc>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://souffleuse.app/a-propos.html" />
+    <xhtml:link rel="alternate" hreflang="en" href="https://souffleuse.app/en/about.html" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://souffleuse.app/a-propos.html" />
+    <lastmod>2026-09-23</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://souffleuse.app/en/about.html</loc>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://souffleuse.app/a-propos.html" />
+    <xhtml:link rel="alternate" hreflang="en" href="https://souffleuse.app/en/about.html" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://souffleuse.app/a-propos.html" />
+    <lastmod>2026-09-23</lastmod>
+    <priority>0.5</priority>
+  </url>
   <!-- Guides FR -->
   <url>
     <loc>https://souffleuse.app/guides/autocompletion-mac-comme-iphone.html</loc>
@@ -87,7 +103,7 @@
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://souffleuse.app/guides/alternative-cotypist-gratuite.html</loc>
+    <loc>https://souffleuse.app/guides/alternative-cotypist-sans-abonnement.html</loc>
     <lastmod>2026-07-09</lastmod>
     <priority>0.8</priority>
   </url>

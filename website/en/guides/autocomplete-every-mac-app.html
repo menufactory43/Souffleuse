@@ -114,6 +114,7 @@
   footer nav { display: flex; flex-wrap: wrap; gap: 0.4rem 1.4rem; margin-top: 0.6rem; }
   footer a { color: var(--ink-faint); }
 </style>
+<script defer src="/_vercel/insights/script.js"></script>
 </head>
 <body>
 
@@ -155,7 +156,7 @@
     <h2>Step by step: autocomplete everywhere with Souffleuse</h2>
     <p><a href="/en/">Souffleuse</a> is one of these system-wide tools — a small menu-bar app whose language model runs entirely on your Mac. Setting it up takes a few minutes:</p>
     <ol class="pas">
-      <li><a href="/Souffleuse.dmg" download>Download Souffleuse</a> (free during the beta, ~7.5 MB, notarized by Apple) and drag it into Applications. It lives in the menu bar.</li>
+      <li><a href="/Souffleuse.dmg" download>Download Souffleuse</a> (requires a Studio license, ~7.5 MB, notarized by Apple) and drag it into Applications. It lives in the menu bar.</li>
       <li>Grant the <b>Accessibility permission</b> when macOS asks — that's how it can see the text field you're writing in and place the ghost text at your caret. On first launch it downloads its language model once (0.4–1.5 GB depending on the model); that is the only network connection it ever makes.</li>
       <li>Open Mail, Slack, Notes — anything — and just type. When Souffleuse has a good guess at how your sentence continues, it appears in grey under your cursor.</li>
       <li>Press <kbd>Tab</kbd> to accept (word by word or in chunks), <kbd>Esc</kbd> to dismiss — or simply keep typing and the suggestion fades on its own.</li>
@@ -169,7 +170,7 @@
     <h2>What makes this approach different</h2>
     <ul>
       <li><b>100% on-device.</b> The model runs on your Apple Silicon chip. Your keystrokes never leave your Mac — there is no server to send them to. It even <a href="/en/guides/offline-ai-writing-mac.html">works fully offline</a>.</li>
-      <li><b>Free during the beta,</b> with no daily quota, no account, no card. If it ever becomes paid, it will be a one-time purchase, never a hidden subscription. (Cotypist, the category pioneer, moved to a subscription with a free daily allowance — a fair model too, just a different one.)</li>
+      <li><b>Free to download:</b> autocomplete works without a license, with no daily quota and no account. Studio (translation, tone, the // bar) is a one-time purchase from €29, never a subscription. (Cotypist, the category pioneer, moved to a subscription with a free daily allowance — a fair model too, just a different one.)</li>
       <li><b>More than autocomplete.</b> The same app can <a href="/en/guides/translate-while-typing-mac.html">translate as you type</a> (pick a target language once per conversation) and <a href="/en/guides/professional-email-tone-mac.html">rewrite a sentence in the right tone</a> — type <span class="shortcode">//</span> and it rereads your phrase, calmer in Mail, lighter in Messages. It also fixes typos in passing: Tab restores the slip.</li>
       <li><b>It learns your style</b> from an encrypted history stored on your Mac, readable by you alone.</li>
     </ul>
@@ -186,7 +187,7 @@
       <h2>Try it in your own apps</h2>
       <p>Install it, type a sentence in Mail or Slack, and judge the grey text for yourself.</p>
       <a href="/Souffleuse.dmg" download class="btn">Download Souffleuse for Mac</a>
-      <p class="cta-note"><b>Free during the beta.</b> macOS Sonoma (14) or later · Apple Silicon · ~7.5 MB · your text never leaves your Mac.</p>
+      <p class="cta-note"><b>Free download, autocomplete included. Studio (translation, tone, the // bar): one-time purchase from €29.</b> macOS Sonoma (14) or later · Apple Silicon · ~7.5 MB · your text never leaves your Mac.</p>
     </div>
   </article>
 </main>
@@ -204,6 +205,7 @@
       <a href="/en/guides/local-llm-writing-assistant.html">Local LLM writing assistant</a>
       <a href="/en/compare/cotypist-alternatives.html">Cotypist alternatives</a>
       <a href="/en/privacy.html">Privacy</a>
+      <a href="/en/about.html">About</a>
     </nav>
   </div>
 </footer>

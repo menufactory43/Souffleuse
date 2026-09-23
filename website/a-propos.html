@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>À propos — Souffleuse</title>
+<meta name="description" content="Souffleuse, assistant d'écriture IA 100 % local pour Mac : ce qu'elle fait, pour qui, qui la fait (Meffysto, développeur indépendant en France), prix et données." />
+
+<link rel="canonical" href="https://souffleuse.app/a-propos.html" />
+<link rel="alternate" hreflang="fr" href="https://souffleuse.app/a-propos.html" />
+<link rel="alternate" hreflang="en" href="https://souffleuse.app/en/about.html" />
+<link rel="alternate" hreflang="x-default" href="https://souffleuse.app/a-propos.html" />
+<meta name="theme-color" content="#f3ead9" />
+<meta name="robots" content="index,follow" />
+
+<link rel="icon" href="/favicon.ico" sizes="any" />
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Souffleuse" />
+<meta property="og:locale" content="fr_FR" />
+<meta property="og:url" content="https://souffleuse.app/a-propos.html" />
+<meta property="og:title" content="À propos — Souffleuse" />
+<meta property="og:description" content="Autocomplétion IA 100 % locale dans toutes les apps du Mac. Faite par Meffysto, développeur indépendant en France." />
+<meta property="og:image" content="https://souffleuse.app/og.png" />
+
+<!-- Fonts self-hébergées : aucune requête tierce au runtime (promesse 100% local). -->
+<link rel="preload" href="/assets/fonts/bodoni-moda-700-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="preload" href="/assets/fonts/spectral-400-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="stylesheet" href="/assets/fonts.css" />
+
+<style>
+  :root {
+    --paper:      #f3ead9;
+    --paper-deep: #ece0c9;
+    --paper-edge: #e3d5ba;
+    --ink:        #1a1613;
+    --ink-soft:   #463d33;
+    --ink-faint:  #5e5446;
+    --rouge:      #8c2b21;
+    --display: "Bodoni Moda", Georgia, serif;
+    --body:    "Spectral", Georgia, serif;
+    --filet:   1px solid var(--ink);
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background-color: var(--paper);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: clamp(1rem, 0.95rem + 0.35vw, 1.12rem);
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    position: relative;
+  }
+  body::before {
+    content: "";
+    position: fixed; inset: 0; z-index: 0;
+    pointer-events: none; opacity: 0.45; mix-blend-mode: multiply;
+    background-image:
+      radial-gradient(rgba(60,45,25,0.06) 1px, transparent 1px),
+      radial-gradient(rgba(60,45,25,0.04) 1px, transparent 1px);
+    background-size: 3px 3px, 5px 5px;
+  }
+  header, main, footer { position: relative; z-index: 1; }
+  .shell { width: min(72ch, 92vw); margin-inline: auto; }
+
+  /* Barre de tête, alignée sur le livret. */
+  .topbar { border-bottom: var(--filet); background: var(--paper-deep); }
+  .topbar__inner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-block: 0.9rem; }
+  .brand { display: inline-flex; align-items: center; gap: 0.6rem; color: var(--ink); text-decoration: none; }
+  .brand__mark { display: block; }
+  .brand__name { font-family: var(--display); font-weight: 700; font-size: 1.1rem; letter-spacing: 0.04em; display: block; line-height: 1; }
+  .brand__sub { font-style: italic; font-size: 0.8rem; color: var(--ink-faint); }
+  .topbar__right { display: flex; align-items: center; gap: 1.2rem; }
+  .topback { color: var(--ink-soft); text-decoration: none; font-size: 0.9rem; border-bottom: 1px solid transparent; }
+  .topback:hover { color: var(--rouge); border-bottom-color: var(--rouge); }
+  .langswitch { display: inline-flex; gap: 0.4rem; font-size: 0.9rem; letter-spacing: 0.06em; }
+  .langswitch a { color: var(--ink-soft); text-decoration: none; border-bottom: 1px solid transparent; }
+  .langswitch a:hover { color: var(--ink); border-bottom-color: var(--rouge); }
+  .langswitch a[aria-current="true"] { color: var(--rouge); border-bottom-color: var(--rouge); }
+  .langswitch__sep { color: var(--ink-faint); opacity: 0.5; }
+
+  .doc { padding-block: clamp(2.6rem, 6vw, 4.4rem) clamp(3rem, 7vw, 5rem); }
+  .doc__eyebrow { font-variant: small-caps; letter-spacing: 0.28em; text-transform: lowercase; color: var(--rouge); font-size: 0.82rem; display: block; margin-bottom: 0.7rem; }
+  .doc h1 { font-family: var(--display); font-weight: 900; font-size: clamp(2rem, 5vw, 3rem); line-height: 1.05; margin: 0 0 1rem; }
+  .doc__lede { font-size: 1.12rem; color: var(--ink-soft); max-width: 60ch; }
+  .doc__updated { font-style: italic; font-size: 0.86rem; color: var(--ink-faint); margin-top: 0.4rem; }
+
+  .doc h2 {
+    font-family: var(--display); font-weight: 700;
+    font-size: clamp(1.3rem, 3vw, 1.65rem);
+    margin: 2.8rem 0 0.6rem; padding-top: 1.6rem;
+    border-top: 1px solid rgba(26,22,19,0.18);
+  }
+  .doc h2:first-of-type { border-top: none; padding-top: 0; }
+  .doc p { max-width: 64ch; }
+  .doc b, .doc strong { font-weight: 700; color: var(--ink); }
+  .doc a { color: var(--rouge); }
+  .doc ul { max-width: 64ch; padding-left: 1.2rem; }
+  .doc li { margin-block: 0.35rem; }
+
+  /* Le sceau « ce qui ne sort pas » : un encadré sang-de-bœuf discret. */
+  .seal {
+    margin: 2rem 0; padding: 1.2rem 1.4rem;
+    border: 1px solid var(--rouge); border-left-width: 3px;
+    background: rgba(140,43,33,0.04);
+  }
+  .seal p { margin: 0; max-width: none; }
+  .seal b { color: var(--rouge); }
+
+  footer { border-top: var(--filet); background: var(--paper-deep); padding-block: 2.2rem; margin-top: 2rem; }
+  .foot { display: flex; flex-direction: column; gap: 0.5rem; align-items: center; text-align: center; font-size: 0.86rem; color: var(--ink-faint); }
+  .foot a { color: var(--ink-soft); text-decoration: none; border-bottom: 1px solid transparent; }
+  .foot a:hover { color: var(--rouge); border-bottom-color: var(--rouge); }
+  .foot__brand { font-family: var(--display); font-weight: 700; font-size: 1.05rem; color: var(--ink); letter-spacing: 0.04em; }
+  .foot__links { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5rem 1.4rem; margin-top: 0.4rem; }
+
+
+  .doc h3 { font-family: var(--display); font-weight: 700; font-size: 1.12rem; margin: 1.6rem 0 0.3rem; }
+  .doc code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.92em; background: var(--paper-edge); padding: 0 0.25em; }
+  .facts { display: grid; grid-template-columns: minmax(9rem, 13rem) 1fr; gap: 0; margin: 1.2rem 0 0; border-top: 1px solid rgba(26,22,19,0.18); max-width: 64ch; }
+  .facts dt, .facts dd { margin: 0; padding: 0.55rem 0; border-bottom: 1px solid rgba(26,22,19,0.18); }
+  .facts dt { font-variant: small-caps; letter-spacing: 0.08em; color: var(--ink-soft); padding-right: 1rem; }
+  .facts .apps { margin: 0; padding-left: 1.1rem; }
+  .facts .apps li { margin-block: 0.25rem; }
+  @media (max-width: 560px) {
+    .facts { grid-template-columns: 1fr; }
+    .facts dt { border-bottom: none; padding-bottom: 0; }
+    .facts dd { padding-top: 0.1rem; }
+  }
+
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "AboutPage",
+  "name": "À propos — Souffleuse",
+  "url": "https://souffleuse.app/a-propos.html",
+  "inLanguage": "fr",
+  "description": "Souffleuse, assistant d'écriture IA 100 % local pour Mac : ce qu'elle fait, pour qui, qui la fait (Meffysto, développeur indépendant en France), prix et données.",
+  "isPartOf": {
+    "@type": "WebSite",
+    "name": "Souffleuse",
+    "url": "https://souffleuse.app/"
+  },
+  "author": {
+    "@type": "Person",
+    "name": "Meffysto",
+    "url": "https://github.com/menufactory43",
+    "sameAs": [
+      "https://x.com/Meffysto69",
+      "https://github.com/menufactory43"
+    ]
+  },
+  "publisher": {
+    "@type": "Person",
+    "name": "Meffysto",
+    "url": "https://github.com/menufactory43",
+    "sameAs": [
+      "https://x.com/Meffysto69",
+      "https://github.com/menufactory43"
+    ]
+  },
+  "mainEntity": {
+    "@type": "SoftwareApplication",
+    "name": "Souffleuse",
+    "url": "https://souffleuse.app/",
+    "applicationCategory": "ProductivityApplication",
+    "operatingSystem": "macOS 14 (Sonoma) or later, Apple Silicon",
+    "softwareVersion": "0.12.2",
+    "fileSize": "7.4MB",
+    "downloadUrl": "https://souffleuse.app/Souffleuse.dmg",
+    "description": "Autocomplétion IA 100 % locale dans toutes les apps du Mac. Faite par Meffysto, développeur indépendant en France.",
+    "offers": [
+      {
+        "@type": "Offer",
+        "name": "Souffleuse Studio (Lightning)",
+        "price": "29",
+        "priceCurrency": "EUR"
+      },
+      {
+        "@type": "Offer",
+        "name": "Souffleuse Studio (card)",
+        "price": "39",
+        "priceCurrency": "EUR"
+      }
+    ],
+    "author": {
+      "@type": "Person",
+      "name": "Meffysto",
+      "url": "https://github.com/menufactory43",
+      "sameAs": [
+        "https://x.com/Meffysto69",
+        "https://github.com/menufactory43"
+      ]
+    },
+    "publisher": {
+      "@type": "Person",
+      "name": "Meffysto",
+      "url": "https://github.com/menufactory43",
+      "sameAs": [
+        "https://x.com/Meffysto69",
+        "https://github.com/menufactory43"
+      ]
+    },
+    "sameAs": [
+      "https://github.com/menufactory43/Souffleuse"
+    ]
+  }
+}
+</script>
+<script defer src="/_vercel/insights/script.js"></script>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="shell topbar__inner">
+    <a href="/" class="brand" aria-label="Souffleuse, accueil">
+      <svg class="brand__mark" width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
+        <path d="M2 22 Q13 2 24 22" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <path d="M6 22 Q13 9 20 22" fill="none" stroke="currentColor" stroke-width="1"/>
+        <circle cx="13" cy="22" r="1.4" fill="currentColor"/>
+      </svg>
+      <span>
+        <span class="brand__name">Souffleuse</span>
+        <span class="brand__sub">À propos</span>
+      </span>
+    </a>
+    <div class="topbar__right">
+      <a href="/" class="topback">← Retour au livret</a>
+      <div class="langswitch" role="group" aria-label="Langue / Language">
+        <a href="/a-propos.html" hreflang="fr" aria-current="true">FR</a>
+        <span class="langswitch__sep" aria-hidden="true">·</span>
+        <a href="/en/about.html" hreflang="en">EN</a>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="doc">
+  <div class="shell">
+    <span class="doc__eyebrow">Le programme, en une page</span>
+    <h1>À propos de Souffleuse</h1>
+    <p class="doc__lede">
+      Souffleuse est un assistant d'écriture pour Mac qui propose la suite de vos phrases, en gris
+      sous le curseur, dans presque toutes vos apps, pour celles et ceux qui écrivent toute la journée
+      et veulent que leurs textes restent sur leur Mac.
+    </p>
+    <p class="doc__updated">Dernière mise à jour : 23 septembre 2026 · version 0.12.2 (bêta publique).</p>
+
+    <h2>Ce que fait Souffleuse</h2>
+
+    <h3>La suite de la phrase, dans chaque app</h3>
+    <p>
+      Quand vous hésitez, la suite apparaît en gris sous le curseur : dans Mail, Notes, Messages,
+      Slack, votre navigateur. Tab la prend, Esc l'efface, et si vous continuez à taper, elle
+      disparaît d'elle-même. Elle corrige aussi les coquilles en passant.
+    </p>
+
+    <h3>La barre « // » : corriger, raccourcir, reformuler</h3>
+    <p>
+      Tapez <code>//</code> après un texte pour le corriger, le raccourcir, le reformuler ou en changer
+      le ton, ou donnez une consigne libre. En début de champ, quelques mots-clés suffisent pour
+      qu'elle rédige le message entier, en français, anglais, espagnol, allemand ou italien.
+      Le résultat s'affiche d'abord en aperçu : rien n'est écrit sans votre geste.
+    </p>
+
+    <h3>Traduire au fil de l'écriture</h3>
+    <p>
+      Choisissez la langue d'une conversation une seule fois : Souffleuse s'en souvient et traduit
+      ensuite au fil de la frappe, dans un petit panneau discret. La traduction se fait sur votre Mac,
+      hors ligne.
+    </p>
+
+    <h3>Le carnet d'usage</h3>
+    <p>
+      Un carnet compte les frappes épargnées et le temps gagné. Il reste sur votre Mac, lisible par
+      vous seul.
+    </p>
+
+    <h2>Ce qui change d'un assistant d'écriture en ligne</h2>
+
+    <h3>Vos textes ne partent nulle part</h3>
+    <p>
+      Le modèle de langage tourne sur la puce Apple Silicon de votre Mac, grâce à
+      <a href="https://github.com/ggerganov/llama.cpp" rel="noopener" target="_blank">llama.cpp</a>.
+      Aucun texte n'est envoyé sur internet. Après l'installation, tout fonctionne hors ligne,
+      dans l'avion comme derrière un VPN d'entreprise.
+    </p>
+
+    <h3>Pas de copier-coller vers un chatbot</h3>
+    <p>
+      La reformulation et la traduction se font là où vous écrivez, dans le champ de l'app.
+      Vous n'ouvrez pas d'onglet à côté, vous ne collez votre mail nulle part.
+    </p>
+
+    <h3>Pas d'abonnement, pas de compteur</h3>
+    <p>
+      La licence Studio est un achat unique, sans limite de complétions par jour. À titre de
+      comparaison, la version gratuite de Cotypist est plafonnée à environ 100 complétions par jour,
+      puis passe à un abonnement d'environ 6 à 9 $ par mois
+      (<a href="/guides/alternative-cotypist-sans-abonnement.html">le comparatif</a>).
+    </p>
+
+    <h3>Pas de compte</h3>
+    <p>
+      Vous téléchargez, vous installez, vous écrivez. Il n'y a ni inscription ni identifiant, et
+      aucune télémétrie.
+    </p>
+
+    <h2>Pour qui</h2>
+    <ul>
+      <li>Celles et ceux qui écrivent toute la journée dans l'app d'un autre : Mail, Messages, Slack, un navigateur.</li>
+      <li>Les indépendants et les équipes support qui répondent à beaucoup de messages et veulent un ton juste sans y passer la matinée.</li>
+      <li>Les personnes qui écrivent dans plusieurs langues et veulent traduire sans copier-coller.</li>
+      <li>Les métiers où un texte ne doit pas partir dans un cloud : données clients, correspondance confidentielle, réseau d'entreprise fermé.</li>
+      <li>Les anciens utilisateurs de Cotypist qui ne veulent pas d'abonnement pour un outil de frappe.</li>
+    </ul>
+    <p>Il faut un Mac à puce Apple Silicon (M1 et suivants) sous macOS Sonoma (14) ou plus récent. Les Mac Intel ne sont pas compatibles.</p>
+
+    <h2>Qui fait Souffleuse</h2>
+    <p>
+      Souffleuse est faite par <b>Meffysto</b>, développeur indépendant en France. Il construit des apps
+      Mac et iPhone seul, sans pub ni pistage publicitaire, et raconte tout en public sur X.
+    </p>
+    <p>
+      Liens : <a href="https://x.com/Meffysto69" rel="me noopener" target="_blank">X (@Meffysto69)</a> ·
+      <a href="https://github.com/menufactory43" rel="me noopener" target="_blank">GitHub (menufactory43)</a> ·
+      <a href="/mentions-legales.html">mentions légales</a>
+    </p>
+
+    <h2>Comment ça marche</h2>
+    <ul>
+      <li><b>Installation</b> : téléchargez le DMG sur <a href="/">souffleuse.app</a> (app de 7,4 Mo, signée et notarisée par Apple), glissez-le dans vos Applications et donnez-lui l'autorisation d'accessibilité qu'elle demande. Au premier lancement, elle télécharge une fois son modèle de langage (811 Mo), puis se loge dans la barre de menus.</li>
+      <li><b>Prix</b> : le téléchargement est gratuit. La licence Souffleuse Studio est un achat unique, 29 € en Lightning ou 39 € par carte (paiement par carte via Lemon Squeezy). Elle débloque la traduction, le ton, les transformations « // » et la personnalisation. Pas d'abonnement.</li>
+      <li><b>Mises à jour</b> : elles se font depuis l'app (Sparkle, signature vérifiée).</li>
+      <li><b>Support</b> : écrivez à <a href="mailto:contact@souffleuse.app">contact@souffleuse.app</a>.</li>
+      <li><b>Données</b> : tout reste sur votre Mac. L'historique qui sert à apprendre votre style est chiffré (SQLCipher, AES-256, clé dans le trousseau), les journaux ne contiennent aucun texte, et la capture d'écran pour le contexte est désactivée par défaut. Le détail est dans la <a href="/confidentialite.html">politique de confidentialité</a>.</li>
+    </ul>
+
+    <h2>L'essentiel</h2>
+    <dl class="facts">
+      <dt>Nom</dt>
+      <dd>Souffleuse</dd>
+      <dt>Type</dt>
+      <dd>Assistant d'écriture et autocomplétion IA 100 % locale, dans la barre de menus du Mac</dd>
+      <dt>Plateformes</dt>
+      <dd>macOS Sonoma (14) ou plus récent, Mac à puce Apple Silicon (M1 et suivants). Pas d'Intel.</dd>
+      <dt>Prix</dt>
+      <dd>Téléchargement gratuit. Licence Studio en achat unique : 29 € en Lightning, 39 € par carte. Sans abonnement.</dd>
+      <dt>Lancé</dt>
+      <dd>Juin 2026, en bêta publique</dd>
+      <dt>Moteur</dt>
+      <dd>llama.cpp sur Metal, modèle de langage téléchargé une fois (811 Mo) puis utilisé hors ligne</dd>
+      <dt>Langues</dt>
+      <dd>Les suggestions suivent la langue que vous tapez. Rédaction par « // » en français, anglais, espagnol, allemand et italien. Site en français et en anglais.</dd>
+      <dt>Éditeur</dt>
+      <dd>Meffysto, développeur indépendant, France</dd>
+      <dt>Site</dt>
+      <dd><a href="https://souffleuse.app/">souffleuse.app</a></dd>
+      <dt>Contact</dt>
+      <dd><a href="mailto:contact@souffleuse.app">contact@souffleuse.app</a></dd>
+      <dt>Données / confidentialité</dt>
+      <dd>100 % sur le Mac. Aucun texte envoyé sur internet, pas de compte, pas de télémétrie. Historique chiffré au repos.</dd>
+      <dt>Code source</dt>
+      <dd>Dépôt public sur GitHub : <a href="https://github.com/menufactory43/Souffleuse" rel="noopener" target="_blank">menufactory43/Souffleuse</a></dd>
+      <dt>Autres apps du même éditeur</dt>
+      <dd>
+        <ul class="apps">
+          <li><a href="https://fauconnier.app" rel="noopener" target="_blank">Fauconnier</a> : neuf agents de code sur un canvas, pilotés à la voix. Mac (+ Perchoir sur iPhone). Gratuit.</li>
+          <li><a href="https://daybard.com" rel="noopener" target="_blank">Daybard</a> : ta journée rejouée en épopée RPG le soir. iPhone et Mac. Gratuit.</li>
+          <li><a href="https://timevault-wine.vercel.app" rel="noopener" target="_blank">TimeVault</a> : bloqueur d'apps, on scelle jusqu'à une échéance, ça n'ouvre que sur une preuve. iPhone, Mac. Gratuit, bientôt disponible.</li>
+          <li><a href="https://notacent.app" rel="noopener" target="_blank">Not a Cent</a> : annuaire d'apps peaufinées qui n'ont pas encore gagné un centime. Web. Gratuit.</li>
+          <li><a href="https://menufactory43.github.io/lanes/" rel="noopener" target="_blank">Lanes</a> : tableau de bord Git en lecture seule. Mac. Gratuit, open source (MIT).</li>
+        </ul>
+      </dd>
+    </dl>
+
+    <h2>Questions fréquentes</h2>
+
+    <h3>Souffleuse est-elle gratuite ?</h3>
+    <p>
+      Le téléchargement est gratuit. La traduction, le ton, les transformations « // » et la
+      personnalisation demandent la licence Studio, un achat unique à 29 € en Lightning ou 39 € par
+      carte. Il n'y a pas d'abonnement ni de limite quotidienne.
+    </p>
+
+    <h3>Mes textes partent-ils sur internet ?</h3>
+    <p>
+      Non. Le modèle tourne sur votre Mac et Souffleuse fonctionne hors ligne. Elle se connecte pour
+      télécharger son modèle à l'installation et pour activer une licence Studio, jamais pour envoyer
+      ce que vous écrivez.
+    </p>
+
+    <h3>Quels Mac sont compatibles ?</h3>
+    <p>
+      Les Mac à puce Apple Silicon (M1, M2, M3 et suivants) sous macOS Sonoma (14) ou plus récent.
+      Les Mac à puce Intel ne sont pas compatibles.
+    </p>
+
+    <h3>Dans quelles langues fonctionne-t-elle ?</h3>
+    <p>
+      Les suggestions suivent la langue que vous tapez, anglais compris. La rédaction à partir de
+      mots-clés propose le français, l'anglais, l'espagnol, l'allemand et l'italien.
+    </p>
+
+    <h3>Qui est derrière Souffleuse ?</h3>
+    <p>
+      Meffysto, un développeur indépendant installé en France, qui la construit seul. Il raconte le
+      travail en public sur <a href="https://x.com/Meffysto69" rel="noopener" target="_blank">X</a>.
+    </p>
+
+    <h3>Quelle différence avec Cotypist ?</h3>
+    <p>
+      Cotypist a lancé l'autocomplétion système sur Mac et reste un excellent produit. Souffleuse fait
+      le même geste sans abonnement ni limite quotidienne, et ajoute la traduction au fil de l'écriture,
+      la reformulation par ton et un carnet d'usage, le tout en local.
+      Voir <a href="/guides/alternative-cotypist-sans-abonnement.html">le comparatif détaillé</a>.
+    </p>
+  </div>
+</main>
+
+<footer>
+  <div class="shell foot">
+    <span class="foot__brand">Souffleuse</span>
+    <p style="margin:0;">Fait sur Mac, reste sur votre Mac.</p>
+    <nav class="foot__links" aria-label="Liens utiles">
+      <a href="/">Accueil</a>
+      <a href="/confidentialite.html">Confidentialité</a>
+      <a href="/licence.html">Licence</a>
+      <a href="/mentions-legales.html">Mentions légales</a>
+      <a href="/a-propos.html">À propos</a>
+      <a href="mailto:contact@souffleuse.app">Écrire à la souffleuse</a>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>
