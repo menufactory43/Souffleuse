@@ -35,7 +35,9 @@ export default function middleware(request) {
   const wantsFrench = /(^|[,\s])fr\b/i.test(accept);
   if (wantsFrench && !SCRAPERS.test(ua)) return;
 
+  // On garde les UTM et autres paramètres de suivi : sinon le trafic venu d'un lien
+  // tagué (Not a Cent, annuaires) arrive sans attribution dans les analytics.
   url.pathname = '/en/';
-  url.search = '';
+  url.searchParams.delete('lang');
   return Response.redirect(url, 307);
 }
