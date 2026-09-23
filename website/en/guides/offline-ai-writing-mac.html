@@ -114,6 +114,7 @@
   footer nav { display: flex; flex-wrap: wrap; gap: 0.4rem 1.4rem; margin-top: 0.6rem; }
   footer a { color: var(--ink-faint); }
 </style>
+<script defer src="/_vercel/insights/script.js"></script>
 </head>
 <body>
 
@@ -149,7 +150,7 @@
     <h2>A truly offline writing assistant: the setup</h2>
     <p><a href="/en/">Souffleuse</a> is a menu-bar app for macOS built exactly for this: a small language model (Gemma 1B class, via llama.cpp and Metal) running on your Apple Silicon chip, assisting you inside almost every app through the Accessibility API. It needs the network <b>exactly once</b>:</p>
     <ol class="pas">
-      <li><a href="/Souffleuse.dmg" download>Download Souffleuse</a> (~7.5 MB, notarized by Apple, free during the beta) and drag it into Applications.</li>
+      <li><a href="/Souffleuse.dmg" download>Download Souffleuse</a> (~7.5 MB, notarized by Apple, requires a Studio license) and drag it into Applications.</li>
       <li>Grant the Accessibility permission, then let it download its model — 0.4 to 1.5 GB depending on the model you choose. <b>This is the only connection the app ever makes.</b> Do it at home or at the office; after that, the network is optional forever.</li>
       <li>Write anywhere — Mail, Notes, Slack, your browser. The continuation of your sentence appears in grey; <kbd>Tab</kbd> accepts it, <kbd>Esc</kbd> clears it. This is <a href="/en/guides/autocomplete-every-mac-app.html">system-wide autocomplete</a>, airplane-mode-proof.</li>
       <li>The other roles work offline too: <a href="/en/guides/translate-while-typing-mac.html">translation as you type</a> (pick a target language once per conversation), <a href="/en/guides/professional-email-tone-mac.html">tone rewriting</a> with <span class="shortcode">//</span>, and typo fixes in passing.</li>
@@ -186,7 +187,7 @@
       <h2>Set it up once, then cut the cord</h2>
       <p>One download, one model, and your writing assistant never phones home again.</p>
       <a href="/Souffleuse.dmg" download class="btn">Download Souffleuse for Mac</a>
-      <p class="cta-note"><b>Free during the beta.</b> macOS Sonoma (14) or later · Apple Silicon · ~7.5 MB · your text never leaves your Mac.</p>
+      <p class="cta-note"><b>Free download, autocomplete included. Studio (translation, tone, the // bar): one-time purchase from €29.</b> macOS Sonoma (14) or later · Apple Silicon · ~7.5 MB · your text never leaves your Mac.</p>
     </div>
   </article>
 </main>
@@ -204,6 +205,7 @@
       <a href="/en/guides/local-llm-writing-assistant.html">Local LLM writing assistant</a>
       <a href="/en/compare/cotypist-alternatives.html">Cotypist alternatives</a>
       <a href="/en/privacy.html">Privacy</a>
+      <a href="/en/about.html">About</a>
     </nav>
   </div>
 </footer>
