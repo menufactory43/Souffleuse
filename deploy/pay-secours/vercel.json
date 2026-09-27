@@ -1,0 +1,8 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "redirects": [
+    { "source": "/buy", "destination": "https://souffleuse.lemonsqueezy.com/checkout/buy/6b5bb69d-8662-4752-af4e-8292ae1c1967?desc=0", "permanent": false },
+    { "source": "/buy/:path*", "destination": "https://souffleuse.lemonsqueezy.com/checkout/buy/6b5bb69d-8662-4752-af4e-8292ae1c1967?desc=0", "permanent": false },
+    { "source": "/:path*", "destination": "https://souffleuse.app/", "permanent": false }
+  ]
+}
