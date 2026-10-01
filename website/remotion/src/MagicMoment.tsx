@@ -367,7 +367,7 @@ export const MagicMoment: React.FC = () => {
             color: BRAND.ghost,
           }}
         >
-          100&nbsp;% local · gratuit pendant la bêta
+          100&nbsp;% local · licence Studio requise
         </div>
       </AbsoluteFill>
     </AbsoluteFill>

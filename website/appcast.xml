@@ -20,25 +20,25 @@
     <language>fr</language>
 
     <item>
-      <title>Version 0.12.1</title>
-      <pubDate>Thu, 02 Jul 2026 14:25:47 +0000</pubDate>
-      <sparkle:version>0.12.1</sparkle:version>
-      <sparkle:shortVersionString>0.12.1</sparkle:shortVersionString>
+      <title>Version 0.12.2</title>
+      <pubDate>Mon, 13 Jul 2026 11:41:17 +0000</pubDate>
+      <sparkle:version>0.12.2</sparkle:version>
+      <sparkle:shortVersionString>0.12.2</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
       <description><![CDATA[
-        <h2>Souffleuse 0.12.1</h2>
+        <h2>Souffleuse 0.12.2</h2>
         <ul>
-          <li><b>Téléchargement de modèle annulable :</b> un bouton « Annuler » apparaît pendant le téléchargement d'un modèle dans les réglages.</li>
-          <li><b>Plus de doubles téléchargements :</b> impossible de lancer un second modèle tant qu'un premier télécharge encore.</li>
+          <li><b>Souffleuse Studio :</b> le paywall est actif pour la traduction, le ton, les transformations « // » et la personnalisation.</li>
+          <li><b>Licence :</b> activation locale après achat unique, avec cache Keychain pour l'usage hors ligne.</li>
         </ul>
         <p>macOS 14+ · Apple Silicon · 100 % on-device.</p>
       ]]></description>
-      <!-- Signé le 2026-07-02 (build Developer ID, NOTARISÉ + staplé). -->
+      <!-- Signé le 2026-07-13 (build Developer ID, NOTARISÉ + staplé). -->
       <!-- Régénérer à chaque release : deploy/make-appcast-entry.sh website/dl/Souffleuse.dmg -->
       <enclosure
         url="https://souffleuse.app/Souffleuse.dmg"
-        sparkle:edSignature="+ikxsOniMsrqYqhV7rb6bvJX/6TMkld0i4UO410Bmrcp6OndZvMwcGl6uv4F2YHT5Byb+TYPbn6Z6VIY9/FBDQ=="
-        length="7801032"
+        sparkle:edSignature="QRdoedz7iP1eP5dDU6I92u7A8RIf5LVR37wAtAoqhqeE4cd5pUpFvjLuLl3MDk7SDjFJ5SKQ2ZexjH6U/5YBDw=="
+        length="7801238"
         type="application/octet-stream" />
     </item>
 
