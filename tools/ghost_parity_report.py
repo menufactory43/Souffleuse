@@ -110,6 +110,64 @@ def step_boundary(row):
     return not prefix or prefix[-1].isspace()
 
 
+def trailing_word(text):
+    i = len(text)
+    while i > 0 and is_word_char(text[i - 1]):
+        i -= 1
+    return text[i:]
+
+
+def ghost_has_control_artifact(ghost):
+    if "\t" in ghost or "\n" in ghost or "\r" in ghost:
+        return True
+    return any(ord(ch) < 32 for ch in ghost)
+
+
+def natural_after_boundary_start(ch):
+    return ch.isalpha() or ch.isdigit() or ch in ("'", "\u2019", '"')
+
+
+def plausible_ghost(prefix, ghost):
+    """Structural quality independent of the target fixture.
+
+    This intentionally scores "confirmer que" as plausible even when the fixture
+    expected "confirmer le". It only rejects ghosts that are unsafe to insert or
+    structurally jarring at the caret.
+    """
+    if not ghost:
+        return False, "empty"
+    if ghost_has_control_artifact(ghost):
+        return False, "control"
+    if ghost.startswith(("  ", "\u00a0")):
+        return False, "spacing"
+    if ghost.lstrip().startswith(("#", "*", "_", "~")):
+        return False, "markup"
+
+    first = ghost[0]
+    if not prefix or prefix[-1].isspace():
+        if natural_after_boundary_start(first):
+            return True, "after-boundary"
+        return False, "bad-start"
+
+    if is_word_char(prefix[-1]):
+        if is_word_char(first):
+            typed = trailing_word(prefix).lower()
+            lead = trailing_word(prefix + ghost).lower()
+            if lead.startswith(typed) and len(lead) > len(typed):
+                return True, "word-completion"
+            return False, "word-jump"
+        if first.isspace() or first in ",.!?;:":
+            # Treat next-word/ punctuation alternatives after a complete-looking
+            # word as plausible. This is deliberately permissive because the
+            # target phrase is not the only acceptable continuation.
+            return True, "next-word"
+        return False, "bad-midword-start"
+
+    if first.isspace() or natural_after_boundary_start(first):
+        return True, "after-punctuation"
+    return False, "bad-start"
+
+
 def load_runs(paths):
     runs = {}
     for path in paths:
@@ -173,6 +231,7 @@ def score(runs, engine):
     sc["source_counts"] = Counter()
     sc["wait_total"] = Counter()
     sc["wait_visible"] = Counter()
+    sc["quality_examples"] = []
 
     for run in runs:
         target = run["target"]
@@ -194,6 +253,18 @@ def score(runs, engine):
             if st["ghost"]:
                 sc["steps_non_empty"] += 1
                 sc["lat_visible"].append(st["ms"])
+                truth = target[i:]
+                if truth.startswith(st["ghost"]):
+                    sc["quality_exact"] += 1
+                else:
+                    prefix = target[:i]
+                    ok, reason = plausible_ghost(prefix, st["ghost"])
+                    if ok:
+                        sc["quality_plausible"] += 1
+                    else:
+                        sc["quality_suspicious"] += 1
+                        if len(sc["quality_examples"]) < 5:
+                            sc["quality_examples"].append((prefix, st["ghost"], reason))
             sc["lat_all"].append(st["ms"])
             if st["boundary"]:
                 sc["lat_boundary"].append(st["ms"])
@@ -327,6 +398,22 @@ def main():
     row("  whole word guessed at 0 letters", [pct(c["hit_at0_words"], c["hit_at0_total"]) for c in cards])
 
     print("")
+    row("QUALITY - target vs plausible", ["" for _ in cards])
+    row("  exact target-compatible ghosts", [
+        pct(c["quality_exact"], c["steps_non_empty"]) for c in cards
+    ])
+    row("  plausible alternatives", [
+        pct(c["quality_plausible"], c["steps_non_empty"]) for c in cards
+    ])
+    row("  suspicious ghosts", [
+        pct(c["quality_suspicious"], c["steps_non_empty"]) for c in cards
+    ])
+    row("  exact + plausible", [
+        pct(c["quality_exact"] + c["quality_plausible"], c["steps_non_empty"])
+        for c in cards
+    ])
+
+    print("")
     row("SAVINGS - perfect user, Tab=1 key", ["" for _ in cards])
     row("  saved keystrokes full-accept", [pct(c["saved_full"], c["total_chars"]) for c in cards])
     row("  saved keystrokes word-accept", [pct(c["saved_word"], c["total_chars"]) for c in cards])
@@ -359,6 +446,13 @@ def main():
     row("  visible-only avg / p50", [format_lat(c["lat_visible"]) for c in cards])
     row("  mid-word p50", [percentile(c["lat_mid"], 0.5) for c in cards])
     row("  boundary/after-space p50", [percentile(c["lat_boundary"], 0.5) for c in cards])
+
+    examples = [(c["engine"], ex) for c in cards for ex in c["quality_examples"]]
+    if examples:
+        print("")
+        print("  Suspicious examples:")
+        for engine, (prefix, ghost, reason) in examples[:10]:
+            print(f"    {engine}: {prefix!r} -> {ghost!r} ({reason})")
 
 
 if __name__ == "__main__":
