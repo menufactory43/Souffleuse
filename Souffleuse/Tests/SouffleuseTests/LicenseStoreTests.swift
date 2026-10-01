@@ -19,9 +19,9 @@ struct LicenseStoreTests {
         #expect(LicenseStore.isProValue(paywallEnabled: true, hasLicense: true) == true)
     }
 
-    @Test("le défaut shippé est kill switch OFF (rien ne change pour personne)")
-    func defaultIsPaywallOff() {
-        #expect(LicenseGate.paywallEnabled == false)
+    @Test("le défaut shippé est paywall ON (Studio requiert une licence)")
+    func defaultIsPaywallOn() {
+        #expect(LicenseGate.paywallEnabled == true)
     }
 
     @Test("activateur stub : clé SOUF- valide passe, le reste throw")

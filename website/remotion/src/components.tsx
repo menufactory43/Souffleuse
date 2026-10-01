@@ -148,7 +148,7 @@ export const EndCard: React.FC<{
   inAt: number;
   title: React.ReactNode;
   tagline?: string;
-}> = ({inAt, title, tagline = '100 % local · gratuit pendant la bêta'}) => {
+}> = ({inAt, title, tagline = '100 % local · licence Studio requise'}) => {
   const frame = useCurrentFrame();
   const {durationInFrames} = useVideoConfig();
   const o = band(frame, inAt, durationInFrames + 30, 16);

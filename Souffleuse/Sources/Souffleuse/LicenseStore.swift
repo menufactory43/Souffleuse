@@ -4,13 +4,12 @@ import Security
 import SouffleuseCore
 import SouffleuseLog
 
-/// **Kill switch GLOBAL du paywall.** `false` (défaut) → `isPro` est TOUJOURS
-/// vrai : tout Souffleuse Studio est déverrouillé, le gating dort, rien ne change
-/// pour personne. Passe-le à `true` pour activer le mur (licence requise) ;
-/// repasse-le à `false` pour **revert instantanément**. Constante compile-time :
+/// **Kill switch GLOBAL du paywall.** `true` (défaut shippé) → les features
+/// Studio demandent une licence active. Passe-le à `false` pour désactiver le
+/// mur et rendre `isPro` toujours vrai. Constante compile-time :
 /// un flip = un rebuild, aucune migration, aucune donnée touchée.
 enum LicenseGate {
-    static let paywallEnabled = false
+    static let paywallEnabled = true
 
     /// Page de **choix du moyen de paiement** (carte via Lemon Squeezy, ou Bitcoin
     /// via Lightning). Hébergée par le service de licences (`/buy/studio`), localisée

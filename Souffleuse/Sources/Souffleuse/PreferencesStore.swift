@@ -385,8 +385,8 @@ final class PreferencesStore {
 
     let allowlist = AllowlistStore()
     /// Licence Studio (achat unique) — `license.isPro` gate les features payantes.
-    /// Kill switch global dans `LicenseGate.paywallEnabled` (false par défaut → tout
-    /// déverrouillé).
+    /// Kill switch global dans `LicenseGate.paywallEnabled` (true par défaut →
+    /// licence requise pour Studio).
     let license = LicenseStore()
     let hudAnchors = HUDAnchorStore()
     let conversationTargets = ConversationTargetStore()
